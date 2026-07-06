@@ -60,3 +60,24 @@ export function resolveTies(
 export function freeParameterIds(params: readonly RefinementParameter[]): string[] {
   return params.filter((p) => !p.fixed && !p.expression).map((p) => p.id);
 }
+
+/**
+ * Grouped (equal-value) refinement (Phase 8): within each named group the first
+ * member is the free "leader" and the rest are tied equal to it. Returns a new
+ * parameter list with tie expressions applied, so only one value per group is
+ * refined (e.g. equal occupancies or equal displacement parameters).
+ */
+export function applyEqualValueGroups(
+  params: readonly RefinementParameter[],
+): RefinementParameter[] {
+  const leaders = new Map<string, string>();
+  for (const p of params) {
+    if (p.group && !leaders.has(p.group)) leaders.set(p.group, p.id);
+  }
+  return params.map((p) => {
+    if (!p.group) return { ...p };
+    const leader = leaders.get(p.group)!;
+    if (p.id === leader) return { ...p };
+    return { ...p, expression: `= ${leader}` };
+  });
+}

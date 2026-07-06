@@ -4,14 +4,16 @@
 atomic and magnetic structures.
 **Date:** 2026-07-06
 **Stack:** React 18 · TypeScript 5 (strict) · Vite 5 · Vitest · Web Workers.
-**Status:** Working static app; 66 tests passing; atomic **and magnetic**
-single-crystal + powder atomic refinement; validated against the bundled GSAS-II
-refinements in `data/` (including the 30 K / 200 K / 350 K magnetic structures).
+**Status:** Working static app; **101 tests passing**; atomic **and magnetic**
+single-crystal + powder refinement, multi-phase, Le Bail extraction, and in-app
+magnetic space-group candidate generation & comparison; validated against the
+bundled GSAS-II refinements in `data/` (30 K / 200 K / 350 K).
 
-> **Update (magnetic datasets added):** after the initial atomic build, the
-> `data/` folder gained magnetic refinements (Mn₃Ga at 30 K / 200 K / 350 K:
-> mCIFs, `.lst` outputs, and GSAS Fo²/Fc² reflection lists). Magnetic refinement
-> — flagged as the missing piece — is now implemented and validated. See §3 below.
+> **Update (maturity pass):** added multi-phase powder, Le Bail extraction,
+> anisotropic ADPs, March-Dollase preferred orientation, TOF/instrument support,
+> magnetic powder refinement, and grouped constraints; benchmarked against
+> GSAS-II / Jana2020 / FullProf ([COMPARISON.md](./COMPARISON.md)) with a path to
+> parity ([MATURITY_PLAN.md](./MATURITY_PLAN.md)). Earlier magnetic work is in §3.
 
 ---
 

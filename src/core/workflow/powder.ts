@@ -56,7 +56,7 @@ function dRange(pattern: PowderPattern): { dMin: number; dMax: number } {
   }
 }
 
-function buildPeaks(pattern: PowderPattern, applied: AppliedModel): ProfilePeak[] {
+export function buildPeaks(pattern: PowderPattern, applied: AppliedModel): ProfilePeak[] {
   const { dMin, dMax } = dRange(pattern);
   const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
   const intensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, applied.scale);

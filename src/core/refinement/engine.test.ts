@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { RefinementParameter } from "@/core/refinement/types";
 import { refine, type RefinementProblem } from "@/core/refinement/engine";
-import { parseTie, resolveTies } from "@/core/refinement/constraints";
+import { parseTie, resolveTies, applyEqualValueGroups } from "@/core/refinement/constraints";
 
 describe("refinement engine (Levenberg–Marquardt)", () => {
   it("recovers a linear scale factor from synthetic data", () => {
@@ -78,5 +78,24 @@ describe("constraints", () => {
     ];
     const resolved = resolveTies(params, { occA: 0.3, occB: 0 });
     expect(resolved.occB).toBeCloseTo(0.7, 10);
+  });
+
+  it("ties group members equal to the group leader (Phase 8 grouping)", () => {
+    const params: RefinementParameter[] = [
+      { id: "b1", label: "B1", kind: "bIso", value: 0.5, initialValue: 0.5, fixed: false, group: "Uiso" },
+      { id: "b2", label: "B2", kind: "bIso", value: 0.9, initialValue: 0.9, fixed: false, group: "Uiso" },
+      { id: "b3", label: "B3", kind: "bIso", value: 0.2, initialValue: 0.2, fixed: false, group: "Uiso" },
+      { id: "scale", label: "s", kind: "scale", value: 1, initialValue: 1, fixed: false },
+    ];
+    const grouped = applyEqualValueGroups(params);
+    // Leader (b1) stays free; b2, b3 tied to b1; scale untouched.
+    expect(grouped.find((p) => p.id === "b1")!.expression).toBeUndefined();
+    expect(grouped.find((p) => p.id === "b2")!.expression).toBe("= b1");
+    expect(grouped.find((p) => p.id === "b3")!.expression).toBe("= b1");
+    expect(grouped.find((p) => p.id === "scale")!.expression).toBeUndefined();
+    // After resolution all group members share the leader's value.
+    const resolved = resolveTies(grouped, { b1: 0.7, b2: 0.9, b3: 0.2, scale: 1 });
+    expect(resolved.b2).toBe(0.7);
+    expect(resolved.b3).toBe(0.7);
   });
 });

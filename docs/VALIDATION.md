@@ -15,7 +15,7 @@ comparison recorded here.
    recorded below.
 4. Documentation states plainly which features are *validated* vs *approximate*.
 
-## Test matrix (83 tests, all passing)
+## Test matrix (101 tests, all passing)
 
 | Area | Test kind | Status |
 | --- | --- | --- |
@@ -47,6 +47,13 @@ comparison recorded here.
 | Moment-size restraint → physical magnitudes | integration | ✅ `core/workflow/magneticCompare.test.ts` |
 | TOF ↔ d conversion (POWGEN calibration) | golden (GSAS `.lst`) | ✅ `core/diffraction/instrument.test.ts` |
 | Instrument-file parsing | unit | ✅ `core/diffraction/instrument.test.ts` |
+| Anisotropic ADP (reduces to isotropic) | unit | ✅ `core/diffraction/features.test.ts` |
+| March-Dollase preferred orientation | unit | ✅ `core/diffraction/features.test.ts` |
+| Multi-phase powder (2-phase recovery) | integration | ✅ `core/workflow/multiPhase.test.ts` |
+| Le Bail extraction (pattern reconstruction) | integration | ✅ `core/workflow/leBail.test.ts` |
+| Magnetic powder (separable components + refine) | integration | ✅ `core/workflow/magneticPowder.test.ts` |
+| Grouped (equal-value) constraints | unit | ✅ `core/refinement/engine.test.ts` |
+| Real 200 K/350 K CIF + reflection lists | golden (GSAS d-spacings) | ✅ `parsers/realData.test.ts` |
 | Plot scaling math | unit | ✅ `visualization/scale.test.ts` |
 
 ## Golden examples
@@ -90,6 +97,10 @@ The magnetic moment magnitudes are a particularly strong check: the components a
 given in crystal axes for a monoclinic cell (β = 60.69°), so reproducing GSAS-II's
 reported magnitude confirms both the mCIF parse and the normalized-axis metric
 used for `momentCartesian`.
+
+The 200 K reflection list (`fitted_results_Cmcm_hkl.dat`) contains both phases;
+its cubic MnO subset satisfies d·√(h²+k²+l²) = 4.438 Å, and our `dSpacing()`
+reproduces GSAS-II's listed d-spacings for those reflections to < 2×10⁻³ Å.
 
 **Scope note.** These validate the *crystallographic and scattering
 foundations* — the quantities our engine shares with GSAS-II. The full

@@ -61,6 +61,8 @@ calculations run in Web Workers. Full detail in
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — scope and known simplifications
 - [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project JSON format
 - [docs/REFINEMENT_PROCEDURE.md](docs/REFINEMENT_PROCEDURE.md) — the guided 7-step workflow
+- [docs/COMPARISON.md](docs/COMPARISON.md) — features vs GSAS-II / Jana2020 / FullProf
+- [docs/MATURITY_PLAN.md](docs/MATURITY_PLAN.md) — roadmap toward mature-package parity
 - [docs/REPORT.md](docs/REPORT.md) — build & validation report
 
 ## License

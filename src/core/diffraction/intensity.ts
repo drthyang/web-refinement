@@ -11,10 +11,47 @@
  */
 
 import type { Radiation } from "@/core/diffraction/types";
-import type { StructureModel } from "@/core/crystal/types";
+import type { StructureModel, UnitCell } from "@/core/crystal/types";
+import type { Vec3 } from "@/core/math/types";
 import type { Reflection } from "@/core/diffraction/reflections";
-import { braggTheta } from "@/core/crystal/unitCell";
+import { braggTheta, reciprocalMetricTensor } from "@/core/crystal/unitCell";
+import { mulVec } from "@/core/math/mat3";
 import { nuclearStructureFactorSquared } from "@/core/diffraction/structureFactor";
+
+/**
+ * March–Dollase preferred-orientation correction for a reflection (hkl) given a
+ * preferred-orientation axis (as reciprocal indices) and the March coefficient
+ * r (r = 1 ⇒ no texture):
+ *   P(α) = (r²·cos²α + sin²α / r)^(−3/2),
+ * where α is the angle between the reflection's reciprocal vector and the PO axis.
+ */
+export function marchDollase(
+  cell: UnitCell,
+  poAxis: Vec3,
+  h: number,
+  k: number,
+  l: number,
+  ratio: number,
+): number {
+  if (ratio === 1) return 1;
+  const g = reciprocalMetricTensor(cell);
+  const hkl: Vec3 = [h, k, l];
+  const gHkl = mulVec(g, hkl);
+  const gPo = mulVec(g, poAxis);
+  const dotHP = hkl[0] * gPo[0] + hkl[1] * gPo[1] + hkl[2] * gPo[2];
+  const normH = Math.sqrt(hkl[0] * gHkl[0] + hkl[1] * gHkl[1] + hkl[2] * gHkl[2]);
+  const normP = Math.sqrt(poAxis[0] * gPo[0] + poAxis[1] * gPo[1] + poAxis[2] * gPo[2]);
+  if (normH < 1e-9 || normP < 1e-9) return 1;
+  const cosA = Math.min(1, Math.max(-1, dotHP / (normH * normP)));
+  const cos2 = cosA * cosA;
+  const sin2 = 1 - cos2;
+  return Math.pow(ratio * ratio * cos2 + sin2 / ratio, -1.5);
+}
+
+export interface PreferredOrientation {
+  readonly axis: Vec3;
+  readonly ratio: number;
+}
 
 /**
  * Lorentz(-polarization) factor for a constant-wavelength powder experiment.
@@ -52,12 +89,14 @@ export function powderPeakIntensities(
   radiation: Radiation,
   reflections: readonly Reflection[],
   scale: number,
+  po?: PreferredOrientation,
 ): PowderPeak[] {
   const peaks: PowderPeak[] = [];
   for (const r of reflections) {
     const f2 = nuclearStructureFactorSquared(model, radiation, r.h, r.k, r.l);
     const lp = lorentzPolarization(radiation, r.d);
-    const intensity = scale * r.multiplicity * lp * f2;
+    const poFactor = po ? marchDollase(model.cell, po.axis, r.h, r.k, r.l, po.ratio) : 1;
+    const intensity = scale * r.multiplicity * lp * poFactor * f2;
     let twoTheta = NaN;
     if (radiation.kind !== "neutron-tof") {
       const theta = braggTheta(r.d, radiation.wavelength);

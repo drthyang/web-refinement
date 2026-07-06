@@ -27,8 +27,12 @@ These are deliberate scope choices for early phases, to be lifted later:
 - **Space groups**: represented as an explicit list of symmetry operations
   (as parsed from CIF). No built-in 230-group table initially; no automatic
   systematic-absence generation beyond what the operation list implies.
-- **Powder profiles**: Gaussian first, pseudo-Voigt later. Simple constant/
-  polynomial background only. This is *not* full Rietveld refinement.
+- **Powder profiles**: Gaussian and pseudo-Voigt with a single width; polynomial
+  background; March-Dollase preferred orientation. No Thompson-Cox-Hastings,
+  Chebyshev background, spherical-harmonic texture, or full TOF profile yet
+  (TOF↔d conversion exists, but TOF peak-shape refinement does not). This is
+  *not* full Rietveld refinement. Multi-phase powder and Le Bail extraction are
+  implemented.
 - **Optimizer**: local Levenberg–Marquardt with a numerical Jacobian. No global
   optimization (simulated annealing, etc.); a reasonable starting model is
   assumed. Poor starting points may converge to false minima.
@@ -36,10 +40,13 @@ These are deliberate scope choices for early phases, to be lifted later:
   ⟨j0⟩ magnetic form factor and dipole structure factor. mCIF (BNS) parsing,
   axial-vector moment transformation, and **single-crystal** moment refinement
   are implemented and validated against GSAS-II moment magnitudes. Magnetic
-  **powder** refinement is not yet wired. Moment components in a non-orthogonal
-  cell use the normalized crystal-axis convention (reproduces the GSAS-II
-  magnitude for the monoclinic Mn₃Ga structure); no claim of full magnetic
-  representation-analysis support.
+  **powder** refinement (combined nuclear+magnetic profile) is also implemented.
+  In-app candidate generation covers **k = 0 commensurate** structures only
+  (parent + index-2 subgroups); it does not attach standard BNS labels or handle
+  non-zero / incommensurate propagation vectors, and there is no
+  representation-analysis route. Moment components in a non-orthogonal cell use
+  the normalized crystal-axis convention (reproduces the GSAS-II magnitude for
+  the monoclinic Mn₃Ga structure).
 - **Corrections not yet modelled**: absorption, extinction, preferred
   orientation, anomalous dispersion, TOF profile complexities.
 

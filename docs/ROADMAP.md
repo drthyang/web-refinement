@@ -44,12 +44,12 @@ Nuclear + magnetic intensities; refine magnetic scale, moment magnitude
 (± direction); fixed/free moment parameters; separate contribution reporting;
 export magnetic model in project JSON.
 
-## Phase 7 — Magnetic powder refinement ⬜ (single-crystal magnetic + candidate comparison done; powder magnetic pending)
+## Phase 7 — Magnetic powder refinement ✅ (combined nuclear+magnetic profile, separable components)
 Magnetic peaks, combined nuclear+magnetic profile with separable components,
 moment + magnetic-scale refinement, obs/calc/difference plot, export. After
 Phases 4 and 6 are working.
 
-## Phase 8 — Constraints & advanced refinement 🚧 (fixed/free/bounds/ties + moment-size restraint + symmetry-allowed moments done; grouping pending)
+## Phase 8 — Constraints & advanced refinement ✅ (fixed/free/bounds/ties/groups + moment-size restraint + symmetry-allowed moments)
 Fixed/free/bounds (from Phase 1) plus tied, grouped, site/occupancy/moment/
 lattice constraints, presets. Start with direct tying and grouping; no complex
 symbolic language early.
@@ -68,3 +68,12 @@ Finalize `README`, `ARCHITECTURE`, `ROADMAP`, `VALIDATION`, `LIMITATIONS`,
 ## Deferred accelerators (post-correctness)
 WebAssembly / WebGPU for structure-factor summation, profile convolution, and the
 normal-equations solve — only after the TS core is correct and validated.
+
+## Beyond the original plan — toward mature-package parity
+
+Added after the 10-phase plan: multi-phase powder, Le Bail extraction,
+anisotropic ADPs, March-Dollase preferred orientation, TOF/instrument support,
+and in-app magnetic space-group candidate generation + comparison. The path to
+GSAS-II / Jana2020 / FullProf capability is laid out in
+[MATURITY_PLAN.md](./MATURITY_PLAN.md); the feature comparison is in
+[COMPARISON.md](./COMPARISON.md).
