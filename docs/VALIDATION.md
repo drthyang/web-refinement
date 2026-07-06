@@ -15,7 +15,7 @@ comparison recorded here.
    recorded below.
 4. Documentation states plainly which features are *validated* vs *approximate*.
 
-## Test matrix (55 tests, all passing)
+## Test matrix (66 tests, all passing)
 
 | Area | Test kind | Status |
 | --- | --- | --- |
@@ -37,6 +37,10 @@ comparison recorded here.
 | Magnetic perpendicular-moment projection | unit | ✅ `core/magnetic/magnetic.test.ts` |
 | Q / moment frame conversion | unit | ✅ `core/magnetic/magnetic.test.ts` |
 | Single-crystal + powder workflow refinement | integration (GSAS structure) | ✅ `core/workflow/workflow.test.ts` |
+| Magnetic CIF (mCIF) parsing + BNS ops | golden (GSAS) | ✅ `parsers/magneticCif.test.ts` |
+| Magnetic moment magnitudes | golden (GSAS `.lst`) | ✅ `parsers/magneticCif.test.ts` |
+| GSAS reflection-list (Fo²/Fc²) parsing | golden | ✅ `parsers/magneticCif.test.ts` |
+| Magnetic single-crystal workflow + moment refinement | integration (GSAS structure) | ✅ `core/workflow/magneticWorkflow.test.ts` |
 | Plot scaling math | unit | ✅ `visualization/scale.test.ts` |
 
 ## Golden examples
@@ -71,6 +75,15 @@ CIFs), a two-phase (Mn₃Ga + MnO) TOF neutron powder Rietveld.
 | X-ray f(0) (Mn / O / Ga) | 25.0 / 8.0 / 31.0 | Z = 25 / 8 / 31 | 0.1 | Cromer-Mann |
 | CIF cell (600 K Mn₃Ga) | a=5.42215, c=4.37566 | file values | 1e-5 | CIF |
 | CIF cell (393 K refined) | a=5.41317, c=4.36462 | file values | 1e-5 | CIF |
+| Magnetic moment \|M\| Mn1 (30 K) | 2.527 μB | 2.527 μB | 1e-2 | `30K/.lst` |
+| Magnetic moment \|M\| Mn2 (30 K) | 2.829 μB | 2.829 μB | 1e-2 | `30K/.lst` |
+| Magnetic moment \|M\| Mn3 (30 K) | 2.530 μB | 2.530 μB | 1e-2 | `30K/.lst` |
+| BNS group / ops (30 K, 350 K) | P2₁'/m' 4 / Cm'cm' 16 | mCIF | exact | mCIF |
+
+The magnetic moment magnitudes are a particularly strong check: the components are
+given in crystal axes for a monoclinic cell (β = 60.69°), so reproducing GSAS-II's
+reported magnitude confirms both the mCIF parse and the normalized-axis metric
+used for `momentCartesian`.
 
 **Scope note.** These validate the *crystallographic and scattering
 foundations* — the quantities our engine shares with GSAS-II. The full

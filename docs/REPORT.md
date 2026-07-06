@@ -4,8 +4,14 @@
 atomic and magnetic structures.
 **Date:** 2026-07-06
 **Stack:** React 18 · TypeScript 5 (strict) · Vite 5 · Vitest · Web Workers.
-**Status:** Working static app; 55 tests passing; validated against the bundled
-GSAS-II refinement in `data/`.
+**Status:** Working static app; 66 tests passing; atomic **and magnetic**
+single-crystal + powder atomic refinement; validated against the bundled GSAS-II
+refinements in `data/` (including the 30 K / 200 K / 350 K magnetic structures).
+
+> **Update (magnetic datasets added):** after the initial atomic build, the
+> `data/` folder gained magnetic refinements (Mn₃Ga at 30 K / 200 K / 350 K:
+> mCIFs, `.lst` outputs, and GSAS Fo²/Fc² reflection lists). Magnetic refinement
+> — flagged as the missing piece — is now implemented and validated. See §3 below.
 
 ---
 
@@ -40,7 +46,7 @@ in `src/core/**` is pure, framework-free TypeScript.
 npm install     # deps
 npm run dev      # dev server (localhost:5173/web-refinement/)
 npm run build    # tsc -b && vite build → dist/ (worker bundled separately)
-npm run test     # vitest — 55 tests
+npm run test     # vitest — 66 tests
 ```
 
 ---
@@ -90,7 +96,37 @@ both executed in the Web Worker.
 
 ---
 
-## 3. Honest limitations
+## 3. Magnetic refinement (added with the 30 K / 200 K / 350 K data)
+
+The new datasets are magnetic-structure refinements of Mn₃Ga: mCIF files (BNS
+magnetic space groups with time-reversal symops and moment loops), `.lst`
+outputs with refined moments, and `*_hkl.dat` reflection lists with GSAS Fo²/Fc².
+This unlocked and validated the magnetic workflow:
+
+- **mCIF parser** reads BNS operations (`x,y,z,+1` time-reversal notation) and the
+  `_atom_site_moment.crystalaxis_*` loop into a `MagneticModel`.
+- **Magnetic structure factor** transforms moments as axial vectors
+  (`m' = θ·det(R)·R·m`), projects perpendicular to Q (`M⊥`), and sums with the
+  0.2695 fm/μB prefactor. Nuclear and magnetic intensities are reported
+  separately (`I = scale_N·|F_N|² + scale_M·|F_M⊥|²`).
+- **Moment refinement** (single crystal) refines moment components; validated by
+  recovering a perturbed moment from synthetic data and, in-browser, recovering
+  Mn1 mₐ from −0.5 back to −1.577 μB.
+- **UI**: a magnetic panel with moment arrows, per-reflection nuclear/magnetic/
+  total intensities, and moment-parameter refinement; loading a magnetic CIF is
+  auto-detected.
+
+**Golden validation** (from `30K/.lst`): the refined moment **magnitudes**
+Mn1 = 2.527, Mn2 = 2.829, Mn3 = 2.530 μB are reproduced exactly from the
+crystal-axis components in the monoclinic (β = 60.69°) cell — confirming both the
+mCIF parse and the moment-frame metric. BNS groups and operation counts
+(P2₁'/m' → 4, Cm'cm' → 16) match.
+
+**Still approximate:** we do not reproduce GSAS-II's absolute Fc² scale (TOF,
+instrument, and normalization conventions differ), and magnetic *powder*
+refinement (Phase 7) is not yet wired — only magnetic single-crystal.
+
+## 4. Honest limitations
 
 - **Not a Rietveld replacement.** GSAS-II's own fit here is a two-phase TOF
   Rietveld with instrument profile functions (difC, α/β/σ coefficients),
@@ -101,21 +137,22 @@ both executed in the Web Worker.
   Gaussian/pseudo-Voigt profiles with constant/polynomial background;
   constant-wavelength profiles only (TOF profile not modelled); local LM only
   (no global search).
-- **Magnetic:** the model, perpendicular-moment projection, and magnetic
-  structure factor are implemented and tested; a dedicated magnetic *refinement
-  workflow and UI* are not yet wired (Phases 6–7). Non-orthogonal moment-frame
-  conversion is a documented simplification.
+- **Magnetic:** the model, projection, structure factor, and single-crystal
+  moment refinement (with UI) are implemented and validated (§3). Magnetic
+  *powder* refinement (Phase 7) is not yet wired. The non-orthogonal moment-frame
+  convention (normalized crystal axes) is a documented simplification, validated
+  against GSAS-II moment magnitudes.
 
 Full detail in [LIMITATIONS.md](./LIMITATIONS.md). The standing scope disclaimer
 appears in the app UI, README, and limitations doc.
 
 ---
 
-## 4. Test summary
+## 5. Test summary
 
 ```
-Test Files  12 passed (12)
-Tests       55 passed (55)
+Test Files  14 passed (14)
+Tests       66 passed (66)
 ```
 
 Covering: linear algebra, unit-cell/metric/volume (GSAS golden), symmetry
@@ -126,9 +163,9 @@ crystal & powder workflow refinement, project round-trip, and plot math.
 
 ---
 
-## 5. Suggested next steps
+## 6. Suggested next steps
 
-1. Wire the magnetic refinement workflow + moment-arrow visualization (Phases 6–7).
+1. Extend magnetic refinement to powder data (Phase 7); single-crystal magnetic is done.
 2. Add a TOF profile model to enable a genuine comparison against the GSAS-II
    `.lst` wR on the bundled Mn₃Ga/MnO data.
 3. Parameter grouping and refinement presets (Phase 8 remainder).

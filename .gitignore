@@ -10,3 +10,11 @@ coverage
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# GSAS-II binary project files and backups — large, not parsed by the app.
+# The text reference files (CIF, .lst, .dat, .csv, .vesta) are kept for validation.
+data/**/*.gpx
+data/**/*.gpx.bak
+data/**/*.bak
+data/**/*.bak[0-9]
+data/**/*.bak[0-9][0-9]

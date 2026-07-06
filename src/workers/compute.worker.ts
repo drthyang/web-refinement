@@ -9,6 +9,7 @@ import type { ComputeRequest, ComputeResponse } from "@/workers/protocol";
 import { refine } from "@/core/refinement/engine";
 import { buildPowderProblem } from "@/core/workflow/powder";
 import { buildSingleCrystalProblem } from "@/core/workflow/singleCrystal";
+import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
 
 function handle(req: ComputeRequest): ComputeResponse {
   try {
@@ -17,6 +18,13 @@ function handle(req: ComputeRequest): ComputeResponse {
         shape: req.shape,
         ...(req.eta !== undefined ? { eta: req.eta } : {}),
       });
+      const result = refine(problem, req.options ?? {});
+      return { requestId: req.requestId, ok: true, result };
+    }
+    if (req.type === "refineMagnetic") {
+      const problem = buildMagneticSingleCrystalProblem(
+        req.structure, req.magnetic, req.dataset, req.parameters, req.bindings,
+      );
       const result = refine(problem, req.options ?? {});
       return { requestId: req.requestId, ok: true, result };
     }

@@ -32,9 +32,14 @@ These are deliberate scope choices for early phases, to be lifted later:
 - **Optimizer**: local Levenberg–Marquardt with a numerical Jacobian. No global
   optimization (simulated annealing, etc.); a reasonable starting model is
   assumed. Poor starting points may converge to false minima.
-- **Magnetic model**: single propagation vector, collinear-friendly moment
-  handling, simplified magnetic form factor and structure factor. No claim of
-  full magnetic space-group / representation-analysis support.
+- **Magnetic model**: single propagation vector (k = 0 commensurate), simplified
+  ⟨j0⟩ magnetic form factor and dipole structure factor. mCIF (BNS) parsing,
+  axial-vector moment transformation, and **single-crystal** moment refinement
+  are implemented and validated against GSAS-II moment magnitudes. Magnetic
+  **powder** refinement is not yet wired. Moment components in a non-orthogonal
+  cell use the normalized crystal-axis convention (reproduces the GSAS-II
+  magnitude for the monoclinic Mn₃Ga structure); no claim of full magnetic
+  representation-analysis support.
 - **Corrections not yet modelled**: absorption, extinction, preferred
   orientation, anomalous dispersion, TOF profile complexities.
 

@@ -20,7 +20,8 @@ import { add, expι, scale as cscale, ZERO } from "@/core/math/complex";
 import { dSpacing } from "@/core/crystal/unitCell";
 import { applyOperation } from "@/core/crystal/symmetry";
 import { magneticTable } from "@/core/scattering/magnetic";
-import { momentCartesian, perpendicularMoment, qCartesian } from "@/core/magnetic/moment";
+import { crystalComponentsToCartesian, perpendicularMoment, qCartesian } from "@/core/magnetic/moment";
+import { determinant } from "@/core/math/mat3";
 
 const TWO_PI = 2 * Math.PI;
 /** Magnetic scattering length per Bohr magneton (fm/μ_B): (γ r_e)/2 · g/2. */
@@ -72,24 +73,33 @@ export function magneticStructureFactor(
     if (!site) continue;
     const ffId = formFactorId(structure, moment.siteLabel, moment.formFactorId);
     const fMag = table.has(ffId) ? table.j0(ffId, s) : 1;
-    const mCart = momentCartesian(structure.cell, moment);
-    const mPerp = perpendicularMoment(mCart, q);
 
     for (const op of structure.spaceGroup.operations) {
-      // Rotate the moment by the operation's rotation (axial vector).
+      // Transform the moment as an axial vector in the crystal-axis frame:
+      // m' = θ · det(R) · R · m (θ = time-reversal flag ±1), then convert to
+      // Cartesian and project perpendicular to Q. Rotate-then-project matters:
+      // the two operations do not commute for a general Q.
       const r = op.rotation;
-      const rm: [number, number, number] = [
-        r[0][0] * mPerp[0] + r[0][1] * mPerp[1] + r[0][2] * mPerp[2],
-        r[1][0] * mPerp[0] + r[1][1] * mPerp[1] + r[1][2] * mPerp[2],
-        r[2][0] * mPerp[0] + r[2][1] * mPerp[1] + r[2][2] * mPerp[2],
+      const axial = determinant(r) * (op.timeReversal ?? 1);
+      const comps = moment.components;
+      const rotatedComps: [number, number, number] = [
+        axial * (r[0][0] * comps[0] + r[0][1] * comps[1] + r[0][2] * comps[2]),
+        axial * (r[1][0] * comps[0] + r[1][1] * comps[1] + r[1][2] * comps[2]),
+        axial * (r[2][0] * comps[0] + r[2][1] * comps[1] + r[2][2] * comps[2]),
       ];
+      const mCart =
+        moment.frame === "cartesian"
+          ? rotatedComps
+          : crystalComponentsToCartesian(structure.cell, rotatedComps);
+      const mPerp = perpendicularMoment(mCart, q);
+
       const p = applyOperation(op, site.position);
       const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
       const ph = expι(phase);
       const w = MAGNETIC_PREFACTOR * site.occupancy * fMag;
-      fx = add(fx, cscale(ph, w * rm[0]));
-      fy = add(fy, cscale(ph, w * rm[1]));
-      fz = add(fz, cscale(ph, w * rm[2]));
+      fx = add(fx, cscale(ph, w * mPerp[0]));
+      fy = add(fy, cscale(ph, w * mPerp[1]));
+      fz = add(fz, cscale(ph, w * mPerp[2]));
     }
   }
 

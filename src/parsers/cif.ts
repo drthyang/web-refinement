@@ -8,8 +8,9 @@
  */
 
 import type { AtomSite, SpaceGroup, StructureModel, UnitCell } from "@/core/crystal/types";
+import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import type { Vec3 } from "@/core/math/types";
-import { parseSymmetryOperation } from "@/core/crystal/symmetry";
+import { parseMagneticSymmetryOperation, parseSymmetryOperation } from "@/core/crystal/symmetry";
 
 /** Strip the parenthetical esd and parse: "5.41317(8)" → 5.41317. */
 export function parseCifNumber(raw: string): number {
@@ -178,4 +179,78 @@ export function parseCif(text: string, id = "structure"): StructureModel {
     spaceGroup: parseSpaceGroup(items, loops),
     sites: parseSites(loops),
   };
+}
+
+/** Parse magnetic (BNS) symmetry operations from an mCIF, if present. */
+function parseMagneticSpaceGroup(items: Map<string, string>, loops: Loop[]): SpaceGroup | null {
+  const magLoop = findLoop(loops, (h) =>
+    h.some((k) => k.includes("space_group_symop_magn_operation.xyz")),
+  );
+  if (!magLoop) return null;
+  const idx = magLoop.headers.findIndex((h) => h.toLowerCase().includes("magn_operation.xyz"));
+  const operations = magLoop.rows.map((row) =>
+    parseMagneticSymmetryOperation(row[idx >= 0 ? idx : row.length - 1]!),
+  );
+  // Only strip surrounding double-quotes; apostrophes are part of BNS names.
+  const bns = items.get("_space_group_magn.name_bns")?.replace(/^"|"$/g, "");
+  const parent = items.get("_parent_space_group.name_h-m_alt")?.replace(/^"|"$/g, "");
+  return {
+    operations,
+    ...(bns !== undefined ? { hermannMauguin: bns } : parent !== undefined ? { hermannMauguin: parent } : {}),
+  };
+}
+
+/** Parse the `_atom_site_moment` loop into magnetic moments (μ_B, crystal axes). */
+function parseMoments(loops: Loop[]): MagneticMoment[] {
+  const momLoop = findLoop(loops, (h) => h.some((k) => k.includes("atom_site_moment.label")));
+  if (!momLoop) return [];
+  const col = (needle: string): number =>
+    momLoop.headers.findIndex((h) => h.toLowerCase().includes(needle));
+  const iLabel = col("atom_site_moment.label");
+  const iX = col("crystalaxis_x");
+  const iY = col("crystalaxis_y");
+  const iZ = col("crystalaxis_z");
+
+  const moments: MagneticMoment[] = [];
+  for (const row of momLoop.rows) {
+    const components: Vec3 = [
+      iX >= 0 ? parseCifNumber(row[iX]!) : 0,
+      iY >= 0 ? parseCifNumber(row[iY]!) : 0,
+      iZ >= 0 ? parseCifNumber(row[iZ]!) : 0,
+    ];
+    // Skip zero moments (e.g. non-magnetic atoms listed with 0,0,0).
+    if (components[0] === 0 && components[1] === 0 && components[2] === 0) continue;
+    moments.push({ siteLabel: iLabel >= 0 ? row[iLabel]! : "", frame: "crystallographic", components });
+  }
+  return moments;
+}
+
+export interface MagneticCifResult {
+  readonly structure: StructureModel;
+  readonly magnetic: MagneticModel | null;
+}
+
+/**
+ * Parse a magnetic CIF (mCIF): the crystal structure plus, when present, a
+ * MagneticModel built from the BNS symmetry operations and moment loop. The
+ * structure's space group is set to the magnetic operations (spatial parts);
+ * time-reversal flags are retained on each operation.
+ */
+export function parseMagneticCif(text: string, id = "structure"): MagneticCifResult {
+  const { items, loops } = parseCifBlocks(text);
+  const name = items.get("_pd_phase_name")?.replace(/^["']|["']$/g, "") ?? "structure";
+  const magSg = parseMagneticSpaceGroup(items, loops);
+  const structure: StructureModel = {
+    id,
+    name,
+    cell: parseCell(items),
+    spaceGroup: magSg ?? parseSpaceGroup(items, loops),
+    sites: parseSites(loops),
+  };
+  const moments = parseMoments(loops);
+  const magnetic: MagneticModel | null =
+    magSg && moments.length > 0
+      ? { id: `${id}-mag`, structureId: id, propagation: [[0, 0, 0]], moments }
+      : null;
+  return { structure, magnetic };
 }

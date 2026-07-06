@@ -86,6 +86,12 @@ export interface SymmetryOperation {
   readonly translation: Vec3;
   /** Human-/CIF-readable form, e.g. "-x,y+1/2,-z". */
   readonly xyz: string;
+  /**
+   * Magnetic time-reversal flag: +1 (identity) or −1 (spin flip). Present only
+   * for magnetic (BNS) operations parsed from an mCIF; absent means +1. It does
+   * not affect nuclear/atomic calculations.
+   */
+  readonly timeReversal?: 1 | -1;
 }
 
 /**

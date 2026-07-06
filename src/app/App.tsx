@@ -9,9 +9,20 @@ import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves } from "@/core/workflow/powder";
 import { singleCrystalComparison } from "@/core/workflow/singleCrystal";
 import { reflectionTableCsv, powderPatternCsv, projectJson } from "@/core/export/exporters";
-import { parseCif } from "@/parsers/cif";
+import { parseMagneticCif } from "@/parsers/cif";
+import { magneticComparison } from "@/core/workflow/magnetic";
 import { ComputeClient } from "@/workers/computeClient";
 import { exampleStructure } from "@/examples/mn3ga";
+import {
+  buildMagneticDataset,
+  exampleMagnetic,
+  magneticBindings,
+  magneticParameters,
+  type MagneticExample,
+} from "@/examples/mn3gaMagnetic";
+import { MagneticPanel } from "@/components/MagneticPanel";
+import type { MagneticModel } from "@/core/magnetic/types";
+import type { SingleCrystalDataset as SxDataset } from "@/core/diffraction/types";
 import {
   buildSyntheticPowder,
   buildSyntheticSingleCrystal,
@@ -32,6 +43,16 @@ interface Session {
   scParams: RefinementParameter[];
 }
 
+interface MagState {
+  ex: MagneticExample;
+  dataset: SxDataset;
+  params: RefinementParameter[];
+}
+
+function makeMagnetic(ex: MagneticExample): MagState {
+  return { ex, dataset: buildMagneticDataset(ex), params: magneticParameters(ex.magnetic) };
+}
+
 function newSession(structure: StructureModel): Session {
   return {
     structure,
@@ -46,6 +67,8 @@ export function App(): JSX.Element {
   const [session, setSession] = useState<Session>(() => newSession(exampleStructure()));
   const [powderResult, setPowderResult] = useState<RefinementResult | null>(null);
   const [scResult, setScResult] = useState<RefinementResult | null>(null);
+  const [mag, setMag] = useState(() => makeMagnetic(exampleMagnetic()));
+  const [magResult, setMagResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string>("Loaded bundled example: Mn₃Ga (P6₃/mmc).");
   const client = useRef<ComputeClient>(new ComputeClient());
@@ -62,12 +85,37 @@ export function App(): JSX.Element {
     () => singleCrystalComparison(structure, scDataset, scParams, scBind),
     [structure, scDataset, scParams, scBind],
   );
+  const magBind = useMemo(() => magneticBindings(mag.ex.magnetic), [mag.ex.magnetic]);
+  const magRows = useMemo(
+    () => magneticComparison(mag.ex.structure, mag.ex.magnetic, mag.dataset, mag.params, magBind),
+    [mag, magBind],
+  );
 
   function patchPowder(id: string, patch: Partial<RefinementParameter>): void {
     setSession((s) => ({ ...s, powderParams: s.powderParams.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   }
   function patchSc(id: string, patch: Partial<RefinementParameter>): void {
     setSession((s) => ({ ...s, scParams: s.scParams.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+  }
+  function patchMag(id: string, patch: Partial<RefinementParameter>): void {
+    setMag((m) => ({ ...m, params: m.params.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+  }
+
+  async function runMagnetic(): Promise<void> {
+    setBusy("mag");
+    try {
+      const result = await client.current.refineMagnetic({
+        structure: mag.ex.structure, magnetic: mag.ex.magnetic, dataset: mag.dataset,
+        parameters: mag.params, bindings: magBind, options: { maxIterations: 30 },
+      });
+      setMag((m) => ({ ...m, params: m.params.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value })) }));
+      setMagResult(result);
+      setMessage(`Magnetic refinement ${result.status}: R = ${(100 * result.agreement.rFactor).toFixed(2)}%.`);
+    } catch (e) {
+      setMessage(`Magnetic refinement failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function runPowder(): Promise<void> {
@@ -113,7 +161,14 @@ export function App(): JSX.Element {
   function onLoadCif(file: File): void {
     file.text().then((text) => {
       try {
-        const parsed = parseCif(text, "loaded");
+        const { structure: parsed, magnetic } = parseMagneticCif(text, "loaded");
+        if (magnetic) {
+          const ex: MagneticExample = { structure: { ...parsed, id: "loaded-mag" }, magnetic: { ...magnetic, structureId: "loaded-mag" } as MagneticModel };
+          setMag(makeMagnetic(ex));
+          setMagResult(null);
+          setMessage(`Loaded magnetic CIF: ${parsed.name} · ${magnetic.moments.length} moments · ${parsed.spaceGroup.hermannMauguin ?? "BNS"}.`);
+          return;
+        }
         setSession(newSession({ ...parsed, id: "loaded" }));
         setPowderResult(null);
         setScResult(null);
@@ -227,8 +282,27 @@ export function App(): JSX.Element {
         </div>
       </section>
 
+      <section style={card}>
+        <h2 style={h2}>Magnetic refinement — {mag.ex.structure.name}</h2>
+        <p style={{ fontSize: 12, color: "#666", marginTop: 0 }}>
+          Nuclear and magnetic Bragg intensities kept separate; refine moment components (μB, crystal
+          axes). Bundled example: Mn₃Ga 30 K (GSAS-II). Load a magnetic CIF to replace it.
+        </p>
+        <MagneticPanel
+          structure={mag.ex.structure}
+          magnetic={mag.ex.magnetic}
+          parameters={mag.params}
+          bindings={magBind}
+          rows={magRows}
+          result={magResult}
+          busy={busy !== null}
+          onChange={patchMag}
+          onRefine={runMagnetic}
+        />
+      </section>
+
       <footer style={{ color: "#888", fontSize: 12, marginTop: 24 }}>
-        Bundled example structure from GSAS-II validation data. See docs/VALIDATION.md.
+        Bundled example structures from GSAS-II validation data. See docs/VALIDATION.md.
       </footer>
     </div>
   );

@@ -10,6 +10,7 @@
 import type {
   ComputeRequest,
   ComputeResponse,
+  RefineMagneticRequest,
   RefinePowderRequest,
   RefineSingleCrystalRequest,
 } from "@/workers/protocol";
@@ -17,6 +18,7 @@ import type { RefinementResult } from "@/core/refinement/types";
 import { refine } from "@/core/refinement/engine";
 import { buildPowderProblem } from "@/core/workflow/powder";
 import { buildSingleCrystalProblem } from "@/core/workflow/singleCrystal";
+import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
 
 type Pending = (response: ComputeResponse) => void;
 
@@ -63,6 +65,10 @@ export class ComputeClient {
     return this.run({ ...req, type: "refineSingleCrystal", requestId: this.nextId++ });
   }
 
+  refineMagnetic(req: Omit<RefineMagneticRequest, "requestId" | "type">): Promise<RefinementResult> {
+    return this.run({ ...req, type: "refineMagnetic", requestId: this.nextId++ });
+  }
+
   dispose(): void {
     this.worker?.terminate();
     this.worker = null;
@@ -76,6 +82,12 @@ function runInline(req: ComputeRequest): RefinementResult {
       shape: req.shape,
       ...(req.eta !== undefined ? { eta: req.eta } : {}),
     });
+    return refine(problem, req.options ?? {});
+  }
+  if (req.type === "refineMagnetic") {
+    const problem = buildMagneticSingleCrystalProblem(
+      req.structure, req.magnetic, req.dataset, req.parameters, req.bindings,
+    );
     return refine(problem, req.options ?? {});
   }
   const problem = buildSingleCrystalProblem(req.structure, req.dataset, req.parameters, req.bindings);

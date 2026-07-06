@@ -1,0 +1,378 @@
+********************************************************************************
+   General Structure Analysis System-II Crystal Structure Refinement
+              by Robert B. Von Dreele & Brian H. Toby
+                Argonne National Laboratory(C), 2010
+ This product includes software developed by the UChicago Argonne, LLC,
+            as Operator of Argonne National Laboratory.
+                          Please cite:
+   B.H. Toby & R.B. Von Dreele, J. Appl. Cryst. 46, 544-549 (2013)
+********************************************************************************
+ Least squares controls:
+ Refinement type: analytic Hessian
+ Maximum number of cycles: 10
+ Regularize hydrogens (if any): False
+ Initial shift factor: 1.000
+
+ Phases:
+
+ Phase name: Mn3Ga
+=======================================================================================================================================
+
+ X-ray scattering factors:
+   Symbol     fa                                      fb                                      fc
+---------------------------------------------------------------------------------------------------
+ Mn        11.28190   7.35730   3.01930   2.24410   5.34090   0.34320  17.86740  83.75430   1.08960
+ Ga        15.23540   6.70060   4.35910   2.96230   3.06690   0.24120  10.78050  61.41350   1.71890
+
+ Electron scattering factors:
+   Symbol     fa                                                fb
+---------------------------------------------------------------------------------------------------
+ Mn         0.19430   0.81900   1.92960   2.49680   2.06250   0.11350   1.13130   5.03410  24.17980  80.55980
+ Ga         0.21350   0.97680   1.66690   2.56620   1.67900   0.10200   1.02190   4.62750  22.87420  80.15350
+
+ Neutron scattering factors:
+   Symbol   isotope       mass       b       resonant terms
+---------------------------------------------------------------------------------------------------
+ Mn      Nat. Abund.     54.938   -0.375
+ Ga      Nat. Abund.     69.720    0.729
+
+ Space Group: P 63/m m c
+ The lattice is centrosymmetric primitive hexagonal
+ The Laue symmetry is 6/mmm
+ The lattice point group is 6/mmm
+ Multiplicity of a general site is 24
+ The inversion center is located at 0,0,0
+ 
+ The equivalent positions are:
+
+ ( 1)     X,     Y,     Z 
+ ( 2)   X-Y,     X, 1/2+Z 
+ ( 3)    -Y,   X-Y,     Z 
+ ( 4)    -X,    -Y, 1/2+Z 
+ ( 5)   Y-X,    -X,     Z 
+ ( 6)     Y,   Y-X, 1/2+Z 
+ ( 7)   Y-X,     Y,     Z 
+ ( 8)    -X,   Y-X, 1/2+Z 
+ ( 9)    -Y,    -X,     Z 
+ (10)   X-Y,    -Y, 1/2+Z 
+ (11)     X,   X-Y,     Z 
+ (12)     Y,     X, 1/2+Z 
+
+ Atoms:
+   name    type  refine?   x         y         z      frac site sym  mult I/A   Uiso     U11     U22     U33     U12     U13     U23
+---------------------------------------------------------------------------------------------------------------------------------------
+    Mn1     Mn          0.16393   0.32775   0.25000   0.978mm2(120)    6    I 0.01990                                                
+    Ga1     Ga          0.33330   0.66670   0.75000   1.005-6m2(100)    2    I 0.00335                                                
+
+ Unit cell: a = 5.40789 b = 5.40789 c = 4.35682 alpha = 90.000 beta = 90.000 gamma = 120.000 volume = 110.346 Refine? False
+
+ Phase name: MnO
+=======================================================================================================================================
+
+ X-ray scattering factors:
+   Symbol     fa                                      fb                                      fc
+---------------------------------------------------------------------------------------------------
+ Mn+2      10.80610   7.36200   3.52680   0.21840   5.27960   0.34350  14.34300  41.32350   1.08740
+ O-2        3.76936   2.53342   1.91579   1.55094  15.07970   6.30430  40.34450   0.31291   0.22789
+
+ Electron scattering factors:
+   Symbol     fa                                                fb
+---------------------------------------------------------------------------------------------------
+
+ Neutron scattering factors:
+   Symbol   isotope       mass       b       resonant terms
+---------------------------------------------------------------------------------------------------
+ Mn+2    Nat. Abund.     54.938   -0.375
+ O-2     Nat. Abund.     15.999    0.580
+
+ Space Group: F m -3 m
+ The lattice is centrosymmetric F-centered cubic
+ The Laue symmetry is m3m
+ The lattice point group is m3m
+ Multiplicity of a general site is 192
+ The inversion center is located at 0,0,0
+ 
+ The equivalent positions are:
+
+ (0,0,0; 0,1/2,1/2; 1/2,0,1/2; 1/2,1/2,0)+
+
+ ( 1)     X,     Y,     Z 
+ ( 2)     Z,     X,     Y 
+ ( 3)     Y,     Z,     X 
+ ( 4)     X,     Y,    -Z 
+ ( 5)    -Z,     X,     Y 
+ ( 6)     Y,    -Z,     X 
+ ( 7)    -Z,     X,    -Y 
+ ( 8)    -Y,    -Z,     X 
+ ( 9)     Y,    -Z,    -X 
+ (10)    -X,     Y,    -Z 
+ (11)    -Z,    -X,     Y 
+ (12)     X,    -Y,    -Z 
+ (13)     Y,     X,     Z 
+ (14)     Z,     Y,     X 
+ (15)     X,     Z,     Y 
+ (16)     Y,     X,    -Z 
+ (17)    -Z,     Y,     X 
+ (18)     X,    -Z,     Y 
+ (19)    -Z,     Y,    -X 
+ (20)    -X,    -Z,     Y 
+ (21)     X,    -Z,    -Y 
+ (22)    -Y,     X,    -Z 
+ (23)    -Z,    -Y,     X 
+ (24)     Y,    -X,    -Z 
+
+ Atoms:
+   name    type  refine?   x         y         z      frac site sym  mult I/A   Uiso     U11     U22     U33     U12     U13     U23
+---------------------------------------------------------------------------------------------------------------------------------------
+    Mn1   Mn+2          0.00000   0.00000   0.00000   1.000    m3m    4    I 0.02022                                                
+     O1    O-2          0.50000   0.50000   0.50000   1.000    m3m    4    I 0.02000                                                
+
+ Unit cell: a = 4.44533 b = 4.44533 c = 4.44533 alpha = 90.000 beta = 90.000 gamma = 90.000 volume = 87.844 Refine? False
+
+ Phase name: Mn3Ga-mag_53
+=======================================================================================================================================
+
+ X-ray scattering factors:
+   Symbol     fa                                      fb                                      fc
+---------------------------------------------------------------------------------------------------
+ Mn        11.28190   7.35730   3.01930   2.24410   5.34090   0.34320  17.86740  83.75430   1.08960
+
+ Electron scattering factors:
+   Symbol     fa                                                fb
+---------------------------------------------------------------------------------------------------
+ Mn         0.19430   0.81900   1.92960   2.49680   2.06250   0.11350   1.13130   5.03410  24.17980  80.55980
+
+ Neutron scattering factors:
+   Symbol   isotope       mass       b       resonant terms
+---------------------------------------------------------------------------------------------------
+ Mn      Nat. Abund.     54.938   -0.375
+
+ <j0> Magnetic scattering factors:
+   Symbol     mfa                                    mfb                                     mfc
+---------------------------------------------------------------------------------------------------
+ Mn         0.24380   0.14720   0.61890   0.00000  24.96300  15.67300   6.54000   0.00000  -0.01050
+
+ <j2> Magnetic scattering factors:
+   Symbol     nfa                                    nfb                                     nfc
+---------------------------------------------------------------------------------------------------
+ Mn         2.66810   1.75610   0.36750   0.00000  16.06000   5.64000   2.04900   0.00000   0.00170
+
+ Magnetic Space Group: C m' c m'
+ The lattice is centrosymmetric C-centered orthorhombic
+ The Laue symmetry is mmm
+ The magnetic lattice point group is m'mm'
+ Multiplicity of a general site is 16
+ The inversion center is located at 0,0,0
+ 
+ The equivalent positions are:
+
+ (0,0,0; 1/2,1/2,0)+
+
+ ( 1)     X,     Y,     Z    1 
+ ( 2)    -X,     Y,     Z   -1 
+ ( 3)     X,    -Y, 1/2+Z    1 
+ ( 4)    -X,    -Y, 1/2+Z   -1 
+ ( 5)    -X,    -Y,    -Z    1 
+ ( 6)     X,    -Y,    -Z   -1 
+ ( 7)    -X,     Y, 1/2-Z    1 
+ ( 8)     X,     Y, 1/2-Z   -1 
+
+ Atoms:
+   name    type  refine?   x         y         z      frac site sym  mult I/A   Uiso     U11     U22     U33     U12     U13     U23
+---------------------------------------------------------------------------------------------------------------------------------------
+  Mn1_0     Mn      M   0.24584   0.08191   0.25000   0.978  m'(z)    8    I 0.01990                                                
+  Mn1_1     Mn      M   0.50005   0.66388   0.75000   0.978m'm'2(y)    4    I 0.01990                                                
+
+ Magnetic moments:
+   name    type  refine?  Mx        My        Mz    
+---------------------------------------------------------------------------------------------------------------------------------------
+  Mn1_0     Mn      M   2.32859  -0.68387   0.00000
+  Mn1_1     Mn      M   0.00000   1.36773   0.00000
+
+ Unit cell: a = 5.40789 b = 9.36674 c = 4.35682 alpha = 90.000 beta = 90.000 gamma = 90.000 volume = 220.692 Refine? False
+
+ Phase: Mn3Ga in histogram: PWDR PG3_45598.gsa Bank 1
+=======================================================================================================================================
+ Phase fraction  :     0.9449 Refine? False
+ Extinction coeff:     0.0000 Refine? False
+ March-Dollase PO:     1.0000 Refine? False Axis: 0 0 1
+
+ Size model    : isotropic equatorial:       1.000 Refine? False
+	 LG mixing coeff.:       1.0000 Refine? False
+
+ Mustrain model: isotropic equatorial:      1000.0 Refine? False
+	 LG mixing coeff.:      1.0000 Refine? False
+
+ Hydrostatic/elastic strain:
+ names :         D11         D33
+ values:           0           0
+ refine:       False       False
+ Layer Displacement:      0.000 Refine? False
+
+ Phase: MnO in histogram: PWDR PG3_45598.gsa Bank 1
+=======================================================================================================================================
+ Phase fraction  :    0.05508 Refine? False
+ Extinction coeff:     0.0000 Refine? False
+ March-Dollase PO:     1.0000 Refine? False Axis: 0 0 1
+
+ Size model    : isotropic equatorial:       1.000 Refine? False
+	 LG mixing coeff.:       1.0000 Refine? False
+
+ Mustrain model: isotropic equatorial:      1000.0 Refine? False
+	 LG mixing coeff.:      1.0000 Refine? False
+
+ Hydrostatic/elastic strain:
+ names :         D11          eA
+ values:           0           0
+ refine:       False       False
+ Layer Displacement:      0.000 Refine? False
+
+ Phase: Mn3Ga-mag_53 in histogram: PWDR PG3_45598.gsa Bank 1
+=======================================================================================================================================
+ Phase fraction  :     0.4724 Refine? 0.0
+ Extinction coeff:     0.0000 Refine? False
+ March-Dollase PO:     1.0000 Refine? False Axis: 0 0 1
+
+ Size model    : isotropic equatorial:       1.000 Refine? False
+	 LG mixing coeff.:       1.0000 Refine? False
+
+ Mustrain model: isotropic equatorial:      1000.0 Refine? False
+	 LG mixing coeff.:      1.0000 Refine? False
+
+ Hydrostatic/elastic strain:
+ names :         D11         D22         D33
+ values:           0           0           0
+ refine:       False       False       False
+ Layer Displacement:      0.000 Refine? False
+
+ Histogram: PWDR PG3_45598.gsa Bank 1 histogram Id: 0
+=======================================================================================================================================
+ Instrument type: Debye-Scherrer
+ Histogram limits: 12158.88 msec to 118441.39 msec
+
+ Sample Parameters:
+ Goniometer omega = 0.00, chi = 0.00, phi = 0.00
+ name  :         Scale    Absorption     DisplaceX     DisplaceY
+ value :    24654.3898        0.0000        0.0000        0.0000
+ refine:         False         False         False         False
+
+ Instrument Parameters:
+ name  :     2-theta     Azimuth           X           Y           Z        Zero       alpha      beta-0      beta-1
+ value :   90.000000    0.000000   17.885069   -7.193934   -7.041164   -0.036383    0.133240    0.012789   -0.006511
+ refine:       False                   False       False       False        True       False       False       False
+
+ name  :      beta-q        difA        difB        difC     fltPath       sig-0       sig-1       sig-2       sig-q
+ value :    0.061712   -2.559315   -0.10495522579.855755   63.183000  -41.264158 -569.463984  465.027651  312.533719
+ refine:       False       False       False       False                   False       False       False       False
+
+ Background function: log interpolate Refine? True
+ Coefficients:     41.725    37.673    34.552    35.170    42.088    29.448
+ Fixed background file: ; mult: 1.000  Refine? False
+
+ Refinement results:
+---------------------------------------------------------------------------------------------------------------------------------------
+ Number of function calls: 6 No. of observations: 2849 No. of parameters: 9 User rejected: 0 Sp. gp. extinct: 0
+ Refinement time =    0.612s,    0.612s/cycle, for 1 cycles
+ wR =    5.65%, chi**2 =        36463, GOF =   3.58
+----------------------------------------------------------------------------------------------------------------------------------
+Parameters generated by constraints
+
+ name  :       2::AMy:0
+ value :       -0.55877
+ sig   :        2.01665 
+
+ Phases:
+ Result for phase: Mn3Ga
+=======================================================================================================================================
+
+ Atoms:
+   name      x         y         z      frac   Uiso     U11     U22     U33     U12     U13     U23
+---------------------------------------------------------------------------------------------------------------------------------------
+    Mn1     Mn:
+ values:   0.16393   0.32775   0.25000   0.978 0.01990
+ sig   :                                               
+    Ga1     Ga:
+ values:   0.33330   0.66670   0.75000   1.005 0.00335
+ sig   :                                               
+
+ Density: 6.9608 g/cm**3
+ Result for phase: MnO
+=======================================================================================================================================
+
+ Atoms:
+   name      x         y         z      frac   Uiso     U11     U22     U33     U12     U13     U23
+---------------------------------------------------------------------------------------------------------------------------------------
+    Mn1   Mn+2:
+ values:   0.00000   0.00000   0.00000   1.000 0.02022
+ sig   :                                               
+     O1    O-2:
+ values:   0.50000   0.50000   0.50000   1.000 0.02000
+ sig   :                                               
+
+ Density: 5.3638 g/cm**3
+ Result for phase: Mn3Ga-mag_53
+=======================================================================================================================================
+
+ Atoms:
+   name      x         y         z      frac   Uiso     U11     U22     U33     U12     U13     U23
+---------------------------------------------------------------------------------------------------------------------------------------
+  Mn1_0     Mn:
+ values:   0.24584   0.08191   0.25000   0.978 0.01990
+ sig   :                                               
+  Mn1_1     Mn:
+ values:   0.50005   0.66388   0.75000   0.978 0.01990
+ sig   :                                               
+
+ Magnetic Moments:
+   name       Mx        My        Mz       |Mag|
+---------------------------------------------------------------------------------------------------------------------------------------
+  Mn1_0     Mn:
+ values:     2.296    -0.559     0.000     2.363
+ sig   :     0.890     2.017                    
+  Mn1_1     Mn:
+ values:     0.000     1.118     0.000     1.118
+ sig   :               4.033                    
+
+ Density: 0.2259 g/cm**3
+
+ Phase: Mn3Ga in histogram: PWDR PG3_45598.gsa Bank 1
+=======================================================================================================================================
+ Final refinement RF, RF^2 = 6.20%, 11.26% on 166 reflections
+ Durbin-Watson statistic = 0.755
+ Bragg intensity sum = 1.87e+06
+ Phase fraction  :     0.9449, sig          0 Weight fraction  :  0.96548, sig    0.00000
+
+ Phase: MnO in histogram: PWDR PG3_45598.gsa Bank 1
+=======================================================================================================================================
+ Final refinement RF, RF^2 = 14.52%, 26.38% on 29 reflections
+ Durbin-Watson statistic = 0.755
+ Bragg intensity sum = 6.26e+04
+ Phase fraction  :    0.05508, sig          0 Weight fraction  :  0.03452, sig    0.00000
+
+ Phase: Mn3Ga-mag_53 in histogram: PWDR PG3_45598.gsa Bank 1
+=======================================================================================================================================
+ Final refinement RF, RF^2 = 3.92%, 6.01% on 82 reflections
+ Durbin-Watson statistic = 0.755
+ Bragg intensity sum = 4.73e+05
+
+ Histogram: PWDR PG3_45598.gsa Bank 1 histogram Id: 0
+=======================================================================================================================================
+ PWDR histogram weight factor = 1.000
+ Final refinement wR = 5.65% on 2849 observations in this histogram
+ Other residuals: R = 6.50%, R-bkg = 7.85%, wR-bkg = 5.65% wRmin = 1.58%
+ Instrument type: Debye-Scherrer
+
+ Instrument Parameters:
+ names :     2-theta           X           Y           Z        Zero       alpha      beta-0      beta-1      beta-q
+ value :   90.000000   17.885069   -7.193934   -7.041164   -0.036284    0.133240    0.012789   -0.006511    0.061712
+ sig   :                                                    0.110566                                                
+
+ Instrument Parameters:
+ names :        difA        difB        difC       sig-0       sig-1       sig-2       sig-q
+ value :   -2.559315   -0.10495522579.855755  -41.264158 -569.463984  465.027651  312.533719
+ sig   :                                                                                    
+
+ Background function: log interpolate
+ value :      41.72     37.67     34.55     35.18      42.1     29.45
+ sig   :     0.1035    0.1096    0.1791    0.3238    0.7853     1.166
+ Background sums: empirical 1.06e+05, Debye 0, peaks 0, Total 1.06e+05

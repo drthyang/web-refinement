@@ -34,17 +34,17 @@ pseudo-Voigt) + background (constant, then polynomial). Refine scale, background
 lattice, peak width. Obs/calc/difference plot; export pattern + project. Minimal
 profile refinement, not full Rietveld.
 
-## Phase 5 — Magnetic structure model ✅ (model + structure factor; UI pending)
+## Phase 5 — Magnetic structure model ✅
 Moments on sites, propagation vector k, magnetic form-factor interface,
 perpendicular-moment rule `M⊥ = M − q̂(M·q̂)`, simplified `F_M`, arrow
 visualization. Nuclear/magnetic contributions kept separate.
 
-## Phase 6 — Magnetic single-crystal refinement 🚧 (F_M engine done; refinement wiring pending)
+## Phase 6 — Magnetic single-crystal refinement ✅
 Nuclear + magnetic intensities; refine magnetic scale, moment magnitude
 (± direction); fixed/free moment parameters; separate contribution reporting;
 export magnetic model in project JSON.
 
-## Phase 7 — Magnetic powder refinement ⬜
+## Phase 7 — Magnetic powder refinement ⬜ (single-crystal magnetic done; powder magnetic pending)
 Magnetic peaks, combined nuclear+magnetic profile with separable components,
 moment + magnetic-scale refinement, obs/calc/difference plot, export. After
 Phases 4 and 6 are working.

@@ -30,22 +30,27 @@ export function qCartesian(cell: UnitCell, h: number, k: number, l: number): Vec
  *    directions (â, b̂, ĉ). For orthogonal cells this is the identity; for
  *    oblique cells it is a documented simplification (see LIMITATIONS.md).
  */
-export function momentCartesian(cell: UnitCell, moment: MagneticMoment): Vec3 {
-  if (moment.frame === "cartesian") {
-    return moment.components;
-  }
+/** Convert crystal-axis moment components (μ_B along â, b̂, ĉ) to Cartesian. */
+export function crystalComponentsToCartesian(cell: UnitCell, comps: Vec3): Vec3 {
   const m = orthogonalizationMatrix(cell);
   // Columns of M are a, b, c in Cartesian; normalize each to a direction.
   const cols: Mat3 = transpose(m);
   const ahat = normalize(cols[0]);
   const bhat = normalize(cols[1]);
   const chat = normalize(cols[2]);
-  const [mx, my, mz] = moment.components;
+  const [mx, my, mz] = comps;
   return [
     mx * ahat[0] + my * bhat[0] + mz * chat[0],
     mx * ahat[1] + my * bhat[1] + mz * chat[1],
     mx * ahat[2] + my * bhat[2] + mz * chat[2],
   ];
+}
+
+export function momentCartesian(cell: UnitCell, moment: MagneticMoment): Vec3 {
+  if (moment.frame === "cartesian") {
+    return moment.components;
+  }
+  return crystalComponentsToCartesian(cell, moment.components);
 }
 
 /**

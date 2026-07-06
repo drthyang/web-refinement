@@ -4,6 +4,7 @@
  */
 
 import type { StructureModel } from "@/core/crystal/types";
+import type { MagneticModel } from "@/core/magnetic/types";
 import type { PowderPattern, SingleCrystalDataset } from "@/core/diffraction/types";
 import type {
   ParameterBinding,
@@ -35,7 +36,21 @@ export interface RefineSingleCrystalRequest {
   readonly options?: Partial<RefinementOptions>;
 }
 
-export type ComputeRequest = RefinePowderRequest | RefineSingleCrystalRequest;
+export interface RefineMagneticRequest {
+  readonly type: "refineMagnetic";
+  readonly requestId: number;
+  readonly structure: StructureModel;
+  readonly magnetic: MagneticModel;
+  readonly dataset: SingleCrystalDataset;
+  readonly parameters: RefinementParameter[];
+  readonly bindings: ParameterBinding[];
+  readonly options?: Partial<RefinementOptions>;
+}
+
+export type ComputeRequest =
+  | RefinePowderRequest
+  | RefineSingleCrystalRequest
+  | RefineMagneticRequest;
 
 export interface ComputeSuccess {
   readonly requestId: number;

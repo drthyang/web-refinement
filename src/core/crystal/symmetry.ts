@@ -62,6 +62,22 @@ export function parseSymmetryOperation(xyz: string): SymmetryOperation {
   return { rotation, translation, xyz: xyz.replace(/\s+/g, "") };
 }
 
+/**
+ * Parse a magnetic (BNS) operation string such as "-x,1/2+y,-z,-1": the first
+ * three components are the spatial operation, the trailing ±1 is the
+ * time-reversal flag.
+ */
+export function parseMagneticSymmetryOperation(xyz: string): SymmetryOperation {
+  const parts = xyz.split(",");
+  if (parts.length !== 4) {
+    throw new Error(`Magnetic symmetry op must have 4 fields (x,y,z,±1): "${xyz}"`);
+  }
+  const spatial = parseSymmetryOperation(parts.slice(0, 3).join(","));
+  const flag = parts[3]!.trim();
+  const timeReversal: 1 | -1 = flag.startsWith("-") ? -1 : 1;
+  return { ...spatial, xyz: xyz.replace(/\s+/g, ""), timeReversal };
+}
+
 /** Apply an operation to a fractional coordinate: x' = R·x + t (not wrapped). */
 export function applyOperation(op: SymmetryOperation, pos: Vec3): Vec3 {
   const rotated = mulVec(op.rotation, pos);
