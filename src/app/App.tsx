@@ -114,7 +114,7 @@ export function App(): JSX.Element {
   const { structure, pattern, powderParams, scDataset, scParams, powderSource, scSource } = session;
   const powderIsTof = pattern.xUnit === "tof";
   const powderXLabel = pattern.xUnit === "twoTheta" ? "2θ (°)" : UNIT_LABEL[pattern.xUnit] ?? "x";
-  const pBindings = useMemo(() => powderBindings(structure.id, pattern.id), [structure.id, pattern.id]);
+  const pBindings = useMemo(() => powderBindings(structure, pattern.id), [structure.id, pattern.id]);
   const scBind = useMemo(
     () => session.scBindings ?? singleCrystalBindings(scDataset.id),
     [session.scBindings, scDataset.id],
@@ -260,7 +260,7 @@ export function App(): JSX.Element {
       setSession((s) => ({
         ...s,
         pattern: parsed,
-        powderParams: startingPowderParams(structure, parsed, powderBindings(structure.id, id)),
+        powderParams: startingPowderParams(structure, parsed, powderBindings(structure, id)),
         powderOverlay: overlay ? { calc: overlay.calc, background: overlay.background } : null,
         powderSource: filename,
       }));
@@ -270,7 +270,7 @@ export function App(): JSX.Element {
     }
     const parsed = parsePowderData(text, { id, name: filename, xUnit: fmt.xUnit, radiation: fmt.radiation, ...(fmt.radiation.kind !== "neutron-tof" ? { wavelength: fmt.radiation.wavelength } : {}) });
     if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
-    const bindings = powderBindings(structure.id, id);
+    const bindings = powderBindings(structure, id);
     setSession((s) => ({ ...s, pattern: parsed, powderParams: startingPowderParams(structure, parsed, bindings), powderOverlay: null, powderSource: filename }));
     setPowderResult(null);
     setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · unit=${fmt.xUnit} ${tag}. Scale auto-estimated — click “Refine powder”. ${fmt.note}`);

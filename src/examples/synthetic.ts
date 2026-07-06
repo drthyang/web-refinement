@@ -10,27 +10,40 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
 import { powderCurves } from "@/core/workflow/powder";
 import { singleCrystalComparison } from "@/core/workflow/singleCrystal";
 import { generateReflections } from "@/core/diffraction/reflections";
+import { independentCellParameters } from "@/core/crystal/cellConstraints";
 
 const NEUTRON = { kind: "neutron" as const, wavelength: 1.54 };
 const TRUE_SCALE = 80;
 const TRUE_WIDTH = 0.5;
 
-export function powderBindings(structureId: string, datasetId: string): ParameterBinding[] {
-  return [
+/**
+ * Powder refinement bindings. Cell bindings are symmetry-reduced: one parameter
+ * per independent lattice parameter, each driving all the cell fields it
+ * constrains (e.g. a single `cell_a` → a,b,c for a cubic cell), so dependent
+ * axes cannot be refined independently.
+ */
+export function powderBindings(structure: StructureModel, datasetId: string): ParameterBinding[] {
+  const bindings: ParameterBinding[] = [
     { parameterId: "scale", kind: "scale", targetId: datasetId },
     { parameterId: "width", kind: "peakWidth", targetId: datasetId },
-    { parameterId: "cell_a", kind: "cellLength", targetId: structureId, targetKey: "a" },
-    { parameterId: "cell_c", kind: "cellLength", targetId: structureId, targetKey: "c" },
   ];
+  for (const spec of independentCellParameters(structure)) {
+    for (const target of spec.targets) {
+      bindings.push({ parameterId: spec.id, kind: spec.kind, targetId: structure.id, targetKey: target });
+    }
+  }
+  return bindings;
 }
 
 export function powderParameters(structure: StructureModel, scale = TRUE_SCALE): RefinementParameter[] {
-  return [
+  const params: RefinementParameter[] = [
     { id: "scale", label: "scale", kind: "scale", value: scale, initialValue: scale, min: 0, fixed: false },
     { id: "width", label: "peak FWHM (°2θ)", kind: "peakWidth", value: TRUE_WIDTH, initialValue: TRUE_WIDTH, min: 0.05, fixed: true },
-    { id: "cell_a", label: "a (Å)", kind: "cellLength", value: structure.cell.a, initialValue: structure.cell.a, fixed: true },
-    { id: "cell_c", label: "c (Å)", kind: "cellLength", value: structure.cell.c, initialValue: structure.cell.c, fixed: true },
   ];
+  for (const spec of independentCellParameters(structure)) {
+    params.push({ id: spec.id, label: spec.label, kind: spec.kind, value: spec.value, initialValue: spec.value, fixed: true });
+  }
+  return params;
 }
 
 export function buildSyntheticPowder(structure: StructureModel): PowderPattern {
@@ -45,7 +58,7 @@ export function buildSyntheticPowder(structure: StructureModel): PowderPattern {
     points: grid.map((x) => ({ x, yObs: 0 })),
   };
   const truth = powderParameters(structure);
-  const curves = powderCurves(structure, empty, truth, powderBindings(structure.id, datasetId));
+  const curves = powderCurves(structure, empty, truth, powderBindings(structure, datasetId));
   return {
     ...empty,
     points: grid.map((x, i) => {

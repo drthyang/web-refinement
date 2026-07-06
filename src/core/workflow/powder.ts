@@ -17,7 +17,19 @@ import { applyParameters, type AppliedModel } from "@/core/workflow/apply";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { powderPeakIntensities } from "@/core/diffraction/intensity";
 import { braggTheta } from "@/core/crystal/unitCell";
-import { synthesizePattern, type ProfilePeak, type ProfileOptions } from "@/core/diffraction/profile";
+import { synthesizePattern, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
+import type { BackgroundType } from "@/core/diffraction/background";
+
+/** Powder profile + intensity options for the refinement workflow. */
+export interface PowderProfile {
+  readonly shape: PeakShape;
+  /** Pseudo-Voigt mixing; ignored for Gaussian. */
+  readonly eta?: number;
+  /** Apply the 2θ Lorentz factor. Default true; false for pre-reduced I(Q). */
+  readonly lorentz?: boolean;
+  /** Background model. Default Chebyshev. */
+  readonly backgroundType?: BackgroundType;
+}
 
 /** Convert a d-spacing to the pattern's abscissa unit. Returns NaN if undefined. */
 function dToX(pattern: PowderPattern, d: number): number {
@@ -56,10 +68,10 @@ function dRange(pattern: PowderPattern): { dMin: number; dMax: number } {
   }
 }
 
-export function buildPeaks(pattern: PowderPattern, applied: AppliedModel): ProfilePeak[] {
+export function buildPeaks(pattern: PowderPattern, applied: AppliedModel, applyLorentz = true): ProfilePeak[] {
   const { dMin, dMax } = dRange(pattern);
   const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
-  const intensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, applied.scale);
+  const intensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, applied.scale, undefined, applyLorentz);
   const fwhm = Math.max(applied.peakWidth, 1e-4);
 
   const peaks: ProfilePeak[] = [];
@@ -76,7 +88,7 @@ export function buildPowderProblem(
   pattern: PowderPattern,
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
-  profile: Pick<ProfileOptions, "shape" | "eta"> = { shape: "gaussian" },
+  profile: PowderProfile = { shape: "gaussian" },
 ): RefinementProblem {
   const xValues = pattern.points.map((p) => p.x);
   const yObs = pattern.points.map((p) => p.yObs);
@@ -85,14 +97,16 @@ export function buildPowderProblem(
     weightsFromSigma(pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1))),
     excludedPointMask(yObs),
   );
+  const applyLorentz = profile.lorentz ?? true;
 
   const calculate = (values: Readonly<Record<string, number>>): Float64Array => {
     const resolved = resolveTies(parameters, values);
     const applied = applyParameters(structure, bindings, resolved);
-    const peaks = buildPeaks(pattern, applied);
+    const peaks = buildPeaks(pattern, applied, applyLorentz);
     const opts: ProfileOptions = {
       shape: profile.shape,
       ...(profile.eta !== undefined ? { eta: profile.eta } : {}),
+      ...(profile.backgroundType !== undefined ? { backgroundType: profile.backgroundType } : {}),
       ...(applied.background.length ? { background: applied.background } : {}),
     };
     return synthesizePattern(xValues, peaks, opts);
@@ -114,7 +128,7 @@ export function powderCurves(
   pattern: PowderPattern,
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
-  profile: Pick<ProfileOptions, "shape" | "eta"> = { shape: "gaussian" },
+  profile: PowderProfile = { shape: "gaussian" },
 ): PowderCurves {
   const problem = buildPowderProblem(structure, pattern, parameters, bindings, profile);
   const values: Record<string, number> = {};

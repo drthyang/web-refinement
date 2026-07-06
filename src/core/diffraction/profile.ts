@@ -10,6 +10,8 @@
  * the minimal engine exposes a single width parameter and optional U,V,W.
  */
 
+import { evaluateBackground, type BackgroundType } from "@/core/diffraction/background";
+
 const LN2 = Math.LN2;
 const SQRT_LN2_OVER_PI = Math.sqrt(LN2 / Math.PI);
 
@@ -56,19 +58,10 @@ export interface ProfileOptions {
   readonly shape: PeakShape;
   /** Mixing parameter for pseudo-Voigt; ignored for Gaussian. */
   readonly eta?: number;
-  /** Polynomial background coefficients c0 + c1·x + c2·x² + …. */
+  /** Background coefficients (c0 first). Interpreted per `backgroundType`. */
   readonly background?: readonly number[];
-}
-
-function backgroundAt(x: number, coeffs: readonly number[] | undefined): number {
-  if (!coeffs || coeffs.length === 0) return 0;
-  let value = 0;
-  let xp = 1;
-  for (const c of coeffs) {
-    value += c * xp;
-    xp *= x;
-  }
-  return value;
+  /** Background model; defaults to Chebyshev (well-conditioned for wide x). */
+  readonly backgroundType?: BackgroundType;
 }
 
 function shapeAt(x: number, peak: ProfilePeak, opts: ProfileOptions): number {
@@ -88,9 +81,19 @@ export function synthesizePattern(
   opts: ProfileOptions,
 ): Float64Array {
   const y = new Float64Array(xValues.length);
+  // Chebyshev normalization needs the abscissa span; compute it once.
+  const bgType = opts.backgroundType ?? "chebyshev";
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  if (opts.background && opts.background.length > 0) {
+    for (const x of xValues) {
+      if (x < xMin) xMin = x;
+      if (x > xMax) xMax = x;
+    }
+  }
   for (let i = 0; i < xValues.length; i++) {
     const x = xValues[i]!;
-    let sum = backgroundAt(x, opts.background);
+    let sum = evaluateBackground(x, opts.background, bgType, xMin, xMax);
     for (const peak of peaks) {
       // Skip peaks far outside their effective support for efficiency.
       if (Math.abs(x - peak.center) > 20 * peak.fwhm) continue;

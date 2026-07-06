@@ -12,7 +12,7 @@ describe("Le Bail intensity extraction", () => {
   // Synthesize an observed pattern from the real structure (known peaks).
   const grid = Array.from({ length: 600 }, (_, i) => 15 + (i * 90) / 600);
   const empty: PowderPattern = { id: "p", name: "p", xUnit: "twoTheta", radiation: neutron, wavelength: 1.54, points: grid.map((x) => ({ x, yObs: 0 })) };
-  const curves = powderCurves(structure, empty, powderParameters(structure, 80), powderBindings(structure.id, "p"));
+  const curves = powderCurves(structure, empty, powderParameters(structure, 80), powderBindings(structure, "p"));
   const obs: PowderPattern = { ...empty, points: grid.map((x, i) => ({ x, yObs: curves.yCalc[i]! })) };
 
   const result = leBailExtract(obs, structure.cell, structure.spaceGroup, { fwhm: 0.5, cycles: 12 });

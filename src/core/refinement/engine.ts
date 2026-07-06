@@ -39,6 +39,19 @@ function clamp(value: number, p: RefinementParameter): number {
   return v;
 }
 
+/**
+ * Limit a per-cycle parameter shift to at most `MAX_REL_SHIFT`× the parameter's
+ * current magnitude — a safety net against a single ill-conditioned step
+ * launching the model out of its basin. Parameters at ~0 are left unlimited
+ * (relying on the LM step-rejection loop), so refining toward/away from zero is
+ * not blocked.
+ */
+const MAX_REL_SHIFT = 5;
+function limitShift(delta: number, value: number): number {
+  const cap = MAX_REL_SHIFT * Math.abs(value);
+  return cap > 0 && Math.abs(delta) > cap ? Math.sign(delta) * cap : delta;
+}
+
 /** Build the full id→value record from base params overlaid with free values. */
 function valuesRecord(
   params: readonly RefinementParameter[],
@@ -170,25 +183,38 @@ export function refine(
     // Gradient norm ‖Jᵀr‖: near zero means we sit at a (local) minimum.
     const gradNorm = Math.sqrt(jtr.reduce((acc, v) => acc + v * v, 0));
 
-    // LM damping: augment the diagonal, retry with larger λ on a bad step.
+    // Diagonal preconditioning: rescale so JᵀJ has a unit diagonal before the
+    // solve. This keeps the normal matrix well-conditioned even when parameters
+    // span many orders of magnitude (scale ~1e-11, cell ~10, B ~1, xyz ~0.1),
+    // which is the main cause of stalls/divergence. s_j = sqrt(JᵀJ_jj).
+    const sc = jtj.map((row, j) => {
+      const d = row[j]!;
+      return d > 0 && Number.isFinite(d) ? Math.sqrt(d) : 1;
+    });
+    const A: Matrix = jtj.map((row, i) => row.map((v, j) => v / (sc[i]! * sc[j]!)));
+    const b = jtr.map((g, i) => g / sc[i]!);
+
+    // LM damping on the (unit-diagonal) scaled system; retry with larger λ.
     let stepAccepted = false;
-    for (let attempt = 0; attempt < 12 && !stepAccepted; attempt++) {
-      const damped: Matrix = jtj.map((row, i) =>
-        row.map((v, j) => (i === j ? v * (1 + lambda) : v)),
-      );
-      let delta: number[];
+    for (let attempt = 0; attempt < 15 && !stepAccepted; attempt++) {
+      const damped: Matrix = A.map((row, i) => row.map((v, j) => (i === j ? v + lambda : v)));
+      let y: number[];
       try {
-        // Solve (JᵀJ + λ·diag)·Δp = −Jᵀr.
-        delta = solveLinearSystem(damped, jtr.map((v) => -v));
+        // Solve (D·JᵀJ·D + λI)·y = −D·Jᵀr, then unscale Δp_j = y_j / s_j.
+        y = solveLinearSystem(damped, b.map((v) => -v));
       } catch {
         lambda *= 10;
         continue;
       }
 
+      const delta = y.map((yj, j) => limitShift(yj / sc[j]!, freeValues[j]!));
+      if (delta.some((d) => !Number.isFinite(d))) { lambda *= 10; continue; }
+
       const trial = freeValues.map((v, j) => clamp(v + delta[j]!, freeParams[j]!));
       const trialEval = evalChi(trial);
 
-      if (trialEval.chi < current.chi) {
+      // Reject non-finite objectives (overflow/NaN) as well as uphill steps.
+      if (Number.isFinite(trialEval.chi) && trialEval.chi < current.chi) {
         freeValues = trial;
         current = trialEval;
         lambda = Math.max(lambda / 3, 1e-12);

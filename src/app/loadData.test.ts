@@ -50,7 +50,7 @@ describe("startingPowderParams", () => {
     const structure = exampleStructure();
     // buildSyntheticPowder bakes in TRUE_SCALE = 80; a correct estimate ≈ 80.
     const pattern = buildSyntheticPowder(structure);
-    const bindings = powderBindings(structure.id, pattern.id);
+    const bindings = powderBindings(structure, pattern.id);
     const params = startingPowderParams(structure, pattern, bindings);
 
     const scale = params.find((p) => p.id === "scale")!;
@@ -70,7 +70,7 @@ describe("startingPowderParams", () => {
     const text = truth.points.map((p) => `${p.x} ${p.yObs}`).join("\n");
     const opts = powderOptsFromInstrument({ kind: "constantWavelength", wavelength: 1.54 }, truth.id, "hand.xy");
     const parsed = parsePowderData(text, opts);
-    const bindings = powderBindings(structure.id, parsed.id);
+    const bindings = powderBindings(structure, parsed.id);
     const params = startingPowderParams(structure, parsed, bindings);
     expect(params.find((p) => p.id === "scale")!.value).toBeGreaterThan(0);
   });

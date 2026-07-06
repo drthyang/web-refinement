@@ -50,6 +50,34 @@ describe("refinement engine (Levenberg–Marquardt)", () => {
     expect(result.parameters.b).toBeCloseTo(0.5, 3);
   });
 
+  it("converges with parameters spanning many orders of magnitude", () => {
+    // y = A·b1(x) + B·b2(x) with basis functions scaled so A ~ 2e6 and B ~ 3e-6
+    // both contribute comparably — a 1e12 spread that wrecks an unscaled normal
+    // matrix. Diagonal preconditioning must still recover both from a bad start.
+    const xs = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4];
+    const b1 = xs.map((x) => x * 1e-6);
+    const b2 = xs.map((x) => x * x * 1e6);
+    const trueA = 2e6;
+    const trueB = 3e-6;
+    const observations = Float64Array.from(xs.map((_, i) => trueA * b1[i]! + trueB * b2[i]!));
+    const weights = Float64Array.from(xs.map(() => 1));
+    const parameters: RefinementParameter[] = [
+      { id: "A", label: "A", kind: "scale", value: 1, initialValue: 1, fixed: false },
+      { id: "B", label: "B", kind: "scale", value: 1, initialValue: 1, fixed: false },
+    ];
+    const result = refine(
+      {
+        parameters,
+        observations,
+        weights,
+        calculate: (v) => Float64Array.from(xs.map((_, i) => (v.A ?? 0) * b1[i]! + (v.B ?? 0) * b2[i]!)),
+      },
+      { maxIterations: 60 },
+    );
+    expect(Math.abs(result.parameters.A! / trueA - 1)).toBeLessThan(1e-4);
+    expect(Math.abs(result.parameters.B! / trueB - 1)).toBeLessThan(1e-4);
+  });
+
   it("holds fixed parameters constant", () => {
     const parameters: RefinementParameter[] = [
       { id: "scale", label: "scale", kind: "scale", value: 5, initialValue: 5, fixed: true },

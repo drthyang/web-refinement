@@ -90,11 +90,15 @@ export function powderPeakIntensities(
   reflections: readonly Reflection[],
   scale: number,
   po?: PreferredOrientation,
+  applyLorentz = true,
 ): PowderPeak[] {
   const peaks: PowderPeak[] = [];
   for (const r of reflections) {
     const f2 = nuclearStructureFactorSquared(model, radiation, r.h, r.k, r.l);
-    const lp = lorentzPolarization(radiation, r.d);
+    // Pre-reduced synchrotron I(Q) (e.g. area-detector PDF beamlines) is already
+    // Lorentz-corrected; re-applying the 2θ factor double-corrects and wildly
+    // over-weights low Q. `applyLorentz=false` skips it for such data.
+    const lp = applyLorentz ? lorentzPolarization(radiation, r.d) : 1;
     const poFactor = po ? marchDollase(model.cell, po.axis, r.h, r.k, r.l, po.ratio) : 1;
     const intensity = scale * r.multiplicity * lp * poFactor * f2;
     let twoTheta = NaN;
