@@ -15,23 +15,29 @@ comparison recorded here.
    recorded below.
 4. Documentation states plainly which features are *validated* vs *approximate*.
 
-## Test matrix (target — populated as phases land)
+## Test matrix (55 tests, all passing)
 
-| Area | Test kind | Phase | Status |
-| --- | --- | --- | --- |
-| ProjectFile JSON round-trip | unit | 0 | ✅ `core/project/project.test.ts` |
-| CIF parsing (cell, symmetry, sites) | unit + golden | 1/3 | ⬜ |
-| Reflection (hkl) parsing | unit | 3 | ⬜ |
-| Powder data parsing (+ x-unit) | unit | 4 | ⬜ |
-| Reciprocal lattice / metric tensor | unit + golden | 1 | ⬜ |
-| Phase factor `exp[2πi(hx+ky+lz)]` | unit | 1 | ⬜ |
-| Nuclear structure factor `F_N` | golden | 3 | ⬜ |
-| Lorentz–polarization, multiplicity | unit | 3/4 | ⬜ |
-| Powder peak generation | golden | 4 | ⬜ |
-| Residual & agreement factors | unit | 3 | ⬜ |
-| Optimizer behaviour (LM convergence) | unit | 3 | ⬜ |
-| Magnetic perpendicular-moment projection | unit | 5 | ⬜ |
-| Magnetic structure factor `F_M` | golden | 5/6 | ⬜ |
+| Area | Test kind | Status |
+| --- | --- | --- |
+| ProjectFile JSON round-trip | unit | ✅ `core/project/project.test.ts` |
+| CIF parsing (cell, symmetry, sites) | unit + golden | ✅ `parsers/cif.test.ts` |
+| Powder/reflection numeric parsing (esd) | unit | ✅ `parsers/cif.test.ts` |
+| Reciprocal metric tensor / volume | golden (GSAS) | ✅ `core/crystal/unitCell.test.ts` |
+| d-spacing / \|Q\| consistency | unit | ✅ `core/crystal/unitCell.test.ts` |
+| Symmetry-op parsing & application | unit | ✅ `core/crystal/symmetry.test.ts` |
+| Site multiplicity | golden (GSAS) | ✅ `core/crystal/symmetry.test.ts` |
+| Systematic absences | unit | ✅ `core/crystal/symmetry.test.ts` |
+| Neutron b / X-ray f / magnetic j0 | golden (GSAS) | ✅ `core/scattering/scattering.test.ts` |
+| Nuclear structure factor `F_N` | analytic golden | ✅ `core/diffraction/structureFactor.test.ts` |
+| Reflection generation + multiplicity | golden | ✅ `core/diffraction/reflections.test.ts` |
+| Residual & agreement factors | unit | ✅ (via engine tests) |
+| Optimizer behaviour (LM convergence) | unit | ✅ `core/refinement/engine.test.ts` |
+| Constraint tie parsing/resolution | unit | ✅ `core/refinement/engine.test.ts` |
+| Linear algebra (solve/invert) | unit | ✅ `core/math/linalg.test.ts` |
+| Magnetic perpendicular-moment projection | unit | ✅ `core/magnetic/magnetic.test.ts` |
+| Q / moment frame conversion | unit | ✅ `core/magnetic/magnetic.test.ts` |
+| Single-crystal + powder workflow refinement | integration (GSAS structure) | ✅ `core/workflow/workflow.test.ts` |
+| Plot scaling math | unit | ✅ `visualization/scale.test.ts` |
 
 ## Golden examples
 
@@ -47,13 +53,32 @@ Planned reference structures:
 
 ## External comparisons
 
-For each cross-check we record: the external tool and version, the input, the
-compared quantity, the agreement achieved, and the tolerance we accept. Until a
-row here exists for a feature, that feature is **approximate**, not validated.
+For each cross-check we record: the external tool, the input, the compared
+quantity, the agreement achieved, and the tolerance we accept. The source is the
+GSAS-II refinement bundled in `data/` (`isothermal_hex/Untitled.lst` and the
+CIFs), a two-phase (Mn₃Ga + MnO) TOF neutron powder Rietveld.
 
-| Example | Quantity | Tool | Agreement | Notes |
+| Quantity | Our value | GSAS-II value | Tolerance | Source |
 | --- | --- | --- | --- | --- |
-| _(none yet — Phase 0)_ | | | | |
+| Mn₃Ga cell volume | 110.759 Å³ | 110.759 Å³ | 1e-2 | `.lst` |
+| MnO cell volume | 88.130 Å³ | 88.130 Å³ | 1e-2 | `.lst` |
+| Mn₃Ga recip. tensor A11 | 0.0455025 | 0.045502499 | 1e-6 | `.lst` |
+| Mn₃Ga recip. tensor A33 | 0.0524937 | 0.052493673 | 1e-6 | `.lst` |
+| MnO recip. tensor A11 | 0.0504953 | 0.050495334 | 1e-6 | `.lst` |
+| Mn₃Ga Mn1 multiplicity | 6 | 6 (Wyckoff 6h) | exact | `.lst` |
+| Mn₃Ga Ga1 multiplicity | 2 | 2 (Wyckoff 2d) | exact | `.lst` |
+| Neutron b (Mn / O / Ga) | −3.73 / 5.80 / 7.29 | −3.75 / 5.81 / 7.29 fm | 2e-2 | `.lst` |
+| X-ray f(0) (Mn / O / Ga) | 25.0 / 8.0 / 31.0 | Z = 25 / 8 / 31 | 0.1 | Cromer-Mann |
+| CIF cell (600 K Mn₃Ga) | a=5.42215, c=4.37566 | file values | 1e-5 | CIF |
+| CIF cell (393 K refined) | a=5.41317, c=4.36462 | file values | 1e-5 | CIF |
+
+**Scope note.** These validate the *crystallographic and scattering
+foundations* — the quantities our engine shares with GSAS-II. The full
+end-to-end fit is **not** compared: GSAS-II ran a two-phase TOF Rietveld with
+instrument profile functions, background, and profile coefficients beyond this
+minimal engine's scope (see [LIMITATIONS.md](./LIMITATIONS.md)). Our
+refinement is validated only as *self-consistent* (recovers known parameters
+from synthetic data), not against GSAS-II's wR.
 
 ## Honesty rule
 

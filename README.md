@@ -13,9 +13,13 @@ WebAssembly/WebGPU are future accelerators.
 
 ## Status
 
-**Phase 0 — architecture & type drafts.** The scientific data model is defined as
-TypeScript interfaces; the calculation and refinement engines are not yet
-implemented. See [docs/ROADMAP.md](docs/ROADMAP.md).
+**Working app — atomic/nuclear refinement (single-crystal + powder).** The
+scientific core, Levenberg–Marquardt refinement engine, CIF parsing, plots, Web
+Worker compute, and a functioning workbench UI are implemented and tested (55
+tests). Crystallographic and scattering foundations are validated against a
+bundled GSAS-II refinement (see [docs/REPORT.md](docs/REPORT.md) and
+[docs/VALIDATION.md](docs/VALIDATION.md)). The magnetic structure factor is
+implemented; magnetic refinement UI is pending. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Commands
 
@@ -56,6 +60,7 @@ calculations run in Web Workers. Full detail in
 - [docs/VALIDATION.md](docs/VALIDATION.md) — testing & external comparison strategy
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — scope and known simplifications
 - [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project JSON format
+- [docs/REPORT.md](docs/REPORT.md) — build & validation report
 
 ## License
 
