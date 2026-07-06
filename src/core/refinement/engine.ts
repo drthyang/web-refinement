@@ -1,14 +1,16 @@
 /**
  * Data-agnostic non-linear least-squares refinement engine.
  *
- * Levenberg–Marquardt with a numerical (central-difference) Jacobian. The engine
- * sees only numbers: a flat parameter list, observations, weights, and a
- * `calculate(values)` closure supplied by the active workflow. It knows nothing
- * about crystallography.
+ * Levenberg–Marquardt. Parameters the model depends on *linearly* (scale,
+ * background) get an exact Jacobian column from a single evaluation; the rest use
+ * a central-difference numerical Jacobian. The engine sees only numbers: a flat
+ * parameter list, observations, weights, and a `calculate(values)` closure
+ * supplied by the active workflow. It knows nothing about crystallography.
  */
 
 import type {
   AgreementFactors,
+  ParameterKind,
   RefinementIteration,
   RefinementOptions,
   RefinementParameter,
@@ -31,6 +33,22 @@ const DEFAULT_OPTIONS: RefinementOptions = {
   convergenceTolerance: 1e-4,
   lambda: 1e-3,
 };
+
+/**
+ * Kinds whose contribution to the calculated pattern is linear (affine) by
+ * construction: `scale·I_calc`, `magneticScale·I_mag`, and `Σ c_k·basis_k(x)`
+ * background terms. Used as the default when a parameter does not set `linear`.
+ */
+const LINEAR_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
+  "scale",
+  "background",
+  "magneticScale",
+]);
+
+/** Whether the model is linear in this parameter (explicit flag, else by kind). */
+function isLinear(p: RefinementParameter): boolean {
+  return p.linear ?? LINEAR_KINDS.has(p.kind);
+}
 
 function clamp(value: number, p: RefinementParameter): number {
   let v = value;
@@ -77,23 +95,51 @@ function weightedResiduals(
 }
 
 /**
- * Numerical Jacobian J_ij = ∂r_i/∂p_j via central differences. `r` is the
- * weighted residual vector (obs − calc), so J already carries the sign.
+ * Jacobian J_ij = ∂r_i/∂p_j of the weighted residual r = √w·(obs − calc); the
+ * −√w factor is folded in so J carries the residual's sign.
+ *
+ * Linear parameters (scale, background — the model is affine in them) get an
+ * exact column: since `calc(base + h) = calc(base) + h·∂calc/∂p` with no
+ * higher-order terms, `(calc(base + h) − baseline)/h` is the true derivative for
+ * *any* step `h`, with zero truncation error. It reuses the already-computed
+ * baseline y_calc, costing one `calculate()` call instead of the two a central
+ * difference needs. The step is sized to the parameter's own magnitude (floored
+ * at 1) so the perturbed contribution stays well clear of the baseline — no
+ * catastrophic cancellation whether the parameter sits at ~1e-11 (scale) or
+ * ~1e4 (a background coefficient).
+ *
+ * Non-linear parameters use a central difference as before.
  */
-function numericalJacobian(
+function computeJacobian(
   problem: RefinementProblem,
   freeParams: readonly RefinementParameter[],
   freeValues: number[],
+  baseline: Float64Array,
 ): Matrix {
   const m = problem.observations.length;
   const n = freeValues.length;
   const freeIds = freeParams.map((p) => p.id);
   const jac: Matrix = Array.from({ length: m }, () => new Array<number>(n).fill(0));
+  const sqrtW = new Float64Array(m);
+  for (let i = 0; i < m; i++) sqrtW[i] = Math.sqrt(problem.weights[i]!);
 
   for (let j = 0; j < n; j++) {
     const base = freeValues[j]!;
-    const h = Math.max(1e-6, Math.abs(base) * 1e-5);
 
+    if (isLinear(freeParams[j]!)) {
+      const h = Math.max(1, Math.abs(base));
+      const forward = [...freeValues];
+      forward[j] = base + h;
+      const yF = problem.calculate(valuesRecord(problem.parameters, freeIds, forward));
+      for (let i = 0; i < m; i++) {
+        // r = √w·(obs − calc) ⇒ ∂r/∂p = −√w·∂calc/∂p.
+        const dCalc = (yF[i]! - baseline[i]!) / h;
+        jac[i]![j] = -sqrtW[i]! * dCalc;
+      }
+      continue;
+    }
+
+    const h = Math.max(1e-6, Math.abs(base) * 1e-5);
     const forward = [...freeValues];
     forward[j] = base + h;
     const yF = problem.calculate(valuesRecord(problem.parameters, freeIds, forward));
@@ -103,10 +149,8 @@ function numericalJacobian(
     const yB = problem.calculate(valuesRecord(problem.parameters, freeIds, backward));
 
     for (let i = 0; i < m; i++) {
-      const sw = Math.sqrt(problem.weights[i]!);
-      // r = sqrt(w)(obs − calc) ⇒ ∂r/∂p = −sqrt(w) ∂calc/∂p
       const dCalc = (yF[i]! - yB[i]!) / (2 * h);
-      jac[i]![j] = -sw * dCalc;
+      jac[i]![j] = -sqrtW[i]! * dCalc;
     }
   }
   return jac;
@@ -176,7 +220,7 @@ export function refine(
 
   for (let iter = 0; iter < opts.maxIterations; iter++) {
     const r = weightedResiduals(problem.observations, current.yCalc, problem.weights);
-    const jac = numericalJacobian(problem, freeParams, freeValues);
+    const jac = computeJacobian(problem, freeParams, freeValues, current.yCalc);
     const { jtj, jtr } = normalEquations(jac, r);
     lastJtj = jtj;
 

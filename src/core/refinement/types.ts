@@ -45,6 +45,16 @@ export interface RefinementParameter {
   readonly max?: number;
   /** When true, the parameter is held fixed and excluded from the fit. */
   fixed: boolean;
+  /**
+   * Whether the calculated pattern is a *linear* (affine) function of this
+   * parameter — true for scale factors and background coefficients, which enter
+   * the model as `scale·I_calc` or `Σ c_k·basis_k`. The engine computes an exact
+   * Jacobian column for such parameters from a single evaluation instead of a
+   * two-point finite difference (faster and free of truncation error). When
+   * omitted, the engine falls back to a per-`kind` default (scale, background,
+   * and magnetic scale are treated as linear); set explicitly to override.
+   */
+  readonly linear?: boolean;
   /** Optional group name for grouped/tied refinement (Phase 8). */
   readonly group?: string;
   /**
