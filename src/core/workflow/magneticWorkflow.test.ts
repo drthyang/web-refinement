@@ -1,22 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
-import { parseMagneticCif } from "@/parsers/cif";
 import { refine } from "@/core/refinement/engine";
 import {
   buildMagneticSingleCrystalProblem,
   magneticComparison,
 } from "@/core/workflow/magnetic";
+import { exampleMagnetic } from "@/examples/mn3gaMagnetic";
 
-const { structure, magnetic } = parseMagneticCif(
-  readFileSync(
-    resolve(process.cwd(), "data/30K/Mn3Ga_monoclinic-mag_1_30K_SatoshiModel_FitMoment_Final_magneticUnit.cif"),
-    "utf8",
-  ),
-  "mn3ga-30k",
-);
+// Uses the embedded 30 K magnetic example (identical to the mCIF), so this
+// engine test runs without the git-ignored data/ folder.
+const { structure, magnetic } = exampleMagnetic();
 const neutron = { kind: "neutron" as const, wavelength: 1.54 };
 
 describe("magnetic single-crystal workflow", () => {

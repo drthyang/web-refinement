@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import type { StructureModel } from "@/core/crystal/types";
 import { parseCif, parseCifNumber } from "@/parsers/cif";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { siteMultiplicity } from "@/core/crystal/symmetry";
+import { dataExists, readData } from "@/testSupport/data";
 
-const dataDir = resolve(process.cwd(), "data");
-const read = (p: string): string => readFileSync(resolve(dataDir, p), "utf8");
+const HEX_600K = "Mn3GaHexagonal_structure_600K_Final.cif";
+const HEX_393K = "isothermal_hex/cifs/PG3_59283_393K.cif";
+const has600 = dataExists(HEX_600K);
+const has393 = dataExists(HEX_393K);
 
 describe("parseCifNumber", () => {
   it("strips the esd in parentheses", () => {
@@ -16,8 +18,10 @@ describe("parseCifNumber", () => {
   });
 });
 
-describe("parseCif — GSAS-II Mn₃Ga hexagonal (600 K)", () => {
-  const model = parseCif(read("Mn3GaHexagonal_structure_600K_Final.cif"), "mn3ga");
+// Read only when present; the `as StructureModel` is safe because the tests in
+// this suite are skipped (never dereference `model`) when the file is absent.
+describe.skipIf(!has600)("parseCif — GSAS-II Mn₃Ga hexagonal (600 K)", () => {
+  const model = (has600 ? parseCif(readData(HEX_600K), "mn3ga") : null) as StructureModel;
 
   it("reads the unit cell", () => {
     expect(model.cell.a).toBeCloseTo(5.42215, 5);
@@ -55,8 +59,8 @@ describe("parseCif — GSAS-II Mn₃Ga hexagonal (600 K)", () => {
   });
 });
 
-describe("parseCif — GSAS-II refined series CIF (hex 393 K)", () => {
-  const model = parseCif(read("isothermal_hex/cifs/PG3_59283_393K.cif"), "hex-393");
+describe.skipIf(!has393)("parseCif — GSAS-II refined series CIF (hex 393 K)", () => {
+  const model = (has393 ? parseCif(readData(HEX_393K), "hex-393") : null) as StructureModel;
 
   it("reads the refined cell with esd notation stripped", () => {
     expect(model.cell.a).toBeCloseTo(5.41317, 5);

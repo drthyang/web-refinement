@@ -1,20 +1,26 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import type { MagneticCifResult } from "@/parsers/cif";
 import { parseMagneticCif } from "@/parsers/cif";
 import { parseReflectionList } from "@/parsers/reflectionList";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { momentCartesian } from "@/core/magnetic/moment";
 import { norm } from "@/core/math/vec3";
+import { dataExists, readData } from "@/testSupport/data";
 
-const dataDir = resolve(process.cwd(), "data");
-const read = (p: string): string => readFileSync(resolve(dataDir, p), "utf8");
+// Read/parse only when present; suites are skipped (values never dereferenced)
+// when the git-ignored data/ folder is absent (e.g. on CI).
+const parseIfPresent = (present: boolean, rel: string, id: string): MagneticCifResult =>
+  (present ? parseMagneticCif(readData(rel), id) : { structure: null, magnetic: null }) as MagneticCifResult;
 
-describe("parseMagneticCif — 30 K monoclinic magnetic structure", () => {
-  const { structure, magnetic } = parseMagneticCif(
-    read("30K/Mn3Ga_monoclinic-mag_1_30K_SatoshiModel_FitMoment_Final_magneticUnit.cif"),
-    "mn3ga-30k",
-  );
+const MCIF_30K = "30K/Mn3Ga_monoclinic-mag_1_30K_SatoshiModel_FitMoment_Final_magneticUnit.cif";
+const ORTHO_350K = "350K/Mn3Ga-mag_53_350K_Final_ortho.cif";
+const HKL_30K = "30K/fitted_results_hkl.dat";
+const has30k = dataExists(MCIF_30K);
+const has350k = dataExists(ORTHO_350K);
+const hasHkl = dataExists(HKL_30K);
+
+describe.skipIf(!has30k)("parseMagneticCif — 30 K monoclinic magnetic structure", () => {
+  const { structure, magnetic } = parseIfPresent(has30k, MCIF_30K, "mn3ga-30k");
 
   it("reads the monoclinic magnetic cell", () => {
     expect(structure.cell.a).toBeCloseTo(5.420057, 5);
@@ -39,13 +45,10 @@ describe("parseMagneticCif — 30 K monoclinic magnetic structure", () => {
   });
 });
 
-describe("magnetic moment magnitudes — validated against GSAS-II .lst", () => {
+describe.skipIf(!has30k)("magnetic moment magnitudes — validated against GSAS-II .lst", () => {
   // GSAS-II .lst (30 K) reports total moments: Mn1_0 2.527, Mn2_1 2.829, Mn3_2 2.530 μB.
   // Moment components in crystal axes, magnitude via the normalized-axis metric.
-  const { structure } = parseMagneticCif(
-    read("30K/Mn3Ga_monoclinic-mag_1_30K_SatoshiModel_FitMoment_Final_magneticUnit.cif"),
-    "mn3ga-30k",
-  );
+  const { structure } = parseIfPresent(has30k, MCIF_30K, "mn3ga-30k");
   const mag = (comps: [number, number, number]): number =>
     norm(momentCartesian(structure.cell, { siteLabel: "x", frame: "crystallographic", components: comps }));
 
@@ -60,11 +63,8 @@ describe("magnetic moment magnitudes — validated against GSAS-II .lst", () => 
   });
 });
 
-describe("parseMagneticCif — 350 K orthorhombic (Cm'cm')", () => {
-  const { structure, magnetic } = parseMagneticCif(
-    read("350K/Mn3Ga-mag_53_350K_Final_ortho.cif"),
-    "mn3ga-350k",
-  );
+describe.skipIf(!has350k)("parseMagneticCif — 350 K orthorhombic (Cm'cm')", () => {
+  const { structure, magnetic } = parseIfPresent(has350k, ORTHO_350K, "mn3ga-350k");
   it("reads the orthorhombic cell and 16 magnetic operations", () => {
     expect(structure.cell.a).toBeCloseTo(5.407891, 5);
     expect(structure.cell.gamma).toBe(90);
@@ -78,8 +78,8 @@ describe("parseMagneticCif — 350 K orthorhombic (Cm'cm')", () => {
   });
 });
 
-describe("parseReflectionList — GSAS Fo²/Fc² export", () => {
-  const rows = parseReflectionList(read("30K/fitted_results_hkl.dat"));
+describe.skipIf(!hasHkl)("parseReflectionList — GSAS Fo²/Fc² export", () => {
+  const rows = hasHkl ? parseReflectionList(readData(HKL_30K)) : [];
   it("parses the reflection table skipping headers", () => {
     expect(rows.length).toBeGreaterThan(20);
     const first = rows[0]!;

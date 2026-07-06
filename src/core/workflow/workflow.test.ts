@@ -1,20 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import type { SingleCrystalDataset, PowderPattern } from "@/core/diffraction/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
-import { parseCif } from "@/parsers/cif";
 import { refine } from "@/core/refinement/engine";
 import {
   buildSingleCrystalProblem,
   singleCrystalComparison,
 } from "@/core/workflow/singleCrystal";
 import { buildPowderProblem, powderCurves } from "@/core/workflow/powder";
+import { exampleStructure } from "@/examples/mn3ga";
 
-const model = parseCif(
-  readFileSync(resolve(process.cwd(), "data/Mn3GaHexagonal_structure_600K_Final.cif"), "utf8"),
-  "mn3ga",
-);
+// Uses the embedded example structure (identical to the bundled 600 K CIF), so
+// this engine test runs without the git-ignored data/ folder.
+const model = exampleStructure();
 const neutron = { kind: "neutron" as const, wavelength: 1.54 };
 
 describe("single-crystal workflow — self-consistent refinement", () => {
