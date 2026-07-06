@@ -1,0 +1,284 @@
+********************************************************************************
+   General Structure Analysis System-II Crystal Structure Refinement
+              by Robert B. Von Dreele & Brian H. Toby
+                Argonne National Laboratory(C), 2010
+ This product includes software developed by the UChicago Argonne, LLC,
+            as Operator of Argonne National Laboratory.
+                          Please cite:
+   B.H. Toby & R.B. Von Dreele, J. Appl. Cryst. 46, 544-549 (2013)
+********************************************************************************
+ Least squares controls:
+ Refinement type: analytic Hessian
+ Maximum number of cycles: 3
+ Regularize hydrogens (if any): False
+ Initial shift factor: 1.000
+
+ Phases:
+
+ Phase name: Mn Ga
+=======================================================================================================================================
+
+ X-ray scattering factors:
+   Symbol     fa                                      fb                                      fc
+---------------------------------------------------------------------------------------------------
+ Mn        11.28190   7.35730   3.01930   2.24410   5.34090   0.34320  17.86740  83.75430   1.08960
+ Ga        15.23540   6.70060   4.35910   2.96230   3.06690   0.24120  10.78050  61.41350   1.71890
+
+ Electron scattering factors:
+   Symbol     fa                                                fb
+---------------------------------------------------------------------------------------------------
+ Mn         0.19430   0.81900   1.92960   2.49680   2.06250   0.11350   1.13130   5.03410  24.17980  80.55980
+ Ga         0.21350   0.97680   1.66690   2.56620   1.67900   0.10200   1.02190   4.62750  22.87420  80.15350
+
+ Neutron scattering factors:
+   Symbol   isotope       mass       b       resonant terms
+---------------------------------------------------------------------------------------------------
+ Mn      Nat. Abund.     54.938   -0.375
+ Ga      Nat. Abund.     69.720    0.729
+
+ Space Group: P 21/m
+ The lattice is centrosymmetric primitive monoclinic
+ The Laue symmetry is 2/m
+ The lattice point group is 2/m
+ Multiplicity of a general site is 4
+ The unique monoclinic axis is b
+ The inversion center is located at 0,0,0
+ 
+ The equivalent positions are:
+
+ ( 1)     X,     Y,     Z 
+ ( 2)    -X, 1/2+Y,    -Z 
+
+ Atoms:
+   name    type  refine?   x         y         z      frac site sym  mult I/A   Uiso     U11     U22     U33     U12     U13     U23
+---------------------------------------------------------------------------------------------------------------------------------------
+    Mn1     Mn     XU   0.33129   0.25000   0.18014   1.000   m(y)    2    I 0.01619                                                
+    Mn2     Mn     XU   0.83768   0.25000   0.16745   1.000   m(y)    2    I 0.00588                                                
+    Mn3     Mn     XU   0.83070   0.25000   0.66514   1.000   m(y)    2    I 0.01862                                                
+    Ga1     Ga     XU   0.32377   0.25000   0.65969   1.000   m(y)    2    I 0.00930                                                
+
+ Unit cell: a = 5.42024 b = 4.37378 c = 5.42028 alpha = 90.000 beta = 120.003 gamma = 90.000 volume = 111.279 Refine? True
+
+ Phase name: Mn O
+=======================================================================================================================================
+
+ X-ray scattering factors:
+   Symbol     fa                                      fb                                      fc
+---------------------------------------------------------------------------------------------------
+ Mn        11.28190   7.35730   3.01930   2.24410   5.34090   0.34320  17.86740  83.75430   1.08960
+ O          3.04850   2.28680   1.54630   0.86700  13.27710   5.70110   0.32390  32.90890   0.25080
+
+ Electron scattering factors:
+   Symbol     fa                                                fb
+---------------------------------------------------------------------------------------------------
+ Mn         0.19430   0.81900   1.92960   2.49680   2.06250   0.11350   1.13130   5.03410  24.17980  80.55980
+ O          0.03650   0.17290   0.58050   0.88140   0.31210   0.06520   0.61840   2.94490   9.62980  28.21940
+
+ Neutron scattering factors:
+   Symbol   isotope       mass       b       resonant terms
+---------------------------------------------------------------------------------------------------
+ Mn      Nat. Abund.     54.938   -0.375
+ O       Nat. Abund.     15.999    0.581
+
+ Space Group: F m -3 m
+ The lattice is centrosymmetric F-centered cubic
+ The Laue symmetry is m3m
+ The lattice point group is m3m
+ Multiplicity of a general site is 192
+ The inversion center is located at 0,0,0
+ 
+ The equivalent positions are:
+
+ (0,0,0; 0,1/2,1/2; 1/2,0,1/2; 1/2,1/2,0)+
+
+ ( 1)     X,     Y,     Z 
+ ( 2)     Z,     X,     Y 
+ ( 3)     Y,     Z,     X 
+ ( 4)     X,     Y,    -Z 
+ ( 5)    -Z,     X,     Y 
+ ( 6)     Y,    -Z,     X 
+ ( 7)    -Z,     X,    -Y 
+ ( 8)    -Y,    -Z,     X 
+ ( 9)     Y,    -Z,    -X 
+ (10)    -X,     Y,    -Z 
+ (11)    -Z,    -X,     Y 
+ (12)     X,    -Y,    -Z 
+ (13)     Y,     X,     Z 
+ (14)     Z,     Y,     X 
+ (15)     X,     Z,     Y 
+ (16)     Y,     X,    -Z 
+ (17)    -Z,     Y,     X 
+ (18)     X,    -Z,     Y 
+ (19)    -Z,     Y,    -X 
+ (20)    -X,    -Z,     Y 
+ (21)     X,    -Z,    -Y 
+ (22)    -Y,     X,    -Z 
+ (23)    -Z,    -Y,     X 
+ (24)     Y,    -X,    -Z 
+
+ Atoms:
+   name    type  refine?   x         y         z      frac site sym  mult I/A   Uiso     U11     U22     U33     U12     U13     U23
+---------------------------------------------------------------------------------------------------------------------------------------
+    Mn1     Mn          0.00000   0.00000   0.00000   1.000    m3m    4    I 0.00975                                                
+     O1      O          0.50000   0.50000   0.50000   1.000    m3m    4    I 0.01038                                                
+
+ Unit cell: a = 4.45646 b = 4.45646 c = 4.45646 alpha = 90.000 beta = 90.000 gamma = 90.000 volume = 88.506 Refine? True
+
+ Phase: Mn Ga in histogram: PWDR PG3_59301.gsa Bank 2
+=======================================================================================================================================
+ Phase fraction  :     0.9467 Refine? False
+ Extinction coeff:     0.0000 Refine? False
+ March-Dollase PO:     1.0000 Refine? False Axis: 0 0 1
+
+ Size model    : isotropic equatorial:       1.000 Refine? False
+	 LG mixing coeff.:       1.0000 Refine? False
+
+ Mustrain model: isotropic equatorial:      1000.0 Refine? False
+	 LG mixing coeff.:      1.0000 Refine? False
+
+ Hydrostatic/elastic strain:
+ names :         D11         D22         D33         D13
+ values:           0           0           0           0
+ refine:       False       False       False       False
+ Layer Displacement:      0.000 Refine? False
+
+ Phase: Mn O in histogram: PWDR PG3_59301.gsa Bank 2
+=======================================================================================================================================
+ Phase fraction  :    0.05331 Refine? False
+ Extinction coeff:     0.0000 Refine? False
+ March-Dollase PO:     1.0000 Refine? False Axis: 0 0 1
+
+ Size model    : isotropic equatorial:       1.000 Refine? False
+	 LG mixing coeff.:       1.0000 Refine? False
+
+ Mustrain model: isotropic equatorial:      1000.0 Refine? False
+	 LG mixing coeff.:      1.0000 Refine? False
+
+ Hydrostatic/elastic strain:
+ names :         D11          eA
+ values:           0           0
+ refine:       False       False
+ Layer Displacement:      0.000 Refine? False
+
+ Histogram: PWDR PG3_59301.gsa Bank 2 histogram Id: 18
+=======================================================================================================================================
+ Instrument type: Debye-Scherrer
+ Histogram limits: 11558.90 msec to 55009.33 msec
+
+ Sample Parameters:
+ Goniometer omega = 0.00, chi = 0.00, phi = 0.00
+ name  :         Scale    Absorption     DisplaceX     DisplaceY
+ value :    26769.3265        0.0000        0.0000        0.0000
+ refine:          True         False         False         False
+
+ Instrument Parameters:
+ name  :     2-theta     Azimuth           X           Y           Z        Zero       alpha
+ value :   90.000000    0.000000    0.000000    0.000000    0.000000    0.000000    0.159747
+ refine:       False                   False       False       False       False       False
+
+ name  :      beta-0      beta-1      beta-q        difA        difB        difC     fltPath       sig-0       sig-1
+ value :    0.008025   -0.020456    0.103563   -4.382000    0.56100022588.320000   63.183000  -45.725926 -400.054198
+ refine:       False       False       False       False       False       False                   False       False
+
+ name  :       sig-2       sig-q
+ value :  196.789818  291.653979
+ refine:       False       False
+
+ Background function: log interpolate Refine? True
+ Coefficients:     17.142    11.101     7.198     8.780     7.379
+ Fixed background file: ; mult: 1.000  Refine? False
+
+ Refinement results:
+---------------------------------------------------------------------------------------------------------------------------------------
+ Number of function calls: 12 No. of observations: 1951 No. of parameters: 23 User rejected: 0 Sp. gp. extinct: 0
+ Refinement time =    3.542s,    0.885s/cycle, for 4 cycles
+ wR =   14.25%, chi**2 =      5730.37, GOF =   1.72
+----------------------------------------------------------------------------------------------------------------------------------
+Parameters generated by constraints
+
+ name  :          1::A0
+ value :        0.05035
+ sig   :        0.00000 
+
+ Phases:
+ Result for phase: Mn Ga
+=======================================================================================================================================
+ Reciprocal metric tensor: 
+  names :            A11            A22            A33            A12            A13            A23
+  values:    0.045384855    0.052273712    0.045384349    0.000000000    0.045381504    0.000000000
+  esds  :    0.000012629    0.000001608    0.000013900                   0.000026460               
+ New unit cell:
+  names :           a           b           c       alpha        beta       gamma      Volume
+  values:    5.420059    4.373794    5.420089     90.0000    119.9977     90.0000     111.278
+  esds  :    0.010251    0.000067    0.010412                  0.0198                   0.002
+
+ Atoms:
+   name      x         y         z      frac   Uiso     U11     U22     U33     U12     U13     U23
+---------------------------------------------------------------------------------------------------------------------------------------
+    Mn1     Mn:
+ values:   0.33598   0.25000   0.16105   1.000 0.01269
+ sig   :   0.01276             0.02412         0.03212 
+    Mn2     Mn:
+ values:   0.83979   0.25000   0.16666   1.000 0.01050
+ sig   :   0.03001             0.02680         0.01675 
+    Mn3     Mn:
+ values:   0.83094   0.25000   0.66536   1.000 0.01550
+ sig   :   0.02086             0.01507         0.02192 
+    Ga1     Ga:
+ values:   0.32457   0.25000   0.66123   1.000 0.00912
+ sig   :   0.00626             0.01370         0.00077 
+
+ Density: 6.9996 g/cm**3
+ Result for phase: Mn O
+=======================================================================================================================================
+ Reciprocal metric tensor: 
+  names :            A11            A22            A33            A12            A13            A23
+  values:    0.050347457    0.050347457    0.050347457    0.000000000    0.000000000    0.000000000
+  esds  :    0.000004570                                                                           
+ New unit cell:
+  names :           a           b           c       alpha        beta       gamma      Volume
+  values:    4.456678    4.456678    4.456678     90.0000     90.0000     90.0000      88.518
+  esds  :    0.000202                                                                   0.012
+
+ Atoms:
+   name      x         y         z      frac   Uiso     U11     U22     U33     U12     U13     U23
+---------------------------------------------------------------------------------------------------------------------------------------
+    Mn1     Mn:
+ values:   0.00000   0.00000   0.00000   1.000 0.00975
+ sig   :                                               
+     O1      O:
+ values:   0.50000   0.50000   0.50000   1.000 0.01038
+ sig   :                                               
+
+ Density: 5.3229 g/cm**3
+
+ Phase: Mn Ga in histogram: PWDR PG3_59301.gsa Bank 2
+=======================================================================================================================================
+ Final refinement RF, RF^2 = 5.99%, 10.83% on 940 reflections
+ Durbin-Watson statistic = 1.215
+ Bragg intensity sum = 4.95e+05
+ Phase fraction  :    0.94669, sig          0 Weight fraction  :  0.96706, sig    0.00000
+
+ Phase: Mn O in histogram: PWDR PG3_59301.gsa Bank 2
+=======================================================================================================================================
+ Final refinement RF, RF^2 = 8.55%, 18.44% on 32 reflections
+ Durbin-Watson statistic = 1.215
+ Bragg intensity sum = 1.97e+04
+ Phase fraction  :   0.053314, sig          0 Weight fraction  :  0.03294, sig    0.00000
+
+ Histogram: PWDR PG3_59301.gsa Bank 2 histogram Id: 18
+=======================================================================================================================================
+ PWDR histogram weight factor = 1.000
+ Final refinement wR = 14.25% on 1951 observations in this histogram
+ Other residuals: R = 12.16%, R-bkg = 11.52%, wR-bkg = 14.25% wRmin = 8.31%
+ Instrument type: Debye-Scherrer
+
+ Sample Parameters:
+ names :         Scale    Absorption     DisplaceX     DisplaceY
+ values:    26633.8957        0.0000        0.0000        0.0000
+ sig   :      352.5992                                          
+
+ Background function: log interpolate
+ value :      17.34     11.12     7.192     8.756     7.867
+ sig   :     0.3544     0.167    0.1692    0.3226    0.4838
+ Background sums: empirical 1.95e+04, Debye 0, peaks 0, Total 1.95e+04
