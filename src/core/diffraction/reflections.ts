@@ -6,7 +6,7 @@
 
 import type { UnitCell, SpaceGroup } from "@/core/crystal/types";
 import type { Mat3, Vec3 } from "@/core/math/types";
-import { dSpacing, qMagnitude } from "@/core/crystal/unitCell";
+import { reciprocalTensorA } from "@/core/crystal/unitCell";
 import { isReflectionAbsent } from "@/core/crystal/symmetry";
 
 export interface Reflection {
@@ -28,48 +28,62 @@ function transformIndices(rot: Mat3, h: number, k: number, l: number): Vec3 {
   ];
 }
 
-function key(h: number, k: number, l: number): string {
-  return `${h},${k},${l}`;
+// Pack a Miller index triple into one integer for fast Set membership.
+// Safe for |index| < 512, which far exceeds any powder loop bound.
+const PACK_OFFSET = 512;
+const PACK_BASE = 1024;
+function pack(h: number, k: number, l: number): number {
+  return ((h + PACK_OFFSET) * PACK_BASE + (k + PACK_OFFSET)) * PACK_BASE + (l + PACK_OFFSET);
 }
 
 /**
- * Set of Miller indices equivalent to (hkl) under the Laue group (rotation
- * parts of the space-group operations plus Friedel −(hkl)).
+ * Numeric Miller indices equivalent to (hkl) under the Laue group (rotation
+ * parts of the space-group operations plus Friedel −(hkl)), as packed integers.
  */
-function equivalentIndices(sg: SpaceGroup, h: number, k: number, l: number): Set<string> {
-  const set = new Set<string>();
+function equivalentPacked(sg: SpaceGroup, h: number, k: number, l: number): Set<number> {
+  const set = new Set<number>();
   for (const op of sg.operations) {
     const t = transformIndices(op.rotation, h, k, l);
     const th = Math.round(t[0]);
     const tk = Math.round(t[1]);
     const tl = Math.round(t[2]);
-    set.add(key(th, tk, tl));
-    set.add(key(-th, -tk, -tl)); // Friedel
+    set.add(pack(th, tk, tl));
+    set.add(pack(-th, -tk, -tl)); // Friedel
   }
   return set;
 }
 
-/** A canonical representative for a family: lexicographically greatest index. */
-function canonical(indices: Set<string>): { h: number; k: number; l: number } {
-  let best: { h: number; k: number; l: number } | null = null;
-  for (const s of indices) {
-    const [h, k, l] = s.split(",").map(Number) as [number, number, number];
-    if (
-      best === null ||
-      h > best.h ||
-      (h === best.h && k > best.k) ||
-      (h === best.h && k === best.k && l > best.l)
-    ) {
-      best = { h, k, l };
+/** Canonical representative (lexicographically greatest) from packed indices. */
+function canonicalPacked(indices: Set<number>): { h: number; k: number; l: number } {
+  let bh = -Infinity, bk = -Infinity, bl = -Infinity;
+  for (const p of indices) {
+    const h = Math.floor(p / (PACK_BASE * PACK_BASE)) - PACK_OFFSET;
+    const k = (Math.floor(p / PACK_BASE) % PACK_BASE) - PACK_OFFSET;
+    const l = (p % PACK_BASE) - PACK_OFFSET;
+    if (h > bh || (h === bh && k > bk) || (h === bh && k === bk && l > bl)) {
+      bh = h; bk = k; bl = l;
     }
   }
-  // `indices` is always non-empty (identity op present), so best is set.
-  return best as { h: number; k: number; l: number };
+  return { h: bh, k: bk, l: bl };
+}
+
+/** Bounded memo of reflection lists keyed on cell + range + space group. */
+const reflCache = new Map<string, Reflection[]>();
+const REFL_CACHE_MAX = 24;
+
+function reflectionCacheKey(cell: UnitCell, sg: SpaceGroup, dMin: number, dMax: number): string {
+  // Full-precision cell values so cell-derivative Jacobian columns don't collide
+  // with the base cell; other (non-cell) parameters reuse the same key → hits.
+  return `${cell.a},${cell.b},${cell.c},${cell.alpha},${cell.beta},${cell.gamma}|${dMin},${dMax}|${sg.operations.length}|${sg.hermannMauguin ?? ""}`;
 }
 
 /**
  * Generate unique powder reflection families with dMin ≤ d ≤ dMax.
  * Sorted by decreasing d (increasing |Q|).
+ *
+ * The reciprocal tensor is computed once (not a matrix inversion per hkl), and
+ * results are memoized on the cell — reflections only change when the cell (or
+ * range) changes, so refinements of scale/width/ADP/positions reuse the list.
  */
 export function generateReflections(
   cell: UnitCell,
@@ -77,42 +91,43 @@ export function generateReflections(
   dMin: number,
   dMax: number,
 ): Reflection[] {
-  // Loop bound: max index needed to reach dMin on any axis.
-  const nMax = Math.ceil(Math.max(cell.a, cell.b, cell.c) / dMin) + 1;
+  const cacheKey = reflectionCacheKey(cell, sg, dMin, dMax);
+  const cached = reflCache.get(cacheKey);
+  if (cached) return cached;
 
-  const seenFamilies = new Set<string>();
+  // Precompute the reciprocal tensor once: 1/d² = A11 h² + A22 k² + A33 l²
+  // + A12 hk + A13 hl + A23 kl. Avoids a 3×3 inversion per candidate hkl.
+  const A = reciprocalTensorA(cell);
+  const invDMax2 = 1 / (dMax * dMax); // lower bound on 1/d²
+  const invDMin2 = 1 / (dMin * dMin); // upper bound on 1/d²
+
+  const nMax = Math.ceil(Math.max(cell.a, cell.b, cell.c) / dMin) + 1;
+  const seen = new Set<number>(); // every individual (hkl) already assigned to a family
   const reflections: Reflection[] = [];
 
   for (let h = -nMax; h <= nMax; h++) {
     for (let k = -nMax; k <= nMax; k++) {
       for (let l = -nMax; l <= nMax; l++) {
         if (h === 0 && k === 0 && l === 0) continue;
-        const d = dSpacing(cell, h, k, l);
-        if (!(d >= dMin && d <= dMax)) continue;
+        if (seen.has(pack(h, k, l))) continue; // family already emitted — cheap skip
+        const invd2 = A.a11 * h * h + A.a22 * k * k + A.a33 * l * l + A.a12 * h * k + A.a13 * h * l + A.a23 * k * l;
+        if (invd2 < invDMax2 || invd2 > invDMin2) continue;
 
-        const family = equivalentIndices(sg, h, k, l);
-        const rep = canonical(family);
-        const repKey = key(rep.h, rep.k, rep.l);
-        if (seenFamilies.has(repKey)) continue;
+        // First time we meet this family: expand once, mark all members seen.
+        const family = equivalentPacked(sg, h, k, l);
+        for (const p of family) seen.add(p);
+        const rep = canonicalPacked(family);
+        if (isReflectionAbsent(sg.operations, rep.h, rep.k, rep.l)) continue;
 
-        if (isReflectionAbsent(sg.operations, rep.h, rep.k, rep.l)) {
-          seenFamilies.add(repKey);
-          continue;
-        }
-        seenFamilies.add(repKey);
-
-        reflections.push({
-          h: rep.h,
-          k: rep.k,
-          l: rep.l,
-          d: dSpacing(cell, rep.h, rep.k, rep.l),
-          q: qMagnitude(cell, rep.h, rep.k, rep.l),
-          multiplicity: family.size,
-        });
+        const repInvd2 = A.a11 * rep.h * rep.h + A.a22 * rep.k * rep.k + A.a33 * rep.l * rep.l + A.a12 * rep.h * rep.k + A.a13 * rep.h * rep.l + A.a23 * rep.k * rep.l;
+        const d = 1 / Math.sqrt(repInvd2);
+        reflections.push({ h: rep.h, k: rep.k, l: rep.l, d, q: (2 * Math.PI) / d, multiplicity: family.size });
       }
     }
   }
 
   reflections.sort((a, b) => b.d - a.d);
+  if (reflCache.size >= REFL_CACHE_MAX) reflCache.delete(reflCache.keys().next().value as string);
+  reflCache.set(cacheKey, reflections);
   return reflections;
 }

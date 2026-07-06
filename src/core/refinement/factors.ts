@@ -19,6 +19,27 @@ export function weightsFromSigma(sigma: readonly (number | undefined)[]): Float6
   return w;
 }
 
+/**
+ * Detect a repeated non-positive "sentinel" plateau marking excluded/masked
+ * points (e.g. GSAS exports a constant −3 outside the fit range) and return a
+ * boolean mask (true = excluded). Only triggers when one non-positive value
+ * repeats many times, so scattered near-zero noise in valid data is untouched.
+ */
+export function excludedPointMask(yObs: readonly number[]): boolean[] {
+  const counts = new Map<number, number>();
+  for (const y of yObs) if (y <= 0) counts.set(y, (counts.get(y) ?? 0) + 1);
+  let sentinel: number | null = null;
+  let best = 4; // require ≥5 repeats to be considered a sentinel plateau
+  for (const [v, c] of counts) if (c > best) { best = c; sentinel = v; }
+  return yObs.map((y) => sentinel !== null && y === sentinel);
+}
+
+/** Apply an exclusion mask to a weight vector in place (masked → weight 0). */
+export function applyExclusionMask(weights: Float64Array, mask: readonly boolean[]): Float64Array {
+  for (let i = 0; i < weights.length; i++) if (mask[i]) weights[i] = 0;
+  return weights;
+}
+
 export function computeAgreementFactors(
   yObs: Float64Array,
   yCalc: Float64Array,
@@ -32,9 +53,10 @@ export function computeAgreementFactors(
   const n = yObs.length;
 
   for (let i = 0; i < n; i++) {
+    const w = weights[i]!;
+    if (w <= 0) continue; // excluded/masked point — omit from every agreement sum
     const o = yObs[i]!;
     const c = yCalc[i]!;
-    const w = weights[i]!;
     const diff = o - c;
     sumAbsObs += Math.abs(o);
     sumAbsDiff += Math.abs(diff);

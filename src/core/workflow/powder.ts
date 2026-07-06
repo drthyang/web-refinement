@@ -11,7 +11,7 @@ import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
-import { weightsFromSigma } from "@/core/refinement/factors";
+import { weightsFromSigma, excludedPointMask, applyExclusionMask } from "@/core/refinement/factors";
 import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters, type AppliedModel } from "@/core/workflow/apply";
 import { generateReflections } from "@/core/diffraction/reflections";
@@ -79,9 +79,11 @@ export function buildPowderProblem(
   profile: Pick<ProfileOptions, "shape" | "eta"> = { shape: "gaussian" },
 ): RefinementProblem {
   const xValues = pattern.points.map((p) => p.x);
-  const observations = Float64Array.from(pattern.points.map((p) => p.yObs));
-  const weights = weightsFromSigma(
-    pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1)),
+  const yObs = pattern.points.map((p) => p.yObs);
+  const observations = Float64Array.from(yObs);
+  const weights = applyExclusionMask(
+    weightsFromSigma(pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1))),
+    excludedPointMask(yObs),
   );
 
   const calculate = (values: Readonly<Record<string, number>>): Float64Array => {
