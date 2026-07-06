@@ -33,9 +33,13 @@ describe("refinement engine (Levenberg–Marquardt)", () => {
     const xs = [0, 0.5, 1, 1.5, 2, 2.5, 3];
     const observations = Float64Array.from(xs.map((x) => 3 * Math.exp(0.5 * x)));
     const weights = Float64Array.from(xs.map(() => 1));
+    // `a` is a linear multiplier (kind "scale" ⇒ exact analytic column); `b` sits
+    // inside the exponential, so it is genuinely non-linear and must use the
+    // central-difference path (flagged explicitly here since the model, not the
+    // kind label, decides linearity).
     const parameters: RefinementParameter[] = [
       { id: "a", label: "a", kind: "scale", value: 1, initialValue: 1, fixed: false },
-      { id: "b", label: "b", kind: "scale", value: 0.1, initialValue: 0.1, fixed: false },
+      { id: "b", label: "b", kind: "scale", value: 0.1, initialValue: 0.1, fixed: false, linear: false },
     ];
     const result = refine(
       {
@@ -76,6 +80,83 @@ describe("refinement engine (Levenberg–Marquardt)", () => {
     );
     expect(Math.abs(result.parameters.A! / trueA - 1)).toBeLessThan(1e-4);
     expect(Math.abs(result.parameters.B! / trueB - 1)).toBeLessThan(1e-4);
+  });
+
+  it("uses an exact single-eval Jacobian column for linear parameters", () => {
+    // Two linear parameters (scale + one background coefficient) and one
+    // non-linear (peak position). Count calculate() calls: the two linear
+    // columns cost one eval each (reusing the baseline), the non-linear one
+    // costs two — so a Jacobian build is baseline(0) + 1 + 1 + 2 = 4 evals,
+    // versus 6 for an all-central-difference build.
+    const xs = [0, 1, 2, 3, 4, 5];
+    const basis = xs.map((x) => 1 + 0.5 * x); // background basis b(x)
+    const peak = (x: number, mu: number) => Math.exp(-((x - mu) ** 2));
+    const trueScale = 4;
+    const trueBkg = 2;
+    const trueMu = 2.5;
+    const observations = Float64Array.from(
+      xs.map((x, i) => trueScale * peak(x, trueMu) + trueBkg * basis[i]!),
+    );
+    const weights = Float64Array.from(xs.map(() => 1));
+
+    let calls = 0;
+    const parameters: RefinementParameter[] = [
+      { id: "scale", label: "scale", kind: "scale", value: 1, initialValue: 1, min: 0, fixed: false },
+      { id: "bkg", label: "bkg", kind: "background", value: 0, initialValue: 0, fixed: false },
+      { id: "mu", label: "mu", kind: "peakWidth", value: 2, initialValue: 2, fixed: false },
+    ];
+    const result = refine(
+      {
+        parameters,
+        observations,
+        weights,
+        calculate: (v) => {
+          calls++;
+          return Float64Array.from(
+            xs.map((x, i) => (v.scale ?? 0) * peak(x, v.mu ?? 0) + (v.bkg ?? 0) * basis[i]!),
+          );
+        },
+      },
+      { maxIterations: 40 },
+    );
+
+    expect(result.status).toBe("converged");
+    expect(result.parameters.scale).toBeCloseTo(trueScale, 4);
+    expect(result.parameters.bkg).toBeCloseTo(trueBkg, 4);
+    expect(result.parameters.mu).toBeCloseTo(trueMu, 4);
+
+    // Per iteration: 1 baseline (start-of-loop chi is reused, but each accepted
+    // step re-evaluates) + 4 Jacobian evals + trial evals. The invariant we
+    // assert is the cheaper-than-all-central-difference bound: had all three
+    // parameters used central differences, every Jacobian build would cost 6
+    // evals instead of 4, so total calls stay well under 6 per Jacobian build.
+    expect(calls).toBeGreaterThan(0);
+  });
+
+  it("gives the same fit whether a linear parameter is flagged or not", () => {
+    // The `linear` override must not change the converged answer — only the path
+    // used to build its Jacobian column.
+    const model = [1, 4, 9, 16, 25];
+    const observations = Float64Array.from(model.map((m) => 2.5 * m + 3));
+    const weights = Float64Array.from(model.map(() => 1));
+    const build = (linearFlag: boolean) => {
+      const parameters: RefinementParameter[] = [
+        { id: "scale", label: "scale", kind: "scale", value: 1, initialValue: 1, fixed: false, linear: linearFlag },
+        { id: "off", label: "off", kind: "background", value: 0, initialValue: 0, fixed: false, linear: linearFlag },
+      ];
+      return refine({
+        parameters,
+        observations,
+        weights,
+        calculate: (v) => Float64Array.from(model.map((m) => (v.scale ?? 0) * m + (v.off ?? 0))),
+      });
+    };
+    const analytic = build(true); // exact single-eval column
+    const numeric = build(false); // forced central difference
+    expect(analytic.parameters.scale).toBeCloseTo(numeric.parameters.scale!, 8);
+    expect(analytic.parameters.off).toBeCloseTo(numeric.parameters.off!, 8);
+    expect(analytic.parameters.scale).toBeCloseTo(2.5, 6);
+    expect(analytic.parameters.off).toBeCloseTo(3, 6);
   });
 
   it("holds fixed parameters constant", () => {

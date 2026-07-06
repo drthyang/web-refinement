@@ -21,16 +21,21 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 ---
 
 ## A — Refinement robustness (foundation)
-1. **Parameter normalization / diagonal preconditioning** ⬜ — condition the
+1. **Parameter normalization / diagonal preconditioning** ✅ — condition the
    normal equations by `diag(JᵀJ)` (column scaling) so mixing scale (~1e-11),
    cell (~10), B (~1), and positions (~0.1) no longer wrecks the solve. Biggest
-   single robustness win.
-2. **Analytic derivatives for linear parameters** ⬜ — scale and background
-   coefficients are linear in the model; compute their Jacobian columns exactly
-   and drop them from the finite-difference set (faster + stable). Needs the
-   `RefinementProblem` to flag linear parameters.
-3. **Shift limiting, bound projection, adaptive λ** ⬜ — cap the fractional
+   single robustness win. (`engine.ts`, diagonal Jacobi preconditioning.)
+2. **Analytic derivatives for linear parameters** ✅ — scale and background
+   coefficients are linear in the model; their Jacobian column is computed
+   exactly from a single evaluation (forward step differenced against the
+   already-computed baseline y_calc — exact for an affine parameter, no
+   truncation error) instead of a two-point central difference. Parameters carry
+   a `linear` flag on `RefinementParameter`; `scale`, `background`, and
+   `magneticScale` kinds default to linear. Faster (one `calculate()` call per
+   linear column instead of two) and free of finite-difference error.
+3. **Shift limiting, bound projection, adaptive λ** ✅ — cap the fractional
    parameter shift per cycle; project onto bounds; Marquardt diagonal damping.
+   (`limitShift`, `clamp`, and the LM retry loop in `engine.ts`.)
 4. **Staged (guided) refinement** ⬜ — unlock parameters in the expert order
    (scale → background → cell → profile → ADP → positions), each converged before
    the next. Robustness *and* the guided-sequence UX.
@@ -40,7 +45,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
    stall-vs-converged discrimination.
 
 ## B — Background functions
-1. **Chebyshev polynomial on x∈[−1,1]** ⬜ — GSAS/Topas standard; well
+1. **Chebyshev polynomial on x∈[−1,1]** ✅ — GSAS/Topas standard; well
    conditioned, N refinable terms. Replaces the raw-power form (fixes overflow).
 2. **Shifted Chebyshev, linear-interpolation (anchored), reciprocal (1/x)** ⬜.
 3. **UI** ⬜ — choose function + term count; refined early in the staged sequence;
@@ -98,6 +103,8 @@ vs 298.8 K data.
   `GaNb4Se8_XRD_28ID`) load with the correct unit and radiation for testing.
 
 ## Build order
-**A → B → C → D.** First implementation chunk: **A1 + A3** (engine conditioning +
-shift limiting) and **B1** (Chebyshev background) — where the "significantly more
-robust" jump comes from — then A2/A4, then C, then D.
+**A → B → C → D.** First implementation chunk — **A1 + A3** (engine conditioning +
+shift limiting) and **B1** (Chebyshev background) — landed, where the
+"significantly more robust" jump came from. **A2** (analytic column for linear
+parameters) is now in as well. Next: **A4** (staged/guided refinement), then C
+(thermal parameters), then D (refined-structure presentation).
