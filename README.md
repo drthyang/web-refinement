@@ -60,6 +60,7 @@ calculations run in Web Workers. Full detail in
 - [docs/VALIDATION.md](docs/VALIDATION.md) — testing & external comparison strategy
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — scope and known simplifications
 - [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project JSON format
+- [docs/REFINEMENT_PROCEDURE.md](docs/REFINEMENT_PROCEDURE.md) — the guided 7-step workflow
 - [docs/REPORT.md](docs/REPORT.md) — build & validation report
 
 ## License

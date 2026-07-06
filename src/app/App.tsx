@@ -32,8 +32,22 @@ import {
   singleCrystalParameters,
 } from "@/examples/synthetic";
 import { ParameterTable } from "@/components/ParameterTable";
+import { CandidateComparison } from "@/components/CandidateComparison";
 import { PatternPlot } from "@/visualization/PatternPlot";
 import { ScatterPlot } from "@/visualization/ScatterPlot";
+import { bondLengths } from "@/core/crystal/geometry";
+import type { InstrumentParameters } from "@/core/diffraction/instrument";
+import { parseInstrumentParameters } from "@/parsers/instrument";
+
+const STEPS = [
+  "1. Structure (CIF)",
+  "2. Data & instrument",
+  "3. Structural refinement",
+  "4. Quality",
+  "5. Magnetic candidates",
+  "6. Magnetic refinement",
+  "7. Compare groups",
+] as const;
 
 interface Session {
   structure: StructureModel;
@@ -70,6 +84,8 @@ export function App(): JSX.Element {
   const [mag, setMag] = useState(() => makeMagnetic(exampleMagnetic()));
   const [magResult, setMagResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [step, setStep] = useState(0);
+  const [instrument, setInstrument] = useState<InstrumentParameters>({ kind: "constantWavelength", wavelength: 1.54 });
   const [message, setMessage] = useState<string>("Loaded bundled example: Mn₃Ga (P6₃/mmc).");
   const client = useRef<ComputeClient>(new ComputeClient());
 
@@ -179,6 +195,22 @@ export function App(): JSX.Element {
     });
   }
 
+  function onLoadInstrument(file: File): void {
+    file.text().then((text) => {
+      try {
+        const parsed = parseInstrumentParameters(text);
+        setInstrument(parsed);
+        setMessage(
+          parsed.kind === "tof"
+            ? `Loaded TOF instrument: difC=${parsed.difC.toFixed(2)}, Zero=${(parsed.zero ?? 0).toFixed(3)}.`
+            : `Loaded CW instrument: λ=${parsed.wavelength} Å.`,
+        );
+      } catch (e) {
+        setMessage(`Instrument parse failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    });
+  }
+
   function exportProject(): void {
     const project: ProjectFile = {
       schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -229,81 +261,181 @@ export function App(): JSX.Element {
         <span style={{ color: "#1f4e79", marginLeft: 8 }}>{message}</span>
       </div>
 
-      <section style={card}>
-        <h2 style={h2}>Structure — {structure.name}</h2>
-        <table style={{ fontSize: 13 }}>
-          <tbody>
-            <tr><td style={kcell}>Space group</td><td>{structure.spaceGroup.hermannMauguin ?? "(from ops)"} · {structure.spaceGroup.operations.length} ops</td></tr>
-            <tr><td style={kcell}>Cell</td><td>a={structure.cell.a.toFixed(4)} b={structure.cell.b.toFixed(4)} c={structure.cell.c.toFixed(4)} Å · α={structure.cell.alpha} β={structure.cell.beta} γ={structure.cell.gamma}°</td></tr>
-            <tr><td style={kcell}>Volume</td><td>{cellVolume(structure.cell).toFixed(3)} Å³</td></tr>
-            <tr><td style={kcell}>Sites</td><td>{structure.sites.map((s) => `${s.label}(${s.element}) occ ${s.occupancy.toFixed(3)}`).join(", ")}</td></tr>
-          </tbody>
-        </table>
-      </section>
+      <nav style={stepNav}>
+        {STEPS.map((label, i) => (
+          <button
+            key={label}
+            onClick={() => setStep(i)}
+            style={{ ...stepChip, ...(i === step ? stepChipActive : {}) }}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
 
-      <section style={card}>
-        <h2 style={h2}>Powder refinement</h2>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-          <div style={{ overflowX: "auto" }}>
-            <PatternPlot curves={curves} xLabel="2θ (°)" />
-            <p style={{ fontSize: 12, color: "#666" }}>Current profile R ≈ {wRpct}% (unweighted, live).</p>
-          </div>
-          <div style={{ minWidth: 320, flex: 1 }}>
-            <ParameterTable parameters={powderParams} esd={powderResult?.esd} onChange={patchPowder} />
-            <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-              <button style={btnPrimary} disabled={busy !== null} onClick={runPowder}>
-                {busy === "powder" ? "Refining…" : "Refine"}
-              </button>
-              <button style={btn} onClick={() => downloadText(`${pattern.id}.csv`, powderPatternCsv(curves), "text/csv")}>
-                Export pattern CSV
-              </button>
-            </div>
-            {powderResult && <Agreement result={powderResult} />}
-          </div>
-        </div>
-      </section>
+      <section style={card}>{renderStep()}</section>
 
-      <section style={card}>
-        <h2 style={h2}>Single-crystal refinement</h2>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-          <div><ScatterPlot rows={scRows} /></div>
-          <div style={{ minWidth: 320, flex: 1 }}>
-            <ParameterTable parameters={scParams} esd={scResult?.esd} onChange={patchSc} />
-            <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-              <button style={btnPrimary} disabled={busy !== null} onClick={runSingleCrystal}>
-                {busy === "sc" ? "Refining…" : "Refine"}
-              </button>
-              <button style={btn} onClick={() => downloadText(`${scDataset.id}.csv`, reflectionTableCsv(scRows), "text/csv")}>
-                Export reflections CSV
-              </button>
-            </div>
-            {scResult && <Agreement result={scResult} />}
-          </div>
-        </div>
-      </section>
-
-      <section style={card}>
-        <h2 style={h2}>Magnetic refinement — {mag.ex.structure.name}</h2>
-        <p style={{ fontSize: 12, color: "#666", marginTop: 0 }}>
-          Nuclear and magnetic Bragg intensities kept separate; refine moment components (μB, crystal
-          axes). Bundled example: Mn₃Ga 30 K (GSAS-II). Load a magnetic CIF to replace it.
-        </p>
-        <MagneticPanel
-          structure={mag.ex.structure}
-          magnetic={mag.ex.magnetic}
-          parameters={mag.params}
-          bindings={magBind}
-          rows={magRows}
-          result={magResult}
-          busy={busy !== null}
-          onChange={patchMag}
-          onRefine={runMagnetic}
-        />
-      </section>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+        <button style={btn} disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>← Back</button>
+        <button style={btnPrimary} disabled={step === STEPS.length - 1} onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}>Next →</button>
+      </div>
 
       <footer style={{ color: "#888", fontSize: 12, marginTop: 24 }}>
-        Bundled example structures from GSAS-II validation data. See docs/VALIDATION.md.
+        Guided workflow mirrors the practical refinement procedure. Bundled example structures from
+        GSAS-II validation data. See docs/REFINEMENT_PROCEDURE.md and docs/VALIDATION.md.
       </footer>
+    </div>
+  );
+
+  function renderStep(): JSX.Element {
+    const magSiteLabels = mag.ex.magnetic.moments.map((m) => m.siteLabel);
+    switch (step) {
+      case 0:
+        return (
+          <div>
+            <h2 style={h2}>Step 1 — Structure ({structure.name})</h2>
+            <p style={stepHelp}>Load a structural CIF (nuclear model). Use “Load CIF…” above.</p>
+            <table style={{ fontSize: 13 }}>
+              <tbody>
+                <tr><td style={kcell}>Space group</td><td>{structure.spaceGroup.hermannMauguin ?? "(from ops)"} · {structure.spaceGroup.operations.length} ops</td></tr>
+                <tr><td style={kcell}>Cell</td><td>a={structure.cell.a.toFixed(4)} b={structure.cell.b.toFixed(4)} c={structure.cell.c.toFixed(4)} Å · α={structure.cell.alpha} β={structure.cell.beta} γ={structure.cell.gamma}°</td></tr>
+                <tr><td style={kcell}>Volume</td><td>{cellVolume(structure.cell).toFixed(3)} Å³</td></tr>
+                <tr><td style={kcell}>Sites</td><td>{structure.sites.map((s) => `${s.label}(${s.element}) occ ${s.occupancy.toFixed(3)}`).join(", ")}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        );
+      case 1:
+        return (
+          <div>
+            <h2 style={h2}>Step 2 — Experimental data &amp; instrument</h2>
+            <p style={stepHelp}>
+              Load an instrument parameter file (GSAS-II <code>.instprm</code>: TOF difC/difA/difB/Zero, or
+              a wavelength). The demo uses a synthetic constant-wavelength pattern; a loaded instrument
+              sets the abscissa calibration.
+            </p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
+              <label style={btn}>
+                Load instrument…
+                <input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) onLoadInstrument(f); }} />
+              </label>
+              <span style={{ fontSize: 13, color: "#444" }}>
+                {instrument.kind === "tof"
+                  ? `TOF · difC=${instrument.difC.toFixed(1)} · Zero=${(instrument.zero ?? 0).toFixed(3)}`
+                  : `Constant wavelength · λ=${instrument.wavelength} Å`}
+              </span>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <PatternPlot curves={curves} xLabel={instrument.kind === "tof" ? "TOF (µs)" : "2θ (°)"} />
+              <p style={{ fontSize: 12, color: "#666" }}>Observed data preview ({pattern.points.length} points).</p>
+            </div>
+          </div>
+        );
+      case 2:
+        return (
+          <div>
+            <h2 style={h2}>Step 3 — Structural refinement (with constraints)</h2>
+            <p style={stepHelp}>Toggle “Refine” per parameter (fixed/free constraints). Refine scale, cell, background, coordinates.</p>
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+              <div style={{ overflowX: "auto" }}>
+                <PatternPlot curves={curves} xLabel="2θ (°)" />
+                <p style={{ fontSize: 12, color: "#666" }}>Powder · profile R ≈ {wRpct}% (live).</p>
+                <div style={{ marginTop: 12 }}><ScatterPlot rows={scRows} /></div>
+                <p style={{ fontSize: 12, color: "#666" }}>Single crystal · I(obs) vs I(calc).</p>
+              </div>
+              <div style={{ minWidth: 320, flex: 1 }}>
+                <strong style={{ fontSize: 13 }}>Powder parameters</strong>
+                <ParameterTable parameters={powderParams} esd={powderResult?.esd} onChange={patchPowder} />
+                <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                  <button style={btnPrimary} disabled={busy !== null} onClick={runPowder}>{busy === "powder" ? "Refining…" : "Refine powder"}</button>
+                  <button style={btn} onClick={() => downloadText(`${pattern.id}.csv`, powderPatternCsv(curves), "text/csv")}>Export CSV</button>
+                </div>
+                {powderResult && <Agreement result={powderResult} />}
+                <div style={{ marginTop: 16 }}>
+                  <strong style={{ fontSize: 13 }}>Single-crystal parameters</strong>
+                  <ParameterTable parameters={scParams} esd={scResult?.esd} onChange={patchSc} />
+                  <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                    <button style={btnPrimary} disabled={busy !== null} onClick={runSingleCrystal}>{busy === "sc" ? "Refining…" : "Refine SX"}</button>
+                    <button style={btn} onClick={() => downloadText(`${scDataset.id}.csv`, reflectionTableCsv(scRows), "text/csv")}>Export CSV</button>
+                  </div>
+                  {scResult && <Agreement result={scResult} />}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      case 3:
+        return <QualityPanel structure={structure} powderResult={powderResult} scResult={scResult} />;
+      case 4:
+        return (
+          <div>
+            <h2 style={h2}>Step 5 — Allowed magnetic space groups ({mag.ex.structure.name})</h2>
+            <CandidateComparison structure={mag.ex.structure} dataset={mag.dataset} magneticSiteLabels={magSiteLabels} mode="generate" />
+          </div>
+        );
+      case 5:
+        return (
+          <div>
+            <h2 style={h2}>Step 6 — Magnetic refinement ({mag.ex.structure.name})</h2>
+            <p style={stepHelp}>Refine moment components (μB, crystal axes) with proper constraints; nuclear and magnetic intensities kept separate.</p>
+            <MagneticPanel
+              structure={mag.ex.structure}
+              magnetic={mag.ex.magnetic}
+              parameters={mag.params}
+              bindings={magBind}
+              rows={magRows}
+              result={magResult}
+              busy={busy !== null}
+              onChange={patchMag}
+              onRefine={runMagnetic}
+            />
+          </div>
+        );
+      case 6:
+        return (
+          <div>
+            <h2 style={h2}>Step 7 — Compare magnetic space groups</h2>
+            <CandidateComparison structure={mag.ex.structure} dataset={mag.dataset} magneticSiteLabels={magSiteLabels} mode="compare" />
+          </div>
+        );
+      default:
+        return <div />;
+    }
+  }
+}
+
+function QualityPanel({ structure, powderResult, scResult }: { structure: StructureModel; powderResult: RefinementResult | null; scResult: RefinementResult | null }): JSX.Element {
+  const bonds = bondLengths(structure).slice(0, 12);
+  return (
+    <div>
+      <h2 style={h2}>Step 4 — Refinement quality &amp; structure investigation</h2>
+      <p style={stepHelp}>Assess fit quality (R, wR, GoF) and inspect the refined geometry (bond lengths) before proceeding to magnetism.</p>
+      <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
+        <div>
+          <strong style={{ fontSize: 13 }}>Agreement factors</strong>
+          <table style={{ fontSize: 13, marginTop: 6 }}>
+            <tbody>
+              <tr><td style={kcell}>Powder</td><td>{powderResult ? `wR ${(100 * (powderResult.agreement.rWeighted ?? 0)).toFixed(2)}% · GoF ${(powderResult.agreement.goodnessOfFit ?? 0).toFixed(2)}` : "not refined"}</td></tr>
+              <tr><td style={kcell}>Single crystal</td><td>{scResult ? `R ${(100 * scResult.agreement.rFactor).toFixed(2)}%` : "not refined"}</td></tr>
+            </tbody>
+          </table>
+          <p style={{ fontSize: 12, color: "#666", maxWidth: 320 }}>
+            GoF near 1 indicates a fit consistent with the data uncertainties. Much larger values mean an
+            incomplete model or underestimated errors.
+          </p>
+        </div>
+        <div>
+          <strong style={{ fontSize: 13 }}>Bond lengths (≤ 3.2 Å)</strong>
+          <table style={{ fontSize: 12, marginTop: 6 }}>
+            <thead><tr><th style={kcell}>pair</th><th style={kcell}>d (Å)</th></tr></thead>
+            <tbody>
+              {bonds.map((b, i) => (
+                <tr key={i}><td style={kcell}>{b.from}–{b.to}</td><td style={kcell}>{b.distance.toFixed(3)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
@@ -341,4 +473,8 @@ const card: React.CSSProperties = { border: "1px solid #e3e3e3", borderRadius: 1
 const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 17 };
 const kcell: React.CSSProperties = { padding: "2px 10px 2px 0", color: "#444", verticalAlign: "top" };
 const btn: React.CSSProperties = { border: "1px solid #bbb", background: "#fff", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 13 };
-const btnPrimary: React.CSSProperties = { ...btn, background: "#1f4e79", color: "#fff", borderColor: "#1f4e79" };
+const btnPrimary: React.CSSProperties = { ...btn, background: "#1f4e79", color: "#fff", border: "1px solid #1f4e79" };
+const stepNav: React.CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0 12px" };
+const stepChip: React.CSSProperties = { border: "1px solid #ccc", background: "#fff", borderRadius: 16, padding: "4px 12px", cursor: "pointer", fontSize: 12, color: "#555" };
+const stepChipActive: React.CSSProperties = { background: "#1f4e79", color: "#fff", border: "1px solid #1f4e79", fontWeight: 600 };
+const stepHelp: React.CSSProperties = { fontSize: 13, color: "#555", marginTop: 0 };

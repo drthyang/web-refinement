@@ -7,7 +7,7 @@
 
 import type { Mat3, Vec3 } from "@/core/math/types";
 import type { SymmetryOperation } from "@/core/crystal/types";
-import { mulVec } from "@/core/math/mat3";
+import { mulMat, mulVec } from "@/core/math/mat3";
 import { wrapFractional } from "@/core/math/vec3";
 
 const AXES = ["x", "y", "z"] as const;
@@ -76,6 +76,55 @@ export function parseMagneticSymmetryOperation(xyz: string): SymmetryOperation {
   const flag = parts[3]!.trim();
   const timeReversal: 1 | -1 = flag.startsWith("-") ? -1 : 1;
   return { ...spatial, xyz: xyz.replace(/\s+/g, ""), timeReversal };
+}
+
+/** Compose two operations: (a∘b)(x) = a(b(x)). Translations wrapped into [0,1). */
+export function composeOperations(a: SymmetryOperation, b: SymmetryOperation): SymmetryOperation {
+  const rotation = mulMat(a.rotation, b.rotation);
+  const rb = mulVec(a.rotation, b.translation);
+  const translation = wrapFractional([
+    rb[0] + a.translation[0],
+    rb[1] + a.translation[1],
+    rb[2] + a.translation[2],
+  ]);
+  const timeReversal: 1 | -1 =
+    ((a.timeReversal ?? 1) * (b.timeReversal ?? 1)) as 1 | -1;
+  return { rotation, translation, xyz: formatOperationXyz(rotation, translation), timeReversal };
+}
+
+/** A canonical key (rotation + wrapped translation) for comparing operations mod lattice. */
+export function operationKey(op: SymmetryOperation): string {
+  const t = wrapFractional(op.translation);
+  const r = op.rotation.map((row) => row.map((v) => Math.round(v)).join(",")).join(";");
+  const tt = t.map((v) => Math.round(((v % 1) + 1) % 1 === 0 ? 0 : v * 12) / 12).join(",");
+  return `${r}|${tt}`;
+}
+
+const AXIS_NAMES = ["x", "y", "z"] as const;
+
+/** Render a rotation+translation back to a Jones-Faithful string. */
+export function formatOperationXyz(rotation: Mat3, translation: Vec3): string {
+  const frac = (v: number): string => {
+    if (Math.abs(v) < 1e-6) return "";
+    const twelfths = Math.round(v * 12);
+    const map: Record<number, string> = { 6: "1/2", 4: "1/3", 8: "2/3", 3: "1/4", 9: "3/4", 2: "1/6", 10: "5/6" };
+    return map[((twelfths % 12) + 12) % 12] ?? v.toFixed(3);
+  };
+  return rotation
+    .map((row, i) => {
+      const parts: string[] = [];
+      for (let j = 0; j < 3; j++) {
+        const c = row[j]!;
+        if (Math.abs(c) < 1e-6) continue;
+        const sign = c < 0 ? "-" : parts.length ? "+" : "";
+        const mag = Math.abs(c);
+        parts.push(`${sign}${mag === 1 ? "" : mag}${AXIS_NAMES[j]}`);
+      }
+      const t = frac(translation[i]!);
+      if (t) parts.push(`${parts.length ? "+" : ""}${t}`);
+      return parts.join("") || "0";
+    })
+    .join(",");
 }
 
 /** Apply an operation to a fractional coordinate: x' = R·x + t (not wrapped). */

@@ -75,4 +75,4 @@ export function MagneticPanel(props: Props): JSX.Element {
 
 const c: React.CSSProperties = { padding: "2px 8px", textAlign: "left" };
 const btn: React.CSSProperties = { border: "1px solid #bbb", background: "#fff", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 13 };
-const btnPrimary: React.CSSProperties = { ...btn, background: "#8a1f1f", color: "#fff", borderColor: "#8a1f1f" };
+const btnPrimary: React.CSSProperties = { ...btn, background: "#8a1f1f", color: "#fff", border: "1px solid #8a1f1f" };

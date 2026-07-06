@@ -15,7 +15,7 @@ comparison recorded here.
    recorded below.
 4. Documentation states plainly which features are *validated* vs *approximate*.
 
-## Test matrix (66 tests, all passing)
+## Test matrix (83 tests, all passing)
 
 | Area | Test kind | Status |
 | --- | --- | --- |
@@ -41,6 +41,12 @@ comparison recorded here.
 | Magnetic moment magnitudes | golden (GSAS `.lst`) | ✅ `parsers/magneticCif.test.ts` |
 | GSAS reflection-list (Fo²/Fc²) parsing | golden | ✅ `parsers/magneticCif.test.ts` |
 | Magnetic single-crystal workflow + moment refinement | integration (GSAS structure) | ✅ `core/workflow/magneticWorkflow.test.ts` |
+| Magnetic candidate generation (k=0 index-2 subgroups) | golden (P2₁/m → P2₁'/m') | ✅ `core/magnetic/magneticGroups.test.ts` |
+| Allowed moment directions per site | golden (a–c plane) | ✅ `core/magnetic/magneticGroups.test.ts` |
+| Candidate comparison ranks correct group best | integration (30 K) | ✅ `core/workflow/magneticCompare.test.ts` |
+| Moment-size restraint → physical magnitudes | integration | ✅ `core/workflow/magneticCompare.test.ts` |
+| TOF ↔ d conversion (POWGEN calibration) | golden (GSAS `.lst`) | ✅ `core/diffraction/instrument.test.ts` |
+| Instrument-file parsing | unit | ✅ `core/diffraction/instrument.test.ts` |
 | Plot scaling math | unit | ✅ `visualization/scale.test.ts` |
 
 ## Golden examples

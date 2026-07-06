@@ -44,12 +44,12 @@ Nuclear + magnetic intensities; refine magnetic scale, moment magnitude
 (± direction); fixed/free moment parameters; separate contribution reporting;
 export magnetic model in project JSON.
 
-## Phase 7 — Magnetic powder refinement ⬜ (single-crystal magnetic done; powder magnetic pending)
+## Phase 7 — Magnetic powder refinement ⬜ (single-crystal magnetic + candidate comparison done; powder magnetic pending)
 Magnetic peaks, combined nuclear+magnetic profile with separable components,
 moment + magnetic-scale refinement, obs/calc/difference plot, export. After
 Phases 4 and 6 are working.
 
-## Phase 8 — Constraints & advanced refinement 🚧 (fixed/free/bounds/ties done; grouping pending)
+## Phase 8 — Constraints & advanced refinement 🚧 (fixed/free/bounds/ties + moment-size restraint + symmetry-allowed moments done; grouping pending)
 Fixed/free/bounds (from Phase 1) plus tied, grouped, site/occupancy/moment/
 lattice constraints, presets. Start with direct tying and grouping; no complex
 symbolic language early.
