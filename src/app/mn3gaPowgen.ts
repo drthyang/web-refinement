@@ -4,10 +4,11 @@
  * succeeds in development (the Vite `serve-local-data` plugin exposes `data/`);
  * in production every fetch 404s and the app keeps its bundled structure.
  *
- * The dataset's CIF is empty on disk, so the structure comes from the bundled
+ * The structure is parsed from the folder CIF, falling back to the bundled
  * `MN3GA_CIF` (the same P6₃/mmc model, validated against GSAS-II Fc² in
- * neutronSfValidation.test.ts). The TOF calibration constant difC is read from
- * the `.gsa` bank header (there is no `.instprm` in the folder).
+ * neutronSfValidation.test.ts) when the CIF is unreachable or unparseable. The
+ * TOF calibration constant difC is read from the `.gsa` bank header (there is no
+ * `.instprm` in the folder).
  */
 
 import type { StructureModel } from "@/core/crystal/types";
@@ -19,6 +20,7 @@ import { MN3GA_CIF } from "@/examples/mn3ga";
 
 const DIR = "data/Mn3Ga_POWGEN_600K";
 const DAT = "PG3_45607-1.dat";
+const CIF = "Mn3GaHexagonal_structure_600K_Final.cif";
 const STRUCTURE_ID = "mn3ga";
 const PATTERN_ID = "mn3ga-powder";
 
@@ -42,16 +44,31 @@ async function fetchText(url: string): Promise<string | null> {
   }
 }
 
+/** Parse the folder CIF, falling back to the bundled model on any failure. */
+function parseStructure(cifText: string | null): StructureModel {
+  if (cifText?.trim()) {
+    try {
+      return parseCif(cifText, STRUCTURE_ID);
+    } catch {
+      // Fall through to the bundled structure.
+    }
+  }
+  return parseCif(MN3GA_CIF, STRUCTURE_ID);
+}
+
 /**
  * Attempt to load the bundled-in-`data/` Mn₃Ga POWGEN TOF dataset. Resolves to a
  * parsed structure + TOF pattern + instrument, or `null` when the data is not
  * reachable (production, or a checkout without the local `data/` folder).
  */
 export async function loadMn3GaPowgen(): Promise<LoadedMn3Ga | null> {
-  const datText = await fetchText(`${import.meta.env.BASE_URL}${DIR}/${DAT}`);
+  const root = `${import.meta.env.BASE_URL}${DIR}`;
+  const [datText, cifText] = await Promise.all([fetchText(`${root}/${DAT}`), fetchText(`${root}/${CIF}`)]);
   if (datText === null) return null;
   try {
-    const structure: StructureModel = { ...parseCif(MN3GA_CIF, STRUCTURE_ID), id: STRUCTURE_ID };
+    // Prefer the folder CIF; fall back to the bundled model if it is missing,
+    // empty, or fails to parse (both are the same validated P6₃/mmc structure).
+    const structure: StructureModel = { ...parseStructure(cifText), id: STRUCTURE_ID };
     const pattern = parsePowderData(datText, {
       id: PATTERN_ID,
       name: "Mn₃Ga POWGEN 600 K (TOF, λ=0.8 Å)",
