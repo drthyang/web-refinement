@@ -1,29 +1,25 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_NAME, APP_VERSION, PROJECT_SCHEMA_VERSION } from "@/app/constants";
 import { downloadText } from "@/app/download";
 import type { StructureModel } from "@/core/crystal/types";
-import type { PowderPattern, SingleCrystalDataset } from "@/core/diffraction/types";
+import type { PowderPattern } from "@/core/diffraction/types";
 import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { ProjectFile } from "@/core/project/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import { buildPowderSpec, guidedPowderParams } from "@/app/powderSpec";
 import { DEFAULT_STAGE_KINDS } from "@/core/workflow/structureRefinement";
-import { singleCrystalComparison } from "@/core/workflow/singleCrystal";
-import { reflectionTableCsv, powderPatternCsv, projectJson } from "@/core/export/exporters";
+import { powderPatternCsv, projectJson } from "@/core/export/exporters";
 import { parseMagneticCif } from "@/parsers/cif";
 import { parsePowderData } from "@/parsers/powderData";
 import { parseGsasCsvPattern } from "@/parsers/gsasPattern";
 import { detectDataFormat, type DetectedFormat } from "@/parsers/detectFormat";
 import { magneticComparison } from "@/core/workflow/magnetic";
 import type { ParameterBinding } from "@/core/refinement/types";
-import {
-  startingPowderParams,
-  loadReflectionDataset,
-  structuralParameters,
-} from "@/app/loadData";
+import { startingPowderParams } from "@/app/loadData";
 import { ComputeClient } from "@/workers/computeClient";
-import { exampleStructure } from "@/examples/mn3ga";
+import { exampleStructure } from "@/examples/highEntropyWO4";
+import { loadPowgenDefault } from "@/app/powgenData";
 import {
   buildMagneticDataset,
   exampleMagnetic,
@@ -34,17 +30,10 @@ import {
 import { MagneticPanel } from "@/components/MagneticPanel";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { SingleCrystalDataset as SxDataset } from "@/core/diffraction/types";
-import {
-  buildSyntheticPowder,
-  buildSyntheticSingleCrystal,
-  powderBindings,
-  singleCrystalBindings,
-  singleCrystalParameters,
-} from "@/examples/synthetic";
+import { buildSyntheticPowder, powderBindings } from "@/examples/synthetic";
 import { ParameterTable } from "@/components/ParameterTable";
 import { CandidateComparison } from "@/components/CandidateComparison";
 import { PatternPlot } from "@/visualization/PatternPlot";
-import { ScatterPlot } from "@/visualization/ScatterPlot";
 import { bondLengths } from "@/core/crystal/geometry";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { parseInstrumentParameters } from "@/parsers/instrument";
@@ -72,15 +61,10 @@ interface Session {
   powderProfile: PowderProfile;
   /** Number of Chebyshev background coefficients in the powder model. */
   backgroundTerms: number;
-  scDataset: SingleCrystalDataset;
-  scParams: RefinementParameter[];
-  /** Custom single-crystal bindings (e.g. structural B refinement); scale-only when absent. */
-  scBindings?: ParameterBinding[];
   /** GSAS-II's own calc/background overlay for a view-only (TOF) pattern. */
   powderOverlay?: { calc: number[]; background: number[] } | null;
-  /** Provenance of the observed data driving each refinement. */
+  /** Provenance of the observed data driving the refinement. */
   powderSource: string;
-  scSource: string;
 }
 
 const SYNTHETIC_SOURCE = "synthetic (self-consistent demo)";
@@ -106,34 +90,68 @@ function newSession(structure: StructureModel, instrument: InstrumentParameters 
     powderBindings: spec.bindings,
     powderProfile: spec.profile,
     backgroundTerms: DEFAULT_BACKGROUND_TERMS,
-    scDataset: buildSyntheticSingleCrystal(structure),
-    scParams: singleCrystalParameters(2),
     powderSource: SYNTHETIC_SOURCE,
-    scSource: SYNTHETIC_SOURCE,
   };
 }
 
 export function App(): JSX.Element {
   const [session, setSession] = useState<Session>(() => newSession(exampleStructure()));
   const [powderResult, setPowderResult] = useState<RefinementResult | null>(null);
-  const [scResult, setScResult] = useState<RefinementResult | null>(null);
   const [mag, setMag] = useState(() => makeMagnetic(exampleMagnetic()));
   const [magResult, setMagResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [step, setStep] = useState(0);
   const [instrument, setInstrument] = useState<InstrumentParameters>({ kind: "constantWavelength", wavelength: 1.54 });
   const [instrumentLoaded, setInstrumentLoaded] = useState(false);
-  const [message, setMessage] = useState<string>("Loaded bundled example: Mn₃Ga (P6₃/mmc).");
+  const [message, setMessage] = useState<string>("High-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ (P2/c). Checking for the POWGEN pattern…");
   const client = useRef<ComputeClient>(new ComputeClient());
+  // Set once the user loads a CIF/data or resets, so the async startup POWGEN
+  // load never clobbers a session the user has already taken over.
+  const userTookOver = useRef(false);
 
-  const { structure, pattern, powderParams, scDataset, scParams, powderSource, scSource } = session;
+  // On startup, try to open the real POWGEN high-entropy dataset from the local
+  // (git-ignored) data/ folder — served by the dev-only Vite plugin. When it is
+  // reachable the app opens real TOF neutron data instead of a synthetic demo;
+  // otherwise it keeps the bundled high-entropy structure. TOF is view-only until
+  // TOF profile refinement lands (roadmap M1).
+  useEffect(() => {
+    let cancelled = false;
+    void loadPowgenDefault().then((loaded) => {
+      if (cancelled || userTookOver.current) return;
+      if (!loaded) {
+        setMessage("High-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ (P2/c) — bundled structure (POWGEN pattern not found in data/).");
+        return;
+      }
+      const { structure: st, pattern: pt, instrument: inst, isTof } = loaded;
+      const bindings = powderBindings(st, pt.id);
+      setInstrument(inst);
+      setInstrumentLoaded(true);
+      setSession({
+        structure: st,
+        pattern: pt,
+        powderParams: startingPowderParams(st, pt, bindings),
+        powderBindings: bindings,
+        powderProfile: { shape: "gaussian" },
+        backgroundTerms: DEFAULT_BACKGROUND_TERMS,
+        powderOverlay: null,
+        powderSource: pt.name,
+      });
+      setPowderResult(null);
+      setMessage(
+        `Loaded POWGEN high-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ · ${pt.points.length} pts${
+          isTof ? " · TOF — view-only (TOF profile refinement not in the engine yet)" : ""
+        }.`,
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const { structure, pattern, powderParams, powderSource } = session;
   const powderIsTof = pattern.xUnit === "tof";
   const powderXLabel = pattern.xUnit === "twoTheta" ? "2θ (°)" : UNIT_LABEL[pattern.xUnit] ?? "x";
   const pBindings = session.powderBindings;
-  const scBind = useMemo(
-    () => session.scBindings ?? singleCrystalBindings(scDataset.id),
-    [session.scBindings, scDataset.id],
-  );
 
   const curves = useMemo(() => {
     // TOF patterns cannot be profile-fit by the minimal engine; show the observed
@@ -146,10 +164,6 @@ export function App(): JSX.Element {
     }
     return powderCurves(structure, pattern, powderParams, pBindings, session.powderProfile);
   }, [structure, pattern, powderParams, pBindings, session.powderProfile, powderIsTof, session.powderOverlay]);
-  const scRows = useMemo(
-    () => singleCrystalComparison(structure, scDataset, scParams, scBind),
-    [structure, scDataset, scParams, scBind],
-  );
   const magBind = useMemo(() => magneticBindings(mag.ex.magnetic), [mag.ex.magnetic]);
   const magRows = useMemo(
     () => magneticComparison(mag.ex.structure, mag.ex.magnetic, mag.dataset, mag.params, magBind),
@@ -158,9 +172,6 @@ export function App(): JSX.Element {
 
   function patchPowder(id: string, patch: Partial<RefinementParameter>): void {
     setSession((s) => ({ ...s, powderParams: s.powderParams.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
-  }
-  function patchSc(id: string, patch: Partial<RefinementParameter>): void {
-    setSession((s) => ({ ...s, scParams: s.scParams.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   }
   function patchMag(id: string, patch: Partial<RefinementParameter>): void {
     setMag((m) => ({ ...m, params: m.params.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
@@ -249,27 +260,8 @@ export function App(): JSX.Element {
     }
   }
 
-  async function runSingleCrystal(): Promise<void> {
-    setBusy("sc");
-    try {
-      const result = await client.current.refineSingleCrystal({
-        structure, dataset: scDataset, parameters: scParams, bindings: scBind,
-        options: { maxIterations: 20 },
-      });
-      setSession((s) => ({
-        ...s,
-        scParams: s.scParams.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value })),
-      }));
-      setScResult(result);
-      setMessage(`Single-crystal refinement ${result.status}: R = ${(100 * result.agreement.rFactor).toFixed(2)}%.`);
-    } catch (e) {
-      setMessage(`Single-crystal refinement failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setBusy(null);
-    }
-  }
-
   function onLoadCif(file: File): void {
+    userTookOver.current = true;
     file.text().then((text) => {
       try {
         const { structure: parsed, magnetic } = parseMagneticCif(text, "loaded");
@@ -282,7 +274,6 @@ export function App(): JSX.Element {
         }
         setSession(newSession({ ...parsed, id: "loaded" }, instrument));
         setPowderResult(null);
-        setScResult(null);
         setMessage(`Loaded CIF: ${parsed.name} (${parsed.sites.length} sites, ${parsed.spaceGroup.operations.length} symmetry ops).`);
       } catch (e) {
         setMessage(`CIF parse failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -293,15 +284,16 @@ export function App(): JSX.Element {
   // Unified, auto-detecting data loader: the resolver classifies the file
   // (powder vs single-crystal) and, for powder, its x-unit, then dispatches.
   function onLoadData(file: File): void {
+    userTookOver.current = true;
     file.text().then((text) => {
       try {
         const fmt = detectDataFormat({ text, filename: file.name, instrument: instrumentLoaded ? instrument : undefined });
         const tag = `[${fmt.source}/${fmt.confidence}]`;
         if (fmt.dataType === "single-crystal") {
-          applyReflections(text, file.name, tag);
-        } else {
-          applyPowder(text, file.name, fmt, tag);
+          setMessage(`“${file.name}” looks like a single-crystal reflection list ${tag}. Single-crystal refinement is disabled for now — load a powder pattern instead.`);
+          return;
         }
+        applyPowder(text, file.name, fmt, tag);
       } catch (e) {
         setMessage(`Data load failed: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -343,17 +335,6 @@ export function App(): JSX.Element {
     setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · unit=${fmt.xUnit} ${tag}. ${nParams} symmetry-allowed parameters. Scale auto-estimated — click “Refine powder” or “Guided”. ${fmt.note}`);
   }
 
-  function applyReflections(text: string, filename: string, tag: string): void {
-    const id = `${structure.id}-refl`;
-    const loaded = loadReflectionDataset(text, structure, id, filename);
-    if (loaded.kept < 2) throw new Error("fewer than 2 reflections matched this structure's cell");
-    const { parameters, bindings } = structuralParameters(structure, loaded.dataset);
-    setSession((s) => ({ ...s, scDataset: loaded.dataset, scParams: parameters, scBindings: bindings, scSource: filename }));
-    setScResult(null);
-    const phaseNote = loaded.dropped > 0 ? ` (${loaded.dropped} dropped — other phase, e.g. impurity)` : "";
-    setMessage(`Loaded reflections “${filename}” · single-crystal ${tag} · ${loaded.kept} match phase${phaseNote}. Refining scale + B — click “Refine SX”.`);
-  }
-
   function onLoadInstrument(file: File): void {
     file.text().then((text) => {
       try {
@@ -382,9 +363,9 @@ export function App(): JSX.Element {
       },
       structures: [structure],
       magneticModels: [],
-      datasets: [pattern, scDataset],
-      parameters: [...powderParams, ...scParams],
-      bindings: [...pBindings, ...scBind],
+      datasets: [pattern],
+      parameters: [...powderParams],
+      bindings: [...pBindings],
       ...(powderResult ? { lastResult: powderResult } : {}),
     };
     downloadText(`${structure.id}-project.json`, projectJson(project), "application/json");
@@ -408,7 +389,7 @@ export function App(): JSX.Element {
       <header>
         <h1 style={{ margin: "0 0 4px" }}>{APP_NAME}</h1>
         <p style={{ margin: 0, color: "#555" }}>
-          v{APP_VERSION} · atomic/nuclear refinement · single-crystal &amp; powder
+          v{APP_VERSION} · atomic/nuclear refinement · powder
         </p>
         <p style={disclaimer}>
           Early browser-native refinement workbench. Results for publication must be validated against
@@ -426,7 +407,7 @@ export function App(): JSX.Element {
             onChange={(e) => { const f = e.target.files?.[0]; if (f) onLoadCif(f); }}
           />
         </label>
-        <button style={btn} onClick={() => setSession(newSession(exampleStructure(), instrument))}>Reset to example</button>
+        <button style={btn} onClick={() => { userTookOver.current = true; setSession(newSession(exampleStructure(), instrument)); }}>Reset to example</button>
         <button style={btn} onClick={exportProject}>Export project JSON</button>
         <span style={{ color: "#1f4e79", marginLeft: 8 }}>{message}</span>
       </div>
@@ -480,12 +461,10 @@ export function App(): JSX.Element {
           <div>
             <h2 style={h2}>Step 2 — Experimental data &amp; instrument</h2>
             <p style={stepHelp}>
-              Load your <strong>observed data</strong> — the reader auto-detects powder vs
-              single-crystal and the x-axis unit (2θ / Q / d / TOF) from the file header, the loaded
-              instrument, or the data range. Powder is <code>x&nbsp;y&nbsp;[σ]</code>; single-crystal
-              is a reflection list <code>h&nbsp;k&nbsp;l&nbsp;Iobs&nbsp;[σ]</code> (incl. GSAS-II
-              <code>_hkl.dat</code>). Load an instrument file for the authoritative calibration.
-              Until you load data the workbench uses a synthetic demo pattern.
+              Load your <strong>observed powder data</strong> — the reader auto-detects the x-axis
+              unit (2θ / Q / d / TOF) from the file header, the loaded instrument, or the data range.
+              Powder is <code>x&nbsp;y&nbsp;[σ]</code>. Load an instrument file for the authoritative
+              calibration. Until you load data the workbench uses a synthetic demo pattern.
             </p>
             <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
               <label style={btn}>
@@ -505,13 +484,16 @@ export function App(): JSX.Element {
             <table style={{ fontSize: 12, marginBottom: 10 }}>
               <tbody>
                 <tr><td style={kcell}>Powder source</td><td><SourceTag source={powderSource} synthetic={SYNTHETIC_SOURCE} /> · {pattern.points.length} points · unit={UNIT_LABEL[pattern.xUnit]}</td></tr>
-                <tr><td style={kcell}>Reflection source</td><td><SourceTag source={scSource} synthetic={SYNTHETIC_SOURCE} /> · {scDataset.reflections.length} hkl</td></tr>
               </tbody>
             </table>
             <div style={{ overflowX: "auto" }}>
               <PatternPlot curves={curves} xLabel={powderXLabel} />
               <p style={{ fontSize: 12, color: "#666" }}>
-                {powderIsTof ? "Observed (points) with GSAS-II fit overlay" : "Observed data preview"} ({pattern.points.length} points).
+                {powderIsTof
+                  ? session.powderOverlay
+                    ? "Observed (points) with GSAS-II fit overlay"
+                    : "Observed TOF pattern (view-only — no calc overlay)"
+                  : "Observed data preview"} ({pattern.points.length} points).
               </p>
             </div>
           </div>
@@ -531,10 +513,12 @@ export function App(): JSX.Element {
               <div style={{ overflowX: "auto" }}>
                 <PatternPlot curves={curves} xLabel={powderXLabel} />
                 <p style={{ fontSize: 12, color: "#666" }}>
-                  {powderIsTof ? `Powder (TOF) · GSAS-II fit residual ≈ ${wRpct}%` : `Powder · profile R ≈ ${wRpct}% (live)`}.
+                  {powderIsTof
+                    ? session.powderOverlay
+                      ? `Powder (TOF) · GSAS-II fit residual ≈ ${wRpct}%`
+                      : "Powder (TOF) · view-only (no fit computed by the engine)"
+                    : `Powder · profile R ≈ ${wRpct}% (live)`}.
                 </p>
-                <div style={{ marginTop: 12 }}><ScatterPlot rows={scRows} /></div>
-                <p style={{ fontSize: 12, color: "#666" }}>Single crystal · I(obs) vs I(calc).</p>
               </div>
               <div style={{ minWidth: 320, flex: 1 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -565,30 +549,19 @@ export function App(): JSX.Element {
                 </div>
                 {powderIsTof && (
                   <p style={{ fontSize: 12, color: "#8a1f1f", marginTop: 6, maxWidth: 340 }}>
-                    TOF pattern loaded — the plot shows the observed data with GSAS-II's own fit as an
-                    overlay. The minimal engine profile-fits constant-wavelength data only, so powder
-                    refinement is disabled here; use the reflection-intensity refinement instead.
+                    TOF pattern loaded — <strong>view-only</strong>. The engine profile-fits
+                    constant-wavelength data only, so refinement is disabled until TOF profile fitting
+                    (back-to-back exponentials, α/β/σ) lands. The pattern is shown for inspection and
+                    indexing; a GSAS-II calc overlay appears when a GSAS-II CSV export is loaded.
                   </p>
                 )}
                 {powderResult && <Agreement result={powderResult} />}
-                <div style={{ marginTop: 16 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <strong style={{ fontSize: 13 }}>Single-crystal parameters</strong>
-                    <SourceTag source={scSource} synthetic={SYNTHETIC_SOURCE} />
-                  </div>
-                  <ParameterTable parameters={scParams} esd={scResult?.esd} onChange={patchSc} />
-                  <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                    <button style={btnPrimary} disabled={busy !== null} onClick={runSingleCrystal}>{busy === "sc" ? "Refining…" : "Refine SX"}</button>
-                    <button style={btn} onClick={() => downloadText(`${scDataset.id}.csv`, reflectionTableCsv(scRows), "text/csv")}>Export CSV</button>
-                  </div>
-                  {scResult && <Agreement result={scResult} />}
-                </div>
               </div>
             </div>
           </div>
         );
       case 3:
-        return <QualityPanel structure={structure} powderResult={powderResult} scResult={scResult} />;
+        return <QualityPanel structure={structure} powderResult={powderResult} />;
       case 4:
         return (
           <div>
@@ -627,7 +600,7 @@ export function App(): JSX.Element {
   }
 }
 
-function QualityPanel({ structure, powderResult, scResult }: { structure: StructureModel; powderResult: RefinementResult | null; scResult: RefinementResult | null }): JSX.Element {
+function QualityPanel({ structure, powderResult }: { structure: StructureModel; powderResult: RefinementResult | null }): JSX.Element {
   const bonds = bondLengths(structure).slice(0, 12);
   return (
     <div>
@@ -639,7 +612,6 @@ function QualityPanel({ structure, powderResult, scResult }: { structure: Struct
           <table style={{ fontSize: 13, marginTop: 6 }}>
             <tbody>
               <tr><td style={kcell}>Powder</td><td>{powderResult ? `wR ${(100 * (powderResult.agreement.rWeighted ?? 0)).toFixed(2)}% · GoF ${(powderResult.agreement.goodnessOfFit ?? 0).toFixed(2)}` : "not refined"}</td></tr>
-              <tr><td style={kcell}>Single crystal</td><td>{scResult ? `R ${(100 * scResult.agreement.rFactor).toFixed(2)}%` : "not refined"}</td></tr>
             </tbody>
           </table>
           <p style={{ fontSize: 12, color: "#666", maxWidth: 320 }}>
@@ -682,7 +654,8 @@ function SourceTag({ source, synthetic }: { source: string; synthetic: string })
 function Agreement({ result }: { result: RefinementResult }): JSX.Element {
   const a = result.agreement;
   const d = result.diagnostics;
-  const hasDiagnostics = d !== undefined && (d.svdZeroCount > 0 || d.highCorrelations.length > 0);
+  const hasDiagnostics =
+    d !== undefined && (d.svdZeroCount > 0 || d.highCorrelations.length > 0 || d.atBounds.length > 0);
   return (
     <div style={{ marginTop: 12, fontSize: 13 }}>
       <strong>Result:</strong> {result.status} · R = {(100 * a.rFactor).toFixed(2)}%
@@ -701,6 +674,13 @@ function Agreement({ result }: { result: RefinementResult }): JSX.Element {
               High correlation: {d.highCorrelations.slice(0, 4).map((c) =>
                 `${c.parameterIdA}/${c.parameterIdB} ${c.coefficient.toFixed(3)}`,
               ).join("; ")}
+            </div>
+          )}
+          {d.atBounds.length > 0 && (
+            <div>
+              At bound (not converged — value/esd unreliable): {d.atBounds.map((b) =>
+                `${b.parameterId} (${b.bound})`,
+              ).join(", ")}.
             </div>
           )}
         </div>
