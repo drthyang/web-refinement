@@ -7,7 +7,7 @@ import type { RefinementParameter, RefinementResult } from "@/core/refinement/ty
 import type { ProjectFile } from "@/core/project/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
-import { buildPowderSpec } from "@/app/powderSpec";
+import { buildPowderSpec, guidedPowderParams } from "@/app/powderSpec";
 import { DEFAULT_STAGE_KINDS } from "@/core/workflow/structureRefinement";
 import { singleCrystalComparison } from "@/core/workflow/singleCrystal";
 import { reflectionTableCsv, powderPatternCsv, projectJson } from "@/core/export/exporters";
@@ -60,6 +60,7 @@ const STEPS = [
 ] as const;
 
 const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", wavelength: 1.54 };
+const DEFAULT_BACKGROUND_TERMS = 4;
 
 interface Session {
   structure: StructureModel;
@@ -69,6 +70,8 @@ interface Session {
   powderBindings: ParameterBinding[];
   /** Peak-shape / Lorentz / background settings for display and refinement. */
   powderProfile: PowderProfile;
+  /** Number of Chebyshev background coefficients in the powder model. */
+  backgroundTerms: number;
   scDataset: SingleCrystalDataset;
   scParams: RefinementParameter[];
   /** Custom single-crystal bindings (e.g. structural B refinement); scale-only when absent. */
@@ -95,13 +98,14 @@ function makeMagnetic(ex: MagneticExample): MagState {
 
 function newSession(structure: StructureModel, instrument: InstrumentParameters = DEFAULT_INSTRUMENT): Session {
   const pattern = buildSyntheticPowder(structure);
-  const spec = buildPowderSpec(structure, pattern, instrument);
+  const spec = buildPowderSpec(structure, pattern, instrument, true, DEFAULT_BACKGROUND_TERMS);
   return {
     structure,
     pattern,
     powderParams: spec.params,
     powderBindings: spec.bindings,
     powderProfile: spec.profile,
+    backgroundTerms: DEFAULT_BACKGROUND_TERMS,
     scDataset: buildSyntheticSingleCrystal(structure),
     scParams: singleCrystalParameters(2),
     powderSource: SYNTHETIC_SOURCE,
@@ -138,7 +142,7 @@ export function App(): JSX.Element {
       const x = pattern.points.map((p) => p.x);
       const yObs = pattern.points.map((p) => p.yObs);
       const yCalc = session.powderOverlay.calc;
-      return { x, yObs, yCalc, diff: yObs.map((o, i) => o - (yCalc[i] ?? 0)) };
+      return { x, yObs, yCalc, yBackground: session.powderOverlay.background, diff: yObs.map((o, i) => o - (yCalc[i] ?? 0)) };
     }
     return powderCurves(structure, pattern, powderParams, pBindings, session.powderProfile);
   }, [structure, pattern, powderParams, pBindings, session.powderProfile, powderIsTof, session.powderOverlay]);
@@ -160,6 +164,39 @@ export function App(): JSX.Element {
   }
   function patchMag(id: string, patch: Partial<RefinementParameter>): void {
     setMag((m) => ({ ...m, params: m.params.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+  }
+
+  function setBackgroundTerms(backgroundTerms: number): void {
+    const count = Math.max(0, Math.min(20, Math.trunc(backgroundTerms)));
+    setSession((s) => {
+      const spec = buildPowderSpec(
+        s.structure,
+        s.pattern,
+        instrumentLoaded ? instrument : DEFAULT_INSTRUMENT,
+        s.powderProfile.lorentz,
+        count,
+      );
+      const previous = new Map(s.powderParams.map((p) => [p.id, p]));
+      return {
+        ...s,
+        backgroundTerms: count,
+        powderParams: spec.params.map((p) => {
+          const old = previous.get(p.id);
+          return old
+            ? {
+                ...p,
+                value: old.value,
+                initialValue: old.initialValue,
+                fixed: old.fixed,
+                ...(old.esd !== undefined ? { esd: old.esd } : {}),
+              }
+            : p;
+        }),
+        powderBindings: spec.bindings,
+        powderProfile: spec.profile,
+      };
+    });
+    setPowderResult(null);
   }
 
   async function runMagnetic(): Promise<void> {
@@ -190,7 +227,7 @@ export function App(): JSX.Element {
     setBusy("powder");
     try {
       const result = await client.current.refinePowder({
-        structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(),
+        structure, pattern, parameters: guided ? guidedPowderParams(powderParams) : powderParams, bindings: pBindings, ...profileReq(),
         ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),
         options: { maxIterations: guided ? 15 : 20 },
       });
@@ -299,7 +336,7 @@ export function App(): JSX.Element {
     if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
     // Full symmetry-allowed parameter set, seeded from the loaded instrument
     // (Caglioti profile + zero when the .instprm carries them).
-    const spec = buildPowderSpec(structure, parsed, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, session.powderProfile.lorentz);
+    const spec = buildPowderSpec(structure, parsed, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, session.powderProfile.lorentz, session.backgroundTerms);
     setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
     setPowderResult(null);
     const nParams = spec.params.length;
@@ -374,8 +411,8 @@ export function App(): JSX.Element {
           v{APP_VERSION} · atomic/nuclear refinement · single-crystal &amp; powder
         </p>
         <p style={disclaimer}>
-          Not a replacement for GSAS-II, FullProf, Jana2020, or ShelX. Results for publication must be
-          validated against established tools.
+          Early browser-native refinement workbench. Results for publication must be validated against
+          established tools.
         </p>
       </header>
 
@@ -508,6 +545,19 @@ export function App(): JSX.Element {
                 <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <button style={btnPrimary} disabled={busy !== null || powderIsTof} onClick={() => runPowder(false)}>{busy === "powder" ? "Refining…" : "Refine selected"}</button>
                   <button style={btn} disabled={busy !== null || powderIsTof} onClick={() => runPowder(true)} title="Staged: scale → background → cell → profile → ADP → positions">Guided (staged)</button>
+                  <label style={controlLabel}>
+                    Background terms
+                    <input
+                      type="number"
+                      min={0}
+                      max={20}
+                      step={1}
+                      value={session.backgroundTerms}
+                      disabled={busy !== null || powderIsTof}
+                      onChange={(e) => setBackgroundTerms(Number(e.target.value))}
+                      style={numberInput}
+                    />
+                  </label>
                   <label style={{ fontSize: 12, color: "#444", display: "flex", gap: 4, alignItems: "center" }}>
                     <input type="checkbox" checked={session.powderProfile.lorentz !== false} onChange={(e) => setSession((s) => ({ ...s, powderProfile: { ...s.powderProfile, lorentz: e.target.checked } }))} /> Lorentz
                   </label>
@@ -631,11 +681,30 @@ function SourceTag({ source, synthetic }: { source: string; synthetic: string })
 
 function Agreement({ result }: { result: RefinementResult }): JSX.Element {
   const a = result.agreement;
+  const d = result.diagnostics;
+  const hasDiagnostics = d !== undefined && (d.svdZeroCount > 0 || d.highCorrelations.length > 0);
   return (
     <div style={{ marginTop: 12, fontSize: 13 }}>
       <strong>Result:</strong> {result.status} · R = {(100 * a.rFactor).toFixed(2)}%
       {a.rWeighted !== undefined && <> · wR = {(100 * a.rWeighted).toFixed(2)}%</>}
       {a.goodnessOfFit !== undefined && <> · GoF = {a.goodnessOfFit.toFixed(2)}</>}
+      {d && hasDiagnostics && (
+        <div style={diagnosticsBox}>
+          {d.svdZeroCount > 0 && (
+            <div>
+              SVD dropped {d.svdZeroCount} near-null direction{d.svdZeroCount === 1 ? "" : "s"}
+              {d.singularParameterIds.length > 0 ? `: ${d.singularParameterIds.join(", ")}` : ""}.
+            </div>
+          )}
+          {d.highCorrelations.length > 0 && (
+            <div>
+              High correlation: {d.highCorrelations.slice(0, 4).map((c) =>
+                `${c.parameterIdA}/${c.parameterIdB} ${c.coefficient.toFixed(3)}`,
+              ).join("; ")}
+            </div>
+          )}
+        </div>
+      )}
       <details style={{ marginTop: 6 }}>
         <summary>Refinement history ({result.history.length} cycles)</summary>
         <table style={{ fontSize: 12, marginTop: 4 }}>
@@ -661,6 +730,9 @@ const bar: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center"
 const card: React.CSSProperties = { border: "1px solid #e3e3e3", borderRadius: 10, padding: 16, marginBottom: 16, background: "#fafafa" };
 const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 17 };
 const kcell: React.CSSProperties = { padding: "2px 10px 2px 0", color: "#444", verticalAlign: "top" };
+const diagnosticsBox: React.CSSProperties = { marginTop: 6, padding: "6px 8px", background: "#fff8e7", border: "1px solid #ead49b", borderRadius: 6, color: "#5a4100", lineHeight: 1.4 };
+const controlLabel: React.CSSProperties = { fontSize: 12, color: "#444", display: "flex", gap: 6, alignItems: "center" };
+const numberInput: React.CSSProperties = { width: 54, padding: "4px 6px", border: "1px solid #bbb", borderRadius: 6, fontSize: 12 };
 const btn: React.CSSProperties = { border: "1px solid #bbb", background: "#fff", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 13 };
 const btnPrimary: React.CSSProperties = { ...btn, background: "#1f4e79", color: "#fff", border: "1px solid #1f4e79" };
 const stepNav: React.CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0 12px" };

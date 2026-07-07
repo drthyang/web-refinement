@@ -19,7 +19,7 @@ import { optimalScale } from "@/app/loadData";
 
 /** Kinds held fixed on first load; freed via the table or the guided sequence. */
 const STRUCTURAL_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
-  "positionShift", "bIso", "occupancy", "poRatio", "absorption",
+  "positionShift", "bIso", "uAniso", "occupancy", "poRatio", "absorption",
 ]);
 
 export interface PowderSpec {
@@ -33,6 +33,7 @@ export function buildPowderSpec(
   pattern: PowderPattern,
   instrument: InstrumentParameters,
   lorentz = true,
+  backgroundTerms = 4,
 ): PowderSpec {
   const cw = instrument.kind === "constantWavelength" ? instrument : null;
   // A GSAS-II .instprm carries the Caglioti U,V,W → angle-dependent width; else
@@ -47,11 +48,21 @@ export function buildPowderSpec(
 
   const cagOpt = caglioti ? { caglioti } : {};
   // Seed the scale from the data with a unit-scale evaluation.
-  const seed = buildStructureRefinement(structure, pattern, { scale: 1, zero, ...cagOpt });
+  const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, ...cagOpt });
   const curves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
   const s = optimalScale(curves.yObs.map((y) => (y > 0 ? y : 0)), curves.yCalc);
 
-  const spec = buildStructureRefinement(structure, pattern, { scale: s, zero, ...cagOpt });
+  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...cagOpt });
   const params = spec.params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
   return { params, bindings: spec.bindings, profile };
+}
+
+/**
+ * Guided refinement uses the staged plan to unlock structural rows in the
+ * expert order. UI-fixed structural rows must therefore be sent as unlockable,
+ * while intentionally fixed profile terms (notably profU when refineU=false)
+ * remain fixed.
+ */
+export function guidedPowderParams(params: readonly RefinementParameter[]): RefinementParameter[] {
+  return params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: false } : { ...p }));
 }

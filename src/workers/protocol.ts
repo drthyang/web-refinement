@@ -8,6 +8,7 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import type { PowderPattern, SingleCrystalDataset } from "@/core/diffraction/types";
 import type {
   ParameterBinding,
+  LinearRestraint,
   RefinementOptions,
   RefinementParameter,
   RefinementResult,
@@ -23,6 +24,7 @@ export interface RefinePowderRequest {
   readonly pattern: PowderPattern;
   readonly parameters: RefinementParameter[];
   readonly bindings: ParameterBinding[];
+  readonly restraints?: readonly LinearRestraint[];
   readonly shape: PeakShape;
   readonly eta?: number;
   /** Apply the 2θ Lorentz factor. Default true; false for pre-reduced I(Q). */

@@ -58,7 +58,7 @@ export function powderOptsFromInstrument(
     id,
     name,
     xUnit: "twoTheta",
-    radiation: { kind: "neutron", wavelength: instrument.wavelength },
+    radiation: { kind: instrument.radiationKind ?? "neutron", wavelength: instrument.wavelength },
     wavelength: instrument.wavelength,
   };
 }

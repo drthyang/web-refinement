@@ -20,7 +20,7 @@ export function PatternPlot({ curves, xLabel = "x", width = 760, height = 380 }:
   const diffH = (height - margin.top - margin.bottom) * 0.28;
 
   const [xMin, xMax] = extent(curves.x);
-  const [yMin, yMax] = extent([...curves.yObs, ...curves.yCalc]);
+  const [yMin, yMax] = extent([...curves.yObs, ...curves.yCalc, ...(curves.yBackground ?? [])]);
   const [dMin, dMax] = extent(curves.diff);
 
   const sx = linearScale(xMin, xMax, margin.left, margin.left + plotW);
@@ -33,6 +33,7 @@ export function PatternPlot({ curves, xLabel = "x", width = 760, height = 380 }:
   );
 
   const calcLine = polylinePoints(curves.x, curves.yCalc, sx, sy);
+  const backgroundLine = curves.yBackground ? polylinePoints(curves.x, curves.yBackground, sx, sy) : "";
   const diffLine = polylinePoints(curves.x, curves.diff, sx, sd);
 
   return (
@@ -55,6 +56,9 @@ export function PatternPlot({ curves, xLabel = "x", width = 760, height = 380 }:
       )}
       {/* calculated line */}
       <polyline points={calcLine} fill="none" stroke="#1f4e79" strokeWidth={1.4} />
+      {curves.yBackground && (
+        <polyline points={backgroundLine} fill="none" stroke="#8a5a00" strokeWidth={1.2} strokeDasharray="5 3" />
+      )}
       {/* difference */}
       <line
         x1={margin.left}
@@ -87,6 +91,12 @@ export function PatternPlot({ curves, xLabel = "x", width = 760, height = 380 }:
         <text x={margin.left + 64} y={margin.top + 9} fill="#333">calc</text>
         <line x1={margin.left + 96} y1={margin.top + 6} x2={margin.left + 112} y2={margin.top + 6} stroke="#2e7d32" strokeWidth={1.5} />
         <text x={margin.left + 116} y={margin.top + 9} fill="#333">diff</text>
+        {curves.yBackground && (
+          <>
+            <line x1={margin.left + 148} y1={margin.top + 6} x2={margin.left + 164} y2={margin.top + 6} stroke="#8a5a00" strokeWidth={1.5} strokeDasharray="5 3" />
+            <text x={margin.left + 168} y={margin.top + 9} fill="#333">bkg</text>
+          </>
+        )}
       </g>
     </svg>
   );

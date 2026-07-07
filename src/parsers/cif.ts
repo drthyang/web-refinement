@@ -7,7 +7,7 @@
  * holds for the files this workbench consumes. Unknown items are ignored.
  */
 
-import type { AtomSite, SpaceGroup, StructureModel, UnitCell } from "@/core/crystal/types";
+import type { AtomSite, DisplacementParameters, SpaceGroup, StructureModel, UnitCell } from "@/core/crystal/types";
 import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import type { Vec3 } from "@/core/math/types";
 import { parseMagneticSymmetryOperation, parseSymmetryOperation } from "@/core/crystal/symmetry";
@@ -136,9 +136,43 @@ function parseSpaceGroup(items: Map<string, string>, loops: Loop[]): SpaceGroup 
   };
 }
 
+function parseAnisotropicAdps(loops: Loop[]): Map<string, DisplacementParameters> {
+  const anisoLoop = findLoop(loops, (h) => h.some((k) => k.includes("atom_site_aniso_u_11")));
+  if (!anisoLoop) return new Map();
+  const col = (name: string): number =>
+    anisoLoop.headers.findIndex((h) => h.toLowerCase() === name);
+  const iLabel = col("_atom_site_aniso_label");
+  const iU11 = col("_atom_site_aniso_u_11");
+  const iU22 = col("_atom_site_aniso_u_22");
+  const iU33 = col("_atom_site_aniso_u_33");
+  const iU12 = col("_atom_site_aniso_u_12");
+  const iU13 = col("_atom_site_aniso_u_13");
+  const iU23 = col("_atom_site_aniso_u_23");
+  if ([iLabel, iU11, iU22, iU33, iU12, iU13, iU23].some((i) => i < 0)) return new Map();
+
+  const adps = new Map<string, DisplacementParameters>();
+  for (const row of anisoLoop.rows) {
+    const label = row[iLabel];
+    if (label === undefined) continue;
+    adps.set(label, {
+      kind: "anisotropic",
+      uAniso: [
+        parseCifNumber(row[iU11]!),
+        parseCifNumber(row[iU22]!),
+        parseCifNumber(row[iU33]!),
+        parseCifNumber(row[iU12]!),
+        parseCifNumber(row[iU13]!),
+        parseCifNumber(row[iU23]!),
+      ],
+    });
+  }
+  return adps;
+}
+
 function parseSites(loops: Loop[]): AtomSite[] {
   const atomLoop = findLoop(loops, (h) => h.some((k) => k.includes("atom_site_fract_x")));
   if (!atomLoop) return [];
+  const anisoAdps = parseAnisotropicAdps(loops);
 
   const col = (name: string): number =>
     atomLoop.headers.findIndex((h) => h.toLowerCase() === name);
@@ -148,6 +182,7 @@ function parseSites(loops: Loop[]): AtomSite[] {
   const iY = col("_atom_site_fract_y");
   const iZ = col("_atom_site_fract_z");
   const iOcc = col("_atom_site_occupancy");
+  const iAdpType = col("_atom_site_adp_type");
   const iU = col("_atom_site_u_iso_or_equiv");
   const iMult = col("_atom_site_site_symmetry_multiplicity");
 
@@ -155,13 +190,17 @@ function parseSites(loops: Loop[]): AtomSite[] {
     const uIso = iU >= 0 && row[iU] !== undefined ? parseCifNumber(row[iU]!) : 0;
     const position: Vec3 = [parseCifNumber(row[iX]!), parseCifNumber(row[iY]!), parseCifNumber(row[iZ]!)];
     const element = iType >= 0 ? elementFromType(row[iType]!) : elementFromType(row[iLabel]!);
+    const label = iLabel >= 0 ? row[iLabel]! : element;
+    const adpType = iAdpType >= 0 ? row[iAdpType]?.toLowerCase() : undefined;
+    const adp = adpType === "uani" && anisoAdps.has(label)
+      ? anisoAdps.get(label)!
+      : { kind: "isotropic" as const, bIso: 8 * Math.PI * Math.PI * uIso };
     const site: AtomSite = {
-      label: iLabel >= 0 ? row[iLabel]! : element,
+      label,
       element,
       position,
       occupancy: iOcc >= 0 && row[iOcc] !== undefined ? parseCifNumber(row[iOcc]!) : 1,
-      // CIF stores U_iso; convert to B_iso = 8π²·U_iso.
-      adp: { kind: "isotropic", bIso: 8 * Math.PI * Math.PI * uIso },
+      adp,
       ...(iMult >= 0 && row[iMult] !== undefined ? { multiplicity: parseInt(row[iMult]!, 10) } : {}),
     };
     return site;

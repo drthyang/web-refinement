@@ -6,6 +6,7 @@
 
 import type { AtomSite, StructureModel, UnitCell } from "@/core/crystal/types";
 import type { ParameterBinding } from "@/core/refinement/types";
+import type { UAniso } from "@/core/crystal/adpConstraints";
 
 export interface AppliedModel {
   readonly model: StructureModel;
@@ -39,8 +40,15 @@ export function applyParameters(
   values: Readonly<Record<string, number>>,
 ): AppliedModel {
   const cell: MutableCell = { ...model.cell };
-  const sites: AtomSite[] = model.sites.map((s) => ({ ...s, position: [...s.position] as [number, number, number] }));
+  const sites: AtomSite[] = model.sites.map((s) => ({
+    ...s,
+    position: [...s.position] as [number, number, number],
+    adp: s.adp.kind === "anisotropic"
+      ? { kind: "anisotropic", uAniso: [...s.adp.uAniso] as [number, number, number, number, number, number] }
+      : { kind: "isotropic", bIso: s.adp.bIso },
+  }));
   const byLabel = new Map(sites.map((s) => [s.label, s]));
+  const uAnisoByLabel = new Map<string, [number, number, number, number, number, number]>();
 
   let scale = 1;
   let magneticScale = 1;
@@ -122,6 +130,15 @@ export function applyParameters(
         }
         break;
       }
+      case "uAniso": {
+        const site = binding.targetKey ? byLabel.get(binding.targetKey) : undefined;
+        if (site && binding.uBasis) {
+          const acc = uAnisoByLabel.get(site.label) ?? [0, 0, 0, 0, 0, 0];
+          for (let i = 0; i < 6; i++) acc[i]! += v * binding.uBasis[i]!;
+          uAnisoByLabel.set(site.label, acc);
+        }
+        break;
+      }
       case "momentX":
       case "momentY":
       case "momentZ":
@@ -137,6 +154,11 @@ export function applyParameters(
         muR = v;
         break;
     }
+  }
+
+  for (const [label, u] of uAnisoByLabel) {
+    const site = byLabel.get(label);
+    if (site) (site as { adp: { kind: "anisotropic"; uAniso: UAniso } }).adp = { kind: "anisotropic", uAniso: u };
   }
 
   const appliedModel: StructureModel = { ...model, cell, sites };

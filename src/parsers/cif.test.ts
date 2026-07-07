@@ -18,6 +18,47 @@ describe("parseCifNumber", () => {
   });
 });
 
+describe("parseCif — anisotropic ADP loop", () => {
+  it("attaches _atom_site_aniso_U_ij tensors to Uani sites", () => {
+    const model = parseCif(`data_test
+_cell_length_a  10
+_cell_length_b  10
+_cell_length_c  10
+_cell_angle_alpha  90
+_cell_angle_beta   90
+_cell_angle_gamma  90
+loop_
+  _space_group_symop_operation_xyz
+  'x,y,z'
+loop_
+  _atom_site_label
+  _atom_site_type_symbol
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+  _atom_site_occupancy
+  _atom_site_adp_type
+  _atom_site_U_iso_or_equiv
+  Nb1 Nb 0 0 0 1 Uani 0.002
+  Se1 Se 0.25 0.25 0.25 1 Uiso 0.003
+loop_
+  _atom_site_aniso_label
+  _atom_site_aniso_U_11
+  _atom_site_aniso_U_22
+  _atom_site_aniso_U_33
+  _atom_site_aniso_U_12
+  _atom_site_aniso_U_13
+  _atom_site_aniso_U_23
+  Nb1 0.002 0.003 0.004 0.0001 0.0002 0.0003
+`);
+    const nb = model.sites.find((s) => s.label === "Nb1")!;
+    expect(nb.adp.kind).toBe("anisotropic");
+    if (nb.adp.kind === "anisotropic") expect(nb.adp.uAniso).toEqual([0.002, 0.003, 0.004, 0.0001, 0.0002, 0.0003]);
+    const se = model.sites.find((s) => s.label === "Se1")!;
+    expect(se.adp.kind).toBe("isotropic");
+  });
+});
+
 // Read only when present; the `as StructureModel` is safe because the tests in
 // this suite are skipped (never dereference `model`) when the file is absent.
 describe.skipIf(!has600)("parseCif — GSAS-II Mn₃Ga hexagonal (600 K)", () => {

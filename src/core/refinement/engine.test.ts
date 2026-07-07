@@ -82,6 +82,35 @@ describe("refinement engine (Levenberg–Marquardt)", () => {
     expect(Math.abs(result.parameters.B! / trueB - 1)).toBeLessThan(1e-4);
   });
 
+  it("fits through rank-deficient Hessians and reports singular correlations", () => {
+    // a and b are physically indistinguishable here: only their sum is observed.
+    // A robust crystallographic fit should still find the identifiable sum and
+    // tell the user that the individual parameters are linearly dependent.
+    const xs = [1, 2, 3, 4, 5];
+    const observations = Float64Array.from(xs.map((x) => 4 * x));
+    const weights = Float64Array.from(xs.map(() => 1));
+    const parameters: RefinementParameter[] = [
+      { id: "a", label: "a", kind: "scale", value: 0, initialValue: 0, fixed: false },
+      { id: "b", label: "b", kind: "scale", value: 0, initialValue: 0, fixed: false },
+    ];
+
+    const result = refine(
+      {
+        parameters,
+        observations,
+        weights,
+        calculate: (v) => Float64Array.from(xs.map((x) => ((v.a ?? 0) + (v.b ?? 0)) * x)),
+      },
+      { maxIterations: 40 },
+    );
+
+    expect(["converged", "stalled"]).toContain(result.status);
+    expect((result.parameters.a ?? 0) + (result.parameters.b ?? 0)).toBeCloseTo(4, 4);
+    expect(result.diagnostics?.svdZeroCount).toBeGreaterThanOrEqual(1);
+    expect(result.diagnostics?.singularParameterIds).toEqual(expect.arrayContaining(["a", "b"]));
+    expect(result.diagnostics?.highCorrelations.some((c) => Math.abs(c.coefficient) > 0.99)).toBe(true);
+  });
+
   it("uses an exact single-eval Jacobian column for linear parameters", () => {
     // Two linear parameters (scale + one background coefficient) and one
     // non-linear (peak position). Count calculate() calls: the two linear

@@ -4,6 +4,7 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
 import { parseCif } from "@/parsers/cif";
 import { buildPowderProblem, powderCurves } from "@/core/workflow/powder";
 import { buildStructureRefinement, refinePowderStructure } from "@/core/workflow/structureRefinement";
+import { allowedAnisotropicAdpModes } from "@/core/crystal/adpConstraints";
 import { refine } from "@/core/refinement/engine";
 import { computeAgreementFactors, weightsFromSigma, excludedPointMask, applyExclusionMask } from "@/core/refinement/factors";
 import { parseInstrumentParameters } from "@/parsers/instrument";
@@ -26,6 +27,12 @@ const CIF = `${DIR}/GaNb4Se8_100K.cif`;
 const DAT = `${DIR}/GaNb4Se8_799_T_298.8K_gsas.dat`;
 const INSTPRM = `${DIR}/xrd_instrum.instprm`;
 const has = dataExists(CIF) && dataExists(DAT);
+const requiresGaNb4Se8 = process.env.GANB4SE8_REQUIRED === "1";
+if (requiresGaNb4Se8 && !has) {
+  throw new Error(
+    `GaNb4Se8 regression data is required. Expected data/${CIF} and data/${DAT}.`,
+  );
+}
 
 /** Instrument parameters from the GSAS-II `.instprm` (wavelength, zero, U,V,W). */
 function loadInstrument(): Extract<ReturnType<typeof parseInstrumentParameters>, { kind: "constantWavelength" }> {
@@ -84,8 +91,17 @@ function buildParamsAndBindings(structure: ReturnType<typeof parseCif>, pattern:
     { id: "bkg3", label: "bkg3", kind: "background", value: 0, initialValue: 0, fixed: false },
   ];
   for (const site of structure.sites) {
-    params.push({ id: `B_${site.label}`, label: `${site.label} B`, kind: "bIso", value: 0.3, initialValue: 0.3, min: 0, max: 8, fixed: false });
-    bindings.push({ parameterId: `B_${site.label}`, kind: "bIso", targetId: structure.id, targetKey: site.label });
+    if (site.adp.kind === "isotropic") {
+      params.push({ id: `B_${site.label}`, label: `${site.label} B`, kind: "bIso", value: 0.3, initialValue: 0.3, min: 0, max: 8, fixed: false });
+      bindings.push({ parameterId: `B_${site.label}`, kind: "bIso", targetId: structure.id, targetKey: site.label });
+    } else {
+      const modes = allowedAnisotropicAdpModes(structure.spaceGroup.operations, site.position, site.adp.uAniso);
+      modes.modes.forEach((mode, i) => {
+        const id = `U_${site.label}_${i}`;
+        params.push({ id, label: `${site.label} ${mode.label}`, kind: "uAniso", value: mode.coefficient, initialValue: mode.coefficient, min: mode.diagonal ? 0 : -0.02, max: mode.diagonal ? 0.2 : 0.02, fixed: false });
+        bindings.push({ parameterId: id, kind: "uAniso", targetId: structure.id, targetKey: site.label, uBasis: mode.basis });
+      });
+    }
   }
   return { params, bindings };
 }
@@ -106,6 +122,12 @@ describe.skipIf(!has)("real powder XRD — GaNb4Se8 (NSLS-II 28ID synchrotron)",
     const { structure, pattern } = loadPattern();
     expect(structure.spaceGroup.operations.length).toBe(96);
     expect(structure.cell.a).toBeCloseTo(10.3951, 3);
+    const nb = structure.sites.find((s) => s.label === "Nb1")!;
+    expect(nb.adp.kind).toBe("anisotropic");
+    if (nb.adp.kind === "anisotropic") {
+      expect(nb.adp.uAniso[0]).toBeCloseTo(0.00226, 5);
+      expect(nb.adp.uAniso[3]).toBeCloseTo(0.00037, 5);
+    }
     expect(pattern.points.length).toBeGreaterThan(3000);
     expect(excludedPointMask(pattern.points.map((p) => p.yObs)).filter(Boolean).length).toBeGreaterThan(100);
   });
@@ -182,10 +204,14 @@ describe.skipIf(!has)("real powder XRD — GaNb4Se8 (NSLS-II 28ID synchrotron)",
     expect(get("profU").value).toBeCloseTo(inst.u ?? 0, 6);
     expect(get("profW").value).not.toBeCloseTo(inst.w ?? 1, 3);
 
-    // Per-site ADPs refined to finite, non-negative values.
+    // Per-site ADPs refined to finite values: isotropic B for Uiso sites and
+    // symmetry-adapted U tensor modes for the Nb Uani site.
     const bs = out.parameters.filter((p) => p.kind === "bIso");
-    expect(bs.length).toBe(structure.sites.length);
+    expect(bs.length).toBe(structure.sites.filter((s) => s.adp.kind === "isotropic").length);
     expect(bs.every((p) => p.value >= 0 && Number.isFinite(p.value))).toBe(true);
+    const us = out.parameters.filter((p) => p.kind === "uAniso");
+    expect(us.length).toBe(2);
+    expect(us.every((p) => Number.isFinite(p.value))).toBe(true);
 
     // All three general (x,x,x) sites contribute a positional mode; the fixed
     // (3/4,3/4,3/4) site contributes none. (Regression on the coord>0.5 bug that
@@ -200,6 +226,38 @@ describe.skipIf(!has)("real powder XRD — GaNb4Se8 (NSLS-II 28ID synchrotron)",
     expect(wRend).toBeLessThan(wRstart);
     expect(wRend).toBeLessThan(40);
     expect(elapsed).toBeLessThan(15000);
-    console.log(`GaNb4Se8 staged: wR ${wRstart.toFixed(1)}%→${wRend.toFixed(1)}% · Rp=${(100 * af.rFactor).toFixed(1)}% Rexp=${(100 * (af.rExpected ?? 0)).toFixed(1)}% GoF=${af.goodnessOfFit?.toFixed(1)} · ${posModes.length} pos modes · W ${(inst.w ?? 0).toFixed(2)}→${get("profW").value.toFixed(2)} · ${elapsed}ms`);
+    console.log(`GaNb4Se8 staged: wR ${wRstart.toFixed(1)}%→${wRend.toFixed(1)}% · Rp=${(100 * af.rFactor).toFixed(1)}% Rexp=${(100 * (af.rExpected ?? 0)).toFixed(1)}% GoF=${af.goodnessOfFit?.toFixed(1)} · ${posModes.length} pos modes · ${us.length} Uani modes · W ${(inst.w ?? 0).toFixed(2)}→${get("profW").value.toFixed(2)} · ${elapsed}ms`);
+  });
+
+  it("restrained occupancy refinement stays chemically plausible on real data", () => {
+    const { structure, pattern } = loadPattern();
+    const inst = loadInstrument();
+    const CWPROFILE = { shape: "pseudoVoigt" as const, eta: 0.5, lorentz: false };
+    const spec = buildStructureRefinement(structure, pattern, {
+      scale: 1,
+      backgroundTerms: 10,
+      startB: 0.3,
+      refineAdp: true,
+      refinePositions: true,
+      refineOccupancy: true,
+      occupancyRestraints: structure.sites.map((s) => ({
+        id: `occ_${s.label}_prior`,
+        sites: [{ label: s.label, coefficient: 1 }],
+        target: 1,
+        sigma: 0.001,
+      })),
+      caglioti: { u: inst.u ?? 0, v: inst.v ?? 0, w: inst.w ?? 1 },
+      zero: inst.zero ?? 0,
+    });
+    const t0 = Date.now();
+    const out = refinePowderStructure(structure, pattern, spec, CWPROFILE, { maxIterations: 30 });
+    const elapsed = Date.now() - t0;
+    const occ = out.parameters.filter((p) => p.kind === "occupancy");
+
+    expect(occ.length).toBe(structure.sites.length);
+    expect(occ.every((p) => p.value > 0.85 && p.value <= 1)).toBe(true);
+    expect(out.parameters.every((p) => Number.isFinite(p.value))).toBe(true);
+    expect(elapsed).toBeLessThan(20000);
+    console.log(`GaNb4Se8 restrained occupancy: ${occ.map((p) => `${p.id}=${p.value.toFixed(3)}`).join(" ")} · ${elapsed}ms`);
   });
 });

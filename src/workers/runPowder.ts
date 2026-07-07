@@ -19,7 +19,7 @@ export function runPowderRefinement(req: RefinePowderRequest): RefinementResult 
     ...(req.backgroundType !== undefined ? { backgroundType: req.backgroundType } : {}),
   };
   const build = (params: readonly RefinePowderRequest["parameters"][number][]) =>
-    buildPowderProblem(req.structure, req.pattern, params, req.bindings, profile);
+    buildPowderProblem(req.structure, req.pattern, params, req.bindings, profile, req.restraints ?? []);
 
   if (req.staged && req.staged.length > 0) {
     const out = refineStaged(req.parameters, build, stagesFromKindGroups(req.staged), req.options ?? {});

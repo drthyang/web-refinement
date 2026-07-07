@@ -12,8 +12,7 @@ scope and honesty statements live in [LIMITATIONS.md](./LIMITATIONS.md).
 
 ## Design goals
 
-Inspired by the ideas behind GSAS-II, FullProf, Jana2020, and ShelX — **not** a
-clone of any of them:
+Guided by established crystallographic refinement practice:
 
 - Transparent, inspectable data models.
 - Reproducible project files (plain JSON, versioned schema).

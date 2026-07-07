@@ -124,7 +124,8 @@ function unitFromRange(rows: number[][]): { xUnit: PowderXUnit; note: string } {
 function radiationFor(xUnit: PowderXUnit, instrument?: InstrumentParameters): Radiation {
   if (xUnit === "tof") return { kind: "neutron-tof" };
   const wavelength = instrument?.kind === "constantWavelength" ? instrument.wavelength : DEFAULT_WAVELENGTH;
-  return { kind: "neutron", wavelength };
+  const kind = instrument?.kind === "constantWavelength" ? instrument.radiationKind ?? "neutron" : "neutron";
+  return { kind, wavelength };
 }
 
 /** Resolve data type + x-unit for a loaded file. Never throws. */

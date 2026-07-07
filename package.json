@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:ganb4se8": "GANB4SE8_REQUIRED=1 vitest run src/core/workflow/realPowderXRD.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit"
   },

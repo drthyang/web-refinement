@@ -19,6 +19,7 @@ describe("parseInstrumentParameters", () => {
     const p = parseInstrumentParameters(text);
     expect(p.kind).toBe("constantWavelength");
     if (p.kind !== "constantWavelength") throw new Error("wrong kind");
+    expect(p.radiationKind).toBe("xray");
     expect(p.wavelength).toBeCloseTo(0.1665, 6);
     expect(p.zero).toBe(0);
     expect(p.u).toBeCloseTo(-46.054, 3);

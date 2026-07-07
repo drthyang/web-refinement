@@ -9,7 +9,7 @@
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
-import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
+import type { LinearRestraint, ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
 import { weightsFromSigma, excludedPointMask, applyExclusionMask } from "@/core/refinement/factors";
 import { resolveTies } from "@/core/refinement/constraints";
@@ -18,7 +18,7 @@ import { generateReflections } from "@/core/diffraction/reflections";
 import { powderPeakIntensities, cylinderAbsorption } from "@/core/diffraction/intensity";
 import { braggTheta } from "@/core/crystal/unitCell";
 import { synthesizePattern, cagliotiFwhm, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
-import type { BackgroundType } from "@/core/diffraction/background";
+import { evaluateBackground, type BackgroundType } from "@/core/diffraction/background";
 
 /** Powder profile + intensity options for the refinement workflow. */
 export interface PowderProfile {
@@ -100,14 +100,21 @@ export function buildPowderProblem(
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
   profile: PowderProfile = { shape: "gaussian" },
+  restraints: readonly LinearRestraint[] = [],
 ): RefinementProblem {
   const xValues = pattern.points.map((p) => p.x);
   const yObs = pattern.points.map((p) => p.yObs);
-  const observations = Float64Array.from(yObs);
-  const weights = applyExclusionMask(
+  const observations = Float64Array.from([...yObs, ...restraints.map((r) => r.target)]);
+  const diffractionWeights = applyExclusionMask(
     weightsFromSigma(pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1))),
     excludedPointMask(yObs),
   );
+  const weights = new Float64Array(observations.length);
+  weights.set(diffractionWeights, 0);
+  for (let i = 0; i < restraints.length; i++) {
+    const sigma = Math.max(restraints[i]!.sigma, 1e-12);
+    weights[xValues.length + i] = 1 / (sigma * sigma);
+  }
   const applyLorentz = profile.lorentz ?? true;
 
   const calculate = (values: Readonly<Record<string, number>>): Float64Array => {
@@ -120,7 +127,17 @@ export function buildPowderProblem(
       ...(profile.backgroundType !== undefined ? { backgroundType: profile.backgroundType } : {}),
       ...(applied.background.length ? { background: applied.background } : {}),
     };
-    return synthesizePattern(xValues, peaks, opts);
+    const yCalc = synthesizePattern(xValues, peaks, opts);
+    if (restraints.length === 0) return yCalc;
+    const withRestraints = new Float64Array(yCalc.length + restraints.length);
+    withRestraints.set(yCalc, 0);
+    for (let i = 0; i < restraints.length; i++) {
+      const restraint = restraints[i]!;
+      let value = 0;
+      for (const term of restraint.terms) value += term.coefficient * (resolved[term.parameterId] ?? 0);
+      withRestraints[yCalc.length + i] = value;
+    }
+    return withRestraints;
   };
 
   return { parameters, observations, weights, calculate };
@@ -130,6 +147,7 @@ export interface PowderCurves {
   readonly x: number[];
   readonly yObs: number[];
   readonly yCalc: number[];
+  readonly yBackground?: number[];
   readonly diff: number[];
 }
 
@@ -147,6 +165,12 @@ export function powderCurves(
   const yCalc = problem.calculate(values);
   const x = pattern.points.map((p) => p.x);
   const yObs = pattern.points.map((p) => p.yObs);
+  const resolved = resolveTies(parameters, values);
+  const applied = applyParameters(structure, bindings, resolved);
+  const xMin = Math.min(...x);
+  const xMax = Math.max(...x);
+  const bgType = profile.backgroundType ?? "chebyshev";
+  const yBackground = x.map((xv) => evaluateBackground(xv, applied.background, bgType, xMin, xMax));
   const diff = yObs.map((o, i) => o - (yCalc[i] ?? 0));
-  return { x, yObs, yCalc: Array.from(yCalc), diff };
+  return { x, yObs, yCalc: Array.from(yCalc), yBackground, diff };
 }

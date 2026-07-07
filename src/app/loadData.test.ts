@@ -38,6 +38,13 @@ describe("powderOptsFromInstrument", () => {
     expect(opts.radiation).toEqual({ kind: "neutron", wavelength: 1.54 });
   });
 
+  it("preserves X-ray radiation for constant-wavelength instruments", () => {
+    const opts = powderOptsFromInstrument({ kind: "constantWavelength", radiationKind: "xray", wavelength: 0.1665 }, "id", "f.dat");
+    expect(opts.xUnit).toBe("twoTheta");
+    expect(opts.wavelength).toBe(0.1665);
+    expect(opts.radiation).toEqual({ kind: "xray", wavelength: 0.1665 });
+  });
+
   it("maps TOF instruments to a tof pattern", () => {
     const opts = powderOptsFromInstrument({ kind: "tof", difC: 5000 }, "id", "f.dat");
     expect(opts.xUnit).toBe("tof");

@@ -12,8 +12,9 @@ bundled GSAS-II refinements in `data/` (30 K / 200 K / 350 K).
 > **Update (maturity pass):** added multi-phase powder, Le Bail extraction,
 > anisotropic ADPs, March-Dollase preferred orientation, TOF/instrument support,
 > magnetic powder refinement, and grouped constraints; benchmarked against
-> GSAS-II / Jana2020 / FullProf ([COMPARISON.md](./COMPARISON.md)) with a path to
-> parity ([MATURITY_PLAN.md](./MATURITY_PLAN.md)). Earlier magnetic work is in §3.
+> GSAS-II / Jana2020 / FullProf ([COMPARISON.md](./COMPARISON.md)); remaining
+> maturity work is tracked in [MATURITY_PLAN.md](./MATURITY_PLAN.md). Earlier
+> magnetic work is in §3.
 
 ---
 
@@ -130,7 +131,7 @@ refinement (Phase 7) is not yet wired — only magnetic single-crystal.
 
 ## 4. Honest limitations
 
-- **Not a Rietveld replacement.** GSAS-II's own fit here is a two-phase TOF
+- **Rietveld comparison scope.** GSAS-II's own fit here is a two-phase TOF
   Rietveld with instrument profile functions (difC, α/β/σ coefficients),
   background, and profile terms beyond this minimal engine. We validate the
   shared foundations and self-consistency, **not** GSAS-II's wR (11.96 %).
@@ -145,8 +146,8 @@ refinement (Phase 7) is not yet wired — only magnetic single-crystal.
   convention (normalized crystal axes) is a documented simplification, validated
   against GSAS-II moment magnitudes.
 
-Full detail in [LIMITATIONS.md](./LIMITATIONS.md). The standing scope disclaimer
-appears in the app UI, README, and limitations doc.
+Full detail in [LIMITATIONS.md](./LIMITATIONS.md). The scope statement appears
+in the app UI, README, and limitations doc.
 
 ---
 

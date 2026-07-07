@@ -23,6 +23,7 @@ export type ParameterKind =
   | "positionShift"
   | "occupancy"
   | "bIso"
+  | "uAniso"
   | "peakWidth"
   | "profileU"
   | "profileV"
@@ -91,6 +92,26 @@ export interface ParameterBinding {
    * special-position coordinates (e.g. (x,x,x) → [1,1,1]) move together.
    */
   readonly axis?: readonly [number, number, number];
+  /**
+   * Symmetry-adapted anisotropic ADP tensor mode, ordered as
+   * [U11, U22, U33, U12, U13, U23]. A `uAniso` parameter sets the site's full
+   * U tensor through the sum of all bound modes for that site.
+   */
+  readonly uBasis?: readonly [number, number, number, number, number, number];
+}
+
+/** A soft linear restraint appended as pseudo-observation to least squares. */
+export interface LinearRestraint {
+  readonly id: string;
+  readonly label: string;
+  /** Target value for Σ coefficient·parameter. */
+  readonly target: number;
+  /** Standard uncertainty of the restraint; smaller means stronger. */
+  readonly sigma: number;
+  readonly terms: readonly {
+    readonly parameterId: string;
+    readonly coefficient: number;
+  }[];
 }
 
 /** Convergence/termination status of a refinement run. */
@@ -121,6 +142,30 @@ export interface RefinementIteration {
   readonly agreement: AgreementFactors;
 }
 
+/** Pair of parameters whose covariance implies near-linear dependence. */
+export interface RefinementCorrelation {
+  readonly parameterIdA: string;
+  readonly parameterIdB: string;
+  readonly coefficient: number;
+}
+
+/** Numerical diagnostics from the least-squares Hessian. */
+export interface RefinementDiagnostics {
+  /**
+   * Number of near-null Hessian directions dropped by the SVD-style
+   * pseudo-inverse used for covariance/ESD estimation.
+   */
+  readonly svdZeroCount: number;
+  /** Parameters with the largest participation in dropped singular directions. */
+  readonly singularParameterIds: readonly string[];
+  /** Effective condition number of the retained Hessian spectrum. */
+  readonly conditionNumber: number;
+  /** Strong parameter correlations, sorted by absolute coefficient. */
+  readonly highCorrelations: readonly RefinementCorrelation[];
+  /** Largest LM damping value reached while searching for accepted steps. */
+  readonly maxLambda: number;
+}
+
 /** Full result of a refinement run. */
 export interface RefinementResult {
   readonly status: RefinementStatus;
@@ -131,6 +176,8 @@ export interface RefinementResult {
   readonly agreement: AgreementFactors;
   /** Per-iteration history, oldest first. */
   readonly history: readonly RefinementIteration[];
+  /** SVD/correlation diagnostics for judging whether the fit is well-posed. */
+  readonly diagnostics?: RefinementDiagnostics;
   /** Human-readable notes, warnings, or failure reason. */
   readonly message?: string;
 }
@@ -142,4 +189,10 @@ export interface RefinementOptions {
   readonly convergenceTolerance: number;
   /** Initial Levenberg–Marquardt damping factor. */
   readonly lambda?: number;
+  /** Relative singular-value cutoff for the Hessian pseudo-inverse. */
+  readonly svdTolerance?: number;
+  /** Absolute correlation coefficient above which pairs are reported. */
+  readonly correlationThreshold?: number;
+  /** Maximum number of high-correlation pairs kept in diagnostics. */
+  readonly maxReportedCorrelations?: number;
 }

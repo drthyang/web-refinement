@@ -17,7 +17,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 ## Phase 1 — Atomic/nuclear refinement core ✅
 Minimal, correct, testable. Cell, sites, occupancies, B_iso, symmetry ops,
 reflection data, scale, (powder) background, parameter table with fixed/free +
-bounds, refinement history. Not full GSAS-II.
+bounds, refinement history.
 
 ## Phase 2 — Data models for single crystal & powder ✅
 Finalize both observation models behind one engine (types exist from Phase 0;
@@ -32,7 +32,7 @@ project JSON. Simplified structure-factor equation; modular scattering table.
 Allowed reflections → nuclear intensities → profile (Gaussian, then
 pseudo-Voigt) + background (constant, then polynomial). Refine scale, background,
 lattice, peak width. Obs/calc/difference plot; export pattern + project. Minimal
-profile refinement, not full Rietveld.
+profile refinement.
 
 ## Phase 5 — Magnetic structure model ✅
 Moments on sites, propagation vector k, magnetic form-factor interface,
@@ -63,13 +63,13 @@ cross-checks vs GSAS-II/FullProf/Jana2020 where possible. See
 
 ## Phase 10 — Documentation & limitations ✅
 Finalize `README`, `ARCHITECTURE`, `ROADMAP`, `VALIDATION`, `LIMITATIONS`,
-`PROJECT_FORMAT`, including the standing scope disclaimer.
+`PROJECT_FORMAT`, including the scope statement.
 
 ## Deferred accelerators (post-correctness)
 WebAssembly / WebGPU for structure-factor summation, profile convolution, and the
 normal-equations solve — only after the TS core is correct and validated.
 
-## Beyond the original plan — toward mature-package parity
+## Beyond the original plan — mature package coverage
 
 Added after the 10-phase plan: multi-phase powder, Le Bail extraction,
 anisotropic ADPs, March-Dollase preferred orientation, TOF/instrument support,

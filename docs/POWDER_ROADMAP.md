@@ -14,8 +14,8 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 - Background: `background` kind exists in `apply.ts` / `profile.ts` but **no
   workflow creates background parameters**, and it is a **raw-power polynomial**
   (`c0 + c1·x + …`) that overflows for wide abscissae (Q, TOF).
-- Thermal: **no atomic ADPs in the powder path**; CIF `U_iso` is read but
-  anisotropic `U_ij` is **not parsed**. Structure factor already supports both.
+- Thermal: powder refinement supports per-site isotropic B and symmetry-adapted
+  anisotropic `U_ij` modes parsed from CIF.
 - Presentation: a 12-row bond-length list; no atom table, esds, angles, or view.
 
 ---
@@ -58,11 +58,12 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 1. **Isotropic Uiso/Biso per site (powder)** ✅ — params + bindings emitted by
    `buildStructureRefinement` (per isotropic site), refined in the `ADP` stage.
    UI wiring still ⬜.
-2. **Anisotropic Uani** ⬜ — parse `_atom_site_aniso_U_11…U_23`; add `U11…U23`
-   kinds + apply; `anisotropicDebyeWaller` already consumes them.
-3. **Site-symmetry constraints on Uij** ⬜ — derive allowed ADP components from
-   site point symmetry (same null-space method as magnetic `allowedMomentDirections`).
-   Required for stable anisotropic refinement.
+2. **Anisotropic Uani** ✅ — parse `_atom_site_aniso_U_11…U_23`; emit
+   symmetry-adapted `uAniso` modes; apply them back to the full U tensor consumed
+   by `anisotropicDebyeWaller`.
+3. **Site-symmetry constraints on Uij** ✅ — allowed ADP modes are the null space
+   of `U = R U Rᵀ` over the site stabilizer. On the GaNb₄Se₈ Nb 16e site this
+   correctly gives two modes: `U11=U22=U33` and `U12=U13=U23`.
 4. **Report Ueq** from Uani ⬜.
 
 ## C½ — Atomic position refinement (the core of structure refinement)
@@ -152,9 +153,11 @@ low-angle reflection (400) under-predicted ~3× in integrated intensity.
 absorption is smooth, and the X-ray form factors are already correct Cromer-Mann —
 so it is **structural**. Freeing site occupancies drops wR to **23.4%** and fixes
 (400), but drives chemically impossible values (Nb 0.57, Ga 0.12): the classic
-occupancy↔scale↔ADP correlation on X-ray-only data. **Correct next step is not
-more corrections but occupancy constraints/restraints** (total occupancy, charge
-balance — knowledge-base §18) or the complementary neutron dataset.
+occupancy↔scale↔ADP correlation on X-ray-only data. Soft linear occupancy
+restraints are now wired as least-squares pseudo-observations; the real-data
+regression keeps restrained occupancies plausible (Nb/Se = 1.000, Ga ≈ 0.983).
+Complementary neutron data remains the stronger physical way to break this
+correlation.
 
 ## Physics / intensity model (gates real-data fit quality)
 - **Lorentz handling — selectable** ✅ (`applyLorentz` on `powderPeakIntensities`
@@ -175,9 +178,10 @@ balance — knowledge-base §18) or the complementary neutron dataset.
 **A → B → C → D.** Landed: **A1 + A3** (engine conditioning + shift limiting),
 **B1** (Chebyshev background), **A2** (analytic column for linear parameters),
 **A4** (staged/guided refinement), **C1** (per-site isotropic ADP in the powder
-path), and **C½** (symmetry-adapted atomic-position refinement) — the powder path
-now does genuine Rietveld *structure* refinement, driven by
+path), **C2/C3** (anisotropic ADP with site-symmetry modes), and **C½**
+(symmetry-adapted atomic-position refinement) — the powder path now does genuine
+Rietveld *structure* refinement, driven by
 `buildStructureRefinement` + `refinePowderStructure`
-(`workflow/structureRefinement.ts`). Next: **C2/C3** (anisotropic ADP + site
-constraints), then **D** (refined-structure presentation: atom table with esds,
-geometry, 3D view, CIF export), and the UI wiring for the staged flow.
+(`workflow/structureRefinement.ts`). Next: **D** (refined-structure
+presentation: atom table with esds, geometry, 3D view, CIF export), and the UI
+wiring for the staged flow.

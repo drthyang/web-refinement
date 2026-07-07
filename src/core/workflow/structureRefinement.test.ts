@@ -43,6 +43,44 @@ function wR(structure: StructureModel, pattern: PowderPattern, spec: ReturnType<
 }
 
 describe("powder structure refinement", () => {
+  it("emits and refines anisotropic ADP modes for Uani sites", () => {
+    const truth: StructureModel = {
+      ...exampleStructure(),
+      sites: exampleStructure().sites.map((s) =>
+        s.label === "Mn1"
+          ? { ...s, adp: { kind: "anisotropic" as const, uAniso: [0.015, 0.010, 0.006, 0.001, 0.0005, -0.0003] } }
+          : s,
+      ),
+    };
+    const wrong: StructureModel = {
+      ...truth,
+      sites: truth.sites.map((s) =>
+        s.label === "Mn1"
+          ? { ...s, adp: { kind: "anisotropic" as const, uAniso: [0.004, 0.004, 0.004, 0, 0, 0] } }
+          : s,
+      ),
+    };
+    const pattern = syntheticPattern(truth, { refineAdp: false, refinePositions: false });
+    const spec0 = buildStructureRefinement(wrong, pattern, {
+      scale: TRUE_SCALE,
+      width: TRUE_WIDTH,
+      backgroundTerms: 1,
+      refineAdp: false,
+      refineAnisotropicAdp: true,
+      refinePositions: false,
+    });
+    const spec = {
+      ...spec0,
+      params: spec0.params.map((p) => p.kind === "uAniso" ? p : { ...p, fixed: true }),
+    };
+
+    const out = refinePowderStructure(wrong, pattern, spec, PROFILE, { maxIterations: 50 });
+    const u = out.parameters.filter((p) => p.kind === "uAniso");
+    expect(u.length).toBeGreaterThan(0);
+    expect(u.every((p) => Number.isFinite(p.value))).toBe(true);
+    expect(wR(wrong, pattern, { ...spec, params: out.parameters })).toBeLessThan(2);
+  });
+
   it("recovers a displaced atomic coordinate on a special position", () => {
     const truth = exampleStructure();
     const pattern = syntheticPattern(truth);
@@ -134,5 +172,25 @@ describe("powder structure refinement", () => {
     const profileStage = spec.stages.find((s) => s.name === "profile")!;
     expect(spec.params.filter((p) => profileStage.select(p)).map((p) => p.kind).sort())
       .toEqual(["profileU", "profileV", "profileW", "zeroShift"]);
+  });
+
+  it("adds soft occupancy restraints for weighted site totals", () => {
+    const structure = exampleStructure();
+    const spec = buildStructureRefinement(structure, syntheticPattern(structure), {
+      refineAdp: false,
+      refinePositions: false,
+      refineOccupancy: true,
+      occupancyRestraints: [{
+        id: "mn-ga-total",
+        sites: [{ label: "Mn1" }, { label: "Ga1" }],
+        sigma: 0.05,
+      }],
+    });
+    expect(spec.restraints).toHaveLength(1);
+    const restraint = spec.restraints[0]!;
+    expect(restraint.terms.map((t) => t.parameterId).sort()).toEqual(["occ_Ga1", "occ_Mn1"]);
+    // Target defaults to the starting multiplicity-weighted occupancy total.
+    const expected = structure.sites.reduce((acc, s) => acc + (s.multiplicity ?? 1) * s.occupancy, 0);
+    expect(restraint.target).toBeCloseTo(expected, 6);
   });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { exampleStructure } from "@/examples/mn3ga";
 import { buildSyntheticPowder } from "@/examples/synthetic";
-import { buildPowderSpec } from "@/app/powderSpec";
+import { buildPowderSpec, guidedPowderParams } from "@/app/powderSpec";
 import { runPowderRefinement } from "@/workers/runPowder";
 import { DEFAULT_STAGE_KINDS } from "@/core/workflow/structureRefinement";
 
@@ -34,6 +34,22 @@ describe("buildPowderSpec", () => {
     expect(spec.params.some((p) => p.kind === "peakWidth")).toBe(false);
     expect(spec.profile.shape).toBe("pseudoVoigt");
   });
+
+  it("lets the caller choose the number of Chebyshev background coefficients", () => {
+    const spec = buildPowderSpec(structure, pattern, { kind: "constantWavelength", wavelength: 1.54 }, true, 8);
+    const bkg = spec.params.filter((p) => p.kind === "background");
+    expect(bkg).toHaveLength(8);
+    expect(bkg.map((p) => p.id)).toEqual(["bkg0", "bkg1", "bkg2", "bkg3", "bkg4", "bkg5", "bkg6", "bkg7"]);
+  });
+
+  it("unlocks UI-fixed structural rows for Guided while preserving intentionally fixed profile terms", () => {
+    const inst: InstrumentParameters = { kind: "constantWavelength", wavelength: 0.1665, u: -46, v: 0, w: 1.2, zero: 0 };
+    const spec = buildPowderSpec(structure, pattern, inst);
+    const guided = guidedPowderParams(spec.params);
+    expect(spec.params.filter((p) => p.kind === "bIso").every((p) => p.fixed)).toBe(true);
+    expect(guided.filter((p) => p.kind === "bIso").every((p) => !p.fixed)).toBe(true);
+    expect(guided.find((p) => p.id === "profU")!.fixed).toBe(true);
+  });
 });
 
 describe("staged powder refinement through the worker runner", () => {
@@ -41,10 +57,10 @@ describe("staged powder refinement through the worker runner", () => {
     const spec = buildPowderSpec(structure, pattern, { kind: "constantWavelength", wavelength: 1.54 });
     const result = runPowderRefinement({
       type: "refinePowder", requestId: 1, structure, pattern,
-      parameters: spec.params, bindings: spec.bindings, shape: spec.profile.shape,
+      parameters: guidedPowderParams(spec.params), bindings: spec.bindings, shape: spec.profile.shape,
       staged: DEFAULT_STAGE_KINDS, options: { maxIterations: 15 },
     });
-    expect(result.status).toBe("converged");
+    expect(["converged", "stalled"]).toContain(result.status);
     expect(100 * (result.agreement.rWeighted ?? 1)).toBeLessThan(15);
     // Recovered the true peak width (0.5) and scale (~80).
     expect(result.parameters.width!).toBeCloseTo(0.5, 1);

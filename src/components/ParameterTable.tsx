@@ -25,6 +25,7 @@ const CATEGORY: Record<ParameterKind, string> = {
   profileW: "Instrument / profile",
   zeroShift: "Instrument / profile",
   bIso: "ADPs (thermal)",
+  uAniso: "ADPs (thermal)",
   atomX: "Positions",
   atomY: "Positions",
   atomZ: "Positions",
@@ -108,13 +109,21 @@ function GroupBody({
         <tr key={p.id} style={{ borderBottom: "1px solid #eee" }}>
           <td style={{ ...cell, paddingLeft: 16 }}>{p.label}</td>
           <td style={cell}>
-            <input
-              type="number"
-              value={p.value}
-              step="any"
-              style={{ width: 100 }}
-              onChange={(e) => onChange(p.id, { value: Number(e.target.value) })}
-            />
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="number"
+                value={p.value}
+                min={p.min}
+                max={p.max}
+                step="any"
+                style={{ width: 100 }}
+                title={boundLabel(p)}
+                onChange={(e) => onChange(p.id, { value: Number(e.target.value) })}
+              />
+              {boundLabel(p) !== undefined && (
+                <span style={{ fontSize: 11, color: "#9a3412", whiteSpace: "nowrap" }}>{boundLabel(p)}</span>
+              )}
+            </div>
           </td>
           <td style={cell}>{esd && esd[p.id] !== undefined ? esd[p.id]!.toPrecision(3) : "—"}</td>
           <td style={cell}>
@@ -128,6 +137,13 @@ function GroupBody({
       ))}
     </>
   );
+}
+
+function boundLabel(p: RefinementParameter): string | undefined {
+  const tol = Math.max(1e-10, Math.abs(p.value) * 1e-10);
+  if (p.max !== undefined && p.value >= p.max - tol) return "at max";
+  if (p.min !== undefined && p.value <= p.min + tol) return "at min";
+  return undefined;
 }
 
 const cell: React.CSSProperties = { padding: "4px 8px" };

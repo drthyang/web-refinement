@@ -2,7 +2,10 @@
 
 Purpose: guide implementation of fast, stable fitting algorithms for atomic and magnetic structure refinement in a browser/WebGPU-capable refinement package.
 
-This document is inspired by established refinement software principles used in programs such as GSAS-II, FullProf, and Jana2020. Do not copy their internal implementation. Implement the general numerical and crystallographic principles in a clean, independent codebase.
+This document is inspired by established crystallographic refinement practice in
+programs such as GSAS-II, FullProf, and Jana2020. Do not copy their internal
+implementation. Implement the general numerical and crystallographic principles
+in a clean, independent codebase.
 
 ---
 
@@ -357,7 +360,8 @@ rank candidates
 suggest next parameter group
 ```
 
-This should guide staged refinement. It should not replace crystallographic judgment.
+This should guide staged refinement while keeping crystallographic judgment in
+the loop.
 
 ---
 

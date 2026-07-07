@@ -60,6 +60,16 @@ describe("detectDataFormat — x-unit priority chain", () => {
     expect(cw.radiation).toEqual({ kind: "neutron", wavelength: 2.4 });
   });
 
+  it("preserves X-ray radiation from a GSAS-II PXC instrument file", () => {
+    const d = detectDataFormat({
+      text: "1.5,100\n1.6,120\n1.7,110",
+      filename: "GaNb4Se8_799_T_298.8K_gsas.dat",
+      instrument: { kind: "constantWavelength", radiationKind: "xray", wavelength: 0.1665 },
+    });
+    expect(d.xUnit).toBe("twoTheta");
+    expect(d.radiation).toEqual({ kind: "xray", wavelength: 0.1665 });
+  });
+
   it("recognizes a GSAS-II CSV as TOF, beating even a CW instrument", () => {
     const csv = `"limits",0.5,5.2\n"masked X","X","obs","calc","bkg","diff"\n--,3390,48,45,5,-2`;
     const d = detectDataFormat({ text: csv, filename: "fitted_results.csv", instrument: { kind: "constantWavelength", wavelength: 1.54 } });

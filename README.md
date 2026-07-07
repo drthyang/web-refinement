@@ -6,10 +6,9 @@ backend for the core workflow. Heavy computation runs in Web Workers;
 WebAssembly/WebGPU are future accelerators.
 
 > This package is an early browser-native refinement workbench for transparent
-> model building, simulation, and basic constrained refinement. It is **not yet a
-> replacement** for GSAS-II, FullProf, Jana2020, ShelX, or other established
-> crystallographic refinement suites. Results intended for publication must be
-> validated against established tools and expert crystallographic judgment.
+> model building, simulation, and basic constrained refinement. Results intended
+> for publication must be validated against established tools and expert
+> crystallographic judgment.
 
 ## Status
 
@@ -28,7 +27,13 @@ npm install     # install dependencies
 npm run dev     # start the local dev server
 npm run build   # type-check and build the static site
 npm run test    # run the test suite (Vitest)
+npm run test:ganb4se8  # required real-data powder regression
 ```
+
+Use `npm run test:ganb4se8` for refinement-engine changes. It requires the local
+`data/GaNb4Se8_XRD/` files and fails if they are missing; this dataset is the
+primary real-data check because it exposes the current build's powder-refinement
+failure modes much better than synthetic examples.
 
 ## What it will do
 
@@ -62,7 +67,7 @@ calculations run in Web Workers. Full detail in
 - [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project JSON format
 - [docs/REFINEMENT_PROCEDURE.md](docs/REFINEMENT_PROCEDURE.md) — the guided 7-step workflow
 - [docs/COMPARISON.md](docs/COMPARISON.md) — features vs GSAS-II / Jana2020 / FullProf
-- [docs/MATURITY_PLAN.md](docs/MATURITY_PLAN.md) — roadmap toward mature-package parity
+- [docs/MATURITY_PLAN.md](docs/MATURITY_PLAN.md) — maturity roadmap
 - [docs/REPORT.md](docs/REPORT.md) — build & validation report
 
 ## License

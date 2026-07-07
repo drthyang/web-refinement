@@ -41,8 +41,11 @@ export type {
   RefinementStatus,
   AgreementFactors,
   RefinementIteration,
+  RefinementCorrelation,
+  RefinementDiagnostics,
   RefinementResult,
   RefinementOptions,
+  LinearRestraint,
 } from "@/core/refinement/types";
 
 export type {

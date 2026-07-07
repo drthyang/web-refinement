@@ -12,12 +12,14 @@
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
-import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
+import type { LinearRestraint, ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementOptions } from "@/core/refinement/types";
 import { refineStaged, type RefinementStage, type StagedRefinementResult } from "@/core/refinement/staged";
 import { buildPowderProblem, type PowderProfile } from "@/core/workflow/powder";
 import { independentCellParameters } from "@/core/crystal/cellConstraints";
 import { allowedPositionShifts } from "@/core/crystal/siteConstraints";
+import { allowedAnisotropicAdpModes } from "@/core/crystal/adpConstraints";
+import { siteMultiplicity } from "@/core/crystal/symmetry";
 
 export interface StructureRefinementOptions {
   /** Starting scale factor (seed with `optimalScale` for real data). Default 1. */
@@ -49,10 +51,18 @@ export interface StructureRefinementOptions {
   readonly startB?: number;
   /** Refine per-site isotropic ADP (B_iso). Default true. */
   readonly refineAdp?: boolean;
+  /** Refine symmetry-adapted anisotropic ADP modes for Uani sites. Default follows `refineAdp`. */
+  readonly refineAnisotropicAdp?: boolean;
   /** Refine symmetry-adapted atomic positions. Default true. */
   readonly refinePositions?: boolean;
   /** Refine site occupancies. Default false. */
   readonly refineOccupancy?: boolean;
+  /**
+   * Soft linear restraints on occupancies. Use coefficients to express total
+   * occupancy, sublattice totals, or charge-balance terms. Targets default to
+   * the starting model's weighted sum.
+   */
+  readonly occupancyRestraints?: readonly OccupancyRestraint[];
   /** Max fractional shift of a positional mode from its start. Default 0.2. */
   readonly positionBound?: number;
   /**
@@ -73,8 +83,23 @@ export interface StructureRefinementOptions {
 export interface StructureRefinementSpec {
   readonly params: RefinementParameter[];
   readonly bindings: ParameterBinding[];
+  readonly restraints: LinearRestraint[];
   /** Expert-order stages for `refineStaged` (cumulative). */
   readonly stages: RefinementStage[];
+}
+
+export interface OccupancyRestraint {
+  readonly id?: string;
+  readonly label?: string;
+  readonly sites: readonly {
+    readonly label: string;
+    /** Defaults to the site's crystallographic multiplicity. */
+    readonly coefficient?: number;
+  }[];
+  /** Defaults to the starting model's weighted occupancy sum. */
+  readonly target?: number;
+  /** Default 0.02 occupancy units after coefficients. */
+  readonly sigma?: number;
 }
 
 /**
@@ -98,8 +123,10 @@ export function buildStructureRefinement(
     refineU = false,
     startB = 0.5,
     refineAdp = true,
+    refineAnisotropicAdp = refineAdp,
     refinePositions = true,
     refineOccupancy = false,
+    occupancyRestraints = [],
     positionBound = 0.2,
     preferredOrientation,
     absorption,
@@ -108,6 +135,7 @@ export function buildStructureRefinement(
 
   const params: RefinementParameter[] = [];
   const bindings: ParameterBinding[] = [];
+  const restraints: LinearRestraint[] = [];
 
   // Scale.
   params.push({ id: "scale", label: "scale", kind: "scale", value: scale, initialValue: scale, min: 0, fixed: false });
@@ -152,13 +180,36 @@ export function buildStructureRefinement(
     bindings.push({ parameterId: "zero", kind: "zeroShift", targetId: pattern.id });
   }
 
-  // Per-site isotropic ADP.
+  // Per-site ADP. Isotropic sites refine B_iso; anisotropic sites refine the
+  // symmetry-adapted U tensor modes allowed by site symmetry.
   if (refineAdp) {
     for (const site of structure.sites) {
       if (site.adp.kind !== "isotropic") continue;
       const id = `B_${site.label}`;
       params.push({ id, label: `${site.label} B`, kind: "bIso", value: startB, initialValue: startB, min: 0, max: 10, fixed: false });
       bindings.push({ parameterId: id, kind: "bIso", targetId: structure.id, targetKey: site.label });
+    }
+  }
+  if (refineAnisotropicAdp) {
+    for (const site of structure.sites) {
+      if (site.adp.kind !== "anisotropic") continue;
+      const allowed = allowedAnisotropicAdpModes(structure.spaceGroup.operations, site.position, site.adp.uAniso);
+      allowed.modes.forEach((mode, i) => {
+        const id = `U_${site.label}_${i}`;
+        const abs = Math.abs(mode.coefficient);
+        const span = Math.max(0.02, abs * 4);
+        params.push({
+          id,
+          label: `${site.label} ${mode.label}`,
+          kind: "uAniso",
+          value: mode.coefficient,
+          initialValue: mode.coefficient,
+          min: mode.diagonal ? 0 : mode.coefficient - span,
+          max: mode.diagonal ? Math.max(0.2, mode.coefficient + span) : mode.coefficient + span,
+          fixed: false,
+        });
+        bindings.push({ parameterId: id, kind: "uAniso", targetId: structure.id, targetKey: site.label, uBasis: mode.basis });
+      });
     }
   }
 
@@ -186,6 +237,7 @@ export function buildStructureRefinement(
       params.push({ id, label: `${site.label} occ`, kind: "occupancy", value: site.occupancy, initialValue: site.occupancy, min: 0, max: 1, fixed: false });
       bindings.push({ parameterId: id, kind: "occupancy", targetId: structure.id, targetKey: site.label });
     }
+    restraints.push(...buildOccupancyRestraints(structure, occupancyRestraints));
   }
 
   // Corrections: preferred orientation (March–Dollase) and cylinder absorption.
@@ -198,7 +250,7 @@ export function buildStructureRefinement(
     bindings.push({ parameterId: "absorption", kind: "absorption", targetId: pattern.id });
   }
 
-  return { params, bindings, stages: defaultStages() };
+  return { params, bindings, restraints, stages: defaultStages() };
 }
 
 /**
@@ -214,8 +266,34 @@ export function refinePowderStructure(
   options: Partial<RefinementOptions> = {},
 ): StagedRefinementResult {
   const buildProblem = (params: readonly RefinementParameter[]) =>
-    buildPowderProblem(structure, pattern, params, spec.bindings, profile);
+    buildPowderProblem(structure, pattern, params, spec.bindings, profile, spec.restraints);
   return refineStaged(spec.params, buildProblem, spec.stages, options);
+}
+
+function buildOccupancyRestraints(
+  structure: StructureModel,
+  specs: readonly OccupancyRestraint[],
+): LinearRestraint[] {
+  const byLabel = new Map(structure.sites.map((s) => [s.label, s]));
+  return specs.map((spec, idx) => {
+    const terms = spec.sites.map((siteSpec) => {
+      const site = byLabel.get(siteSpec.label);
+      if (!site) throw new Error(`Unknown occupancy restraint site: ${siteSpec.label}`);
+      const coefficient = siteSpec.coefficient ?? site.multiplicity ?? siteMultiplicity(structure.spaceGroup.operations, site.position);
+      return { parameterId: `occ_${site.label}`, coefficient };
+    });
+    const target = spec.target ?? terms.reduce((acc, term) => {
+      const label = term.parameterId.slice("occ_".length);
+      return acc + term.coefficient * (byLabel.get(label)?.occupancy ?? 0);
+    }, 0);
+    return {
+      id: spec.id ?? `occ_restraint_${idx}`,
+      label: spec.label ?? `occupancy restraint ${idx + 1}`,
+      target,
+      sigma: spec.sigma ?? 0.02,
+      terms,
+    };
+  });
 }
 
 /**
@@ -263,7 +341,7 @@ export const DEFAULT_STAGE_KINDS: readonly StageKinds[] = [
   { name: "background", kinds: ["background"] },
   { name: "cell", kinds: ["cellLength", "cellAngle"] },
   { name: "profile", kinds: ["peakWidth", "profileU", "profileV", "profileW", "zeroShift"] },
-  { name: "ADP", kinds: ["bIso"] },
+  { name: "ADP", kinds: ["bIso", "uAniso"] },
   { name: "positions", kinds: ["positionShift"] },
   { name: "occupancy", kinds: ["occupancy"] },
   { name: "corrections", kinds: ["poRatio", "absorption"] },

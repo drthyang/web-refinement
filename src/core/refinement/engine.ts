@@ -18,7 +18,12 @@ import type {
   RefinementStatus,
 } from "@/core/refinement/types";
 import { chiSquared, computeAgreementFactors } from "@/core/refinement/factors";
-import { invertMatrix, solveLinearSystem, type Matrix } from "@/core/math/linalg";
+import {
+  pseudoInverseSymmetric,
+  solveSymmetricPseudoInverse,
+  type Matrix,
+  type SymmetricPseudoInverseResult,
+} from "@/core/math/linalg";
 
 /** The problem handed to the engine. `calculate` maps all param values → y_calc. */
 export interface RefinementProblem {
@@ -32,6 +37,9 @@ const DEFAULT_OPTIONS: RefinementOptions = {
   maxIterations: 20,
   convergenceTolerance: 1e-4,
   lambda: 1e-3,
+  svdTolerance: 1e-6,
+  correlationThreshold: 0.95,
+  maxReportedCorrelations: 12,
 };
 
 /**
@@ -183,6 +191,44 @@ function normalEquations(jac: Matrix, r: Float64Array): { jtj: Matrix; jtr: numb
   return { jtj, jtr };
 }
 
+function normalizedPseudoInverse(
+  jtj: Matrix,
+  rcond: number,
+): { covarianceBase: Matrix; diagnostics: SymmetricPseudoInverseResult } {
+  const scale = jtj.map((row, j) => {
+    const d = row[j]!;
+    return d > 0 && Number.isFinite(d) ? Math.sqrt(d) : 1;
+  });
+  const normalized = jtj.map((row, i) => row.map((v, j) => v / (scale[i]! * scale[j]!)));
+  const diagnostics = pseudoInverseSymmetric(normalized, rcond);
+  const covarianceBase = diagnostics.inverse.map((row, i) =>
+    row.map((v, j) => v / (scale[i]! * scale[j]!)),
+  );
+  return { covarianceBase, diagnostics };
+}
+
+function highCorrelations(
+  covariance: Matrix,
+  ids: readonly string[],
+  threshold: number,
+  maxPairs: number,
+) {
+  const pairs: { parameterIdA: string; parameterIdB: string; coefficient: number }[] = [];
+  for (let i = 0; i < covariance.length; i++) {
+    const vi = covariance[i]![i]!;
+    if (!(vi > 0)) continue;
+    for (let j = i + 1; j < covariance.length; j++) {
+      const vj = covariance[j]![j]!;
+      if (!(vj > 0)) continue;
+      const coefficient = covariance[i]![j]! / Math.sqrt(vi * vj);
+      if (Number.isFinite(coefficient) && Math.abs(coefficient) >= threshold) {
+        pairs.push({ parameterIdA: ids[i]!, parameterIdB: ids[j]!, coefficient });
+      }
+    }
+  }
+  return pairs.sort((a, b) => Math.abs(b.coefficient) - Math.abs(a.coefficient)).slice(0, maxPairs);
+}
+
 export function refine(
   problem: RefinementProblem,
   options: Partial<RefinementOptions> = {},
@@ -195,6 +241,7 @@ export function refine(
   const history: RefinementIteration[] = [];
   let freeValues = freeParams.map((p) => p.value);
   let lambda = opts.lambda ?? 1e-3;
+  let maxLambda = lambda;
 
   const evalChi = (vals: number[]): { yCalc: Float64Array; chi: number } => {
     const yCalc = problem.calculate(valuesRecord(problem.parameters, freeIds, vals));
@@ -216,13 +263,14 @@ export function refine(
 
   let current = evalChi(freeValues);
   let status: RefinementStatus = "maxIterations";
-  let lastJtj: Matrix | null = null;
+  const solveDropped = new Set<string>();
+  let maxSolveZeroCount = 0;
+  let maxSolveConditionNumber = 0;
 
   for (let iter = 0; iter < opts.maxIterations; iter++) {
     const r = weightedResiduals(problem.observations, current.yCalc, problem.weights);
     const jac = computeJacobian(problem, freeParams, freeValues, current.yCalc);
     const { jtj, jtr } = normalEquations(jac, r);
-    lastJtj = jtj;
 
     // Gradient norm ‖Jᵀr‖: near zero means we sit at a (local) minimum.
     const gradNorm = Math.sqrt(jtr.reduce((acc, v) => acc + v * v, 0));
@@ -241,18 +289,29 @@ export function refine(
     // LM damping on the (unit-diagonal) scaled system; retry with larger λ.
     let stepAccepted = false;
     for (let attempt = 0; attempt < 15 && !stepAccepted; attempt++) {
+      maxLambda = Math.max(maxLambda, lambda);
       const damped: Matrix = A.map((row, i) => row.map((v, j) => (i === j ? v + lambda : v)));
-      let y: number[];
-      try {
-        // Solve (D·JᵀJ·D + λI)·y = −D·Jᵀr, then unscale Δp_j = y_j / s_j.
-        y = solveLinearSystem(damped, b.map((v) => -v));
-      } catch {
-        lambda *= 10;
-        continue;
+      // Solve (D·JᵀJ·D + λI)·y = −D·Jᵀr with a truncated pseudo-inverse,
+      // then unscale Δp_j = y_j / s_j. The truncation removes near-null
+      // directions instead of letting a singular Hessian inject huge shifts.
+      const { x: y, diagnostics: solveDiagnostics } = solveSymmetricPseudoInverse(
+        damped,
+        b.map((v) => -v),
+        opts.svdTolerance ?? 1e-6,
+      );
+      maxSolveZeroCount = Math.max(maxSolveZeroCount, solveDiagnostics.zeroCount);
+      maxSolveConditionNumber = Math.max(maxSolveConditionNumber, solveDiagnostics.conditionNumber);
+      for (const dropped of solveDiagnostics.droppedIndices) {
+        const id = freeIds[dropped];
+        if (id !== undefined) solveDropped.add(id);
       }
 
       const delta = y.map((yj, j) => limitShift(yj / sc[j]!, freeValues[j]!));
-      if (delta.some((d) => !Number.isFinite(d))) { lambda *= 10; continue; }
+      if (delta.some((d) => !Number.isFinite(d))) {
+        lambda *= 10;
+        maxLambda = Math.max(maxLambda, lambda);
+        continue;
+      }
 
       const trial = freeValues.map((v, j) => clamp(v + delta[j]!, freeParams[j]!));
       const trialEval = evalChi(trial);
@@ -265,6 +324,7 @@ export function refine(
         stepAccepted = true;
       } else {
         lambda *= 3;
+        maxLambda = Math.max(maxLambda, lambda);
       }
     }
 
@@ -292,21 +352,41 @@ export function refine(
     }
   }
 
-  // Covariance & esds from (JᵀJ)⁻¹ scaled by reduced χ² (GoF²).
+  // Covariance & esds from a normalized pseudo-inverse of the final Hessian,
+  // scaled by reduced χ² (GoF²). Normalization plus SVD truncation follows the
+  // robust crystallographic least-squares pattern used by GSAS-II: keep stable
+  // directions, drop near-null ones, and report the troublemakers.
   const esd: Record<string, number> = {};
   const dof = Math.max(problem.observations.length - n, 1);
   const reducedChi = current.chi / dof;
-  if (lastJtj) {
-    try {
-      const cov = invertMatrix(lastJtj);
-      for (let j = 0; j < n; j++) {
-        const variance = cov[j]![j]! * reducedChi;
-        esd[freeIds[j]!] = variance > 0 ? Math.sqrt(variance) : 0;
-      }
-    } catch {
-      // Singular normal matrix: leave esds unset.
-    }
+  const finalResiduals = weightedResiduals(problem.observations, current.yCalc, problem.weights);
+  const finalJacobian = computeJacobian(problem, freeParams, freeValues, current.yCalc);
+  const { jtj: finalJtj } = normalEquations(finalJacobian, finalResiduals);
+  const { covarianceBase, diagnostics: covDiagnostics } = normalizedPseudoInverse(
+    finalJtj,
+    opts.svdTolerance ?? 1e-6,
+  );
+  const covariance = covarianceBase.map((row) => row.map((v) => v * reducedChi));
+  for (let j = 0; j < n; j++) {
+    const variance = covariance[j]![j]!;
+    esd[freeIds[j]!] = variance > 0 ? Math.sqrt(variance) : 0;
   }
+  const singularParameterIds = Array.from(new Set([
+    ...covDiagnostics.droppedIndices.map((i) => freeIds[i]).filter((id): id is string => id !== undefined),
+    ...solveDropped,
+  ]));
+  const diagnostics = {
+    svdZeroCount: Math.max(covDiagnostics.zeroCount, maxSolveZeroCount),
+    singularParameterIds,
+    conditionNumber: Math.max(covDiagnostics.conditionNumber, maxSolveConditionNumber),
+    highCorrelations: highCorrelations(
+      covarianceBase,
+      freeIds,
+      opts.correlationThreshold ?? 0.95,
+      opts.maxReportedCorrelations ?? 12,
+    ),
+    maxLambda,
+  };
 
   const finalValues = valuesRecord(problem.parameters, freeIds, freeValues);
   const agreement: AgreementFactors = computeAgreementFactors(
@@ -322,6 +402,9 @@ export function refine(
     esd,
     agreement,
     history,
-    message: `${status} after ${history.length} iteration(s)`,
+    diagnostics,
+    message: `${status} after ${history.length} iteration(s)${
+      diagnostics.svdZeroCount > 0 ? `; SVD dropped ${diagnostics.svdZeroCount} near-null direction(s)` : ""
+    }`,
   };
 }

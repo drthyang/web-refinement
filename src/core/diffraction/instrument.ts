@@ -14,6 +14,8 @@
 export type InstrumentParameters =
   | {
       readonly kind: "constantWavelength";
+      /** Radiation family from GSAS-II Type (PXC = X-ray CW, PNC = neutron CW). */
+      readonly radiationKind?: "xray" | "neutron";
       readonly wavelength: number;
       /** Zero shift in degrees 2θ. */
       readonly zero?: number;

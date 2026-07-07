@@ -23,21 +23,34 @@ Weights:
 - Single-crystal missing σ → unit weights.
 - Raw powder counts missing σ → `σ_i = √y_obs,i` (Poisson).
 
-## Method: Levenberg–Marquardt
+## Method: Levenberg-Marquardt with SVD-stabilized Hessian solves
 
-Gauss–Newton with adaptive damping — the standard choice for crystallographic
-least squares. Each iteration solves the normal equations
+Gauss-Newton with adaptive damping: the standard local optimizer for
+crystallographic least squares. The implementation follows the same robustness
+principles used in GSAS-II's Hessian least-squares driver without copying that
+code: scale the Hessian, solve with a truncated pseudo-inverse when directions
+are near-singular, and report the unstable directions instead of hiding them.
+
+Each iteration solves the damped normal equations
 
 ```
-(JᵀWJ + λ·diag(JᵀWJ)) · Δp = JᵀW·r
+(JᵀWJ + damping) · Δp = -Jᵀr
 ```
 
-where `J_ij = ∂y_calc,i/∂p_j`, `W = diag(w_i)`, `r_i = y_obs,i − y_calc,i`.
+where `J_ij = ∂r_i/∂p_j`, `r_i = sqrt(w_i) * (y_obs,i - y_calc,i)`.
 
 - `λ` large → gradient descent (safe, slow); `λ` small → Gauss–Newton (fast near
   the minimum). `λ` is decreased on a successful step, increased on a rejected one.
-- **Jacobian:** numerical (central finite differences) first — robust and easy to
-  validate. Analytic derivatives are a later optimization for hotspots.
+- **Jacobian:** exact one-evaluation columns for affine parameters (scale,
+  magnetic scale, background); central finite differences for non-linear
+  parameters.
+- **Scaling:** the normal matrix is diagonal-preconditioned before each LM solve,
+  so scale factors, cell lengths, ADPs, and background coefficients can coexist
+  without one unit system dominating the linear algebra.
+- **SVD truncation:** the scaled Hessian is solved with a symmetric
+  Moore-Penrose pseudo-inverse. Singular values below `svdTolerance *
+  max(singularValue)` are dropped, preventing nearly-null parameter combinations
+  from producing huge shifts.
 - **Bounds:** enforced by clamping/reparameterization; parameters with `min`/`max`
   stay inside `[min, max]`.
 - **Fixed parameters** are removed from `p` entirely (not just zero-weighted), so
@@ -84,16 +97,24 @@ require weights; unweighted `R` is always available.
 
 ## Uncertainty estimation
 
-After convergence, the parameter covariance is
+After convergence, the parameter covariance is computed from the final Jacobian
+using the same normalized Hessian pseudo-inverse:
 
 ```
-C = (JᵀWJ)⁻¹        (optionally scaled by GoF)
+C = pinv(JᵀJ) * reduced_χ²
 esd(p_j) = sqrt(C_jj)
 ```
 
-These populate `RefinementParameter.esd` and `RefinementResult.esd`. A refinement
-tool that reports values without uncertainties is not doing its job, so esds are
-part of the result from the start, not an afterthought.
+These populate `RefinementParameter.esd` and `RefinementResult.esd`. The result
+also carries diagnostics:
+
+- `svdZeroCount`: number of dropped near-null Hessian directions.
+- `singularParameterIds`: parameters participating strongly in dropped
+  directions.
+- `highCorrelations`: parameter pairs whose covariance correlation exceeds the
+  reporting threshold.
+- `conditionNumber` and `maxLambda`: numerical health indicators for the final
+  Hessian and LM search.
 
 ## Refinement history
 
@@ -104,7 +125,8 @@ project shows how it got where it is.
 
 ## What is intentionally *not* here yet
 
-- Analytic derivatives (numerical first; see [ROADMAP.md](./ROADMAP.md)).
+- Analytic derivatives for the full crystallographic model (only affine
+  parameters have exact columns today; see [ROADMAP.md](./ROADMAP.md)).
 - Symbolic constraint language — Phase 8 starts with direct tying and grouping
   via `RefinementParameter.group` / `expression`, not a full expression compiler.
 - Simulated annealing / global optimization — LM is local; good starting models

@@ -5,7 +5,7 @@
  *
  * where the sum runs over all symmetry-equivalent atoms in the unit cell, b_j
  * is the scattering factor (neutron length or X-ray form factor), and T_j is
- * the isotropic Debye-Waller factor exp(−B_iso · s²) with s = sinθ/λ = 1/(2d).
+ * the isotropic or anisotropic Debye-Waller factor.
  */
 
 import type { Complex } from "@/core/math/types";

@@ -22,8 +22,14 @@ function readValues(text: string): Map<string, number> {
   return values;
 }
 
+function gsasType(text: string): string | undefined {
+  const m = text.match(/^\s*Type\s*[:=\s]\s*([A-Za-z0-9]+)/im);
+  return m?.[1]?.toUpperCase();
+}
+
 export function parseInstrumentParameters(text: string): InstrumentParameters {
   const v = readValues(text);
+  const type = gsasType(text);
   const difC = v.get("difc");
   if (difC !== undefined) {
     const params: Extract<InstrumentParameters, { kind: "tof" }> = {
@@ -37,8 +43,10 @@ export function parseInstrumentParameters(text: string): InstrumentParameters {
   }
   const lam = v.get("lam") ?? v.get("lam1") ?? v.get("wavelength") ?? v.get("lambda");
   if (lam !== undefined) {
+    const radiationKind = type?.includes("X") ? "xray" : type?.includes("N") ? "neutron" : undefined;
     return {
       kind: "constantWavelength",
+      ...(radiationKind !== undefined ? { radiationKind } : {}),
       wavelength: lam,
       ...(v.get("zero") !== undefined ? { zero: v.get("zero")! } : {}),
       ...(v.get("u") !== undefined ? { u: v.get("u")! } : {}),

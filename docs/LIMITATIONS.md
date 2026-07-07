@@ -1,12 +1,11 @@
 # Limitations
 
-## Standing scope statement
+## Scope statement
 
 > This package is an early browser-native refinement workbench for transparent
-> model building, simulation, and basic constrained refinement. It is not yet a
-> replacement for GSAS-II, FullProf, Jana2020, ShelX, or other established
-> crystallographic refinement suites. Results intended for publication must be
-> validated against established tools and expert crystallographic judgment.
+> model building, simulation, and basic constrained refinement. Results intended
+> for publication must be validated against established tools and expert
+> crystallographic judgment.
 
 This statement appears in the app UI and the README, not only here.
 
@@ -30,9 +29,8 @@ These are deliberate scope choices for early phases, to be lifted later:
 - **Powder profiles**: Gaussian and pseudo-Voigt with a single width; polynomial
   background; March-Dollase preferred orientation. No Thompson-Cox-Hastings,
   Chebyshev background, spherical-harmonic texture, or full TOF profile yet
-  (TOF↔d conversion exists, but TOF peak-shape refinement does not). This is
-  *not* full Rietveld refinement. Multi-phase powder and Le Bail extraction are
-  implemented.
+  (TOF↔d conversion exists, but TOF peak-shape refinement does not). Multi-phase
+  powder and Le Bail extraction are implemented.
 - **Optimizer**: local Levenberg–Marquardt with a numerical Jacobian. No global
   optimization (simulated annealing, etc.); a reasonable starting model is
   assumed. Poor starting points may converge to false minima.
@@ -58,6 +56,6 @@ be treated as such, regardless of how plausible the output looks.
 
 ## Non-goals
 
-- Cloning the full feature set of GSAS-II, FullProf, Jana2020, or ShelX.
-- Replacing expert crystallographic judgment.
+- Matching every feature of established crystallographic refinement suites.
+- Automating expert crystallographic judgment.
 - Serving as the sole basis for published structural or magnetic results.
