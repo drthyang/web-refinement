@@ -116,11 +116,19 @@ suppression test.
 The null-space constraint machinery is correct but is only ever as good as the
 **parsed CIF operation list**. To make constraints trustworthy and complete:
 
-1. **Built-in 230 space-group tables** ⬜ — generators + Hermann–Mauguin lookup,
-   standard settings, and **Wyckoff positions**, replacing CIF-only symmetry.
-   *Validate against International Tables generators.* (Highest value-to-effort.)
+1. **Built-in space-group tables** 🚧 — generators + Hermann–Mauguin/number
+   lookup, replacing CIF-only symmetry. **Landed:** a group-closure engine
+   (`generators → full operation list`) and a verified seed table — P1, P-1,
+   P2₁/c, F-4̄3m, Fm-3̄m — with `buildSpaceGroup(id)` and a `completeSpaceGroup`
+   hook that closes partial CIF op-lists ([`crystal/spaceGroups.ts`](../src/core/crystal/spaceGroups.ts)).
+   Validated by group order, the closure property, special-position
+   multiplicities, and an exact operation-set match to the real F-4̄3m CIF.
+   **Remaining:** **Wyckoff-position enumeration** (letters, site symmetry,
+   canonical coordinates), full 230-group coverage, and standard settings.
 2. **Systematic-absence generation** ⬜ — derive allowed reflections from the
-   group rather than only from the supplied operation list.
+   group rather than only from the supplied operation list. (The per-operation
+   absence test already exists in [`crystal/symmetry.ts`](../src/core/crystal/symmetry.ts);
+   this drives it from the built-in group.)
 3. **Unified constraint-transform layer** 🚧 — document and consolidate the
    existing "emit reduced modes" mechanism as *the* single constraint path
    (`raw = transform(free)`), covering positions, ADPs, occupancy ties/groups,
