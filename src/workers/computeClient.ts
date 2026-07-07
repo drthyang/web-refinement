@@ -16,9 +16,9 @@ import type {
 } from "@/workers/protocol";
 import type { RefinementResult } from "@/core/refinement/types";
 import { refine } from "@/core/refinement/engine";
-import { buildPowderProblem } from "@/core/workflow/powder";
 import { buildSingleCrystalProblem } from "@/core/workflow/singleCrystal";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
+import { runPowderRefinement } from "@/workers/runPowder";
 
 type Pending = (response: ComputeResponse) => void;
 
@@ -78,11 +78,7 @@ export class ComputeClient {
 
 function runInline(req: ComputeRequest): RefinementResult {
   if (req.type === "refinePowder") {
-    const problem = buildPowderProblem(req.structure, req.pattern, req.parameters, req.bindings, {
-      shape: req.shape,
-      ...(req.eta !== undefined ? { eta: req.eta } : {}),
-    });
-    return refine(problem, req.options ?? {});
+    return runPowderRefinement(req);
   }
   if (req.type === "refineMagnetic") {
     const problem = buildMagneticSingleCrystalProblem(

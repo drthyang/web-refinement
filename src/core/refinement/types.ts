@@ -20,10 +20,16 @@ export type ParameterKind =
   | "atomX"
   | "atomY"
   | "atomZ"
+  | "positionShift"
   | "occupancy"
   | "bIso"
   | "peakWidth"
+  | "profileU"
+  | "profileV"
+  | "profileW"
   | "zeroShift"
+  | "poRatio"
+  | "absorption"
   | "magneticScale"
   | "momentX"
   | "momentY"
@@ -78,6 +84,13 @@ export interface ParameterBinding {
   readonly targetId: string;
   /** Site label or coefficient index the parameter drives, when applicable. */
   readonly targetKey?: string;
+  /**
+   * Symmetry-adapted displacement direction (fractional components) for a
+   * `positionShift` binding. The parameter value is the magnitude along this
+   * mode, added to the site's stored position: X = X₀ + value·axis. Coupled
+   * special-position coordinates (e.g. (x,x,x) → [1,1,1]) move together.
+   */
+  readonly axis?: readonly [number, number, number];
 }
 
 /** Convergence/termination status of a refinement run. */

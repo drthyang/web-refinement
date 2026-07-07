@@ -6,7 +6,9 @@ import type { PowderPattern, SingleCrystalDataset } from "@/core/diffraction/typ
 import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { ProjectFile } from "@/core/project/types";
 import { cellVolume } from "@/core/crystal/unitCell";
-import { powderCurves } from "@/core/workflow/powder";
+import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
+import { buildPowderSpec } from "@/app/powderSpec";
+import { DEFAULT_STAGE_KINDS } from "@/core/workflow/structureRefinement";
 import { singleCrystalComparison } from "@/core/workflow/singleCrystal";
 import { reflectionTableCsv, powderPatternCsv, projectJson } from "@/core/export/exporters";
 import { parseMagneticCif } from "@/parsers/cif";
@@ -36,7 +38,6 @@ import {
   buildSyntheticPowder,
   buildSyntheticSingleCrystal,
   powderBindings,
-  powderParameters,
   singleCrystalBindings,
   singleCrystalParameters,
 } from "@/examples/synthetic";
@@ -58,10 +59,16 @@ const STEPS = [
   "7. Compare groups",
 ] as const;
 
+const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", wavelength: 1.54 };
+
 interface Session {
   structure: StructureModel;
   pattern: PowderPattern;
   powderParams: RefinementParameter[];
+  /** Bindings that map the powder parameters onto the model (from buildPowderSpec). */
+  powderBindings: ParameterBinding[];
+  /** Peak-shape / Lorentz / background settings for display and refinement. */
+  powderProfile: PowderProfile;
   scDataset: SingleCrystalDataset;
   scParams: RefinementParameter[];
   /** Custom single-crystal bindings (e.g. structural B refinement); scale-only when absent. */
@@ -86,11 +93,15 @@ function makeMagnetic(ex: MagneticExample): MagState {
   return { ex, dataset: buildMagneticDataset(ex), params: magneticParameters(ex.magnetic) };
 }
 
-function newSession(structure: StructureModel): Session {
+function newSession(structure: StructureModel, instrument: InstrumentParameters = DEFAULT_INSTRUMENT): Session {
+  const pattern = buildSyntheticPowder(structure);
+  const spec = buildPowderSpec(structure, pattern, instrument);
   return {
     structure,
-    pattern: buildSyntheticPowder(structure),
-    powderParams: powderParameters(structure, 40), // start off the true value
+    pattern,
+    powderParams: spec.params,
+    powderBindings: spec.bindings,
+    powderProfile: spec.profile,
     scDataset: buildSyntheticSingleCrystal(structure),
     scParams: singleCrystalParameters(2),
     powderSource: SYNTHETIC_SOURCE,
@@ -114,7 +125,7 @@ export function App(): JSX.Element {
   const { structure, pattern, powderParams, scDataset, scParams, powderSource, scSource } = session;
   const powderIsTof = pattern.xUnit === "tof";
   const powderXLabel = pattern.xUnit === "twoTheta" ? "2θ (°)" : UNIT_LABEL[pattern.xUnit] ?? "x";
-  const pBindings = useMemo(() => powderBindings(structure, pattern.id), [structure.id, pattern.id]);
+  const pBindings = session.powderBindings;
   const scBind = useMemo(
     () => session.scBindings ?? singleCrystalBindings(scDataset.id),
     [session.scBindings, scDataset.id],
@@ -129,8 +140,8 @@ export function App(): JSX.Element {
       const yCalc = session.powderOverlay.calc;
       return { x, yObs, yCalc, diff: yObs.map((o, i) => o - (yCalc[i] ?? 0)) };
     }
-    return powderCurves(structure, pattern, powderParams, pBindings);
-  }, [structure, pattern, powderParams, pBindings, powderIsTof, session.powderOverlay]);
+    return powderCurves(structure, pattern, powderParams, pBindings, session.powderProfile);
+  }, [structure, pattern, powderParams, pBindings, session.powderProfile, powderIsTof, session.powderOverlay]);
   const scRows = useMemo(
     () => singleCrystalComparison(structure, scDataset, scParams, scBind),
     [structure, scDataset, scParams, scBind],
@@ -168,19 +179,32 @@ export function App(): JSX.Element {
     }
   }
 
-  async function runPowder(): Promise<void> {
+  const profileReq = (): { shape: "gaussian" | "pseudoVoigt"; eta?: number; lorentz?: boolean } => ({
+    shape: session.powderProfile.shape,
+    ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+    ...(session.powderProfile.lorentz !== undefined ? { lorentz: session.powderProfile.lorentz } : {}),
+  });
+
+  /** Flat co-refinement of the currently-freed parameters. */
+  async function runPowder(guided = false): Promise<void> {
     setBusy("powder");
     try {
       const result = await client.current.refinePowder({
-        structure, pattern, parameters: powderParams, bindings: pBindings, shape: "gaussian",
-        options: { maxIterations: 20 },
+        structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(),
+        ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),
+        options: { maxIterations: guided ? 15 : 20 },
       });
       setSession((s) => ({
         ...s,
-        powderParams: s.powderParams.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value })),
+        // Guided refinement frees parameters internally; reflect that in the table.
+        powderParams: s.powderParams.map((p) => ({
+          ...p,
+          value: result.parameters[p.id] ?? p.value,
+          ...(guided ? { fixed: false } : {}),
+        })),
       }));
       setPowderResult(result);
-      setMessage(`Powder refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`);
+      setMessage(`Powder ${guided ? "guided " : ""}refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`);
     } catch (e) {
       setMessage(`Powder refinement failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -219,7 +243,7 @@ export function App(): JSX.Element {
           setMessage(`Loaded magnetic CIF: ${parsed.name} · ${magnetic.moments.length} moments · ${parsed.spaceGroup.hermannMauguin ?? "BNS"}.`);
           return;
         }
-        setSession(newSession({ ...parsed, id: "loaded" }));
+        setSession(newSession({ ...parsed, id: "loaded" }, instrument));
         setPowderResult(null);
         setScResult(null);
         setMessage(`Loaded CIF: ${parsed.name} (${parsed.sites.length} sites, ${parsed.spaceGroup.operations.length} symmetry ops).`);
@@ -257,10 +281,13 @@ export function App(): JSX.Element {
         ? overlay.pattern
         : parsePowderData(text, { id, name: filename, xUnit: "tof", radiation: { kind: "neutron-tof" } });
       if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
+      const tofBindings = powderBindings(structure, id);
       setSession((s) => ({
         ...s,
         pattern: parsed,
-        powderParams: startingPowderParams(structure, parsed, powderBindings(structure, id)),
+        powderParams: startingPowderParams(structure, parsed, tofBindings),
+        powderBindings: tofBindings,
+        powderProfile: { shape: "gaussian" },
         powderOverlay: overlay ? { calc: overlay.calc, background: overlay.background } : null,
         powderSource: filename,
       }));
@@ -270,10 +297,13 @@ export function App(): JSX.Element {
     }
     const parsed = parsePowderData(text, { id, name: filename, xUnit: fmt.xUnit, radiation: fmt.radiation, ...(fmt.radiation.kind !== "neutron-tof" ? { wavelength: fmt.radiation.wavelength } : {}) });
     if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
-    const bindings = powderBindings(structure, id);
-    setSession((s) => ({ ...s, pattern: parsed, powderParams: startingPowderParams(structure, parsed, bindings), powderOverlay: null, powderSource: filename }));
+    // Full symmetry-allowed parameter set, seeded from the loaded instrument
+    // (Caglioti profile + zero when the .instprm carries them).
+    const spec = buildPowderSpec(structure, parsed, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, session.powderProfile.lorentz);
+    setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
     setPowderResult(null);
-    setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · unit=${fmt.xUnit} ${tag}. Scale auto-estimated — click “Refine powder”. ${fmt.note}`);
+    const nParams = spec.params.length;
+    setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · unit=${fmt.xUnit} ${tag}. ${nParams} symmetry-allowed parameters. Scale auto-estimated — click “Refine powder” or “Guided”. ${fmt.note}`);
   }
 
   function applyReflections(text: string, filename: string, tag: string): void {
@@ -359,7 +389,7 @@ export function App(): JSX.Element {
             onChange={(e) => { const f = e.target.files?.[0]; if (f) onLoadCif(f); }}
           />
         </label>
-        <button style={btn} onClick={() => setSession(newSession(exampleStructure()))}>Reset to example</button>
+        <button style={btn} onClick={() => setSession(newSession(exampleStructure(), instrument))}>Reset to example</button>
         <button style={btn} onClick={exportProject}>Export project JSON</button>
         <span style={{ color: "#1f4e79", marginLeft: 8 }}>{message}</span>
       </div>
@@ -453,7 +483,13 @@ export function App(): JSX.Element {
         return (
           <div>
             <h2 style={h2}>Step 3 — Structural refinement (with constraints)</h2>
-            <p style={stepHelp}>Toggle “Refine” per parameter (fixed/free constraints). Refine scale, cell, background, coordinates.</p>
+            <p style={stepHelp}>
+              The full <strong>symmetry-allowed</strong> parameter set is listed: scale, Chebyshev
+              background, symmetry-reduced cell, instrument profile (Caglioti U/V/W + zero), per-site
+              ADP, and symmetry-adapted atomic positions. Structural rows start fixed — free them per
+              row and click <strong>Refine selected</strong>, or click <strong>Guided (staged)</strong>
+              to unlock them in the expert order automatically.
+            </p>
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
               <div style={{ overflowX: "auto" }}>
                 <PatternPlot curves={curves} xLabel={powderXLabel} />
@@ -469,8 +505,12 @@ export function App(): JSX.Element {
                   <SourceTag source={powderSource} synthetic={SYNTHETIC_SOURCE} />
                 </div>
                 <ParameterTable parameters={powderParams} esd={powderResult?.esd} onChange={patchPowder} />
-                <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                  <button style={btnPrimary} disabled={busy !== null || powderIsTof} onClick={runPowder}>{busy === "powder" ? "Refining…" : "Refine powder"}</button>
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <button style={btnPrimary} disabled={busy !== null || powderIsTof} onClick={() => runPowder(false)}>{busy === "powder" ? "Refining…" : "Refine selected"}</button>
+                  <button style={btn} disabled={busy !== null || powderIsTof} onClick={() => runPowder(true)} title="Staged: scale → background → cell → profile → ADP → positions">Guided (staged)</button>
+                  <label style={{ fontSize: 12, color: "#444", display: "flex", gap: 4, alignItems: "center" }}>
+                    <input type="checkbox" checked={session.powderProfile.lorentz !== false} onChange={(e) => setSession((s) => ({ ...s, powderProfile: { ...s.powderProfile, lorentz: e.target.checked } }))} /> Lorentz
+                  </label>
                   <button style={btn} onClick={() => downloadText(`${pattern.id}.csv`, powderPatternCsv(curves), "text/csv")}>Export CSV</button>
                 </div>
                 {powderIsTof && (

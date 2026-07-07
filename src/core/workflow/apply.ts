@@ -15,6 +15,18 @@ export interface AppliedModel {
   readonly background: number[];
   /** Single peak-width parameter (FWHM proxy / Caglioti W). */
   readonly peakWidth: number;
+  /**
+   * Caglioti profile coefficients (GSAS-II convention, centidegrees²):
+   * FWHM² = U·tan²θ + V·tanθ + W. Present only when a profileU/V/W binding is
+   * supplied; then the angle-dependent width supersedes `peakWidth`.
+   */
+  readonly caglioti?: { readonly u: number; readonly v: number; readonly w: number };
+  /** Zero-point shift of the abscissa, in the pattern's x-unit. */
+  readonly zeroShift: number;
+  /** March–Dollase preferred orientation (axis in hkl + ratio). Absent ⇒ none. */
+  readonly po?: { readonly axis: [number, number, number]; readonly ratio: number };
+  /** Absorption coefficient μR (cylinder radius × linear absorption). 0 ⇒ none. */
+  readonly muR: number;
   /** Moment-magnitude scale applied to magnetic moments. */
   readonly momentScale: number;
 }
@@ -34,6 +46,12 @@ export function applyParameters(
   let magneticScale = 1;
   let momentScale = 1;
   let peakWidth = 0.1;
+  let zeroShift = 0;
+  let profileU: number | undefined;
+  let profileV: number | undefined;
+  let profileW: number | undefined;
+  let muR = 0;
+  let po: { axis: [number, number, number]; ratio: number } | undefined;
   const background: number[] = [];
 
   for (const binding of bindings) {
@@ -49,6 +67,15 @@ export function applyParameters(
         break;
       case "peakWidth":
         peakWidth = v;
+        break;
+      case "profileU":
+        profileU = v;
+        break;
+      case "profileV":
+        profileV = v;
+        break;
+      case "profileW":
+        profileW = v;
         break;
       case "background": {
         const idx = binding.targetKey ? Number(binding.targetKey) : 0;
@@ -72,6 +99,17 @@ export function applyParameters(
         }
         break;
       }
+      case "positionShift": {
+        // Symmetry-adapted mode: shift the site along `axis` by `v` (fractional),
+        // anchored at the model's stored position. Coupled coordinates move
+        // together, keeping the atom on its special position.
+        const site = binding.targetKey ? byLabel.get(binding.targetKey) : undefined;
+        if (site && binding.axis) {
+          const p = site.position as [number, number, number];
+          for (let i = 0; i < 3; i++) p[i] = p[i]! + v * binding.axis[i]!;
+        }
+        break;
+      }
       case "occupancy": {
         const site = binding.targetKey ? byLabel.get(binding.targetKey) : undefined;
         if (site) (site as { occupancy: number }).occupancy = v;
@@ -90,17 +128,32 @@ export function applyParameters(
         momentScale = v; // moment vector edits handled by magnetic workflow
         break;
       case "zeroShift":
+        zeroShift = v;
+        break;
+      case "poRatio":
+        po = { axis: (binding.axis ? [...binding.axis] : [0, 0, 1]) as [number, number, number], ratio: v };
+        break;
+      case "absorption":
+        muR = v;
         break;
     }
   }
 
   const appliedModel: StructureModel = { ...model, cell, sites };
+  const caglioti =
+    profileU !== undefined || profileV !== undefined || profileW !== undefined
+      ? { u: profileU ?? 0, v: profileV ?? 0, w: profileW ?? 0 }
+      : undefined;
   return {
     model: appliedModel,
     scale,
     magneticScale,
     momentScale,
     peakWidth,
+    zeroShift,
+    muR,
+    ...(caglioti ? { caglioti } : {}),
+    ...(po ? { po } : {}),
     background: background.length ? background.map((c) => c ?? 0) : [],
   };
 }
