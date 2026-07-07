@@ -152,21 +152,23 @@ agent tool it exposes.**
 - **Goal:** reliable, well-diagnosed convergence on any good-starting-model
   nuclear structure + single-crystal or powder data.
 - **Exists:** staged Rietveld refinement; symmetry-adapted positions/ADP; real
-  data at wR ≈ 36.5%.
-- **Benchmark (GaNb₄Se₈ 298.8 K, identical data):** GSAS-II reaches **wR ≈ 7.34%**
-  with a **fixed** structure, refining only scale + Chebyshev background — using a
-  **Thompson–Cox–Hastings pseudo-Voigt** (Gaussian Caglioti U/V/W **+** an
-  independent Lorentzian size–strain X/Y **+** SH/L axial asymmetry). Our engine,
-  with only a single Gaussian-dominated pseudo-Voigt, reaches **wR ≈ 66.7%** on a
-  fixed structure — and its ~36.5% "best" only comes from freeing ADPs that then
-  rail to their bounds *absorbing the peak-shape error*. **So the TCH profile is
-  the confirmed root cause**, and fixing it should also resolve the ADP-at-bounds
-  symptom. Locked in as [`gsasBenchmark.test.ts`](../src/core/workflow/gsasBenchmark.test.ts).
-- **Needed (in priority order):** **(1) Thompson–Cox–Hastings pseudo-Voigt** —
-  independent Gaussian (U/V/W) and Lorentzian (X/Y) angle-dependent widths + SH/L
-  axial asymmetry + polarization — the single biggest fit-quality win; then
-  F1 + F2; full TOF profile (back-to-back exponentials) so the POWGEN data fits
-  end-to-end; and **refined-structure presentation** (atom table with esds,
+  GaNb₄Se₈ data at **wR ≈ 10.4%** (close to GSAS-II's 7.34%).
+- **Benchmark (GaNb₄Se₈ 298.8 K, identical data):** GSAS-II reaches **wR ≈ 7.34%**.
+  Benchmarking against its extracted calc + reflection list ([`gsasBenchmark.test.ts`](../src/core/workflow/gsasBenchmark.test.ts))
+  exposed **two major computation bugs**, both now fixed: (1) the nuclear
+  structure factor summed over *all* space-group operations, over-counting a
+  special position by its site-symmetry order — so with different site symmetries
+  (Nb/Se on 3m, Ga on -4̄3m) the *relative* intensities were wrong by up to ~5×
+  (our |F|²/GSAS Fc² now matches to <1.5×, guarded by
+  [`sfDiagnostic.test.ts`](../src/core/diffraction/sfDiagnostic.test.ts)); and
+  (2) the Lorentz factor was left off for this raw 2θ histogram. Fixing both drove
+  the staged fit from ~63% to **10.4%**. Also landed toward matching GSAS-II's
+  shape functions: a **Thompson–Cox–Hastings pseudo-Voigt** (Gaussian U/V/W +
+  Lorentzian X/Y) and **Finger–Cox–Jephcoat** axial asymmetry.
+- **Needed (in priority order):** close the last ~3% to 7.34% — wire the TCH+FCJ
+  profile and polarization into the staged app flow (they exist in the core);
+  then F1 + F2; full TOF profile (back-to-back exponentials) so the POWGEN data
+  fits end-to-end; and **refined-structure presentation** (atom table with esds,
   geometry, obs/calc/difference plot, 3D view).
 - **Validation gate:** drive `gsasBenchmark.test.ts` wR down toward GSAS-II's
   7.34%; synthetic displaced-atom recovery; multi-histogram (X-ray + neutron)

@@ -8,12 +8,13 @@
  * the isotropic or anisotropic Debye-Waller factor.
  */
 
-import type { Complex } from "@/core/math/types";
-import type { StructureModel } from "@/core/crystal/types";
+import type { Complex, Vec3 } from "@/core/math/types";
+import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
 import type { Radiation } from "@/core/diffraction/types";
 import type { ScatteringTable } from "@/core/scattering/types";
 import { add, expι, modulusSquared, scale, ZERO } from "@/core/math/complex";
 import { applyOperation } from "@/core/crystal/symmetry";
+import { wrapFractional } from "@/core/math/vec3";
 import { dSpacing, reciprocalMetricTensor } from "@/core/crystal/unitCell";
 import { neutronTable } from "@/core/scattering/neutron";
 import { xrayTable } from "@/core/scattering/xray";
@@ -23,6 +24,50 @@ const TWO_PI = 2 * Math.PI;
 
 export function scatteringTableFor(radiation: Radiation): ScatteringTable {
   return radiation.kind === "xray" ? xrayTable : neutronTable;
+}
+
+function almostEqualMod1(a: Vec3, b: Vec3, tol = 1e-3): boolean {
+  for (let i = 0; i < 3; i++) {
+    let d = Math.abs(a[i]! - b[i]!);
+    d = Math.min(d, 1 - d);
+    if (d > tol) return false;
+  }
+  return true;
+}
+
+/**
+ * The subset of space-group operations that generate a site's DISTINCT orbit
+ * (one coset representative per equivalent position) — cached. We cache the
+ * *operations*, not the resulting positions, and re-apply them to the current
+ * position in the sum. This is deliberate: which ops are distinct is a property
+ * of the site symmetry (stable under the symmetry-adapted position modes and the
+ * finite-difference perturbations used to build the Jacobian), whereas the
+ * positions must move with the parameter — caching positions would silently zero
+ * out the coordinate gradient. Keyed by the operation-list identity (stable
+ * across a calc/refinement) then a coarse position key.
+ */
+const cosetCache = new WeakMap<readonly SymmetryOperation[], Map<string, SymmetryOperation[]>>();
+function distinctSiteOps(ops: readonly SymmetryOperation[], pos: Vec3): readonly SymmetryOperation[] {
+  let byPos = cosetCache.get(ops);
+  if (!byPos) {
+    byPos = new Map();
+    cosetCache.set(ops, byPos);
+  }
+  const key = `${Math.round(pos[0] * 1e4)},${Math.round(pos[1] * 1e4)},${Math.round(pos[2] * 1e4)}`;
+  let reps = byPos.get(key);
+  if (!reps) {
+    reps = [];
+    const seen: Vec3[] = [];
+    for (const op of ops) {
+      const p = wrapFractional(applyOperation(op, pos));
+      if (!seen.some((q) => almostEqualMod1(q, p))) {
+        seen.push(p);
+        reps.push(op);
+      }
+    }
+    byPos.set(key, reps);
+  }
+  return reps;
 }
 
 /** Isotropic Debye-Waller factor exp(−B_iso · s²), s = sinθ/λ = 1/(2d). */
@@ -81,7 +126,12 @@ export function nuclearStructureFactor(
         : anisotropicDebyeWaller(model.cell, site.adp.uAniso, h, k, l);
     const weight = site.occupancy * b * dw;
 
-    for (const op of model.spaceGroup.operations) {
+    // Sum over the DISTINCT equivalent positions (the site's orbit), each once.
+    // Summing over all space-group operations instead over-counts a special
+    // position by its site-symmetry order — and since different sites have
+    // different site symmetries (e.g. Nb/Se on 3m vs Ga on -43m in GaNb4Se8),
+    // that corrupts the *relative* structure factors, not just an overall scale.
+    for (const op of distinctSiteOps(model.spaceGroup.operations, site.position)) {
       const p = applyOperation(op, site.position);
       const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
       f = add(f, scale(expι(phase), weight));

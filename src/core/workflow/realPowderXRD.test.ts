@@ -22,7 +22,7 @@ import { dataExists, readData } from "@/testSupport/data";
  * background. Skips when the git-ignored data/ folder is absent.
  */
 
-const DIR = "GaNb4Se8_XRD";
+const DIR = "GaNb4Se8_XRD_28ID";
 const CIF = `${DIR}/GaNb4Se8_100K.cif`;
 const DAT = `${DIR}/GaNb4Se8_799_T_298.8K_gsas.dat`;
 const INSTPRM = `${DIR}/xrd_instrum.instprm`;
@@ -58,9 +58,10 @@ function loadPattern(): { structure: ReturnType<typeof parseCif>; pattern: Powde
   return { structure, pattern };
 }
 
-// Pre-reduced synchrotron I(Q) is already Lorentz-corrected; sharper peaks fit a
-// pseudo-Voigt. (Confirmed: Lorentz-on wR≈53%, Lorentz-off wR≈40%.)
-const PROFILE = { shape: "pseudoVoigt" as const, eta: 0.5, lorentz: false };
+// This is a raw 2θ histogram (GSAS applies Lorentz-polarization), so Lorentz is
+// ON. The earlier "Lorentz-off is better" was an artifact of a structure-factor
+// bug (special positions over-counted); with |F|² correct, Lorentz-on is right.
+const PROFILE = { shape: "pseudoVoigt" as const, eta: 0.5, lorentz: true };
 
 // scale (auto) + cubic a (a=b=c) + Chebyshev background + width + per-site B.
 function buildParamsAndBindings(structure: ReturnType<typeof parseCif>, pattern: PowderPattern) {
@@ -169,10 +170,9 @@ describe.skipIf(!has)("real powder XRD — GaNb4Se8 (NSLS-II 28ID synchrotron)",
     // Full structure refinement seeded from the real .instprm: the Caglioti
     // profile (U fixed, V/W refined to absorb sample broadening), zero shift,
     // per-site B, and symmetry-adapted positions — unlocked by the staged driver
-    // (scale → background → cell → profile → ADP → positions). The pattern is
-    // pre-reduced, so the Lorentz factor is off (empirically wR 36% off vs 49%
-    // on; on double-corrects the already-reduced low angle).
-    const CWPROFILE = { shape: "pseudoVoigt" as const, eta: 0.5, lorentz: false };
+    // (scale → background → cell → profile → ADP → positions). Raw 2θ histogram ⇒
+    // Lorentz on (correct once the structure-factor special-position fix landed).
+    const CWPROFILE = { shape: "pseudoVoigt" as const, eta: 0.5, lorentz: true };
     const spec = buildStructureRefinement(structure, pattern, {
       scale: 1, backgroundTerms: 10, startB: 0.3, refineAdp: true, refinePositions: true,
       caglioti: { u: inst.u ?? 0, v: inst.v ?? 0, w: inst.w ?? 1 }, zero: inst.zero ?? 0,
