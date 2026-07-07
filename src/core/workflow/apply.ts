@@ -22,6 +22,13 @@ export interface AppliedModel {
    * supplied; then the angle-dependent width supersedes `peakWidth`.
    */
   readonly caglioti?: { readonly u: number; readonly v: number; readonly w: number };
+  /**
+   * Lorentzian size–strain coefficients (GSAS-II X,Y) for the Thompson–Cox–
+   * Hastings pseudo-Voigt: Γ_L = X/cosθ + Y·tanθ. Present only when a
+   * profileX/profileY binding is supplied; combined with the Gaussian Caglioti
+   * width per peak. Only applies to a 2θ pattern.
+   */
+  readonly lorentzian?: { readonly x: number; readonly y: number };
   /** Zero-point shift of the abscissa, in the pattern's x-unit. */
   readonly zeroShift: number;
   /** March–Dollase preferred orientation (axis in hkl + ratio). Absent ⇒ none. */
@@ -58,6 +65,8 @@ export function applyParameters(
   let profileU: number | undefined;
   let profileV: number | undefined;
   let profileW: number | undefined;
+  let profileX: number | undefined;
+  let profileY: number | undefined;
   let muR = 0;
   let po: { axis: [number, number, number]; ratio: number } | undefined;
   const background: number[] = [];
@@ -84,6 +93,12 @@ export function applyParameters(
         break;
       case "profileW":
         profileW = v;
+        break;
+      case "profileX":
+        profileX = v;
+        break;
+      case "profileY":
+        profileY = v;
         break;
       case "background": {
         const idx = binding.targetKey ? Number(binding.targetKey) : 0;
@@ -166,6 +181,10 @@ export function applyParameters(
     profileU !== undefined || profileV !== undefined || profileW !== undefined
       ? { u: profileU ?? 0, v: profileV ?? 0, w: profileW ?? 0 }
       : undefined;
+  const lorentzian =
+    profileX !== undefined || profileY !== undefined
+      ? { x: profileX ?? 0, y: profileY ?? 0 }
+      : undefined;
   return {
     model: appliedModel,
     scale,
@@ -175,6 +194,7 @@ export function applyParameters(
     zeroShift,
     muR,
     ...(caglioti ? { caglioti } : {}),
+    ...(lorentzian ? { lorentzian } : {}),
     ...(po ? { po } : {}),
     background: background.length ? background.map((c) => c ?? 0) : [],
   };

@@ -36,6 +36,14 @@ export interface StructureRefinementOptions {
    * `width` is dropped. Only applies to a 2θ pattern.
    */
   readonly caglioti?: { readonly u: number; readonly v: number; readonly w: number };
+  /**
+   * Lorentzian size–strain coefficients (GSAS-II X,Y) for a Thompson–Cox–Hastings
+   * pseudo-Voigt: Γ_L = X/cosθ + Y·tanθ, combined with the Gaussian Caglioti
+   * width per peak. When given, X and Y are refined in the profile stage — the
+   * peak-shape freedom real synchrotron/CW data needs. Only applies to a 2θ
+   * pattern; requires a pseudo-Voigt profile.
+   */
+  readonly lorentzian?: { readonly x: number; readonly y: number };
   /** Starting zero-point shift in the pattern's x-unit. Default 0. */
   readonly zero?: number;
   /** Refine the zero-point shift. Default true when `caglioti` is provided. */
@@ -118,6 +126,7 @@ export function buildStructureRefinement(
     backgroundTerms = 4,
     width = 0.1,
     caglioti,
+    lorentzian,
     zero = 0,
     refineZero = caglioti !== undefined,
     refineU = false,
@@ -172,6 +181,20 @@ export function buildStructureRefinement(
   } else {
     params.push({ id: "width", label: "peak FWHM", kind: "peakWidth", value: width, initialValue: width, min: 1e-3, fixed: false });
     bindings.push({ parameterId: "width", kind: "peakWidth", targetId: pattern.id });
+  }
+
+  // Lorentzian size–strain (TCH pseudo-Voigt): X (size, 1/cosθ) ≥ 0; Y (strain,
+  // tanθ) may be negative. Refined in the profile stage; combined with the
+  // Gaussian per peak via the Thompson–Cox–Hastings mixing.
+  if (lorentzian) {
+    const xy: [string, "profileX" | "profileY", number, number][] = [
+      ["profX", "profileX", lorentzian.x, 0],
+      ["profY", "profileY", lorentzian.y, -50],
+    ];
+    for (const [id, kind, value, min] of xy) {
+      params.push({ id, label: id.replace("prof", "prof "), kind, value, initialValue: value, min, max: 100, fixed: false });
+      bindings.push({ parameterId: id, kind, targetId: pattern.id });
+    }
   }
 
   // Zero-point shift (instrument).
@@ -340,7 +363,7 @@ export const DEFAULT_STAGE_KINDS: readonly StageKinds[] = [
   { name: "scale", kinds: ["scale"] },
   { name: "background", kinds: ["background"] },
   { name: "cell", kinds: ["cellLength", "cellAngle"] },
-  { name: "profile", kinds: ["peakWidth", "profileU", "profileV", "profileW", "zeroShift"] },
+  { name: "profile", kinds: ["peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY", "zeroShift"] },
   { name: "ADP", kinds: ["bIso", "uAniso"] },
   { name: "positions", kinds: ["positionShift"] },
   { name: "occupancy", kinds: ["occupancy"] },

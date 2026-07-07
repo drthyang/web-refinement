@@ -17,7 +17,7 @@ import { applyParameters, type AppliedModel } from "@/core/workflow/apply";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { powderPeakIntensities, cylinderAbsorption } from "@/core/diffraction/intensity";
 import { braggTheta } from "@/core/crystal/unitCell";
-import { synthesizePattern, cagliotiFwhm, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
+import { synthesizePattern, cagliotiFwhm, lorentzianFwhm, tchPseudoVoigt, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
 import { evaluateBackground, type BackgroundType } from "@/core/diffraction/background";
 
 /** Powder profile + intensity options for the refinement workflow. */
@@ -77,6 +77,10 @@ export function buildPeaks(pattern: PowderPattern, applied: AppliedModel, applyL
   // is defined in 2θ). GSAS-II gives U,V,W in centidegrees², so the FWHM comes
   // out in centidegrees — divide by 100 to reach the pattern's degree unit.
   const useCaglioti = applied.caglioti !== undefined && pattern.xUnit === "twoTheta";
+  // Thompson–Cox–Hastings: an independent Lorentzian size–strain width (GSAS-II
+  // X,Y, also centidegrees) combined with the Gaussian per peak into a per-peak
+  // FWHM and η. This is the peak-shape model real synchrotron/CW data needs.
+  const useTch = applied.lorentzian !== undefined && pattern.xUnit === "twoTheta";
   const applyAbsorption = applied.muR > 0 && pattern.xUnit === "twoTheta";
 
   const peaks: ProfilePeak[] = [];
@@ -84,12 +88,20 @@ export function buildPeaks(pattern: PowderPattern, applied: AppliedModel, applyL
     let center = dToX(pattern, p.d);
     if (Number.isNaN(center)) continue;
     center += applied.zeroShift;
-    const fwhm = useCaglioti
-      ? Math.max(cagliotiFwhm(center, applied.caglioti!) / 100, 1e-4)
-      : constWidth;
+    const gaussianFwhm = useCaglioti ? cagliotiFwhm(center, applied.caglioti!) / 100 : constWidth;
+    let fwhm: number;
+    let eta: number | undefined;
+    if (useTch) {
+      const gammaL = lorentzianFwhm(center, applied.lorentzian!) / 100;
+      const tch = tchPseudoVoigt(gaussianFwhm, gammaL);
+      fwhm = Math.max(tch.fwhm, 1e-4);
+      eta = tch.eta;
+    } else {
+      fwhm = Math.max(gaussianFwhm, 1e-4);
+    }
     // GSAS-II cylinder absorption A(μR, 2θ) multiplies the calculated intensity.
     const intensity = applyAbsorption ? p.intensity * cylinderAbsorption(applied.muR, center) : p.intensity;
-    peaks.push({ center, intensity, fwhm });
+    peaks.push(eta !== undefined ? { center, intensity, fwhm, eta } : { center, intensity, fwhm });
   }
   return peaks;
 }

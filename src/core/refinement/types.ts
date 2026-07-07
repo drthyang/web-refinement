@@ -28,6 +28,8 @@ export type ParameterKind =
   | "profileU"
   | "profileV"
   | "profileW"
+  | "profileX"
+  | "profileY"
   | "zeroShift"
   | "poRatio"
   | "absorption"

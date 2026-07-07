@@ -38,7 +38,7 @@ export interface CagliotiParams {
   readonly w: number;
 }
 
-/** FWHM(θ) from Caglioti U,V,W (θ in radians). Clamped to a small positive floor. */
+/** Gaussian FWHM(θ) from Caglioti U,V,W (θ in radians). Clamped to a small floor. */
 export function cagliotiFwhm(twoThetaDeg: number, p: CagliotiParams): number {
   const theta = (twoThetaDeg / 2) * (Math.PI / 180);
   const t = Math.tan(theta);
@@ -46,10 +46,51 @@ export function cagliotiFwhm(twoThetaDeg: number, p: CagliotiParams): number {
   return Math.sqrt(Math.max(fwhm2, 1e-6));
 }
 
+/** Lorentzian size–strain coefficients (GSAS-II convention). */
+export interface LorentzianParams {
+  /** Size (Scherrer) term, broadening ∝ 1/cosθ. */
+  readonly x: number;
+  /** Microstrain term, broadening ∝ tanθ. */
+  readonly y: number;
+}
+
+/** Lorentzian FWHM(θ) from GSAS-II X,Y: Γ_L = X/cosθ + Y·tanθ. Floored at 0. */
+export function lorentzianFwhm(twoThetaDeg: number, p: LorentzianParams): number {
+  const theta = (twoThetaDeg / 2) * (Math.PI / 180);
+  return Math.max(p.x / Math.cos(theta) + p.y * Math.tan(theta), 0);
+}
+
+/**
+ * Thompson–Cox–Hastings pseudo-Voigt: combine a Gaussian FWHM Γ_G and a
+ * Lorentzian FWHM Γ_L (same unit) into the total pseudo-Voigt FWHM Γ and the
+ * mixing fraction η. This is the standard approximation to a true Voigt used by
+ * GSAS-II / FullProf, and is what lets independent Gaussian (instrument) and
+ * Lorentzian (sample size–strain) broadening coexist in one peak.
+ *
+ *   Γ⁵ = Γ_G⁵ + 2.69269 Γ_G⁴Γ_L + 2.42843 Γ_G³Γ_L² + 4.47163 Γ_G²Γ_L³
+ *        + 0.07842 Γ_G Γ_L⁴ + Γ_L⁵
+ *   η  = 1.36603 (Γ_L/Γ) − 0.47719 (Γ_L/Γ)² + 0.11116 (Γ_L/Γ)³
+ */
+export function tchPseudoVoigt(gammaG: number, gammaL: number): { fwhm: number; eta: number } {
+  const g = Math.max(gammaG, 1e-9);
+  const l = Math.max(gammaL, 0);
+  const g2 = g * g, g3 = g2 * g, g4 = g3 * g, g5 = g4 * g;
+  const l2 = l * l, l3 = l2 * l, l4 = l3 * l, l5 = l4 * l;
+  const fwhm = Math.pow(
+    g5 + 2.69269 * g4 * l + 2.42843 * g3 * l2 + 4.47163 * g2 * l3 + 0.07842 * g * l4 + l5,
+    0.2,
+  );
+  const r = l / fwhm;
+  const eta = Math.min(Math.max(1.36603 * r - 0.47719 * r * r + 0.11116 * r * r * r, 0), 1);
+  return { fwhm, eta };
+}
+
 export interface ProfilePeak {
   readonly center: number;
   readonly intensity: number;
   readonly fwhm: number;
+  /** Per-peak pseudo-Voigt mixing (from TCH); falls back to the global η. */
+  readonly eta?: number;
 }
 
 export type PeakShape = "gaussian" | "pseudoVoigt";
@@ -68,7 +109,9 @@ function shapeAt(x: number, peak: ProfilePeak, opts: ProfileOptions): number {
   if (opts.shape === "gaussian") {
     return gaussian(x, peak.center, peak.fwhm);
   }
-  return pseudoVoigt(x, peak.center, peak.fwhm, opts.eta ?? 0.5);
+  // A per-peak η (from the TCH combination of Gaussian + Lorentzian widths) wins
+  // over the global η; the global value is the single-width fallback.
+  return pseudoVoigt(x, peak.center, peak.fwhm, peak.eta ?? opts.eta ?? 0.5);
 }
 
 /**
