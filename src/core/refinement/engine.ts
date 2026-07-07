@@ -10,6 +10,7 @@
 
 import type {
   AgreementFactors,
+  BoundActiveParameter,
   ParameterKind,
   RefinementIteration,
   RefinementOptions,
@@ -36,11 +37,39 @@ export interface RefinementProblem {
 const DEFAULT_OPTIONS: RefinementOptions = {
   maxIterations: 20,
   convergenceTolerance: 1e-4,
+  // Shift-based convergence is opt-in: 0 disables it, leaving the χ² test as the
+  // sole stopping rule (unchanged default behavior). The relative-shift metric is
+  // always *reported* in diagnostics regardless.
+  shiftTolerance: 0,
   lambda: 1e-3,
   svdTolerance: 1e-6,
   correlationThreshold: 0.95,
   maxReportedCorrelations: 12,
 };
+
+/**
+ * Free parameters resting on a bound at the end of the fit. A refined parameter
+ * pinned to its min/max is not converged in the interior; flag it so the caller
+ * does not read a meaningless value/esd off a bound.
+ */
+function boundActiveParameters(
+  params: readonly RefinementParameter[],
+  values: readonly number[],
+): BoundActiveParameter[] {
+  const out: BoundActiveParameter[] = [];
+  for (let j = 0; j < params.length; j++) {
+    const p = params[j]!;
+    const v = values[j]!;
+    // Tolerance relative to the parameter's own magnitude, not an absolute floor:
+    // a scale factor legitimately converges to ~1e-10, and an absolute 1e-6 tol
+    // would misreport that healthy value as "railing at min 0". A clamped value
+    // sits exactly on its bound, so |v − bound| = 0 still trips a relative tol.
+    const tolFor = (bound: number) => 1e-6 * Math.max(Math.abs(v), Math.abs(bound));
+    if (p.min !== undefined && v - p.min <= tolFor(p.min)) out.push({ parameterId: p.id, bound: "min", value: p.min });
+    else if (p.max !== undefined && p.max - v <= tolFor(p.max)) out.push({ parameterId: p.id, bound: "max", value: p.max });
+  }
+  return out;
+}
 
 /**
  * Kinds whose contribution to the calculated pattern is linear (affine) by
@@ -242,6 +271,11 @@ export function refine(
   let freeValues = freeParams.map((p) => p.value);
   let lambda = opts.lambda ?? 1e-3;
   let maxLambda = lambda;
+  // Largest *relative* parameter shift on the most recent accepted step,
+  // max_j |Δp_j| / (|p_j| + tiny) — genuinely scale-invariant (a ~1e-10 scale and
+  // a ~10 cell length compare equally), used for the reported diagnostic and the
+  // opt-in shift-based convergence test.
+  let lastMaxRelShift = Infinity;
 
   const evalChi = (vals: number[]): { yCalc: Float64Array; chi: number } => {
     const yCalc = problem.calculate(valuesRecord(problem.parameters, freeIds, vals));
@@ -318,6 +352,14 @@ export function refine(
 
       // Reject non-finite objectives (overflow/NaN) as well as uphill steps.
       if (Number.isFinite(trialEval.chi) && trialEval.chi < current.chi) {
+        // Relative shift of this accepted step (computed against the pre-step
+        // values, before we overwrite them below).
+        let ms = 0;
+        for (let j = 0; j < trial.length; j++) {
+          const rel = Math.abs(trial[j]! - freeValues[j]!) / (Math.abs(trial[j]!) + 1e-30);
+          if (rel > ms) ms = rel;
+        }
+        lastMaxRelShift = ms;
         freeValues = trial;
         current = trialEval;
         lambda = Math.max(lambda / 3, 1e-12);
@@ -349,6 +391,14 @@ export function refine(
         status = "converged";
         break;
       }
+    }
+    // Dual convergence: also stop when the parameters have effectively stopped
+    // moving, even if χ² is still creeping down a shallow valley (the classic
+    // correlated-parameter case). Disabled when shiftTolerance is 0.
+    const shiftTol = opts.shiftTolerance ?? 0;
+    if (shiftTol > 0 && lastMaxRelShift < shiftTol) {
+      status = "converged";
+      break;
     }
   }
 
@@ -386,6 +436,8 @@ export function refine(
       opts.maxReportedCorrelations ?? 12,
     ),
     maxLambda,
+    atBounds: boundActiveParameters(freeParams, freeValues),
+    maxParameterShift: Number.isFinite(lastMaxRelShift) ? lastMaxRelShift : 0,
   };
 
   const finalValues = valuesRecord(problem.parameters, freeIds, freeValues);

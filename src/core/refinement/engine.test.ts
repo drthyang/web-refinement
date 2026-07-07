@@ -202,6 +202,61 @@ describe("refinement engine (Levenberg–Marquardt)", () => {
   });
 });
 
+describe("diagnostics: bound-active parameters and shift", () => {
+  const model = [1, 2, 3, 4, 5];
+  const problemFor = (obs: number[], scale: Partial<RefinementParameter>): RefinementProblem => ({
+    parameters: [
+      { id: "scale", label: "scale", kind: "scale", value: 1, initialValue: 1, fixed: false, ...scale },
+    ],
+    observations: Float64Array.from(obs),
+    weights: Float64Array.from(obs.map(() => 1)),
+    calculate: (v) => Float64Array.from(model.map((m) => (v.scale ?? 0) * m)),
+  });
+
+  it("flags a parameter pinned at its max bound", () => {
+    // Data wants scale = 2.5 but max is 2 → the fit rails at the upper bound.
+    const result = refine(problemFor(model.map((m) => 2.5 * m), { max: 2 }));
+    expect(result.diagnostics?.atBounds).toEqual([{ parameterId: "scale", bound: "max", value: 2 }]);
+  });
+
+  it("flags a parameter pinned at its min bound", () => {
+    // Data wants scale = −0.5 but min is 0 → the fit rails at the lower bound.
+    const result = refine(problemFor(model.map((m) => -0.5 * m), { min: 0 }));
+    expect(result.diagnostics?.atBounds).toEqual([{ parameterId: "scale", bound: "min", value: 0 }]);
+  });
+
+  it("reports no bound-active parameters for an interior optimum", () => {
+    const result = refine(problemFor(model.map((m) => 2.5 * m), { min: 0, max: 10 }));
+    expect(result.diagnostics?.atBounds).toEqual([]);
+    expect(result.parameters.scale).toBeCloseTo(2.5, 6);
+  });
+
+  it("does not flag a tiny but converged value as railing at its min", () => {
+    // A scale legitimately converges to ~2e-10 on real-data magnitudes; a bound
+    // check with an absolute tolerance would wrongly call that "at min 0".
+    const tiny = 2e-10;
+    const result = refine(problemFor(model.map((m) => tiny * m), { min: 0 }));
+    expect(Math.abs(result.parameters.scale! / tiny - 1)).toBeLessThan(1e-4);
+    expect(result.diagnostics?.atBounds).toEqual([]);
+  });
+
+  it("reports a finite, settled max parameter shift at convergence", () => {
+    const result = refine(problemFor(model.map((m) => 2.5 * m), {}));
+    const shift = result.diagnostics?.maxParameterShift;
+    expect(shift).toBeDefined();
+    expect(Number.isFinite(shift!)).toBe(true);
+    expect(shift!).toBeGreaterThanOrEqual(0);
+    expect(shift!).toBeLessThan(1); // parameters have stopped moving
+  });
+
+  it("can converge on parameter shift alone (shiftTolerance)", () => {
+    // A generous shiftTolerance lets the fit stop as soon as the step is tiny.
+    const result = refine(problemFor(model.map((m) => 2.5 * m), {}), { shiftTolerance: 0.1 });
+    expect(result.status).toBe("converged");
+    expect(result.parameters.scale).toBeCloseTo(2.5, 4);
+  });
+});
+
 describe("constraints", () => {
   it("parses tie expressions", () => {
     expect(parseTie("= x")).toEqual({ factor: 1, refId: "x", constant: 0 });

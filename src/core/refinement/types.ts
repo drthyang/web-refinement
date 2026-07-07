@@ -149,6 +149,20 @@ export interface RefinementCorrelation {
   readonly coefficient: number;
 }
 
+/**
+ * A free parameter whose final value is sitting on one of its bounds. A refined
+ * parameter pinned to a bound is **not converged in the interior**: the optimizer
+ * would push it past a physical limit, so its esd is meaningless and it usually
+ * signals a correlation or an upstream model error (e.g. a B_iso railing to 0
+ * because the model over-damps high-angle intensity).
+ */
+export interface BoundActiveParameter {
+  readonly parameterId: string;
+  readonly bound: "min" | "max";
+  /** The bound value the parameter is resting on. */
+  readonly value: number;
+}
+
 /** Numerical diagnostics from the least-squares Hessian. */
 export interface RefinementDiagnostics {
   /**
@@ -164,6 +178,19 @@ export interface RefinementDiagnostics {
   readonly highCorrelations: readonly RefinementCorrelation[];
   /** Largest LM damping value reached while searching for accepted steps. */
   readonly maxLambda: number;
+  /**
+   * Free parameters resting on a bound at the end of the fit — a not-converged
+   * signal the caller (or an agent) should surface rather than trust the value.
+   */
+  readonly atBounds: readonly BoundActiveParameter[];
+  /**
+   * Largest *relative* parameter shift on the final accepted step,
+   * `max_j |Δp_j| / (|p_j| + tiny)` — scale-invariant, so a ~1e-11 scale factor
+   * and a ~10 cell length compare on equal footing. Near zero means the
+   * parameters stopped moving; a large value alongside a "converged" χ² means the
+   * fit stopped on the objective while a parameter was still drifting.
+   */
+  readonly maxParameterShift: number;
 }
 
 /** Full result of a refinement run. */
@@ -187,6 +214,13 @@ export interface RefinementOptions {
   readonly maxIterations: number;
   /** Relative change in χ² below which the fit is considered converged. */
   readonly convergenceTolerance: number;
+  /**
+   * Relative-shift convergence threshold: when the largest relative parameter
+   * shift on an accepted step falls below this, the fit is considered converged
+   * on the *parameters* (complementing the χ² test). Defaults to 0 (disabled),
+   * leaving the χ² test as the sole stopping rule; set > 0 to opt in.
+   */
+  readonly shiftTolerance?: number;
   /** Initial Levenberg–Marquardt damping factor. */
   readonly lambda?: number;
   /** Relative singular-value cutoff for the Hessian pseudo-inverse. */
