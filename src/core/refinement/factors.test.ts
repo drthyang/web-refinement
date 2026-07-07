@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { excludedPointMask, applyExclusionMask, weightsFromSigma, computeAgreementFactors } from "@/core/refinement/factors";
+import { excludedPointMask, applyExclusionMask, fitRangeMask, weightsFromSigma, computeAgreementFactors } from "@/core/refinement/factors";
 
 describe("excludedPointMask", () => {
   it("flags a repeated non-positive sentinel plateau", () => {
@@ -14,6 +14,24 @@ describe("excludedPointMask", () => {
 
   it("ignores positive data entirely", () => {
     expect(excludedPointMask([1, 2, 3, 4, 5, 6]).every((m) => !m)).toBe(true);
+  });
+});
+
+describe("fitRangeMask", () => {
+  const xs = [10, 20, 30, 40, 50];
+
+  it("excludes points outside an inclusive window", () => {
+    expect(fitRangeMask(xs, { min: 20, max: 40 })).toEqual([true, false, false, false, true]);
+  });
+
+  it("leaves a side unrestricted when its bound is omitted", () => {
+    expect(fitRangeMask(xs, { min: 30 })).toEqual([true, true, false, false, false]);
+    expect(fitRangeMask(xs, { max: 30 })).toEqual([false, false, false, true, true]);
+  });
+
+  it("excludes nothing for an undefined or empty range", () => {
+    expect(fitRangeMask(xs, undefined).every((m) => !m)).toBe(true);
+    expect(fitRangeMask(xs, {}).every((m) => !m)).toBe(true);
   });
 });
 

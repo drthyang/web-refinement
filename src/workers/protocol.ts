@@ -35,6 +35,8 @@ export interface RefinePowderRequest {
    * in order instead of a single co-refinement of all free parameters.
    */
   readonly staged?: readonly StageKinds[];
+  /** Restrict refinement to an inclusive abscissa window; omit for full range. */
+  readonly fitRange?: { readonly min?: number; readonly max?: number };
   readonly options?: Partial<RefinementOptions>;
 }
 

@@ -35,6 +35,31 @@ export function buildPowderSpec(
   lorentz = true,
   backgroundTerms = 4,
 ): PowderSpec {
+  // Time-of-flight: back-to-back-exponential profile driven by the diffractometer
+  // constants (difC/difA/difB) plus α/β/σ shape coefficients. The .instprm here
+  // rarely carries the shape coefficients, so seed them: σ scales with difC·Δd
+  // (a POWGEN-like resolution), and α/β take moderator-scale (µs) starting
+  // values. The profile stage then refines them against the data.
+  if (instrument.kind === "tof") {
+    const resolution = 0.0015; // Δd/d ballpark → σ_TOF ≈ difC·d·Δd/d
+    const tof = {
+      difC: instrument.difC,
+      difA: instrument.difA ?? 0,
+      difB: instrument.difB ?? 0,
+      alpha0: 0, alpha1: 1.5,
+      beta0: 0.02, beta1: 0,
+      sig0: 0, sig1: (instrument.difC * resolution) ** 2, sig2: 0,
+    };
+    const zero = instrument.zero ?? 0;
+    const profile: PowderProfile = { shape: "tof" };
+    const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, tof });
+    const seedCurves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
+    const s = optimalScale(seedCurves.yObs.map((y) => (y > 0 ? y : 0)), seedCurves.yCalc);
+    const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof });
+    const params = spec.params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
+    return { params, bindings: spec.bindings, profile };
+  }
+
   const cw = instrument.kind === "constantWavelength" ? instrument : null;
   // A GSAS-II .instprm carries the Caglioti U,V,W → angle-dependent width; else
   // fall back to a single width.

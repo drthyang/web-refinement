@@ -11,14 +11,22 @@ import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { LinearRestraint, ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
-import { weightsFromSigma, excludedPointMask, applyExclusionMask } from "@/core/refinement/factors";
+import { weightsFromSigma, excludedPointMask, applyExclusionMask, fitRangeMask } from "@/core/refinement/factors";
 import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters, type AppliedModel } from "@/core/workflow/apply";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { powderPeakIntensities, cylinderAbsorption } from "@/core/diffraction/intensity";
 import { braggTheta } from "@/core/crystal/unitCell";
+import { dFromTof } from "@/core/diffraction/instrument";
 import { synthesizePattern, cagliotiFwhm, lorentzianFwhm, tchPseudoVoigt, fcjSubPeaks, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
 import { evaluateBackground, type BackgroundType } from "@/core/diffraction/background";
+
+/** Inclusive abscissa window that restricts refinement to a sub-range of the
+ * pattern. Either bound may be omitted to leave that side unrestricted. */
+export interface FitRange {
+  readonly min?: number;
+  readonly max?: number;
+}
 
 /** Powder profile + intensity options for the refinement workflow. */
 export interface PowderProfile {
@@ -68,10 +76,56 @@ function dRange(pattern: PowderPattern): { dMin: number; dMax: number } {
   }
 }
 
+/** Smallest d-spacing (Å) modelled for a TOF pattern. The data extends to very
+ *  high Q (tiny d); enumerating every reflection there is pointless (the peaks
+ *  overlap into the background) and costly, so the modelled range is floored. */
+const TOF_DMIN_FLOOR = 0.5;
+
+/** d-range covered by a TOF pattern, from its TOF extent and calibration. */
+function tofDRange(
+  pattern: PowderPattern,
+  cal: { difC: number; difA: number; difB: number },
+  zero: number,
+): { dMin: number; dMax: number } {
+  const xs = pattern.points.map((p) => p.x);
+  const p = { kind: "tof" as const, difC: cal.difC, difA: cal.difA, difB: cal.difB, zero };
+  // TOF increases monotonically with d, so min/max TOF map to min/max d.
+  const dLo = dFromTof(p, Math.min(...xs));
+  const dHi = dFromTof(p, Math.max(...xs));
+  return { dMin: Math.max(Math.min(dLo, dHi), TOF_DMIN_FLOOR), dMax: Math.max(dLo, dHi) };
+}
+
+/** Back-to-back-exponential TOF peaks: positions from the diffractometer
+ *  constants, d-dependent α/β/σ from the profile coefficients. */
+function buildTofPeaks(
+  intensities: readonly { d: number; intensity: number }[],
+  applied: AppliedModel,
+): ProfilePeak[] {
+  const cal = applied.tof!;
+  const tp = applied.tofProfile;
+  const peaks: ProfilePeak[] = [];
+  for (const p of intensities) {
+    const d = p.d;
+    if (d <= 0) continue;
+    const center = cal.difC * d + cal.difA * d * d + cal.difB / d + applied.zeroShift;
+    const alpha = Math.max((tp?.alpha0 ?? 0) + (tp?.alpha1 ?? 0) / d, 1e-6);
+    const beta = Math.max((tp?.beta0 ?? 0) + (tp?.beta1 ?? 0) / (d * d * d * d), 1e-6);
+    const sig2 = Math.max((tp?.sig0 ?? 0) + (tp?.sig1 ?? 0) * d * d + (tp?.sig2 ?? 0) * d * d * d * d, 1e-6);
+    const sigma = Math.sqrt(sig2);
+    // Support proxy for the far-peak skip: Gaussian FWHM plus both exponential
+    // decay lengths, so the long β tail is not clipped.
+    const effFwhm = 2.3548 * sigma + 1 / alpha + 1 / beta;
+    peaks.push({ center, intensity: p.intensity, fwhm: effFwhm, tof: { alpha, beta, sigma } });
+  }
+  return peaks;
+}
+
 export function buildPeaks(pattern: PowderPattern, applied: AppliedModel, applyLorentz = true): ProfilePeak[] {
-  const { dMin, dMax } = dRange(pattern);
+  const isTof = pattern.xUnit === "tof" && applied.tof !== undefined;
+  const { dMin, dMax } = isTof ? tofDRange(pattern, applied.tof!, applied.zeroShift) : dRange(pattern);
   const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
   const intensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, applied.scale, applied.po, applyLorentz);
+  if (isTof) return buildTofPeaks(intensities, applied);
   const constWidth = Math.max(applied.peakWidth, 1e-4);
   // Angle-dependent Caglioti width only makes sense on a 2θ abscissa (the form
   // is defined in 2θ). GSAS-II gives U,V,W in centidegrees², so the FWHM comes
@@ -123,13 +177,17 @@ export function buildPowderProblem(
   bindings: readonly ParameterBinding[],
   profile: PowderProfile = { shape: "gaussian" },
   restraints: readonly LinearRestraint[] = [],
+  fitRange?: FitRange,
 ): RefinementProblem {
   const xValues = pattern.points.map((p) => p.x);
   const yObs = pattern.points.map((p) => p.yObs);
   const observations = Float64Array.from([...yObs, ...restraints.map((r) => r.target)]);
   const diffractionWeights = applyExclusionMask(
-    weightsFromSigma(pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1))),
-    excludedPointMask(yObs),
+    applyExclusionMask(
+      weightsFromSigma(pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1))),
+      excludedPointMask(yObs),
+    ),
+    fitRangeMask(xValues, fitRange),
   );
   const weights = new Float64Array(observations.length);
   weights.set(diffractionWeights, 0);

@@ -7,6 +7,7 @@ import type { RefinementParameter, RefinementResult } from "@/core/refinement/ty
 import type { ProjectFile } from "@/core/project/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
+import type { PeakShape } from "@/core/diffraction/profile";
 import { buildPowderSpec, guidedPowderParams } from "@/app/powderSpec";
 import { DEFAULT_STAGE_KINDS } from "@/core/workflow/structureRefinement";
 import { powderPatternCsv, projectJson } from "@/core/export/exporters";
@@ -20,6 +21,7 @@ import { startingPowderParams } from "@/app/loadData";
 import { ComputeClient } from "@/workers/computeClient";
 import { exampleStructure } from "@/examples/highEntropyWO4";
 import { loadPowgenDefault } from "@/app/powgenData";
+import { loadMn3GaPowgen } from "@/app/mn3gaPowgen";
 import {
   buildMagneticDataset,
   exampleMagnetic,
@@ -33,7 +35,7 @@ import type { SingleCrystalDataset as SxDataset } from "@/core/diffraction/types
 import { buildSyntheticPowder, powderBindings } from "@/examples/synthetic";
 import { ParameterTable } from "@/components/ParameterTable";
 import { CandidateComparison } from "@/components/CandidateComparison";
-import { PatternPlot } from "@/visualization/PatternPlot";
+import { PatternPlot, type FitRangeSelection } from "@/visualization/PatternPlot";
 import { bondLengths } from "@/core/crystal/geometry";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { parseInstrumentParameters } from "@/parsers/instrument";
@@ -94,6 +96,26 @@ function newSession(structure: StructureModel, instrument: InstrumentParameters 
   };
 }
 
+/**
+ * Session for a real loaded dataset (CW or TOF). `buildPowderSpec` seeds the
+ * full symmetry-allowed parameter set — for TOF that includes the back-to-back-
+ * exponential profile (α/β/σ) plus fixed diffractometer constants — and
+ * estimates the scale from the observed counts.
+ */
+function loadedSession(structure: StructureModel, pattern: PowderPattern, instrument: InstrumentParameters): Session {
+  const spec = buildPowderSpec(structure, pattern, instrument, true, DEFAULT_BACKGROUND_TERMS);
+  return {
+    structure,
+    pattern,
+    powderParams: spec.params,
+    powderBindings: spec.bindings,
+    powderProfile: spec.profile,
+    backgroundTerms: DEFAULT_BACKGROUND_TERMS,
+    powderOverlay: null,
+    powderSource: pattern.name,
+  };
+}
+
 export function App(): JSX.Element {
   const [session, setSession] = useState<Session>(() => newSession(exampleStructure()));
   const [powderResult, setPowderResult] = useState<RefinementResult | null>(null);
@@ -101,6 +123,9 @@ export function App(): JSX.Element {
   const [magResult, setMagResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [step, setStep] = useState(0);
+  // Optional refinement window; null = fit the full pattern. Reset when the
+  // observed pattern changes (see effect below).
+  const [fitRange, setFitRange] = useState<FitRangeSelection | null>(null);
   const [instrument, setInstrument] = useState<InstrumentParameters>({ kind: "constantWavelength", wavelength: 1.54 });
   const [instrumentLoaded, setInstrumentLoaded] = useState(false);
   const [message, setMessage] = useState<string>("High-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ (P2/c). Checking for the POWGEN pattern…");
@@ -109,47 +134,51 @@ export function App(): JSX.Element {
   // load never clobbers a session the user has already taken over.
   const userTookOver = useRef(false);
 
-  // On startup, try to open the real POWGEN high-entropy dataset from the local
-  // (git-ignored) data/ folder — served by the dev-only Vite plugin. When it is
-  // reachable the app opens real TOF neutron data instead of a synthetic demo;
-  // otherwise it keeps the bundled high-entropy structure. TOF is view-only until
-  // TOF profile refinement lands (roadmap M1).
+  // On startup, try to open a real POWGEN dataset from the local (git-ignored)
+  // data/ folder — served by the dev-only Vite plugin. The Mn₃Ga 600 K TOF set
+  // is preferred (it exercises the time-of-flight refinement path); otherwise
+  // fall back to the high-entropy POWGEN set, then the bundled synthetic demo.
   useEffect(() => {
     let cancelled = false;
-    void loadPowgenDefault().then((loaded) => {
+    void (async () => {
+      const mn3ga = await loadMn3GaPowgen();
+      if (cancelled || userTookOver.current) return;
+      if (mn3ga) {
+        setInstrument(mn3ga.instrument);
+        setInstrumentLoaded(true);
+        setSession(loadedSession(mn3ga.structure, mn3ga.pattern, mn3ga.instrument));
+        setPowderResult(null);
+        setMessage(
+          `Loaded Mn₃Ga POWGEN 600 K · ${mn3ga.pattern.points.length} pts · TOF (back-to-back-exponential profile) — click “Refine powder” or “Guided”.`,
+        );
+        return;
+      }
+      const loaded = await loadPowgenDefault();
       if (cancelled || userTookOver.current) return;
       if (!loaded) {
         setMessage("High-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ (P2/c) — bundled structure (POWGEN pattern not found in data/).");
         return;
       }
-      const { structure: st, pattern: pt, instrument: inst, isTof } = loaded;
-      const bindings = powderBindings(st, pt.id);
+      const { structure: st, pattern: pt, instrument: inst } = loaded;
       setInstrument(inst);
       setInstrumentLoaded(true);
-      setSession({
-        structure: st,
-        pattern: pt,
-        powderParams: startingPowderParams(st, pt, bindings),
-        powderBindings: bindings,
-        powderProfile: { shape: "gaussian" },
-        backgroundTerms: DEFAULT_BACKGROUND_TERMS,
-        powderOverlay: null,
-        powderSource: pt.name,
-      });
+      setSession(loadedSession(st, pt, inst));
       setPowderResult(null);
-      setMessage(
-        `Loaded POWGEN high-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ · ${pt.points.length} pts${
-          isTof ? " · TOF — view-only (TOF profile refinement not in the engine yet)" : ""
-        }.`,
-      );
-    });
+      setMessage(`Loaded POWGEN high-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ · ${pt.points.length} pts · ${pt.xUnit === "tof" ? "TOF" : pt.xUnit}.`);
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
 
   const { structure, pattern, powderParams, powderSource } = session;
+  // A freshly-loaded pattern is a new object; drop any window from the old one.
+  useEffect(() => setFitRange(null), [pattern]);
   const powderIsTof = pattern.xUnit === "tof";
+  // A TOF pattern refines only when a back-to-back-exponential profile was built
+  // (i.e. a TOF calibration was available). A GSAS overlay or an uncalibrated TOF
+  // pattern keeps the shape at "gaussian" and stays view-only.
+  const tofViewOnly = powderIsTof && session.powderProfile.shape !== "tof";
   const powderXLabel = pattern.xUnit === "twoTheta" ? "2θ (°)" : UNIT_LABEL[pattern.xUnit] ?? "x";
   const pBindings = session.powderBindings;
 
@@ -164,6 +193,14 @@ export function App(): JSX.Element {
     }
     return powderCurves(structure, pattern, powderParams, pBindings, session.powderProfile);
   }, [structure, pattern, powderParams, pBindings, session.powderProfile, powderIsTof, session.powderOverlay]);
+  // Full pattern extent; the plot handles default to this until the user drags.
+  const patternExtent = useMemo<FitRangeSelection>(() => {
+    const xs = curves.x;
+    return { min: Math.min(...xs), max: Math.max(...xs) };
+  }, [curves.x]);
+  const effectiveFitRange = fitRange ?? patternExtent;
+  const fitRangeActive =
+    fitRange !== null && (fitRange.min > patternExtent.min || fitRange.max < patternExtent.max);
   const magBind = useMemo(() => magneticBindings(mag.ex.magnetic), [mag.ex.magnetic]);
   const magRows = useMemo(
     () => magneticComparison(mag.ex.structure, mag.ex.magnetic, mag.dataset, mag.params, magBind),
@@ -227,7 +264,7 @@ export function App(): JSX.Element {
     }
   }
 
-  const profileReq = (): { shape: "gaussian" | "pseudoVoigt"; eta?: number; lorentz?: boolean } => ({
+  const profileReq = (): { shape: PeakShape; eta?: number; lorentz?: boolean } => ({
     shape: session.powderProfile.shape,
     ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
     ...(session.powderProfile.lorentz !== undefined ? { lorentz: session.powderProfile.lorentz } : {}),
@@ -240,6 +277,7 @@ export function App(): JSX.Element {
       const result = await client.current.refinePowder({
         structure, pattern, parameters: guided ? guidedPowderParams(powderParams) : powderParams, bindings: pBindings, ...profileReq(),
         ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),
+        ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         options: { maxIterations: guided ? 15 : 20 },
       });
       setSession((s) => ({
@@ -304,24 +342,39 @@ export function App(): JSX.Element {
     const id = `${structure.id}-powder`;
     const isGsasCsv = /(^|,)\s*"?obs"?\s*,/i.test(text) && /calc/i.test(text);
     if (fmt.xUnit === "tof") {
-      // TOF: view-only (engine profile-fits constant-wavelength only).
       const overlay = isGsasCsv ? parseGsasCsvPattern(text, id, filename) : null;
       const parsed = overlay
         ? overlay.pattern
         : parsePowderData(text, { id, name: filename, xUnit: "tof", radiation: { kind: "neutron-tof" } });
       if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
-      const tofBindings = powderBindings(structure, id);
-      setSession((s) => ({
-        ...s,
-        pattern: parsed,
-        powderParams: startingPowderParams(structure, parsed, tofBindings),
-        powderBindings: tofBindings,
-        powderProfile: { shape: "gaussian" },
-        powderOverlay: overlay ? { calc: overlay.calc, background: overlay.background } : null,
-        powderSource: filename,
-      }));
+      const tofInstrument = instrumentLoaded && instrument.kind === "tof" ? instrument : null;
+      // A GSAS-II CSV carries its own calc/background (shown as a reference
+      // overlay); and without a TOF calibration (difC) we cannot place peaks —
+      // both stay view-only. A plain TOF pattern with a loaded TOF instrument is
+      // refined with the back-to-back-exponential profile.
+      if (overlay || !tofInstrument) {
+        const tofBindings = powderBindings(structure, id);
+        setSession((s) => ({
+          ...s,
+          pattern: parsed,
+          powderParams: startingPowderParams(structure, parsed, tofBindings),
+          powderBindings: tofBindings,
+          powderProfile: { shape: "gaussian" },
+          powderOverlay: overlay ? { calc: overlay.calc, background: overlay.background } : null,
+          powderSource: filename,
+        }));
+        setPowderResult(null);
+        setMessage(
+          overlay
+            ? `Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag} with GSAS-II calc overlay (reference). ${fmt.note}`
+            : `Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag}. Load a TOF instrument (.instprm with difC) to refine. ${fmt.note}`,
+        );
+        return;
+      }
+      const spec = buildPowderSpec(structure, parsed, tofInstrument, true, session.backgroundTerms);
+      setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
       setPowderResult(null);
-      setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · unit=TOF ${tag} (view-only — TOF profile fitting not in engine). ${fmt.note}`);
+      setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag}. ${spec.params.length} parameters, back-to-back-exponential profile — click “Refine powder” or “Guided”. ${fmt.note}`);
       return;
     }
     const parsed = parsePowderData(text, { id, name: filename, xUnit: fmt.xUnit, radiation: fmt.radiation, ...(fmt.radiation.kind !== "neutron-tof" ? { wavelength: fmt.radiation.wavelength } : {}) });
@@ -378,6 +431,8 @@ export function App(): JSX.Element {
     for (let i = 0; i < curves.yObs.length; i++) {
       const c = curves.yCalc[i] ?? 0;
       if (powderIsTof && c <= 0) continue;
+      // Match the refined window: exclude points outside an active fit range.
+      if (fitRangeActive && (curves.x[i]! < fitRange!.min || curves.x[i]! > fitRange!.max)) continue;
       num += Math.abs(curves.yObs[i]! - c);
       den += Math.abs(curves.yObs[i]!);
     }
@@ -487,13 +542,19 @@ export function App(): JSX.Element {
               </tbody>
             </table>
             <div style={{ overflowX: "auto" }}>
-              <PatternPlot curves={curves} xLabel={powderXLabel} />
+              <PatternPlot
+                curves={curves}
+                xLabel={powderXLabel}
+                fitRange={effectiveFitRange}
+                {...(tofViewOnly ? {} : { onFitRangeChange: setFitRange })}
+              />
               <p style={{ fontSize: 12, color: "#666" }}>
-                {powderIsTof
+                {tofViewOnly
                   ? session.powderOverlay
                     ? "Observed (points) with GSAS-II fit overlay"
                     : "Observed TOF pattern (view-only — no calc overlay)"
-                  : "Observed data preview"} ({pattern.points.length} points).
+                  : `Observed${powderIsTof ? " TOF" : ""} data with calculated profile`} ({pattern.points.length} points).
+                {!tofViewOnly && " Drag the blue handles to set the fit range."}
               </p>
             </div>
           </div>
@@ -511,13 +572,29 @@ export function App(): JSX.Element {
             </p>
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
               <div style={{ overflowX: "auto" }}>
-                <PatternPlot curves={curves} xLabel={powderXLabel} />
+                <PatternPlot
+                  curves={curves}
+                  xLabel={powderXLabel}
+                  fitRange={effectiveFitRange}
+                  {...(tofViewOnly ? {} : { onFitRangeChange: setFitRange })}
+                />
                 <p style={{ fontSize: 12, color: "#666" }}>
-                  {powderIsTof
+                  {tofViewOnly
                     ? session.powderOverlay
                       ? `Powder (TOF) · GSAS-II fit residual ≈ ${wRpct}%`
-                      : "Powder (TOF) · view-only (no fit computed by the engine)"
-                    : `Powder · profile R ≈ ${wRpct}% (live)`}.
+                      : "Powder (TOF) · view-only (no TOF calibration loaded)"
+                    : `Powder${powderIsTof ? " (TOF)" : ""} · profile R ≈ ${wRpct}% (live)`}
+                  {fitRangeActive && ` · fit range ${effectiveFitRange.min.toFixed(2)}–${effectiveFitRange.max.toFixed(2)}`}.
+                  {!tofViewOnly && (
+                    <>
+                      {" "}Drag the blue handles to set the fit range.
+                      {fitRangeActive && (
+                        <button style={{ ...btn, padding: "1px 8px", marginLeft: 6, fontSize: 11 }} onClick={() => setFitRange(null)}>
+                          Reset range
+                        </button>
+                      )}
+                    </>
+                  )}
                 </p>
               </div>
               <div style={{ minWidth: 320, flex: 1 }}>
@@ -527,8 +604,8 @@ export function App(): JSX.Element {
                 </div>
                 <ParameterTable parameters={powderParams} esd={powderResult?.esd} onChange={patchPowder} />
                 <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <button style={btnPrimary} disabled={busy !== null || powderIsTof} onClick={() => runPowder(false)}>{busy === "powder" ? "Refining…" : "Refine selected"}</button>
-                  <button style={btn} disabled={busy !== null || powderIsTof} onClick={() => runPowder(true)} title="Staged: scale → background → cell → profile → ADP → positions">Guided (staged)</button>
+                  <button style={btnPrimary} disabled={busy !== null || tofViewOnly} onClick={() => runPowder(false)}>{busy === "powder" ? "Refining…" : "Refine selected"}</button>
+                  <button style={btn} disabled={busy !== null || tofViewOnly} onClick={() => runPowder(true)} title="Staged: scale → background → cell → profile → ADP → positions">Guided (staged)</button>
                   <label style={controlLabel}>
                     Background terms
                     <input
@@ -537,7 +614,7 @@ export function App(): JSX.Element {
                       max={20}
                       step={1}
                       value={session.backgroundTerms}
-                      disabled={busy !== null || powderIsTof}
+                      disabled={busy !== null || tofViewOnly}
                       onChange={(e) => setBackgroundTerms(Number(e.target.value))}
                       style={numberInput}
                     />
@@ -547,12 +624,18 @@ export function App(): JSX.Element {
                   </label>
                   <button style={btn} onClick={() => downloadText(`${pattern.id}.csv`, powderPatternCsv(curves), "text/csv")}>Export CSV</button>
                 </div>
-                {powderIsTof && (
+                {powderIsTof && !tofViewOnly && (
+                  <p style={{ fontSize: 12, color: "#1f5e1f", marginTop: 6, maxWidth: 360 }}>
+                    TOF pattern — refined with a <strong>back-to-back-exponential</strong> profile
+                    (α rise, β tail, σ Gaussian) placed by difC/difA/difB. The α/β/σ coefficients
+                    refine in the profile stage; difC is held at the instrument calibration.
+                  </p>
+                )}
+                {tofViewOnly && (
                   <p style={{ fontSize: 12, color: "#8a1f1f", marginTop: 6, maxWidth: 340 }}>
-                    TOF pattern loaded — <strong>view-only</strong>. The engine profile-fits
-                    constant-wavelength data only, so refinement is disabled until TOF profile fitting
-                    (back-to-back exponentials, α/β/σ) lands. The pattern is shown for inspection and
-                    indexing; a GSAS-II calc overlay appears when a GSAS-II CSV export is loaded.
+                    TOF pattern — <strong>view-only</strong>. {session.powderOverlay
+                      ? "A GSAS-II CSV was loaded, so its own calc/background is shown as a reference."
+                      : "Load a TOF instrument file (.instprm with difC) to place peaks and enable refinement."}
                   </p>
                 )}
                 {powderResult && <Agreement result={powderResult} />}

@@ -7,6 +7,8 @@ export interface LinearScale {
   (value: number): number;
   readonly domainMin: number;
   readonly domainMax: number;
+  /** Map a pixel coordinate back to a data value (inverse of the scale). */
+  invert(pixel: number): number;
 }
 
 export function linearScale(
@@ -16,14 +18,17 @@ export function linearScale(
   rangeMax: number,
 ): LinearScale {
   const span = domainMax - domainMin || 1;
+  const pixelSpan = rangeMax - rangeMin || 1;
   const fn = ((v: number): number =>
     rangeMin + ((v - domainMin) / span) * (rangeMax - rangeMin)) as {
     (value: number): number;
     domainMin: number;
     domainMax: number;
+    invert(pixel: number): number;
   };
   fn.domainMin = domainMin;
   fn.domainMax = domainMax;
+  fn.invert = (pixel: number): number => domainMin + ((pixel - rangeMin) / pixelSpan) * span;
   return fn;
 }
 

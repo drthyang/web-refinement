@@ -40,6 +40,23 @@ export function applyExclusionMask(weights: Float64Array, mask: readonly boolean
   return weights;
 }
 
+/**
+ * Mask (true = excluded) for points whose abscissa falls outside an inclusive
+ * fit range [min, max]. A missing bound leaves that side unrestricted, so a
+ * partially-defined range still works.
+ */
+export function fitRangeMask(
+  xValues: readonly number[],
+  range: { readonly min?: number; readonly max?: number } | undefined,
+): boolean[] {
+  if (!range || (range.min === undefined && range.max === undefined)) {
+    return xValues.map(() => false);
+  }
+  const min = range.min ?? -Infinity;
+  const max = range.max ?? Infinity;
+  return xValues.map((x) => x < min || x > max);
+}
+
 export function computeAgreementFactors(
   yObs: Float64Array,
   yCalc: Float64Array,

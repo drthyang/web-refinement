@@ -28,6 +28,8 @@ const CATEGORY: Record<ParameterKind, string> = {
   asymSL: "Instrument / profile",
   asymHL: "Instrument / profile",
   zeroShift: "Instrument / profile",
+  tofCalibration: "Instrument / profile",
+  tofProfile: "Instrument / profile",
   bIso: "ADPs (thermal)",
   uAniso: "ADPs (thermal)",
   atomX: "Positions",

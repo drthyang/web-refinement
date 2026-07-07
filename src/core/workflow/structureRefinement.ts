@@ -50,9 +50,17 @@ export interface StructureRefinementOptions {
    * high-resolution synchrotron data. Only applies to a 2θ pattern.
    */
   readonly axial?: { readonly sl: number; readonly hl: number };
-  /** Starting zero-point shift in the pattern's x-unit. Default 0. */
+  /**
+   * Time-of-flight calibration + peak-shape seeds. When given (pattern is TOF),
+   * the diffractometer constants (difC/difA/difB) are emitted as fixed
+   * `tofCalibration` parameters that place the peaks, and the back-to-back-
+   * exponential shape coefficients (α/β/σ) as refinable `tofProfile` parameters.
+   * Mutually exclusive with `caglioti`/`lorentzian`/`axial` (those are 2θ-only).
+   */
+  readonly tof?: TofSeed;
+  /** Starting zero-point shift in the pattern's x-unit (µs for TOF). Default 0. */
   readonly zero?: number;
-  /** Refine the zero-point shift. Default true when `caglioti` is provided. */
+  /** Refine the zero-point shift. Default true when `caglioti` or `tof` is set. */
   readonly refineZero?: boolean;
   /**
    * Refine the Caglioti U (tan²θ) term. Default false: over a narrow low-angle
@@ -92,6 +100,27 @@ export interface StructureRefinementOptions {
   readonly absorption?: number;
   /** Refine μR. Default false (correlates strongly with scale and ADP). */
   readonly refineAbsorption?: boolean;
+}
+
+/**
+ * Time-of-flight calibration + peak-shape seed values (GSAS-II convention).
+ * difC is the primary diffractometer constant (from calibration, held fixed);
+ * the α/β/σ coefficients drive the d-dependent back-to-back-exponential widths.
+ */
+export interface TofSeed {
+  readonly difC: number;
+  readonly difA?: number;
+  readonly difB?: number;
+  /** α = α₀ + α₁/d (rising edge, µs⁻¹). */
+  readonly alpha0?: number;
+  readonly alpha1?: number;
+  /** β = β₀ + β₁/d⁴ (falling tail, µs⁻¹). */
+  readonly beta0?: number;
+  readonly beta1?: number;
+  /** σ² = σ₀ + σ₁·d² + σ₂·d⁴ (Gaussian variance, µs²). */
+  readonly sig0?: number;
+  readonly sig1?: number;
+  readonly sig2?: number;
 }
 
 export interface StructureRefinementSpec {
@@ -134,8 +163,9 @@ export function buildStructureRefinement(
     caglioti,
     lorentzian,
     axial,
+    tof,
     zero = 0,
-    refineZero = caglioti !== undefined,
+    refineZero = caglioti !== undefined || tof !== undefined,
     refineU = false,
     startB = 0.5,
     refineAdp = true,
@@ -185,9 +215,39 @@ export function buildStructureRefinement(
       params.push({ id, label: id.replace("prof", "prof "), kind, value, initialValue: value, fixed });
       bindings.push({ parameterId: id, kind, targetId: pattern.id });
     }
-  } else {
+  } else if (!tof) {
     params.push({ id: "width", label: "peak FWHM", kind: "peakWidth", value: width, initialValue: width, min: 1e-3, fixed: false });
     bindings.push({ parameterId: "width", kind: "peakWidth", targetId: pattern.id });
+  }
+
+  // Time-of-flight profile: fixed diffractometer constants (positions) plus the
+  // refinable back-to-back-exponential α/β/σ coefficients (peak shape).
+  if (tof) {
+    const calib: [string, string, number][] = [
+      ["difC", "difC", tof.difC],
+      ["difA", "difA", tof.difA ?? 0],
+      ["difB", "difB", tof.difB ?? 0],
+    ];
+    for (const [key, label, value] of calib) {
+      // difC/difA/difB come from instrument calibration and are held fixed (they
+      // correlate strongly with the cell); the cell + Zero absorb sample offsets.
+      params.push({ id: `tof_${key}`, label: `TOF ${label}`, kind: "tofCalibration", value, initialValue: value, fixed: true });
+      bindings.push({ parameterId: `tof_${key}`, kind: "tofCalibration", targetId: pattern.id, targetKey: key });
+    }
+    const prof: [string, string, number, number, number][] = [
+      // id, label, value, min, max
+      ["alpha0", "α₀", tof.alpha0 ?? 0, 0, 10],
+      ["alpha1", "α₁", tof.alpha1 ?? 1, 0, 200],
+      ["beta0", "β₀", tof.beta0 ?? 0.03, 1e-4, 10],
+      ["beta1", "β₁", tof.beta1 ?? 0, 0, 1e8],
+      ["sig0", "σ₀²", tof.sig0 ?? 0, 0, 1e7],
+      ["sig1", "σ₁²", tof.sig1 ?? 200, 0, 1e7],
+      ["sig2", "σ₂²", tof.sig2 ?? 0, 0, 1e7],
+    ];
+    for (const [key, label, value, min, max] of prof) {
+      params.push({ id: `tof_${key}`, label: `TOF ${label}`, kind: "tofProfile", value, initialValue: value, min, max, fixed: false });
+      bindings.push({ parameterId: `tof_${key}`, kind: "tofProfile", targetId: pattern.id, targetKey: key });
+    }
   }
 
   // Lorentzian size–strain (TCH pseudo-Voigt): X (size, 1/cosθ) ≥ 0; Y (strain,
@@ -216,9 +276,10 @@ export function buildStructureRefinement(
     }
   }
 
-  // Zero-point shift (instrument).
+  // Zero-point shift (instrument). Degrees for 2θ (±0.5°); µs for TOF (±50 µs).
   if (refineZero) {
-    params.push({ id: "zero", label: "zero shift", kind: "zeroShift", value: zero, initialValue: zero, min: -0.5, max: 0.5, fixed: false });
+    const zBound = tof ? 50 : 0.5;
+    params.push({ id: "zero", label: "zero shift", kind: "zeroShift", value: zero, initialValue: zero, min: -zBound, max: zBound, fixed: false });
     bindings.push({ parameterId: "zero", kind: "zeroShift", targetId: pattern.id });
   }
 
@@ -382,7 +443,7 @@ export const DEFAULT_STAGE_KINDS: readonly StageKinds[] = [
   { name: "scale", kinds: ["scale"] },
   { name: "background", kinds: ["background"] },
   { name: "cell", kinds: ["cellLength", "cellAngle"] },
-  { name: "profile", kinds: ["peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY", "asymSL", "asymHL", "zeroShift"] },
+  { name: "profile", kinds: ["peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY", "asymSL", "asymHL", "zeroShift", "tofCalibration", "tofProfile"] },
   { name: "ADP", kinds: ["bIso", "uAniso"] },
   { name: "positions", kinds: ["positionShift"] },
   { name: "occupancy", kinds: ["occupancy"] },

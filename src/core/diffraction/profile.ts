@@ -88,9 +88,13 @@ export function tchPseudoVoigt(gammaG: number, gammaL: number): { fwhm: number; 
 export interface ProfilePeak {
   readonly center: number;
   readonly intensity: number;
+  /** Symmetric width used for the Gaussian/pseudo-Voigt shapes and, for a TOF
+   *  peak, as the support half-width proxy for the far-peak skip. */
   readonly fwhm: number;
   /** Per-peak pseudo-Voigt mixing (from TCH); falls back to the global η. */
   readonly eta?: number;
+  /** Back-to-back-exponential TOF shape; present only for `shape: "tof"`. */
+  readonly tof?: TofShape;
 }
 
 /**
@@ -190,7 +194,73 @@ export function fcjSubPeaks(
   return subs;
 }
 
-export type PeakShape = "gaussian" | "pseudoVoigt";
+// --- Error functions (Numerical Recipes 6.2 rational form, |err| ≲ 1.2e-7) ---
+// The polynomial in t = 1/(1+|x|/2) shared by erfc and its scaled variant.
+function erfcPoly(t: number): number {
+  return t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 +
+    t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277))))))));
+}
+
+/** Complementary error function erfc(x) = 1 − erf(x), valid for all real x. */
+export function erfc(x: number): number {
+  const z = Math.abs(x);
+  const t = 1 / (1 + 0.5 * z);
+  const ans = t * Math.exp(-z * z - 1.26551223 + erfcPoly(t));
+  return x >= 0 ? ans : 2 - ans;
+}
+
+/**
+ * Scaled complementary error function erfcx(x) = exp(x²)·erfc(x) for x ≥ 0.
+ * Computed without forming exp(x²) so no catastrophic cancellation in the tail
+ * (the exp(−x²) inside erfc cancels the exp(x²) analytically).
+ */
+export function erfcxNonneg(x: number): number {
+  const t = 1 / (1 + 0.5 * x);
+  return t * Math.exp(-1.26551223 + erfcPoly(t));
+}
+
+/** Time-of-flight peak-shape parameters at one reflection (all in µs / µs⁻¹). */
+export interface TofShape {
+  /** Rising-edge exponential rate α (µs⁻¹). */
+  readonly alpha: number;
+  /** Falling-edge exponential rate β (µs⁻¹). */
+  readonly beta: number;
+  /** Gaussian standard deviation σ (µs). */
+  readonly sigma: number;
+}
+
+/**
+ * Back-to-back exponentials convolved with a Gaussian — the standard GSAS/
+ * Von Dreele TOF peak shape (Jorgensen et al.; Von Dreele, Jorgensen & Windsor,
+ * J. Appl. Cryst. 15, 581, 1982). A sharp rising edge (rate α) and a longer
+ * falling tail (rate β) give the characteristic TOF asymmetry; the Gaussian σ
+ * folds in the moderator/detector resolution. Normalized to unit area, so a
+ * peak's integrated intensity multiplies it directly.
+ *
+ *   H(Δ) = αβ/[2(α+β)] · [ e^u erfc(y) + e^v erfc(z) ]
+ *   u = α/2(ασ²+2Δ), y = (ασ²+Δ)/(σ√2);  v = β/2(βσ²−2Δ), z = (βσ²−Δ)/(σ√2)
+ *
+ * Evaluated in the erfcx form when the erfc argument is ≥ 0 (where e^u would
+ * overflow) and directly otherwise (where e^u < 1), so it is stable across the
+ * whole profile.
+ */
+export function tofBackToBack(delta: number, shape: TofShape): number {
+  const alpha = Math.max(shape.alpha, 1e-9);
+  const beta = Math.max(shape.beta, 1e-9);
+  const sigma = Math.max(shape.sigma, 1e-6);
+  const s2 = sigma * sigma;
+  const norm = (alpha * beta) / (2 * (alpha + beta));
+  const gauss = Math.exp(-(delta * delta) / (2 * s2));
+  const inv = 1 / (sigma * Math.SQRT2);
+  const y = (alpha * s2 + delta) * inv;
+  const z = (beta * s2 - delta) * inv;
+  // e^u erfc(y) = e^{−Δ²/2σ²} erfcx(y) for y ≥ 0; e^u erfc(y) directly for y < 0.
+  const termA = y >= 0 ? gauss * erfcxNonneg(y) : Math.exp(0.5 * alpha * (alpha * s2 + 2 * delta)) * erfc(y);
+  const termB = z >= 0 ? gauss * erfcxNonneg(z) : Math.exp(0.5 * beta * (beta * s2 - 2 * delta)) * erfc(z);
+  return norm * (termA + termB);
+}
+
+export type PeakShape = "gaussian" | "pseudoVoigt" | "tof";
 
 export interface ProfileOptions {
   readonly shape: PeakShape;
@@ -203,7 +273,10 @@ export interface ProfileOptions {
 }
 
 function shapeAt(x: number, peak: ProfilePeak, opts: ProfileOptions): number {
-  if (opts.shape === "gaussian") {
+  if (opts.shape === "tof" && peak.tof) {
+    return tofBackToBack(x - peak.center, peak.tof);
+  }
+  if (opts.shape === "gaussian" || opts.shape === "tof") {
     return gaussian(x, peak.center, peak.fwhm);
   }
   // A per-peak η (from the TCH combination of Gaussian + Lorentzian widths) wins

@@ -14,6 +14,13 @@ describe("plotting scale math", () => {
     expect(extent([2, 2, 2])).toEqual([1, 3]);
   });
 
+  it("inverts a pixel coordinate back to a data value", () => {
+    const s = linearScale(0, 10, 40, 140);
+    expect(s.invert(40)).toBeCloseTo(0);
+    expect(s.invert(140)).toBeCloseTo(10);
+    expect(s.invert(90)).toBeCloseTo(5);
+  });
+
   it("builds a polyline string", () => {
     const sx = linearScale(0, 2, 0, 20);
     const sy = linearScale(0, 2, 0, 20);

@@ -83,14 +83,16 @@ export function cylinderAbsorption(muR: number, twoThetaDeg: number): number {
 }
 
 /**
- * Lorentz(-polarization) factor for a constant-wavelength powder experiment.
- *  - neutron: L = 1 / (sin²θ · cosθ)
- *  - X-ray:   Lp = (1 + cos²2θ) / (sin²θ · cosθ)
- * Returns 1 for time-of-flight (handled by the TOF profile, not implemented in
- * the minimal engine) or when θ is undefined.
+ * Lorentz(-polarization) factor for a powder experiment.
+ *  - neutron (CW): L = 1 / (sin²θ · cosθ)
+ *  - X-ray (CW):   Lp = (1 + cos²2θ) / (sin²θ · cosθ)
+ *  - neutron (TOF): L = d⁴ — the fixed-2θ time-of-flight Lorentz factor
+ *    (Buras & Gerward; GSAS-II). The sin θ prefactor is constant per detector
+ *    bank and absorbed into the refined scale.
+ * Returns 1 when θ is undefined.
  */
 export function lorentzPolarization(radiation: Radiation, d: number): number {
-  if (radiation.kind === "neutron-tof") return 1;
+  if (radiation.kind === "neutron-tof") return d * d * d * d;
   const theta = braggTheta(d, radiation.wavelength);
   if (Number.isNaN(theta)) return 1;
   const sinT = Math.sin(theta);

@@ -35,10 +35,14 @@ accidental gap — each is tracked as a roadmap item.
   complete as the supplied operation list. (Roadmap F2.)
 - **Structure factors** use a compact, replaceable scattering-length /
   form-factor table (Cromer–Mann X-ray, tabulated neutron lengths).
-- **Powder profiles.** Gaussian and pseudo-Voigt with Caglioti U/V/W width and
-  Chebyshev background. **No Thompson–Cox–Hastings** pseudo-Voigt and **no full
-  TOF peak shape** yet (TOF↔d conversion and `.instprm` parsing exist; TOF
-  profile refinement does not). (Roadmap M1.)
+- **Powder profiles.** Constant-wavelength: Gaussian / pseudo-Voigt with Caglioti
+  U/V/W width, a Thompson–Cox–Hastings Lorentzian size–strain term, Finger–Cox–
+  Jephcoat axial asymmetry, and Chebyshev background. Time-of-flight: a back-to-
+  back-exponential ⊗ Gaussian peak shape with d-dependent α/β/σ, placed by the
+  difC/difA/difB constants (GSAS-II convention) and the d⁴ TOF Lorentz factor.
+  The TOF **α/β/σ coefficients refine** in the profile stage; difC is held at the
+  instrument calibration. Not yet modelled: the Ikeda–Carpenter moderator shape
+  and TOF absorption/extinction.
 - **Magnetic model.** Single propagation vector, **commensurate k = 0 only**;
   simplified ⟨j₀⟩ magnetic form factor and dipole structure factor. mCIF (BNS)
   parsing, axial-vector moment transformation, and single-crystal + powder moment

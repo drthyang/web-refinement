@@ -7,9 +7,8 @@
  * 404s, `loadPowgenDefault` resolves to `null`, and the app keeps its bundled
  * high-entropy structure. Nothing here throws.
  *
- * The POWGEN pattern is time-of-flight neutron data; the engine profile-fits
- * constant-wavelength only, so it loads **view-only** until TOF profile
- * refinement lands (roadmap M1).
+ * The POWGEN pattern is time-of-flight neutron data, refined with the back-to-
+ * back-exponential TOF profile when a TOF calibration (difC) is available.
  */
 
 import type { StructureModel } from "@/core/crystal/types";
@@ -32,7 +31,7 @@ export interface LoadedPowgen {
   readonly structure: StructureModel;
   readonly pattern: PowderPattern;
   readonly instrument: InstrumentParameters;
-  /** True when the pattern is TOF (currently view-only in the engine). */
+  /** True when the pattern is time-of-flight (vs constant-wavelength). */
   readonly isTof: boolean;
 }
 

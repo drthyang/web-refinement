@@ -36,6 +36,25 @@ export interface AppliedModel {
    * Only applies to a 2θ pattern.
    */
   readonly axial?: { readonly sl: number; readonly hl: number };
+  /**
+   * Time-of-flight diffractometer constants (GSAS-II convention, µs):
+   * TOF = Zero + difC·d + difA·d² + difB/d. Present only when a `tofCalibration`
+   * binding is supplied; drives TOF peak positions. Zero is carried by
+   * `zeroShift`. Only applies to a TOF pattern.
+   */
+  readonly tof?: { readonly difC: number; readonly difA: number; readonly difB: number };
+  /**
+   * Time-of-flight peak-shape coefficients (GSAS-II convention). The d-dependent
+   * rise/decay/Gaussian widths of the back-to-back-exponential profile:
+   *   α = α₀ + α₁/d,  β = β₀ + β₁/d⁴,  σ² = σ₀ + σ₁·d² + σ₂·d⁴.
+   * Present only when a `tofProfile` binding is supplied. Only applies to a TOF
+   * pattern.
+   */
+  readonly tofProfile?: {
+    readonly alpha0: number; readonly alpha1: number;
+    readonly beta0: number; readonly beta1: number;
+    readonly sig0: number; readonly sig1: number; readonly sig2: number;
+  };
   /** Zero-point shift of the abscissa, in the pattern's x-unit. */
   readonly zeroShift: number;
   /** March–Dollase preferred orientation (axis in hkl + ratio). Absent ⇒ none. */
@@ -79,6 +98,8 @@ export function applyParameters(
   let muR = 0;
   let po: { axis: [number, number, number]; ratio: number } | undefined;
   const background: number[] = [];
+  const tofCal = new Map<string, number>();
+  const tofProf = new Map<string, number>();
 
   for (const binding of bindings) {
     const v = values[binding.parameterId];
@@ -177,6 +198,12 @@ export function applyParameters(
       case "zeroShift":
         zeroShift = v;
         break;
+      case "tofCalibration":
+        if (binding.targetKey) tofCal.set(binding.targetKey, v);
+        break;
+      case "tofProfile":
+        if (binding.targetKey) tofProf.set(binding.targetKey, v);
+        break;
       case "poRatio":
         po = { axis: (binding.axis ? [...binding.axis] : [0, 0, 1]) as [number, number, number], ratio: v };
         break;
@@ -204,6 +231,16 @@ export function applyParameters(
     asymSL !== undefined || asymHL !== undefined
       ? { sl: asymSL ?? 0, hl: asymHL ?? 0 }
       : undefined;
+  const tof = tofCal.size
+    ? { difC: tofCal.get("difC") ?? 0, difA: tofCal.get("difA") ?? 0, difB: tofCal.get("difB") ?? 0 }
+    : undefined;
+  const tofProfile = tofProf.size
+    ? {
+        alpha0: tofProf.get("alpha0") ?? 0, alpha1: tofProf.get("alpha1") ?? 0,
+        beta0: tofProf.get("beta0") ?? 0, beta1: tofProf.get("beta1") ?? 0,
+        sig0: tofProf.get("sig0") ?? 0, sig1: tofProf.get("sig1") ?? 0, sig2: tofProf.get("sig2") ?? 0,
+      }
+    : undefined;
   return {
     model: appliedModel,
     scale,
@@ -215,6 +252,8 @@ export function applyParameters(
     ...(caglioti ? { caglioti } : {}),
     ...(lorentzian ? { lorentzian } : {}),
     ...(axial ? { axial } : {}),
+    ...(tof ? { tof } : {}),
+    ...(tofProfile ? { tofProfile } : {}),
     ...(po ? { po } : {}),
     background: background.length ? background.map((c) => c ?? 0) : [],
   };

@@ -33,6 +33,8 @@ export type ParameterKind =
   | "asymSL"
   | "asymHL"
   | "zeroShift"
+  | "tofCalibration"
+  | "tofProfile"
   | "poRatio"
   | "absorption"
   | "magneticScale"
