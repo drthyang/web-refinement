@@ -46,13 +46,18 @@ export function buildPowderSpec(
     lorentz,
   };
 
-  const cagOpt = caglioti ? { caglioti } : {};
+  // For a proper CW instrument, refine a Thompson–Cox–Hastings pseudo-Voigt:
+  // the Gaussian Caglioti U/V/W plus a Lorentzian size–strain X/Y (seeded small
+  // and refined in the profile stage). On real synchrotron data this Lorentzian
+  // is the difference between a mediocre fit and a good one (e.g. GaNb4Se8
+  // wR ≈ 10% → 5.5%). Only meaningful on a 2θ pattern.
+  const profOpt = caglioti ? { caglioti, lorentzian: { x: 1, y: 0 } } : {};
   // Seed the scale from the data with a unit-scale evaluation.
-  const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, ...cagOpt });
+  const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, ...profOpt });
   const curves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
   const s = optimalScale(curves.yObs.map((y) => (y > 0 ? y : 0)), curves.yCalc);
 
-  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...cagOpt });
+  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt });
   const params = spec.params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
   return { params, bindings: spec.bindings, profile };
 }

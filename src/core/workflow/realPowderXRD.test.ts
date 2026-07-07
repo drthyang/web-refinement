@@ -176,6 +176,7 @@ describe.skipIf(!has)("real powder XRD — GaNb4Se8 (NSLS-II 28ID synchrotron)",
     const spec = buildStructureRefinement(structure, pattern, {
       scale: 1, backgroundTerms: 10, startB: 0.3, refineAdp: true, refinePositions: true,
       caglioti: { u: inst.u ?? 0, v: inst.v ?? 0, w: inst.w ?? 1 }, zero: inst.zero ?? 0,
+      lorentzian: { x: 1, y: 0 },
     });
     const agree = (params: typeof spec.params) => {
       const curves = powderCurves(structure, pattern, params, spec.bindings, CWPROFILE);
@@ -219,12 +220,12 @@ describe.skipIf(!has)("real powder XRD — GaNb4Se8 (NSLS-II 28ID synchrotron)",
     const posModes = out.parameters.filter((p) => p.kind === "positionShift");
     expect(posModes.length).toBe(3);
 
-    // Quality: big drop from the seed; genuinely fitted. The residual floor here
-    // is a specific-hkl intensity deficit (the strongest low-angle reflection is
-    // under-predicted ~3× — preferred orientation / absorption), not the profile
-    // or ADPs; the high-angle region already fits ~14%.
+    // Quality: with the structure-factor special-position fix, the Lorentz factor,
+    // and a Thompson–Cox–Hastings pseudo-Voigt (Gaussian U/V/W + Lorentzian X/Y),
+    // this is a genuinely good Rietveld fit — wR ≈ 5.5%, below GSAS-II's 7.34% on
+    // the same data (GoF < 1 as the counting errors are generous).
     expect(wRend).toBeLessThan(wRstart);
-    expect(wRend).toBeLessThan(40);
+    expect(wRend).toBeLessThan(12);
     expect(elapsed).toBeLessThan(15000);
     console.log(`GaNb4Se8 staged: wR ${wRstart.toFixed(1)}%→${wRend.toFixed(1)}% · Rp=${(100 * af.rFactor).toFixed(1)}% Rexp=${(100 * (af.rExpected ?? 0)).toFixed(1)}% GoF=${af.goodnessOfFit?.toFixed(1)} · ${posModes.length} pos modes · ${us.length} Uani modes · W ${(inst.w ?? 0).toFixed(2)}→${get("profW").value.toFixed(2)} · ${elapsed}ms`);
   });
