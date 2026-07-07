@@ -1,79 +1,260 @@
 # Roadmap
 
-Phased build. Each phase ends with **passing tests, updated docs, a working local
-app, and no broken intermediate state**. Later phases do not start until earlier
-ones are stable. Atomic/nuclear refinement comes before magnetic; single crystal
-before powder within each.
+The single, authoritative plan for the Web Refinement Workbench. It supersedes
+the earlier `ROADMAP`, `POWDER_ROADMAP`, and `MATURITY_PLAN` docs (the last two
+are kept for their granular detail in [`archive/`](./archive/)).
 
 Status legend: ✅ done · 🚧 in progress · ⬜ not started
 
-## Phase 0 — Architecture & type drafts ✅
-- Layered architecture, source tree, conventions documented.
-- TypeScript interface drafts for all core models (`src/core/**/types.ts`).
-- Project scaffold: Vite + React + TS (strict) + Vitest; `dev`/`build`/`test` work.
-- Round-trip test for `ProjectFile`.
-- **Deliverables:** the six `docs/*.md` + interface drafts. No calculation engine.
+---
 
-## Phase 1 — Atomic/nuclear refinement core ✅
-Minimal, correct, testable. Cell, sites, occupancies, B_iso, symmetry ops,
-reflection data, scale, (powder) background, parameter table with fixed/free +
-bounds, refinement history.
+## 1. Vision
 
-## Phase 2 — Data models for single crystal & powder ✅
-Finalize both observation models behind one engine (types exist from Phase 0;
-this phase wires the shared residual/weight machinery and parsers).
+Build a **traditional refinement package** — weighted non-linear least squares,
+Rietveld and single-crystal, atomic then magnetic — that runs entirely in the
+browser on a pure-TypeScript, framework-free core. Then expose every capability
+as an **agent tool / skill**, so the same validated functions can be driven
+either by a person in the UI or by an agent reasoning about a structure.
 
-## Phase 3 — Single-crystal atomic refinement ✅
-Load CIF + hkl; compute `F_N`, `|F|²`, `I_calc`; refine scale (± coords,
-occupancies); R and weighted R; obs-vs-calc plot; export reflection table +
-project JSON. Simplified structure-factor equation; modular scattering table.
+Two principles hold throughout:
 
-## Phase 4 — Powder atomic refinement ✅
-Allowed reflections → nuclear intensities → profile (Gaussian, then
-pseudo-Voigt) + background (constant, then polynomial). Refine scale, background,
-lattice, peak width. Obs/calc/difference plot; export pattern + project. Minimal
-profile refinement.
+- **Correctness first, in TypeScript.** No WebAssembly/WebGPU, no global-search
+  shortcuts, and no feature claimed "validated" until a test or external
+  comparison records it. `src/core/**` stays pure and side-effect-free — which
+  is exactly what makes it both testable *and* tool-callable.
+- **One engine, many workflows.** A constrained weighted least-squares engine is
+  the foundation; single-crystal, powder, atomic, and magnetic all plug into it.
+  Everything else is a parameterization or a corrections term on top.
 
-## Phase 5 — Magnetic structure model ✅
-Moments on sites, propagation vector k, magnetic form-factor interface,
-perpendicular-moment rule `M⊥ = M − q̂(M·q̂)`, simplified `F_M`, arrow
-visualization. Nuclear/magnetic contributions kept separate.
+The north-star design rules live in
+[`../knowledge/refinement_fitting_algorithms_knowledge.md`](../knowledge/refinement_fitting_algorithms_knowledge.md):
+never refine everything at once, never ignore parameter correlations, refine
+only symmetry-allowed parameters, use global search only for starting models.
 
-## Phase 6 — Magnetic single-crystal refinement ✅
-Nuclear + magnetic intensities; refine magnetic scale, moment magnitude
-(± direction); fixed/free moment parameters; separate contribution reporting;
-export magnetic model in project JSON.
+### The build sequence, in one line
 
-## Phase 7 — Magnetic powder refinement ✅ (combined nuclear+magnetic profile, separable components)
-Magnetic peaks, combined nuclear+magnetic profile with separable components,
-moment + magnetic-scale refinement, obs/calc/difference plot, export. After
-Phases 4 and 6 are working.
+> **Foundations (F1 robust engine · F2 symmetry constraints)** →
+> **M1 atomic structure refinement** → **M2 magnetic k-vector search** →
+> **M3 magnetic space-group analysis** → **M4 magnetic structure refinement** →
+> **M5 ship the results**, with the **agent-tools/skills layer** exposed
+> incrementally as each milestone lands.
 
-## Phase 8 — Constraints & advanced refinement ✅ (fixed/free/bounds/ties/groups + moment-size restraint + symmetry-allowed moments)
-Fixed/free/bounds (from Phase 1) plus tied, grouped, site/occupancy/moment/
-lattice constraints, presets. Start with direct tying and grouping; no complex
-symbolic language early.
+---
 
-## Phase 9 — Validation ✅ (55 tests, GSAS-II golden values)
-Tests for CIF/reflection/powder parsing, reciprocal lattice, phase factors,
-nuclear structure factors, powder peak generation, residuals, optimizer, project
-round-trip, magnetic projection, magnetic structure factors. Golden examples;
-cross-checks vs GSAS-II/FullProf/Jana2020 where possible. See
-[VALIDATION.md](./VALIDATION.md).
+## 2. Current state (honest baseline)
 
-## Phase 10 — Documentation & limitations ✅
-Finalize `README`, `ARCHITECTURE`, `ROADMAP`, `VALIDATION`, `LIMITATIONS`,
-`PROJECT_FORMAT`, including the scope statement.
+What genuinely works today (181 passing tests; real-data validated):
 
-## Deferred accelerators (post-correctness)
-WebAssembly / WebGPU for structure-factor summation, profile convolution, and the
-normal-equations solve — only after the TS core is correct and validated.
+- **Refinement engine** — Levenberg–Marquardt with diagonal preconditioning,
+  SVD-truncated pseudo-inverse, per-cycle shift limiting, bound projection,
+  exact one-evaluation Jacobian columns for linear parameters, and
+  covariance/esd + correlation/singular-direction reporting.
+  ([`refinement/engine.ts`](../src/core/refinement/engine.ts))
+- **Staged structure refinement** — the expert unlock order
+  (scale → background → cell → profile → ADP → positions) driven by
+  [`workflow/structureRefinement.ts`](../src/core/workflow/structureRefinement.ts).
+  Genuine Rietveld structure refinement, not just scale/width/cell.
+- **Symmetry-adapted parameters** — a single null-space method emits the allowed
+  modes for positions, anisotropic ADPs, magnetic moments, and the cell metric
+  from the parsed operation list
+  ([`crystal/siteConstraints.ts`](../src/core/crystal/siteConstraints.ts) and siblings).
+- **Powder physics** — Chebyshev background, Caglioti U/V/W width, zero-shift,
+  pseudo-Voigt, Le Bail extraction, multi-phase, March–Dollase preferred
+  orientation, Debye–Scherrer absorption, TOF↔d + `.instprm` parsing.
+- **Magnetic (k = 0)** — moment projection, magnetic structure factor, magnetic
+  powder + single-crystal refinement, and honest **k = 0 magnetic space-group
+  candidate generation** (GF(2) homomorphism enumeration) with candidate
+  comparison ([`magnetic/magneticGroups.ts`](../src/core/magnetic/magneticGroups.ts)).
+- **Validation** — GSAS-II golden values; the real GaNb₄Se₈ 28-ID synchrotron
+  XRD regression reaches wR ≈ 36.5% (see [`archive/POWDER_ROADMAP.md`](./archive/POWDER_ROADMAP.md)).
 
-## Beyond the original plan — mature package coverage
+The rest of this document is what is **not** done, ordered.
 
-Added after the 10-phase plan: multi-phase powder, Le Bail extraction,
-anisotropic ADPs, March-Dollase preferred orientation, TOF/instrument support,
-and in-app magnetic space-group candidate generation + comparison. The path to
-GSAS-II / Jana2020 / FullProf capability is laid out in
-[MATURITY_PLAN.md](./MATURITY_PLAN.md); the feature comparison is in
-[COMPARISON.md](./COMPARISON.md).
+---
+
+## 3. Foundations — the two bottlenecks (gate everything)
+
+These are coupled: **F2 produces the reduced parameter vector that F1
+optimizes.** A special-position atom must never refine raw x/y/z independently;
+F2 hands F1 the symmetry-allowed modes, F1 solves them robustly. Both must be
+solid before the milestones can be trusted.
+
+### F1 — Robust refinement algorithm
+
+The engine is capable but still fragile on hard real data. Close these, in order:
+
+1. **Analytic derivatives for the crystallographic model** ⬜ — the single
+   biggest stability + speed win. Today every non-linear parameter uses a central
+   finite difference (2 model evaluations/column). Add exact columns for
+   coordinates, occupancies, B_iso, cell, profile width, zero-shift, and moment
+   components (analytic where practical, validated against finite differences).
+2. **Reflection-window evaluation + dependency caching** ⬜ — accumulate each
+   reflection only over its local `±n·FWHM` window, and invalidate caches by
+   dependency (cell → d-spacings; positions → structure factors; scale → reuse
+   everything). Turns dense global sums into sparse local ones; prerequisite for
+   larger problems and for analytic Jacobian columns.
+3. **Robust automatic starting values** ⬜ — auto-scale (✅), plus
+   auto-background from the data's lower envelope and a zero-shift/peak-position
+   sanity check, so refinement does not start in a false basin.
+4. **Dual convergence + automated staged controller** 🚧 — converge on *both*
+   Δχ² and max parameter shift; the staged controller exists
+   ([`refinement/staged.ts`](../src/core/refinement/staged.ts)) but should reject
+   parameter additions that raise esds or blow up correlations.
+5. **Automated next-parameter diagnostic** ⬜ — rank inactive parameter groups by
+   expected χ² improvement (perturb ±δ, measure residual sensitivity). This is
+   also the **first agent-in-the-loop hook** (see §5).
+6. **Optional global search for starting models** ⬜ — Monte Carlo / simulated
+   annealing, *only* to generate candidates (bad initial model, magnetic
+   sign/phase ambiguity), never as the main engine. Feeds M2 and M4.
+
+*Validation gate:* the GaNb₄Se₈ regression tightens toward the GSAS-II wR;
+analytic-vs-finite-difference Jacobian agreement test; SVD duplicate-parameter
+suppression test.
+
+### F2 — Symmetry-constrained parameterization
+
+The null-space constraint machinery is correct but is only ever as good as the
+**parsed CIF operation list**. To make constraints trustworthy and complete:
+
+1. **Built-in 230 space-group tables** ⬜ — generators + Hermann–Mauguin lookup,
+   standard settings, and **Wyckoff positions**, replacing CIF-only symmetry.
+   *Validate against International Tables generators.* (Highest value-to-effort.)
+2. **Systematic-absence generation** ⬜ — derive allowed reflections from the
+   group rather than only from the supplied operation list.
+3. **Unified constraint-transform layer** 🚧 — document and consolidate the
+   existing "emit reduced modes" mechanism as *the* single constraint path
+   (`raw = transform(free)`), covering positions, ADPs, occupancy ties/groups,
+   moments, and rigid bodies.
+4. **Setting/origin transforms** ⬜ — convert between standard and non-standard
+   settings so external CIFs load into a known frame (needed before M3's subgroup
+   derivation is reliable).
+
+*Validation gate:* Wyckoff assignment and special-position constraints match
+International Tables for a spread of groups (incl. F-4̄3m used by GaNb₄Se₈).
+
+---
+
+## 4. Milestones — the arc
+
+Each milestone: **goal · what exists · what's needed · validation gate · the
+agent tool it exposes.**
+
+### M1 — Atomic structure refinement (robust) 🚧
+
+- **Goal:** reliable, well-diagnosed convergence on any good-starting-model
+  nuclear structure + single-crystal or powder data.
+- **Exists:** staged Rietveld refinement; symmetry-adapted positions/ADP; real
+  data at wR ≈ 36.5%.
+- **Needed:** F1 + F2; Thompson–Cox–Hastings pseudo-Voigt (separate Gaussian/
+  Lorentzian size–strain) and full TOF profile (back-to-back exponentials) so the
+  bundled POWGEN data fits end-to-end; **refined-structure presentation** — atom
+  table with x/y/z, occ, U_iso/U_eq and **esds**, bond lengths & angles with
+  esds, obs/calc/difference plot, and a 3D unit-cell view.
+- **Validation gate:** GaNb₄Se₈ wR toward the GSAS-II value; synthetic
+  displaced-atom recovery; multi-histogram (X-ray + neutron) joint refinement of
+  one model.
+- **Tool exposed:** `refine_structure(model, data, options) → refined model +
+  agreement factors + diagnostics`.
+
+### M2 — Magnetic k-vector search ⬜ (does not exist yet)
+
+- **Goal:** given a nuclear structure and observed magnetic reflections (extra
+  peaks not indexed by the nuclear cell), find the propagation vector(s) **k**.
+- **Exists:** nothing — this is a genuine gap. `MagneticModel` carries a single
+  k, but there is no search.
+- **Needed:** a magnetic-satellite reflection generator for arbitrary k
+  (peaks at G ± k); a **k-scan** over high-symmetry Brillouin-zone points and a
+  commensurate rational grid, then a general grid; scoring by magnetic-peak
+  position match (and optional Le Bail magnetic-intensity fit); ranked output
+  with a commensurate/incommensurate flag.
+- **Validation gate:** recover k for a known test case (simple AFM at a
+  zone-boundary point; a k = 0 case must return k = 0).
+- **Tool exposed:** `search_propagation_vector(nuclear, magnetic_peaks) →
+  ranked k candidates`.
+
+### M3 — Magnetic space-group / symmetry analysis ⬜
+
+- **Goal:** given the parent group and k, enumerate the allowed magnetic symmetry
+  and the **allowed moment basis** (the parameters M4 will refine).
+- **Exists:** k = 0 candidate generation + null-space allowed-moment directions.
+- **Needed:** the **little group of k** (G_k); maximal magnetic subgroup
+  enumeration for k ≠ 0; a **representation-analysis** route (irreps of G_k →
+  basis vectors), the BasIreps/SARAh capability; and standard **BNS/OG labels**
+  via a lookup table so a candidate reads "P2₁'/m'" rather than a primed-operation
+  list.
+- **Validation gate:** little group + allowed moments match Bilbao/ISODISTORT for
+  known cases; k = 0 path reproduces today's candidate set.
+- **Tool exposed:** `enumerate_magnetic_symmetry(parent, k) → candidate groups +
+  moment bases (+ standard labels)`.
+
+### M4 — Magnetic structure refinement ⬜
+
+- **Goal:** refine **moment basis-mode amplitudes** (never raw M_x/M_y/M_z) for
+  each M3 candidate against magnetic data, and rank candidates by fit *and*
+  physical plausibility.
+- **Exists:** k = 0 magnetic powder + single-crystal moment refinement; candidate
+  comparison; a moment-magnitude recovery test.
+- **Needed:** parameterize refinement over the irrep/basis amplitudes from M3;
+  magnetic supercell handling and Fourier-coefficient moment models
+  (sine / helical / conical) for k ≠ 0; use F1's global search to resolve
+  sign/phase ambiguity; candidate ranking with correlation-aware diagnostics.
+- **Validation gate:** recover a known basis-mode amplitude for k ≠ 0; ranked
+  candidates put the true magnetic structure first on a golden case.
+- **Tool exposed:** `refine_magnetic(candidate, data) → refined moments + fit`;
+  the **"magnetic structure determination" skill** chains M2 → M3 → M4.
+
+### M5 — Ship the results 🚧
+
+- **Goal:** reproducible, publishable, machine-readable outputs.
+- **Exists:** versioned project JSON round-trip; agreement factors; refinement
+  history; assorted exporters.
+- **Needed:** **refined CIF / mCIF export** (cell, positions, occ, ADPs, moments
+  + esds) that external tools can read; a **report generator** (atom table,
+  geometry, plots, correlation/failure-mode summary); and a **headless scripting
+  API** mirroring `GSASIIscriptable` — which is also the substrate the agent
+  tools sit on (§5).
+- **Validation gate:** CIF/mCIF round-trip; an external tool (VESTA/GSAS-II)
+  reads the exported files.
+- **Tool exposed:** `export_cif(model) `, `generate_report(result)`.
+
+---
+
+## 5. Agent-tools & skills layer (cross-cutting)
+
+The reason the core is kept pure and JSON-serializable: **each workflow function
+becomes a callable tool, and the milestones define the tool surface.** This layer
+is not a separate system built at the end — it is exposed incrementally as each
+milestone stabilizes.
+
+- **Tool surface** mirrors §4: `load_structure` / `load_data` / `build_refinement`
+  / `refine_structure` (M1) · `search_propagation_vector` (M2) ·
+  `enumerate_magnetic_symmetry` (M3) · `refine_magnetic` (M4) · `export_cif` /
+  `generate_report` (M5) · `diagnose` (correlations, singular directions).
+- **First agent-in-the-loop hook:** F1.5's automated next-parameter diagnostic —
+  an agent can call it to decide what to unlock next, driving the staged
+  controller with crystallographic judgment.
+- **Skills** chain tools with expert prompts: a *guided Rietveld* skill (M1), a
+  *magnetic structure determination* skill (M2 → M3 → M4).
+- **Design rules for tools:** pure, deterministic, JSON in/out, and **every tool
+  returns diagnostics** (agreement factors, correlations, singular directions) so
+  an agent can reason about failure rather than trust a lone R-factor. The M5
+  scripting API is the concrete substrate.
+
+---
+
+## 6. Sequencing & guardrails
+
+**Order:** F1 + F2 (coupled, first) → M1 (proves the foundation on real atomic
+data) → M2 → M3 → M4 (each gates the next) → M5 formalized last but threaded
+throughout. Agent tools exposed per-milestone.
+
+**Deferred until the core is correct:** WebAssembly / WebGPU acceleration for
+structure-factor summation, profile convolution, and the normal-equations solve.
+Superspace (3+d) modulated structures and full structure *solution* (charge
+flipping) are beyond this arc.
+
+**Every milestone ships with:** passing tests (golden values where an external
+reference exists), updated docs, a working local app, and no broken intermediate
+state. A capability is "validated" only when [`VALIDATION.md`](./VALIDATION.md)
+records a test or external comparison. Scope honesty (validated vs approximate)
+is non-negotiable — see [`LIMITATIONS.md`](./LIMITATIONS.md).

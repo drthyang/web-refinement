@@ -1,5 +1,10 @@
 # Powder Refinement Roadmap
 
+> **Archived.** Superseded by the consolidated [`../ROADMAP.md`](../ROADMAP.md).
+> Kept for its granular powder detail — per-workstream status, the GaNb₄Se₈
+> failure modes, and the validated real-data numbers — which the main roadmap
+> references rather than repeats.
+
 Focused plan to make **powder** refinement production-grade: a robust engine,
 real background functions, atomic displacement parameters (not just peak width),
 and a proper refined-structure view. Ordered so each stage rests on a stable one

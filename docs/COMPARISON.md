@@ -111,7 +111,7 @@ tables with standard labels; incommensurate / non-zero-k and helical/conical
 magnetism; full TOF and TCH profile functions; spherical-harmonic texture;
 absorption/extinction; rigid bodies and a restraints library; multi-histogram
 joint refinement; a scripting API. These are laid out in
-[MATURITY_PLAN.md](./MATURITY_PLAN.md).
+[ROADMAP.md](./ROADMAP.md).
 
 ## 4. Performance notes
 

@@ -12,13 +12,15 @@ WebAssembly/WebGPU are future accelerators.
 
 ## Status
 
-**Working app — atomic/nuclear refinement (single-crystal + powder).** The
-scientific core, Levenberg–Marquardt refinement engine, CIF parsing, plots, Web
-Worker compute, and a functioning workbench UI are implemented and tested (55
-tests). Crystallographic and scattering foundations are validated against a
-bundled GSAS-II refinement (see [docs/REPORT.md](docs/REPORT.md) and
-[docs/VALIDATION.md](docs/VALIDATION.md)). The magnetic structure factor is
-implemented; magnetic refinement UI is pending. See [docs/ROADMAP.md](docs/ROADMAP.md).
+**Working app — atomic/nuclear refinement (single-crystal + powder) plus
+magnetic k = 0.** The scientific core, Levenberg–Marquardt refinement engine,
+symmetry-adapted constrained parameters, CIF parsing, plots, and Web Worker
+compute are implemented and tested (**181 tests**). Crystallographic and
+scattering foundations are validated against bundled GSAS-II refinements (see
+[docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
+Magnetic single-crystal + powder refinement and k = 0 space-group candidate
+generation work; the magnetic k-vector search, non-zero-k analysis, and refined-
+structure export are the next milestones. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Commands
 
@@ -58,17 +60,17 @@ calculations run in Web Workers. Full detail in
 
 ## Documentation
 
+- [docs/ROADMAP.md](docs/ROADMAP.md) — **the single authoritative roadmap** (vision, foundations, milestones, agent layer)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layers, source tree, conventions
 - [docs/DATA_MODEL.md](docs/DATA_MODEL.md) — data types and their reasoning
 - [docs/REFINEMENT_ENGINE.md](docs/REFINEMENT_ENGINE.md) — the least-squares design
-- [docs/ROADMAP.md](docs/ROADMAP.md) — phased build plan
 - [docs/VALIDATION.md](docs/VALIDATION.md) — testing & external comparison strategy
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — scope and known simplifications
 - [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project JSON format
 - [docs/REFINEMENT_PROCEDURE.md](docs/REFINEMENT_PROCEDURE.md) — the guided 7-step workflow
 - [docs/COMPARISON.md](docs/COMPARISON.md) — features vs GSAS-II / Jana2020 / FullProf
-- [docs/MATURITY_PLAN.md](docs/MATURITY_PLAN.md) — maturity roadmap
 - [docs/REPORT.md](docs/REPORT.md) — build & validation report
+- [docs/archive/](docs/archive/) — superseded plans (POWDER_ROADMAP, MATURITY_PLAN), kept for detail
 
 ## License
 

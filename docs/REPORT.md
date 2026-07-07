@@ -4,7 +4,8 @@
 atomic and magnetic structures.
 **Date:** 2026-07-06
 **Stack:** React 18 · TypeScript 5 (strict) · Vite 5 · Vitest · Web Workers.
-**Status:** Working static app; **101 tests passing**; atomic **and magnetic**
+**Status:** Working static app; **181 tests passing** (11 real-data tests skip
+without local `data/`); atomic **and magnetic**
 single-crystal + powder refinement, multi-phase, Le Bail extraction, and in-app
 magnetic space-group candidate generation & comparison; validated against the
 bundled GSAS-II refinements in `data/` (30 K / 200 K / 350 K).
@@ -13,7 +14,7 @@ bundled GSAS-II refinements in `data/` (30 K / 200 K / 350 K).
 > anisotropic ADPs, March-Dollase preferred orientation, TOF/instrument support,
 > magnetic powder refinement, and grouped constraints; benchmarked against
 > GSAS-II / Jana2020 / FullProf ([COMPARISON.md](./COMPARISON.md)); remaining
-> maturity work is tracked in [MATURITY_PLAN.md](./MATURITY_PLAN.md). Earlier
+> maturity work is tracked in [ROADMAP.md](./ROADMAP.md). Earlier
 > magnetic work is in §3.
 
 ---

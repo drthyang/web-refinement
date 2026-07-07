@@ -9,44 +9,50 @@
 
 This statement appears in the app UI and the README, not only here.
 
-## Current scope (Phase 0)
+## Current scope
 
-Only the architecture, data-type drafts, and project scaffold exist. **No
-calculation or refinement engine is implemented yet.** Nothing here produces
-scientific results at this phase.
+A working static app performs **atomic/nuclear structure refinement** for both
+single-crystal and powder data (181 passing tests), with the scientific
+foundations for magnetic refinement in place. The Levenberg–Marquardt engine,
+symmetry-adapted constrained parameters, Chebyshev background, Caglioti profile,
+Le Bail extraction, multi-phase powder, and **k = 0** magnetic refinement +
+space-group candidate generation are implemented and tested. The remaining work
+and its ordering are in [ROADMAP.md](./ROADMAP.md).
 
-## Known simplifications (planned, by design)
+Everything below is a **deliberate, still-standing simplification**, not an
+accidental gap — each is tracked as a roadmap item.
 
-These are deliberate scope choices for early phases, to be lifted later:
+## Known simplifications (by design)
 
-- **Structure factors** use a simplified equation and a small, replaceable
-  scattering-length / form-factor table before complete tables are added.
-- **Displacement parameters**: isotropic (B_iso) first; anisotropic ADPs are
-  typed but not yet used in calculation.
-- **Space groups**: represented as an explicit list of symmetry operations
-  (as parsed from CIF). No built-in 230-group table initially; no automatic
-  systematic-absence generation beyond what the operation list implies.
-- **Powder profiles**: Gaussian and pseudo-Voigt with a single width; polynomial
-  background; March-Dollase preferred orientation. No Thompson-Cox-Hastings,
-  Chebyshev background, spherical-harmonic texture, or full TOF profile yet
-  (TOF↔d conversion exists, but TOF peak-shape refinement does not). Multi-phase
-  powder and Le Bail extraction are implemented.
-- **Optimizer**: local Levenberg–Marquardt with a numerical Jacobian. No global
-  optimization (simulated annealing, etc.); a reasonable starting model is
-  assumed. Poor starting points may converge to false minima.
-- **Magnetic model**: single propagation vector (k = 0 commensurate), simplified
-  ⟨j0⟩ magnetic form factor and dipole structure factor. mCIF (BNS) parsing,
-  axial-vector moment transformation, and **single-crystal** moment refinement
-  are implemented and validated against GSAS-II moment magnitudes. Magnetic
-  **powder** refinement (combined nuclear+magnetic profile) is also implemented.
-  In-app candidate generation covers **k = 0 commensurate** structures only
-  (parent + index-2 subgroups); it does not attach standard BNS labels or handle
-  non-zero / incommensurate propagation vectors, and there is no
-  representation-analysis route. Moment components in a non-orthogonal cell use
-  the normalized crystal-axis convention (reproduces the GSAS-II magnitude for
-  the monoclinic Mn₃Ga structure).
-- **Corrections not yet modelled**: absorption, extinction, preferred
-  orientation, anomalous dispersion, TOF profile complexities.
+- **Optimizer.** Local Levenberg–Marquardt with a **numerical (finite-difference)
+  Jacobian** for all non-linear parameters; only linear parameters (scale,
+  background, magnetic scale) have exact columns. No analytic crystallographic
+  derivatives yet and no global optimization — a reasonable starting model is
+  assumed, and poor starting points can converge to false minima. (Roadmap F1.)
+- **Space groups.** Represented as the **explicit operation list parsed from the
+  CIF** — no built-in 230-group tables, Wyckoff lookup, or automatic
+  systematic-absence generation. Symmetry constraints are therefore only as
+  complete as the supplied operation list. (Roadmap F2.)
+- **Structure factors** use a compact, replaceable scattering-length /
+  form-factor table (Cromer–Mann X-ray, tabulated neutron lengths).
+- **Powder profiles.** Gaussian and pseudo-Voigt with Caglioti U/V/W width and
+  Chebyshev background. **No Thompson–Cox–Hastings** pseudo-Voigt and **no full
+  TOF peak shape** yet (TOF↔d conversion and `.instprm` parsing exist; TOF
+  profile refinement does not). (Roadmap M1.)
+- **Magnetic model.** Single propagation vector, **commensurate k = 0 only**;
+  simplified ⟨j₀⟩ magnetic form factor and dipole structure factor. mCIF (BNS)
+  parsing, axial-vector moment transformation, and single-crystal + powder moment
+  refinement are implemented and validated against GSAS-II magnitudes. In-app
+  candidate generation covers k = 0 (parent + index-2 subgroups); it does **not**
+  attach standard BNS labels, handle non-zero/incommensurate k, or offer a
+  representation-analysis route, and there is **no propagation-vector search**.
+  (Roadmap M2–M4.) Moment components in a non-orthogonal cell use the normalized
+  crystal-axis convention (reproduces the GSAS-II magnitude for monoclinic Mn₃Ga).
+- **Corrections modelled:** March–Dollase preferred orientation, Debye–Scherrer
+  cylinder absorption. **Not modelled:** extinction, spherical-harmonic texture,
+  flat-plate/other absorption geometries, anomalous dispersion, microabsorption.
+- **Output.** Reproducible project JSON with history. **No refined CIF/mCIF
+  export, atom table with esds, or report generation yet.** (Roadmap M5.)
 
 ## What "not validated" means here
 

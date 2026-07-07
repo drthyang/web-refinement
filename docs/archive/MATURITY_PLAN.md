@@ -1,7 +1,11 @@
 # Maturity Plan
 
+> **Archived.** Superseded by the consolidated [`../ROADMAP.md`](../ROADMAP.md),
+> which folds these items into the milestone/foundation structure. Kept for
+> reference; the GSAS-II/Jana2020/FullProf feature mapping still lives here.
+
 The road from this early workbench toward the capability level of GSAS-II,
-Jana2020, and FullProf (see [COMPARISON.md](./COMPARISON.md)). Ordered by
+Jana2020, and FullProf (see [COMPARISON.md](../COMPARISON.md)). Ordered by
 value-to-effort, with the correctness-first, tested-in-TypeScript discipline
 kept throughout. Each item names the concrete deliverable and its validation.
 
@@ -67,5 +71,5 @@ kept throughout. Each item names the concrete deliverable and its validation.
 Every item ships with: passing tests (golden values where an external reference
 exists), updated docs, and a working app with no broken intermediate state — the
 same discipline as the phases so far. Scope claims stay honest: a feature is
-"validated" only when [VALIDATION.md](./VALIDATION.md) records a test or external
+"validated" only when [VALIDATION.md](../VALIDATION.md) records a test or external
 comparison for it.
