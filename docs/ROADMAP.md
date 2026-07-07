@@ -153,14 +153,24 @@ agent tool it exposes.**
   nuclear structure + single-crystal or powder data.
 - **Exists:** staged Rietveld refinement; symmetry-adapted positions/ADP; real
   data at wR ≈ 36.5%.
-- **Needed:** F1 + F2; Thompson–Cox–Hastings pseudo-Voigt (separate Gaussian/
-  Lorentzian size–strain) and full TOF profile (back-to-back exponentials) so the
-  bundled POWGEN data fits end-to-end; **refined-structure presentation** — atom
-  table with x/y/z, occ, U_iso/U_eq and **esds**, bond lengths & angles with
-  esds, obs/calc/difference plot, and a 3D unit-cell view.
-- **Validation gate:** GaNb₄Se₈ wR toward the GSAS-II value; synthetic
-  displaced-atom recovery; multi-histogram (X-ray + neutron) joint refinement of
-  one model.
+- **Benchmark (GaNb₄Se₈ 298.8 K, identical data):** GSAS-II reaches **wR ≈ 7.34%**
+  with a **fixed** structure, refining only scale + Chebyshev background — using a
+  **Thompson–Cox–Hastings pseudo-Voigt** (Gaussian Caglioti U/V/W **+** an
+  independent Lorentzian size–strain X/Y **+** SH/L axial asymmetry). Our engine,
+  with only a single Gaussian-dominated pseudo-Voigt, reaches **wR ≈ 66.7%** on a
+  fixed structure — and its ~36.5% "best" only comes from freeing ADPs that then
+  rail to their bounds *absorbing the peak-shape error*. **So the TCH profile is
+  the confirmed root cause**, and fixing it should also resolve the ADP-at-bounds
+  symptom. Locked in as [`gsasBenchmark.test.ts`](../src/core/workflow/gsasBenchmark.test.ts).
+- **Needed (in priority order):** **(1) Thompson–Cox–Hastings pseudo-Voigt** —
+  independent Gaussian (U/V/W) and Lorentzian (X/Y) angle-dependent widths + SH/L
+  axial asymmetry + polarization — the single biggest fit-quality win; then
+  F1 + F2; full TOF profile (back-to-back exponentials) so the POWGEN data fits
+  end-to-end; and **refined-structure presentation** (atom table with esds,
+  geometry, obs/calc/difference plot, 3D view).
+- **Validation gate:** drive `gsasBenchmark.test.ts` wR down toward GSAS-II's
+  7.34%; synthetic displaced-atom recovery; multi-histogram (X-ray + neutron)
+  joint refinement of one model.
 - **Tool exposed:** `refine_structure(model, data, options) → refined model +
   agreement factors + diagnostics`.
 
