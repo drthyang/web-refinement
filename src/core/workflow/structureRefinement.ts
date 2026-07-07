@@ -44,6 +44,12 @@ export interface StructureRefinementOptions {
    * pattern; requires a pseudo-Voigt profile.
    */
   readonly lorentzian?: { readonly x: number; readonly y: number };
+  /**
+   * Finger–Cox–Jephcoat axial-divergence asymmetry (S/L, H/L). When given, both
+   * are refined in the profile stage — essential for the long low-angle tails of
+   * high-resolution synchrotron data. Only applies to a 2θ pattern.
+   */
+  readonly axial?: { readonly sl: number; readonly hl: number };
   /** Starting zero-point shift in the pattern's x-unit. Default 0. */
   readonly zero?: number;
   /** Refine the zero-point shift. Default true when `caglioti` is provided. */
@@ -127,6 +133,7 @@ export function buildStructureRefinement(
     width = 0.1,
     caglioti,
     lorentzian,
+    axial,
     zero = 0,
     refineZero = caglioti !== undefined,
     refineU = false,
@@ -193,6 +200,18 @@ export function buildStructureRefinement(
     ];
     for (const [id, kind, value, min] of xy) {
       params.push({ id, label: id.replace("prof", "prof "), kind, value, initialValue: value, min, max: 100, fixed: false });
+      bindings.push({ parameterId: id, kind, targetId: pattern.id });
+    }
+  }
+
+  // Finger–Cox–Jephcoat axial-divergence asymmetry (S/L, H/L), both refined.
+  if (axial) {
+    const shl: [string, "asymSL" | "asymHL", number][] = [
+      ["asymSL", "asymSL", axial.sl],
+      ["asymHL", "asymHL", axial.hl],
+    ];
+    for (const [id, kind, value] of shl) {
+      params.push({ id, label: id === "asymSL" ? "S/L" : "H/L", kind, value, initialValue: value, min: 0, max: 0.2, fixed: false });
       bindings.push({ parameterId: id, kind, targetId: pattern.id });
     }
   }
@@ -363,7 +382,7 @@ export const DEFAULT_STAGE_KINDS: readonly StageKinds[] = [
   { name: "scale", kinds: ["scale"] },
   { name: "background", kinds: ["background"] },
   { name: "cell", kinds: ["cellLength", "cellAngle"] },
-  { name: "profile", kinds: ["peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY", "zeroShift"] },
+  { name: "profile", kinds: ["peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY", "asymSL", "asymHL", "zeroShift"] },
   { name: "ADP", kinds: ["bIso", "uAniso"] },
   { name: "positions", kinds: ["positionShift"] },
   { name: "occupancy", kinds: ["occupancy"] },

@@ -93,6 +93,103 @@ export interface ProfilePeak {
   readonly eta?: number;
 }
 
+/**
+ * Finger–Cox–Jephcoat axial-divergence asymmetry (S/L, H/L), the sample and
+ * detector-slit half-heights over the diffractometer radius. Both are refinable;
+ * S is often treated as adjustable to absorb divergent optics (Finger et al.,
+ * 1994).
+ */
+export interface AxialDivergence {
+  readonly sl: number;
+  readonly hl: number;
+}
+
+/** Gauss–Legendre nodes/weights on [-1, 1], cached by point count. */
+const glCache = new Map<number, { nodes: number[]; weights: number[] }>();
+function gaussLegendre(n: number): { nodes: number[]; weights: number[] } {
+  const cached = glCache.get(n);
+  if (cached) return cached;
+  const nodes = new Array<number>(n).fill(0);
+  const weights = new Array<number>(n).fill(0);
+  const m = (n + 1) >> 1;
+  for (let i = 0; i < m; i++) {
+    let x = Math.cos((Math.PI * (i + 0.75)) / (n + 0.5)); // initial root guess
+    let dp = 0;
+    for (let iter = 0; iter < 100; iter++) {
+      let p1 = 1, p2 = 0;
+      for (let j = 0; j < n; j++) {
+        const p3 = p2;
+        p2 = p1;
+        p1 = ((2 * j + 1) * x * p2 - j * p3) / (j + 1);
+      }
+      dp = (n * (x * p1 - p2)) / (x * x - 1);
+      const dx = p1 / dp;
+      x -= dx;
+      if (Math.abs(dx) < 1e-15) break;
+    }
+    nodes[i] = -x;
+    nodes[n - 1 - i] = x;
+    const w = 2 / ((1 - x * x) * dp * dp);
+    weights[i] = w;
+    weights[n - 1 - i] = w;
+  }
+  const result = { nodes, weights };
+  glCache.set(n, result);
+  return result;
+}
+
+/**
+ * Expand a Bragg peak at `center2Theta` (degrees) into Finger–Cox–Jephcoat
+ * sub-peaks that reproduce axial-divergence asymmetry — a long low-angle tail for
+ * 2θ < 90° (Finger, Cox & Jephcoat, J. Appl. Cryst. 27, 892, 1994). Each returned
+ * sub-peak is the symmetric profile shifted to a quadrature node between 2θ_min
+ * and 2θ, weighted by W/(h·cos2φ); weights are normalized to sum to 1 (intensity
+ * preserved). Returns a single unit-weight peak when the asymmetry is negligible
+ * or 2θ ≥ 90° (not modelled; irrelevant for the low-angle regime this targets).
+ */
+export function fcjSubPeaks(
+  center2Theta: number,
+  axial: AxialDivergence,
+  nQuad = 16,
+): { center: number; weight: number }[] {
+  const single = [{ center: center2Theta, weight: 1 }];
+  const { sl, hl } = axial;
+  const sum = sl + hl;
+  if (sum <= 1e-7 || center2Theta <= 0 || center2Theta >= 90) return single;
+
+  const rad = Math.PI / 180;
+  const cos2T = Math.cos(center2Theta * rad);
+  const dif = Math.abs(hl - sl);
+  const clamp = (v: number) => Math.min(1, Math.max(-1, v));
+  // Eq (4)/(5): the ramp foot (2θ_min) and the inflection (2θ_infl), in degrees.
+  const twoThetaMin = Math.acos(clamp(cos2T * Math.sqrt(sum * sum + 1))) / rad;
+  const twoThetaInfl = Math.acos(clamp(cos2T * Math.sqrt(dif * dif + 1))) / rad;
+  if (!(twoThetaMin < center2Theta - 1e-9)) return single;
+
+  const { nodes, weights } = gaussLegendre(nQuad);
+  const mid = 0.5 * (center2Theta + twoThetaMin);
+  const half = 0.5 * (center2Theta - twoThetaMin);
+  const minSH = Math.min(sl, hl);
+  const cos2T2 = cos2T * cos2T;
+  const subs: { center: number; weight: number }[] = [];
+  let norm = 0;
+  for (let k = 0; k < nQuad; k++) {
+    const phi = mid + half * nodes[k]!; // 2φ node (degrees)
+    const cphi = Math.cos(phi * rad);
+    const hL2 = (cphi * cphi) / cos2T2 - 1; // (h/L)² from eq (1)
+    if (hL2 <= 1e-12) continue; // at/above the singularity 2φ = 2θ
+    const hL = Math.sqrt(hL2);
+    const w = phi < twoThetaInfl ? sum - hL : 2 * minSH; // eq (7a)/(7b)
+    if (w <= 0) continue;
+    const g = (weights[k]! * w) / (hL * cphi); // eq (6) weight, L/2H cancels in norm
+    subs.push({ center: phi, weight: g });
+    norm += g;
+  }
+  if (norm <= 0 || subs.length === 0) return single;
+  for (const s of subs) s.weight /= norm;
+  return subs;
+}
+
 export type PeakShape = "gaussian" | "pseudoVoigt";
 
 export interface ProfileOptions {

@@ -29,6 +29,13 @@ export interface AppliedModel {
    * width per peak. Only applies to a 2θ pattern.
    */
   readonly lorentzian?: { readonly x: number; readonly y: number };
+  /**
+   * Finger–Cox–Jephcoat axial-divergence asymmetry (S/L, H/L): the sample and
+   * detector-slit half-heights over the diffractometer radius. Present only when
+   * an asymSL/asymHL binding is supplied; drives the low-angle peak asymmetry.
+   * Only applies to a 2θ pattern.
+   */
+  readonly axial?: { readonly sl: number; readonly hl: number };
   /** Zero-point shift of the abscissa, in the pattern's x-unit. */
   readonly zeroShift: number;
   /** March–Dollase preferred orientation (axis in hkl + ratio). Absent ⇒ none. */
@@ -67,6 +74,8 @@ export function applyParameters(
   let profileW: number | undefined;
   let profileX: number | undefined;
   let profileY: number | undefined;
+  let asymSL: number | undefined;
+  let asymHL: number | undefined;
   let muR = 0;
   let po: { axis: [number, number, number]; ratio: number } | undefined;
   const background: number[] = [];
@@ -99,6 +108,12 @@ export function applyParameters(
         break;
       case "profileY":
         profileY = v;
+        break;
+      case "asymSL":
+        asymSL = v;
+        break;
+      case "asymHL":
+        asymHL = v;
         break;
       case "background": {
         const idx = binding.targetKey ? Number(binding.targetKey) : 0;
@@ -185,6 +200,10 @@ export function applyParameters(
     profileX !== undefined || profileY !== undefined
       ? { x: profileX ?? 0, y: profileY ?? 0 }
       : undefined;
+  const axial =
+    asymSL !== undefined || asymHL !== undefined
+      ? { sl: asymSL ?? 0, hl: asymHL ?? 0 }
+      : undefined;
   return {
     model: appliedModel,
     scale,
@@ -195,6 +214,7 @@ export function applyParameters(
     muR,
     ...(caglioti ? { caglioti } : {}),
     ...(lorentzian ? { lorentzian } : {}),
+    ...(axial ? { axial } : {}),
     ...(po ? { po } : {}),
     background: background.length ? background.map((c) => c ?? 0) : [],
   };

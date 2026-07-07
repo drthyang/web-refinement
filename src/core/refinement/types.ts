@@ -30,6 +30,8 @@ export type ParameterKind =
   | "profileW"
   | "profileX"
   | "profileY"
+  | "asymSL"
+  | "asymHL"
   | "zeroShift"
   | "poRatio"
   | "absorption"

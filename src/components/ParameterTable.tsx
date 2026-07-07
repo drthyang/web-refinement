@@ -25,6 +25,8 @@ const CATEGORY: Record<ParameterKind, string> = {
   profileW: "Instrument / profile",
   profileX: "Instrument / profile",
   profileY: "Instrument / profile",
+  asymSL: "Instrument / profile",
+  asymHL: "Instrument / profile",
   zeroShift: "Instrument / profile",
   bIso: "ADPs (thermal)",
   uAniso: "ADPs (thermal)",

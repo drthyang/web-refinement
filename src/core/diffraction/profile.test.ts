@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tchPseudoVoigt, lorentzianFwhm, cagliotiFwhm } from "@/core/diffraction/profile";
+import { tchPseudoVoigt, lorentzianFwhm, cagliotiFwhm, fcjSubPeaks } from "@/core/diffraction/profile";
 
 describe("Thompson–Cox–Hastings pseudo-Voigt", () => {
   it("reduces to a pure Gaussian when Γ_L = 0", () => {
@@ -45,5 +45,33 @@ describe("Lorentzian size–strain width (GSAS-II X, Y)", () => {
 describe("Caglioti Gaussian width (sanity, unchanged)", () => {
   it("returns √W at zero angle", () => {
     expect(cagliotiFwhm(0, { u: 0, v: 0, w: 4 })).toBeCloseTo(2, 6);
+  });
+});
+
+describe("Finger–Cox–Jephcoat axial-divergence asymmetry", () => {
+  it("returns a single unit-weight peak when the asymmetry is negligible", () => {
+    const subs = fcjSubPeaks(30, { sl: 0, hl: 0 });
+    expect(subs).toHaveLength(1);
+    expect(subs[0]!.center).toBe(30);
+    expect(subs[0]!.weight).toBe(1);
+  });
+
+  it("spreads a peak into a low-angle tail with weights summing to 1", () => {
+    const subs = fcjSubPeaks(4, { sl: 0.02, hl: 0.02 });
+    expect(subs.length).toBeGreaterThan(1);
+    for (const s of subs) expect(s.center).toBeLessThanOrEqual(4 + 1e-9); // 2θ<90 ⇒ tail below
+    expect(subs.reduce((a, s) => a + s.weight, 0)).toBeCloseTo(1, 6);
+  });
+
+  it("shifts the intensity centroid to lower angle", () => {
+    const subs = fcjSubPeaks(4, { sl: 0.03, hl: 0.03 });
+    const centroid = subs.reduce((a, s) => a + s.center * s.weight, 0);
+    expect(centroid).toBeLessThan(4);
+  });
+
+  it("produces a longer tail at lower scattering angle", () => {
+    const lowTail = 4 - Math.min(...fcjSubPeaks(4, { sl: 0.03, hl: 0.03 }).map((s) => s.center));
+    const highTail = 40 - Math.min(...fcjSubPeaks(40, { sl: 0.03, hl: 0.03 }).map((s) => s.center));
+    expect(lowTail).toBeGreaterThan(highTail);
   });
 });

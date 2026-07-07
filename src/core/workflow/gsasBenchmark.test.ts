@@ -115,9 +115,11 @@ describe.skipIf(!has)("benchmark vs GSAS-II good fit — GaNb4Se8 298.8 K", () =
     expect(ourWR).toBeGreaterThan(7.34);
   });
 
-  it("TCH pseudo-Voigt refines, and isolates the remaining SH/L asymmetry gap", () => {
+  it("full TCH + FCJ profile refines cleanly; GaNb4Se8 residual is intensity-limited", () => {
     const ref = loadRef();
-    const fit = ref.filter((r) => r.yc > 0);
+    // Downsample: the FCJ sub-peak expansion is ~16× heavier per point; a coarse
+    // grid documents the intensity-limited floor without a slow full-grid solve.
+    const fit = ref.filter((r) => r.yc > 0).filter((_, i) => i % 3 === 0);
     const structure = parseCif(readData(CIF), "gns");
     const pattern: PowderPattern = {
       id: "gns",
@@ -127,15 +129,17 @@ describe.skipIf(!has)("benchmark vs GSAS-II good fit — GaNb4Se8 298.8 K", () =
       wavelength: 0.1665,
       points: fit.map((r) => ({ x: r.x, yObs: r.yobs, sigma: r.sig })),
     };
-    // Fixed atoms; refine scale + cell + Chebyshev background + a Thompson–Cox–
-    // Hastings pseudo-Voigt (Gaussian Caglioti U/V/W AND Lorentzian size–strain
-    // X/Y), seeded with modest positive values so the Lorentzian is a free width.
+    // GSAS-II's model shape: fixed atoms; refine scale + cell + Chebyshev
+    // background + Thompson–Cox–Hastings pseudo-Voigt (Gaussian U/V/W + Lorentzian
+    // X/Y) + Finger–Cox–Jephcoat axial-divergence asymmetry (S/L, H/L). The FCJ
+    // low-angle tail is the piece the strong 1.6°/3.7° synchrotron peaks need.
     const profile = { shape: "pseudoVoigt" as const, lorentz: false };
     const spec = buildStructureRefinement(structure, pattern, {
       scale: 1,
       backgroundTerms: 7,
       caglioti: { u: 0, v: 0, w: 1 },
       lorentzian: { x: 1, y: 0 },
+      axial: { sl: 0.01, hl: 0.01 },
       refineU: true,
       refineAdp: false,
       refinePositions: false,
@@ -143,7 +147,9 @@ describe.skipIf(!has)("benchmark vs GSAS-II good fit — GaNb4Se8 298.8 K", () =
     const unit = powderCurves(structure, pattern, spec.params, spec.bindings, profile).yCalc;
     const s0 = optimalScale(pattern.points.map((p) => (p.yObs > 0 ? p.yObs : 0)), unit);
     const params = spec.params.map((p) => (p.id === "scale" ? { ...p, value: s0, initialValue: s0 } : p));
-    const result = refine(buildPowderProblem(structure, pattern, params, spec.bindings, profile), { maxIterations: 50 });
+    // Few iterations: this documents the intensity-limited floor, not a tight fit
+    // (the FCJ sub-peak expansion makes each evaluation ~16× heavier).
+    const result = refine(buildPowderProblem(structure, pattern, params, spec.bindings, profile), { maxIterations: 12 });
     const refined = params.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value }));
     const curves = powderCurves(structure, pattern, refined, spec.bindings, profile);
     const weights = weightsFromSigma(pattern.points.map((p) => p.sigma));
@@ -153,16 +159,17 @@ describe.skipIf(!has)("benchmark vs GSAS-II good fit — GaNb4Se8 298.8 K", () =
       weights,
       params.length,
     );
-    const tchWR = 100 * (agree.rWeighted ?? 0);
+    const ourWR = 100 * (agree.rWeighted ?? 0);
     // eslint-disable-next-line no-console
-    console.log(`BENCHMARK GaNb4Se8 298.8K — GSAS-II wR = 7.34% | OUR TCH wR (fixed atoms, Gaussian+Lorentzian) = ${tchWR.toFixed(2)}%`);
-    expect(Number.isFinite(tchWR)).toBe(true);
-    // TCH refines cleanly and does not worsen the fit. But on THIS data the peak
-    // widths already match GSAS-II (both ≈0.011° at the strong low-angle peaks),
-    // so the Lorentzian width barely moves wR: the residual floor is dominated by
-    // the SH/L axial-divergence asymmetry at the very-low-angle (1.6°, 3.7°)
-    // synchrotron peaks, which GSAS-II corrects and we do not yet. That is the
-    // next piece needed to reach 7.34% — TCH is necessary but not sufficient here.
-    expect(tchWR).toBeLessThan(70);
+    console.log(`BENCHMARK GaNb4Se8 298.8K — GSAS-II wR = 7.34% | OUR TCH+FCJ wR (fixed atoms) = ${ourWR.toFixed(2)}%`);
+    expect(Number.isFinite(ourWR)).toBe(true);
+    // Honest result: the full profile model (Gaussian U/V/W + Lorentzian X/Y +
+    // FCJ axial asymmetry) refines cleanly, but wR barely moves across profiles
+    // (single-Gaussian 66.7%, TCH 63.9%, TCH+FCJ ~63.5%). The residual is NOT the
+    // peak shape — it is a reflection-intensity discrepancy. GSAS-II fits the
+    // strong (400) with Fc² = Fo² ≈ 1.37e6; our engine under-predicts it ~3×
+    // relative to the other peaks (a structure-factor issue, per LIMITATIONS).
+    // Closing the benchmark to 7.34% needs the intensity fix, not more profile.
+    expect(ourWR).toBeLessThan(70);
   });
 });
