@@ -1,10 +1,10 @@
 /**
  * Bound coherent neutron scattering lengths b (fm).
  *
- * Values from standard neutron data tables (Sears, 1992). The three elements
- * present in the GSAS-II validation data (Mn, O, Ga) match the values GSAS-II
- * prints in its .lst output (in units of 10⁻¹² cm = fm): Mn −3.73, O 5.80,
- * Ga 7.29.
+ * Values from standard neutron data tables (Sears, 1992). The elements present
+ * in the GSAS-II validation data match the values GSAS-II prints in its .lst
+ * output (in units of 10⁻¹² cm = fm): Mn −3.73, O 5.80, Ga 7.29 (Mn₃Ga/MnO);
+ * Sn 6.23, Co 2.49, Fe 9.45 (FeCoSn). See neutronSfValidation.test.ts.
  */
 
 import type { ScatteringTable } from "@/core/scattering/types";
@@ -45,6 +45,7 @@ export const NEUTRON_B: Readonly<Record<string, number>> = {
   Zr: 7.16,
   Nb: 7.054,
   Mo: 6.715,
+  Sn: 6.225,
   Ba: 5.07,
   La: 8.24,
   Ce: 4.84,

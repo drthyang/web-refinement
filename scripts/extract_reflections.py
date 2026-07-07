@@ -60,20 +60,33 @@ def split_phases(path):
     return blocks
 
 
+def file_tag(fname):
+    """A folder may hold several *_hkl.dat (competing space-group refinements),
+    each with its own 'Manganese oxide' phase — namespace CSVs to avoid clobber.
+    `fitted_results_hkl.dat` -> '' (backward compatible); `fitted_results_Cmcm_hkl.dat`
+    -> 'Cmcm'; `fitted_results_P21m_hkl.dat` -> 'P21m'."""
+    stem = re.sub(r"_?hkl\.dat$", "", fname)
+    stem = re.sub(r"^fitted_results_?", "", stem)
+    return re.sub(r"[^A-Za-z0-9]+", "_", stem).strip("_")  # '' for the default file
+
+
 def process_dir(d):
-    src = os.path.join(d, "fitted_results_hkl.dat")
-    if not os.path.exists(src):
+    srcs = sorted(f for f in os.listdir(d) if f.endswith("hkl.dat"))
+    if not srcs:
         return
     tags = []
-    for name, lines in split_phases(src):
-        refl = parse_block(lines)
-        tag = slug(name)
-        tags.append(f"{tag}\t{name}\t{len(refl)}")
-        with open(os.path.join(d, f"reflections_{tag}.csv"), "w") as f:
-            f.write("h,k,l,m,d,Fo2,Fc2\n")
-            for r in refl:
-                f.write(f"{r[0]},{r[1]},{r[2]},{r[3]},{r[4]:.5f},{r[5]:.5f},{r[6]:.5f}\n")
-        print(f"  {os.path.basename(d)}/{tag}: {len(refl)} reflections")
+    for src in srcs:
+        ftag = file_tag(src)
+        for name, lines in split_phases(os.path.join(d, src)):
+            refl = parse_block(lines)
+            ptag = slug(name)
+            tag = f"{ftag}_{ptag}" if ftag else ptag
+            tags.append(f"{tag}\t{src}\t{name}\t{len(refl)}")
+            with open(os.path.join(d, f"reflections_{tag}.csv"), "w") as f:
+                f.write("h,k,l,m,d,Fo2,Fc2\n")
+                for r in refl:
+                    f.write(f"{r[0]},{r[1]},{r[2]},{r[3]},{r[4]:.5f},{r[5]:.5f},{r[6]:.5f}\n")
+            print(f"  {os.path.basename(d)}/{tag}: {len(refl)} reflections")
     with open(os.path.join(d, "phases.txt"), "w") as f:
         f.write("\n".join(tags) + "\n")
 
@@ -83,7 +96,9 @@ def main():
     if not os.path.isdir(base):
         sys.exit(f"no such directory: {base}")
     for entry in sorted(os.listdir(base)):
-        process_dir(os.path.join(base, entry))
+        path = os.path.join(base, entry)
+        if os.path.isdir(path):
+            process_dir(path)
 
 
 if __name__ == "__main__":

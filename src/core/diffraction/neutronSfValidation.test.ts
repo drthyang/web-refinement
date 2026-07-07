@@ -12,16 +12,20 @@ import { dataExists, readData } from "@/testSupport/data";
  * computation (special-position handling, neutron scattering lengths, diverse
  * crystal systems) beyond the single GaNb4Se8 case.
  *
- * These GSAS refinements are multi-phase: each `fitted_results_hkl.dat` holds a
- * separate reflection list per phase (Mn₃Ga, MnO, and — below the ordering
- * temperature — a magnetic phase). `scratchpad/extract_refl.py` splits them into
+ * These GSAS refinements are multi-phase: each reflection list holds a separate
+ * block per phase. `scripts/extract_reflections.py` (text export) and
+ * `scripts/extract_gpx_reflections.py` (binary .gpx) split them into
  * `reflections_<phase>.csv`; mixing phases was the original failure mode (an MnO
  * (111) compared against the hexagonal Mn₃Ga structure looks like a 5-order-of-
- * magnitude "bug"). We validate the two clean *nuclear* phases here:
+ * magnitude "bug"). We validate the clean *nuclear* phases across crystal systems:
  *
- *   • Mn₃Ga 600 K — hexagonal P6₃/mmc, from its CIF (special positions 6h/2c).
- *   • MnO 600 K   — cubic rocksalt Fm-3m, built inline as 8 atoms in P1 (the
- *     F-centering makes mixed-parity reflections vanish for free).
+ *   • Mn₃Ga 600 K — hexagonal P6₃/mmc, from CIF (special positions 6h/2c).
+ *   • MnO 600 K   — cubic rocksalt Fm-3m, built inline as 8 atoms in P1.
+ *   • Mn₃Ga 200 K — orthorhombic Cmcm and monoclinic P2₁/m, from CIF (a second
+ *     temperature, plus C-centering and a monoclinic β≠90 metric).
+ *   • FeCoSn 100 K — three CoSn-type P6/mmm phases (Fe₁Co₉Sn is compositionally
+ *     inhomogeneous), built inline; tests 3-element scattering (Sn/Co/Fe) and a
+ *     mixed Co/Fe occupancy on the 3f site. Reflection list from the .gpx.
  *
  * GSAS reports neutron b in 10⁻¹² cm; our tables use fm (10× larger), so our
  * |F|² is ~100× GSAS Fc². That constant is absorbed by the scale factor in a real
@@ -133,3 +137,79 @@ describe.skipIf(!hasMnO)("neutron |F|² vs GSAS-II — MnO 600 K rocksalt (Fm-3m
     expect(nuclearStructureFactorSquared(model, rad, 2, 0, 0)).toBeGreaterThan(0);
   });
 });
+
+// ---- FeCoSn 100 K: three CoSn-type P6/mmm phases (built inline, orbits in P1) --
+// The CoSn (B35) structure: Sn on 1a (0,0,0) + 2d (⅓,⅔,½), (Co,Fe) on 3f
+// (½,0,0). Fe₁Co₉Sn is compositionally inhomogeneous, so the refinement models
+// three phases with slightly different c and Fe fraction. We expand each Wyckoff
+// orbit explicitly (P1) — the hexagonal special-position engine is already
+// covered by Mn₃Ga above; this isolates 3-element scattering + mixed occupancy.
+interface CoSnPhase {
+  readonly tag: string;
+  readonly a: number; readonly c: number;
+  readonly uSn1: number; readonly uSn2: number; readonly uM: number;
+  readonly occCo: number; readonly occFe: number;
+}
+function cosnModel(p: CoSnPhase): StructureModel {
+  const site = (label: string, element: string, pos: Vec3, occ: number, u: number) =>
+    ({ label, element, position: pos, occupancy: occ, adp: { kind: "isotropic" as const, bIso: U_TO_B * u } });
+  const third = 1 / 3;
+  const orbit1a: Vec3[] = [[0, 0, 0]];
+  const orbit2d: Vec3[] = [[third, 2 * third, 0.5], [2 * third, third, 0.5]];
+  const orbit3f: Vec3[] = [[0.5, 0, 0], [0, 0.5, 0], [0.5, 0.5, 0]];
+  const sites = [
+    ...orbit1a.map((pos, i) => site(`Sn1_${i}`, "Sn", pos, 1, p.uSn1)),
+    ...orbit2d.map((pos, i) => site(`Sn2_${i}`, "Sn", pos, 1, p.uSn2)),
+    ...orbit3f.flatMap((pos, i) => [
+      site(`Co_${i}`, "Co", pos, p.occCo, p.uM),
+      ...(p.occFe > 0 ? [site(`Fe_${i}`, "Fe", pos, p.occFe, p.uM)] : []),
+    ]),
+  ];
+  return {
+    id: `cosn-${p.tag}`, name: `CoSn (${p.tag})`,
+    cell: { a: p.a, b: p.a, c: p.c, alpha: 90, beta: 90, gamma: 120 },
+    spaceGroup: {
+      hermannMauguin: "P 1",
+      operations: [{ rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], translation: [0, 0, 0], xyz: "x,y,z" }],
+    },
+    sites,
+  };
+}
+
+const COSN_PHASES: readonly CoSnPhase[] = [
+  { tag: "CoSn_1", a: 5.27502, c: 4.29276, uSn1: 0.00885, uSn2: 0.00428, uM: 0.00579, occCo: 0.860, occFe: 0.140 },
+  { tag: "CoSn_2", a: 5.27591, c: 4.28106, uSn1: 0.02109, uSn2: 0.03113, uM: 0.03324, occCo: 0.950, occFe: 0.050 },
+  { tag: "CoSn", a: 5.27655, c: 4.24970, uSn1: 0.00159, uSn2: 0.00045, uM: 0.00585, occCo: 1.000, occFe: 0.000 },
+];
+const hasCoSn = COSN_PHASES.every((p) => dataExists(`TwoPhases/reflections_${p.tag}.csv`));
+
+describe.skipIf(!hasCoSn)("neutron |F|² vs GSAS-II — FeCoSn 100 K (three CoSn-type P6/mmm phases)", () => {
+  for (const p of COSN_PHASES) {
+    it(`${p.tag} (Fe ${(p.occFe * 100).toFixed(0)}%): nuclear |F|² is a flat multiple of GSAS Fc²`, () => {
+      // Only 19 reflections per phase (POWGEN bank 3), so anchor on all
+      // meaningfully-strong reflections rather than a fixed top-N.
+      assertFlatRatio(cosnModel(p), loadRefl(`TwoPhases/reflections_${p.tag}.csv`), `FeCoSn ${p.tag}`);
+    });
+  }
+});
+
+// ---- Mn₃Ga 200 K: orthorhombic Cmcm and monoclinic P2₁/m (from CIF) ----------
+// A second temperature with lower-symmetry nuclear structures: C-centering
+// (Cmcm) and a monoclinic β≠90 metric (P2₁/m). The 200 K refinement also carries
+// the MnO second phase (Fm-3m, from CIF with its full 192 ops — exercising the
+// symmetry-engine orbit dedup on an F-centered group, unlike the inline MnO).
+const CIF_TARGETS = [
+  { dir: "200K", cif: "PG3_45614_200K_CmCm.cif", csv: "200K/reflections_Cmcm_Mn3Ga_CmCm.csv", label: "Mn₃Ga 200 K Cmcm" },
+  { dir: "200K", cif: "PG3_45614_200K_mono.cif", csv: "200K/reflections_P21m_Mn3Ga_monoclinic.csv", label: "Mn₃Ga 200 K P2₁/m" },
+  { dir: "200K", cif: "PG3_45614_200K_MnO.cif", csv: "200K/reflections_Cmcm_Manganese_oxide.csv", label: "MnO 200 K Fm-3m (via CIF)" },
+] as const;
+
+for (const t of CIF_TARGETS) {
+  const ok = dataExists(`${t.dir}/${t.cif}`) && dataExists(t.csv);
+  describe.skipIf(!ok)(`neutron |F|² vs GSAS-II — ${t.label}`, () => {
+    it("nuclear |F|² is a flat multiple of GSAS Fc² across all reflections", () => {
+      const model = parseCif(readData(`${t.dir}/${t.cif}`), t.label);
+      assertFlatRatio(model, loadRefl(t.csv), t.label);
+    });
+  });
+}
