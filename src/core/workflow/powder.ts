@@ -15,9 +15,9 @@ import { weightsFromSigma, excludedPointMask, applyExclusionMask } from "@/core/
 import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters, type AppliedModel } from "@/core/workflow/apply";
 import { generateReflections } from "@/core/diffraction/reflections";
-import { powderPeakIntensities } from "@/core/diffraction/intensity";
+import { powderPeakIntensities, cylinderAbsorption } from "@/core/diffraction/intensity";
 import { braggTheta } from "@/core/crystal/unitCell";
-import { synthesizePattern, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
+import { synthesizePattern, cagliotiFwhm, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
 
 /** Powder profile + intensity options for the refinement workflow. */
@@ -71,14 +71,25 @@ function dRange(pattern: PowderPattern): { dMin: number; dMax: number } {
 export function buildPeaks(pattern: PowderPattern, applied: AppliedModel, applyLorentz = true): ProfilePeak[] {
   const { dMin, dMax } = dRange(pattern);
   const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
-  const intensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, applied.scale, undefined, applyLorentz);
-  const fwhm = Math.max(applied.peakWidth, 1e-4);
+  const intensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, applied.scale, applied.po, applyLorentz);
+  const constWidth = Math.max(applied.peakWidth, 1e-4);
+  // Angle-dependent Caglioti width only makes sense on a 2θ abscissa (the form
+  // is defined in 2θ). GSAS-II gives U,V,W in centidegrees², so the FWHM comes
+  // out in centidegrees — divide by 100 to reach the pattern's degree unit.
+  const useCaglioti = applied.caglioti !== undefined && pattern.xUnit === "twoTheta";
+  const applyAbsorption = applied.muR > 0 && pattern.xUnit === "twoTheta";
 
   const peaks: ProfilePeak[] = [];
   for (const p of intensities) {
-    const center = dToX(pattern, p.d);
+    let center = dToX(pattern, p.d);
     if (Number.isNaN(center)) continue;
-    peaks.push({ center, intensity: p.intensity, fwhm });
+    center += applied.zeroShift;
+    const fwhm = useCaglioti
+      ? Math.max(cagliotiFwhm(center, applied.caglioti!) / 100, 1e-4)
+      : constWidth;
+    // GSAS-II cylinder absorption A(μR, 2θ) multiplies the calculated intensity.
+    const intensity = applyAbsorption ? p.intensity * cylinderAbsorption(applied.muR, center) : p.intensity;
+    peaks.push({ center, intensity, fwhm });
   }
   return peaks;
 }

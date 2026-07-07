@@ -13,6 +13,8 @@ import type {
   RefinementResult,
 } from "@/core/refinement/types";
 import type { PeakShape } from "@/core/diffraction/profile";
+import type { BackgroundType } from "@/core/diffraction/background";
+import type { StageKinds } from "@/core/workflow/structureRefinement";
 
 export interface RefinePowderRequest {
   readonly type: "refinePowder";
@@ -23,6 +25,14 @@ export interface RefinePowderRequest {
   readonly bindings: ParameterBinding[];
   readonly shape: PeakShape;
   readonly eta?: number;
+  /** Apply the 2θ Lorentz factor. Default true; false for pre-reduced I(Q). */
+  readonly lorentz?: boolean;
+  readonly backgroundType?: BackgroundType;
+  /**
+   * When present, run a staged (guided) refinement unlocking these kind-groups
+   * in order instead of a single co-refinement of all free parameters.
+   */
+  readonly staged?: readonly StageKinds[];
   readonly options?: Partial<RefinementOptions>;
 }
 

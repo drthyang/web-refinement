@@ -17,6 +17,12 @@ export type InstrumentParameters =
       readonly wavelength: number;
       /** Zero shift in degrees 2θ. */
       readonly zero?: number;
+      /** Caglioti Gaussian width coefficients (GSAS-II, centidegrees²). */
+      readonly u?: number;
+      readonly v?: number;
+      readonly w?: number;
+      /** Polarization fraction (GSAS-II `Polariz.`), for the Lp correction. */
+      readonly polarization?: number;
     }
   | {
       readonly kind: "tof";

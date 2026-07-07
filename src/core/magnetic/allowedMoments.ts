@@ -17,6 +17,7 @@ function siteIsFixed(op: SymmetryOperation, pos: Vec3, tol = 1e-3): boolean {
   const p = applyOperation(op, pos);
   for (let i = 0; i < 3; i++) {
     let d = Math.abs(p[i]! - pos[i]!);
+    d -= Math.floor(d); // wrap into [0,1) — op may shift by >1 cell (coord > 0.5)
     d = Math.min(d, 1 - d);
     if (d > tol) return false;
   }

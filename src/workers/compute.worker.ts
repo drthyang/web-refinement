@@ -7,19 +7,14 @@
 
 import type { ComputeRequest, ComputeResponse } from "@/workers/protocol";
 import { refine } from "@/core/refinement/engine";
-import { buildPowderProblem } from "@/core/workflow/powder";
 import { buildSingleCrystalProblem } from "@/core/workflow/singleCrystal";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
+import { runPowderRefinement } from "@/workers/runPowder";
 
 function handle(req: ComputeRequest): ComputeResponse {
   try {
     if (req.type === "refinePowder") {
-      const problem = buildPowderProblem(req.structure, req.pattern, req.parameters, req.bindings, {
-        shape: req.shape,
-        ...(req.eta !== undefined ? { eta: req.eta } : {}),
-      });
-      const result = refine(problem, req.options ?? {});
-      return { requestId: req.requestId, ok: true, result };
+      return { requestId: req.requestId, ok: true, result: runPowderRefinement(req) };
     }
     if (req.type === "refineMagnetic") {
       const problem = buildMagneticSingleCrystalProblem(

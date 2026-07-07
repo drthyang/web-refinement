@@ -36,9 +36,12 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 3. **Shift limiting, bound projection, adaptive λ** ✅ — cap the fractional
    parameter shift per cycle; project onto bounds; Marquardt diagonal damping.
    (`limitShift`, `clamp`, and the LM retry loop in `engine.ts`.)
-4. **Staged (guided) refinement** ⬜ — unlock parameters in the expert order
+4. **Staged (guided) refinement** ✅ — unlock parameters in the expert order
    (scale → background → cell → profile → ADP → positions), each converged before
-   the next. Robustness *and* the guided-sequence UX.
+   the next. Cumulative: once freed a parameter co-refines in every later stage.
+   (`refinement/staged.ts` `refineStaged`; default plan in
+   `workflow/structureRefinement.ts` `defaultStages`.) Robustness *and* the
+   guided-sequence order in one driver.
 5. **Robust starting values** ⬜ — auto-scale (done), auto-background from the
    data's lower envelope, zero-shift / peak-position sanity check.
 6. **Dual convergence test** ⬜ — on both Δχ² and max parameter shift; better
@@ -52,14 +55,31 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
    auto-seeded from the data envelope.
 
 ## C — Thermal parameters (ADP)
-1. **Isotropic Uiso/Biso per site (powder)** ⬜ — wire params + bindings + UI
-   (the `bIso` kind and apply-logic already exist for the single-crystal path).
+1. **Isotropic Uiso/Biso per site (powder)** ✅ — params + bindings emitted by
+   `buildStructureRefinement` (per isotropic site), refined in the `ADP` stage.
+   UI wiring still ⬜.
 2. **Anisotropic Uani** ⬜ — parse `_atom_site_aniso_U_11…U_23`; add `U11…U23`
    kinds + apply; `anisotropicDebyeWaller` already consumes them.
 3. **Site-symmetry constraints on Uij** ⬜ — derive allowed ADP components from
    site point symmetry (same null-space method as magnetic `allowedMomentDirections`).
    Required for stable anisotropic refinement.
 4. **Report Ueq** from Uani ⬜.
+
+## C½ — Atomic position refinement (the core of structure refinement)
+1. **Symmetry-adapted positional modes** ✅ — a site's free coordinates are the
+   null space of `(R − I)` over its stabilizer (`crystal/siteConstraints.ts`
+   `allowedPositionShifts`), the same method as the magnetic moment / cell-metric
+   constraints. Refinement drives one parameter per allowed mode (`positionShift`
+   kind + `axis` on the binding; apply shifts `X = X₀ + Σ αᵢ·axisᵢ`), so a
+   special-position atom like Se at 16e (x,x,x) refines its single free x with
+   y,z tied — it cannot drift off its site. General positions get three modes.
+   Validated by a synthetic recovery test (displace Mn1 along its mode, refine it
+   back, wR→0) and the real GaNb4Se8 staged test.
+2. **Occupancy refinement** ⬜ — `occupancy` kind is wired end to end and emitted
+   by the builder behind `refineOccupancy` (off by default: correlates with
+   scale/ADP); needs damping/constraints before it's on by default.
+3. **Positional esds from the covariance matrix** ✅ (per-mode; reported on the
+   `RefinementParameter.esd`). Convert mode esds → x/y/z esds in workstream D.
 
 ## D — Refined structure presentation
 1. **Refined atom table** ⬜ — x/y/z, occ, Uiso/Ueq (+Uani) with **esds** from
@@ -87,14 +107,63 @@ vs 298.8 K data.
   nonzero scale (peaks fit). Remaining gap to <15% is profile (Caglioti U,V,W),
   zero-shift, and anisotropic ADP. Tighten the test's wR bound as those land.
 
+## E — Instrument profile (Caglioti) ✅
+Angle-dependent width is required for real data: one width cannot fit both the
+sharp low-angle and broadened high-angle peaks. Implemented:
+- **Caglioti FWHM² = U·tan²θ + V·tanθ + W** wired into `buildPeaks` (2θ patterns),
+  seeded from the GSAS-II `.instprm` (`parseInstrumentParameters` now reads
+  U/V/W + `Polariz.`). Refined in the `profile` stage. **U is fixed by default**
+  (`refineU`): over a narrow low-angle range tan²θ is tiny, so U is unconstrained
+  and trades off against W — V and W absorb sample broadening instead.
+- **Zero-shift** ✅ — `zeroShift` now applied in `buildPeaks` (was a no-op) and
+  refined in the `profile` stage.
+- Still ⬜: **Thompson-Cox-Hastings** pseudo-Voigt (separate Gaussian U,V,W and
+  Lorentzian X,Y size/strain), needed when instrument-sharp low angle and
+  sample-broadened high angle cannot be reconciled by one Gaussian.
+
+## UI wiring ✅
+Step 3 now builds the **full symmetry-allowed parameter set** via
+`buildStructureRefinement` (`app/powderSpec.ts`): scale, Chebyshev background,
+symmetry-reduced cell, instrument profile (Caglioti U/V/W + zero, seeded from a
+loaded `.instprm`), per-site ADP, and symmetry-adapted positions — replacing the
+old scale/width/cell-only set. Structural rows start fixed; **Refine selected**
+does a flat co-refinement of freed rows, **Guided (staged)** runs the expert
+sequence in the worker (`workers/runPowder.ts`, serializable `StageKinds` plan
+over the worker boundary). A Lorentz toggle is exposed. Verified in-app: the
+Mn₃Ga example converges to wR ≈ 5.9% via Guided.
+
+## F — Corrections stack (GSAS-II physics) ✅ wired
+- **March–Dollase preferred orientation** — refinable `poRatio` on a chosen hkl
+  axis (`apply.ts` + `buildPeaks`), builder option `preferredOrientation`, in the
+  `corrections` stage. Formula matches GSAS-II. Synthetic recovery test passes.
+- **Debye–Scherrer cylinder absorption** — `cylinderAbsorption(μR, 2θ)` ported
+  **verbatim from GSAS-II's `Absorb`** (both μR≤3 and μR>3 branches), refinable
+  `absorption` param. Synthetic recovery test passes.
+- Still ⬜: spherical-harmonic texture, flat-plate / other absorption geometries,
+  microabsorption, extinction.
+
+## Validated real-data status (GaNb4Se8, 298.8 K vs 100 K model)
+Staged refinement (scale → bkg → cell → profile → ADP → positions) with the real
+`.instprm` reaches **wR ≈ 36.5%, Rp ≈ 22.7%, Rexp ≈ 12.8%, GoF ≈ 8** — a genuine
+fit (a=10.414, W 1.2→6.2, three refined (x,x,x) positions incl. Se17, per-site B).
+The **high-angle region already fits ≈14%**; the residual floor is the strongest
+low-angle reflection (400) under-predicted ~3× in integrated intensity.
+**Diagnosed** (not corrections): March–Dollase PO barely helps (refined r≈1),
+absorption is smooth, and the X-ray form factors are already correct Cromer-Mann —
+so it is **structural**. Freeing site occupancies drops wR to **23.4%** and fixes
+(400), but drives chemically impossible values (Nb 0.57, Ga 0.12): the classic
+occupancy↔scale↔ADP correlation on X-ray-only data. **Correct next step is not
+more corrections but occupancy constraints/restraints** (total occupancy, charge
+balance — knowledge-base §18) or the complementary neutron dataset.
+
 ## Physics / intensity model (gates real-data fit quality)
 - **Lorentz handling — selectable** ✅ (`applyLorentz` on `powderPeakIntensities`
   / `PowderProfile.lorentz`). Pre-reduced synchrotron I(Q) from a PDF beamline
   (28ID) is already Lorentz-corrected; re-applying the 2θ factor over-amplifies
   low angle. Confirmed on GaNb4Se8: Lorentz-on wR≈53%, **off wR≈40%**. Still
   ⬜ in the UI (auto-default by data source + toggle).
-- **Zero-shift** ⬜ — `zeroShift` kind exists but `apply.ts` is a no-op; wire it
-  (real synchrotron patterns carry a small 2θ offset).
+- **Zero-shift** ✅ — wired in `apply.ts` + `buildPeaks` and refined in the
+  profile stage (see workstream E).
 - **ADP damping** (workstream C) — without refined thermal parameters, high-angle
   intensities are systematically wrong.
 
@@ -103,8 +172,12 @@ vs 298.8 K data.
   `GaNb4Se8_XRD_28ID`) load with the correct unit and radiation for testing.
 
 ## Build order
-**A → B → C → D.** First implementation chunk — **A1 + A3** (engine conditioning +
-shift limiting) and **B1** (Chebyshev background) — landed, where the
-"significantly more robust" jump came from. **A2** (analytic column for linear
-parameters) is now in as well. Next: **A4** (staged/guided refinement), then C
-(thermal parameters), then D (refined-structure presentation).
+**A → B → C → D.** Landed: **A1 + A3** (engine conditioning + shift limiting),
+**B1** (Chebyshev background), **A2** (analytic column for linear parameters),
+**A4** (staged/guided refinement), **C1** (per-site isotropic ADP in the powder
+path), and **C½** (symmetry-adapted atomic-position refinement) — the powder path
+now does genuine Rietveld *structure* refinement, driven by
+`buildStructureRefinement` + `refinePowderStructure`
+(`workflow/structureRefinement.ts`). Next: **C2/C3** (anisotropic ADP + site
+constraints), then **D** (refined-structure presentation: atom table with esds,
+geometry, 3D view, CIF export), and the UI wiring for the staged flow.

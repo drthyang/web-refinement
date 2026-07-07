@@ -12,7 +12,8 @@ function readValues(text: string): Map<string, number> {
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (line === "" || line.startsWith("#")) continue;
-    const m = line.match(/^([A-Za-z0-9_]+)\s*[:=\s]\s*(-?\d[\d.eE+-]*)/);
+    // Keys may carry a dot or slash (GSAS-II `Polariz.`, `SH/L`).
+    const m = line.match(/^([A-Za-z0-9_./]+)\s*[:=\s]\s*(-?\d[\d.eE+-]*)/);
     if (!m) continue;
     const key = m[1]!.toLowerCase();
     const value = parseFloat(m[2]!);
@@ -40,6 +41,10 @@ export function parseInstrumentParameters(text: string): InstrumentParameters {
       kind: "constantWavelength",
       wavelength: lam,
       ...(v.get("zero") !== undefined ? { zero: v.get("zero")! } : {}),
+      ...(v.get("u") !== undefined ? { u: v.get("u")! } : {}),
+      ...(v.get("v") !== undefined ? { v: v.get("v")! } : {}),
+      ...(v.get("w") !== undefined ? { w: v.get("w")! } : {}),
+      ...(v.get("polariz.") !== undefined ? { polarization: v.get("polariz.")! } : {}),
     };
   }
   throw new Error("Instrument file has neither difC (TOF) nor a wavelength (CW)");
