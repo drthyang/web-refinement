@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { linearScale, extent, polylinePoints } from "@/visualization/scale";
+import { linearScale, extent, polylinePoints, clippedPolylinePoints } from "@/visualization/scale";
 
 describe("plotting scale math", () => {
   it("maps domain endpoints to range endpoints", () => {
@@ -25,5 +25,16 @@ describe("plotting scale math", () => {
     const sx = linearScale(0, 2, 0, 20);
     const sy = linearScale(0, 2, 0, 20);
     expect(polylinePoints([0, 1, 2], [0, 1, 2], sx, sy)).toBe("0.00,0.00 10.00,10.00 20.00,20.00");
+  });
+
+  it("clips a polyline to an inclusive x-window", () => {
+    const sx = linearScale(0, 4, 0, 40);
+    const sy = linearScale(0, 4, 0, 40);
+    const xs = [0, 1, 2, 3, 4];
+    const ys = [0, 1, 2, 3, 4];
+    // Only x in [1,3] survives.
+    expect(clippedPolylinePoints(xs, ys, sx, sy, 1, 3)).toBe("10.00,10.00 20.00,20.00 30.00,30.00");
+    // A full-span window is a no-op vs. polylinePoints.
+    expect(clippedPolylinePoints(xs, ys, sx, sy, 0, 4)).toBe(polylinePoints(xs, ys, sx, sy));
   });
 });

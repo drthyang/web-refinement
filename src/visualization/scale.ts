@@ -60,3 +60,26 @@ export function polylinePoints(
   }
   return parts.join(" ");
 }
+
+/**
+ * Like {@link polylinePoints} but only emits points whose abscissa lies within
+ * the inclusive window [lo, hi]. Used to draw the calculated/difference curves
+ * only over the active fit range, so excluded data reads as un-fitted.
+ */
+export function clippedPolylinePoints(
+  xs: readonly number[],
+  ys: readonly number[],
+  sx: LinearScale,
+  sy: LinearScale,
+  lo: number,
+  hi: number,
+): string {
+  const n = Math.min(xs.length, ys.length);
+  const parts: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = xs[i]!;
+    if (x < lo || x > hi) continue;
+    parts.push(`${sx(x).toFixed(2)},${sy(ys[i]!).toFixed(2)}`);
+  }
+  return parts.join(" ");
+}

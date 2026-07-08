@@ -5,7 +5,7 @@
 
 import { useCallback, useRef } from "react";
 import type { PowderCurves } from "@/core/workflow/powder";
-import { extent, linearScale, polylinePoints } from "@/visualization/scale";
+import { clippedPolylinePoints, extent, linearScale } from "@/visualization/scale";
 
 /** Inclusive abscissa window selected on the plot. */
 export interface FitRangeSelection {
@@ -39,8 +39,19 @@ export function PatternPlot({
   const diffH = (height - margin.top - margin.bottom) * 0.28;
 
   const [xMin, xMax] = extent(curves.x);
-  const [yMin, yMax] = extent([...curves.yObs, ...curves.yCalc, ...(curves.yBackground ?? [])]);
-  const [dMin, dMax] = extent(curves.diff);
+
+  // Calc/difference are only meaningful where the data is fitted, so clip them
+  // to the fit window (the full extent when no window is set). Excluded data is
+  // still shown as faint observed points.
+  const clipLo = fitRange ? fitRange.min : xMin;
+  const clipHi = fitRange ? fitRange.max : xMax;
+  const inFitRange = (x: number): boolean => x >= clipLo && x <= clipHi;
+  const clipped = <T,>(arr: readonly T[]): T[] => arr.filter((_, i) => inFitRange(curves.x[i]!));
+
+  // Observed points are shown across the whole pattern (faded outside), so the
+  // y-scale spans all of them; calc/background only span the clipped window.
+  const [yMin, yMax] = extent([...curves.yObs, ...clipped(curves.yCalc), ...clipped(curves.yBackground ?? [])]);
+  const [dMin, dMax] = extent(clipped(curves.diff));
 
   const sx = linearScale(xMin, xMax, margin.left, margin.left + plotW);
   const sy = linearScale(yMin, yMax, margin.top + mainH, margin.top);
@@ -51,9 +62,9 @@ export function PatternPlot({
     margin.top + mainH + 8,
   );
 
-  const calcLine = polylinePoints(curves.x, curves.yCalc, sx, sy);
-  const backgroundLine = curves.yBackground ? polylinePoints(curves.x, curves.yBackground, sx, sy) : "";
-  const diffLine = polylinePoints(curves.x, curves.diff, sx, sd);
+  const calcLine = clippedPolylinePoints(curves.x, curves.yCalc, sx, sy, clipLo, clipHi);
+  const backgroundLine = curves.yBackground ? clippedPolylinePoints(curves.x, curves.yBackground, sx, sy, clipLo, clipHi) : "";
+  const diffLine = clippedPolylinePoints(curves.x, curves.diff, sx, sd, clipLo, clipHi);
 
   const plotBottom = margin.top + mainH + diffH;
   const showHandles = fitRange !== undefined && onFitRangeChange !== undefined;
@@ -108,10 +119,10 @@ export function PatternPlot({
         y2={margin.top + mainH}
         stroke="#888"
       />
-      {/* observed as small circles (subsampled for density) */}
+      {/* observed as small circles (subsampled for density); excluded data faded */}
       {curves.x.map((x, i) =>
         i % 3 === 0 ? (
-          <circle key={i} cx={sx(x)} cy={sy(curves.yObs[i]!)} r={1.6} fill="#c1272d" opacity={0.7} />
+          <circle key={i} cx={sx(x)} cy={sy(curves.yObs[i]!)} r={1.6} fill="#c1272d" opacity={inFitRange(x) ? 0.7 : 0.18} />
         ) : null,
       )}
       {/* calculated line */}
