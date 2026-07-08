@@ -30,6 +30,7 @@ import {
 } from "@/examples/mn3gaMagnetic";
 import { MagneticPanel } from "@/components/MagneticPanel";
 import { KSearchPanel } from "@/components/KSearchPanel";
+import { detectExtraPeaks } from "@/core/magnetic/extraPeaks";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { SingleCrystalDataset as SxDataset } from "@/core/diffraction/types";
 import { buildSyntheticPowder, powderBindings } from "@/examples/synthetic";
@@ -225,6 +226,16 @@ export function App(): JSX.Element {
     [structure],
   );
   const displayUnits = useMemo(() => availableDisplayUnits(axisCtx), [axisCtx]);
+  // Candidate magnetic peaks = positive residual the nuclear model can't explain,
+  // as d-spacings, ready for the k-search (so the user needn't read them off the
+  // plot). Requires a d-convertible axis; assumes the nuclear fit is refined.
+  const magneticPeakD = useMemo<number[]>(() => {
+    if (!displayUnits.includes("dSpacing")) return [];
+    const dArr = pattern.xUnit === "dSpacing"
+      ? curves.x
+      : convertAxisArray(curves.x, pattern.xUnit, "dSpacing", axisCtx);
+    return detectExtraPeaks(dArr, curves.yObs, curves.yCalc).map((p) => p.d);
+  }, [curves, pattern.xUnit, axisCtx, displayUnits]);
   const effectiveUnit: DisplayUnit = displayUnit ?? pattern.xUnit;
   const displayCurves = useMemo(
     () => (effectiveUnit === pattern.xUnit ? curves : { ...curves, x: convertAxisArray(curves.x, pattern.xUnit, effectiveUnit, axisCtx) }),
@@ -723,7 +734,7 @@ export function App(): JSX.Element {
             <div style={{ ...themeCard, padding: 16 }}>
               <h2 style={h2}>Propagation vector &amp; magnetic subgroups ({structure.name})</h2>
               <p style={stepHelp}>Commensurate single-k first pass: pick the magnetic ion(s), find or enter k, and read the allowed magnetic subgroups of its little group.</p>
-              <KSearchPanel structure={structure} />
+              <KSearchPanel structure={structure} autoPeaks={magneticPeakD} />
             </div>
             <div style={{ ...themeCard, padding: 16 }}>
               <h2 style={h2}>Allowed magnetic space groups — k = 0 demo ({mag.ex.structure.name})</h2>

@@ -26,7 +26,14 @@ function parsePeaks(text: string): number[] {
     .filter((v) => Number.isFinite(v) && v > 0);
 }
 
-export function KSearchPanel({ structure }: { structure: StructureModel }): JSX.Element {
+export function KSearchPanel({
+  structure,
+  autoPeaks = [],
+}: {
+  structure: StructureModel;
+  /** d-spacings of candidate magnetic peaks auto-detected from the pattern residual. */
+  autoPeaks?: readonly number[];
+}): JSX.Element {
   const ions = useMemo(() => magneticIonCandidates(structure), [structure]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(ions.map((i) => i.siteLabel)));
   const [kText, setKText] = useState<[string, string, string]>(["0", "0", "0"]);
@@ -41,9 +48,15 @@ export function KSearchPanel({ structure }: { structure: StructureModel }): JSX.
     return { subgroups: generateMagneticCandidatesForK(ops, k), lgSize: littleGroup(ops, k).length };
   }, [structure, k[0], k[1], k[2]]);
 
-  function runSearch(): void {
-    const peaks = parsePeaks(peaksText);
-    setResults(searchPropagationVector(structure.cell, peaks, { tolerance: 0.02 }));
+  function runSearch(peaks?: readonly number[]): void {
+    const list = peaks ?? parsePeaks(peaksText);
+    setResults(searchPropagationVector(structure.cell, [...list], { tolerance: 0.02 }));
+  }
+
+  /** Fill the box with the auto-detected magnetic peaks and search them. */
+  function autoDetectAndSearch(): void {
+    setPeaksText(autoPeaks.map((d) => d.toFixed(4)).join("\n"));
+    runSearch(autoPeaks);
   }
 
   function toggleIon(label: string): void {
@@ -91,7 +104,17 @@ export function KSearchPanel({ structure }: { structure: StructureModel }): JSX.
           <span style={{ fontSize: 13, color: theme.secondary, fontFamily: themeMono }}>= {kLabel(k)}</span>
         </div>
         <div style={{ marginTop: 10 }}>
-          <div style={help}>Search from observed magnetic-peak d-spacings (Å), one per line or comma-separated:</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <button style={{ ...btn, marginTop: 0, opacity: autoPeaks.length === 0 ? 0.5 : 1 }} onClick={autoDetectAndSearch} disabled={autoPeaks.length === 0}>
+              Auto-detect &amp; search ({autoPeaks.length})
+            </button>
+            <span style={help}>
+              {autoPeaks.length > 0
+                ? "Extra peaks from the nuclear-fit residual (refine the nuclear structure first, then all fixed)."
+                : "No extra peaks in the residual — refine the nuclear structure first, or enter d-spacings manually."}
+            </span>
+          </div>
+          <div style={{ ...help, marginTop: 10 }}>Or enter magnetic-peak d-spacings (Å) manually, one per line or comma-separated:</div>
           <textarea
             value={peaksText}
             onChange={(e) => setPeaksText(e.target.value)}
@@ -99,7 +122,7 @@ export function KSearchPanel({ structure }: { structure: StructureModel }): JSX.
             rows={3}
             style={textarea}
           />
-          <button style={btn} onClick={runSearch}>Search k</button>
+          <button style={btn} onClick={() => runSearch()}>Search k</button>
         </div>
         {results && (
           <div style={{ marginTop: 10 }}>
