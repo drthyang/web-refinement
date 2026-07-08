@@ -17,22 +17,47 @@ import { buildStructureRefinement } from "@/core/workflow/structureRefinement";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import { optimalScale } from "@/app/loadData";
 
-/** Kinds held fixed on first load; freed via the table or the guided sequence. */
+/** Structural kinds held fixed on first load; freed via the table or guided. */
 const STRUCTURAL_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "positionShift", "bIso", "uAniso", "occupancy", "poRatio", "absorption",
 ]);
 
 /**
+ * Instrument / profile kinds (peak shape, width, zero, TOF calibration + shape).
+ * These are held fixed on first load too, so the default "Refine" does *not*
+ * touch instrument parameters — a plain scale/background/cell fit. The user frees
+ * them per row, or runs the guided sequence, which refines the profile in its
+ * expert-order stage.
+ */
+const INSTRUMENT_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
+  "peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY",
+  "asymSL", "asymHL", "zeroShift", "tofCalibration", "tofProfile",
+]);
+
+/** Everything the UI holds fixed on load (structural + instrument/profile). */
+const FIXED_ON_LOAD_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
+  ...STRUCTURAL_KINDS,
+  ...INSTRUMENT_KINDS,
+]);
+
+/**
+ * Kinds the guided (staged) sequence is allowed to unlock. It re-frees the
+ * structural kinds (except occupancy) and the profile kinds — but keeps
+ * `profileU` fixed (the Gaussian U correlates strongly with sample broadening;
+ * refined only when explicitly requested) and `tofCalibration` fixed (difC/difA
+ * stay at the instrument calibration). This reproduces the previous free set
+ * exactly, now that everything starts fixed on load.
+ *
  * Occupancies are *shown* (fixed on load) but never freed automatically — not on
  * first load and not by the guided sequence. They correlate strongly with scale
  * and ADP, and a meaningful refinement usually needs a chemically-motivated
  * occupancy-sum restraint the app cannot infer, so the user frees them per row
- * (and adds restraints) deliberately. `guidedPowderParams` unlocks every other
- * structural kind but leaves these alone.
+ * (and adds restraints) deliberately.
  */
-const GUIDED_UNLOCK_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>(
-  [...STRUCTURAL_KINDS].filter((k) => k !== "occupancy"),
-);
+const GUIDED_UNLOCK_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
+  ...[...STRUCTURAL_KINDS].filter((k) => k !== "occupancy"),
+  ...[...INSTRUMENT_KINDS].filter((k) => k !== "profileU" && k !== "tofCalibration"),
+]);
 
 export interface PowderSpec {
   readonly params: RefinementParameter[];
@@ -86,7 +111,7 @@ export function buildPowderSpec(
     const seedCurves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
     const s = optimalScale(seedCurves.yObs.map((y) => (y > 0 ? y : 0)), seedCurves.yCalc);
     const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof, refineOccupancy: true, ...tieOpts });
-    const params = spec.params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
+    const params = spec.params.map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
     return { params, bindings: spec.bindings, profile };
   }
 
@@ -113,7 +138,7 @@ export function buildPowderSpec(
   const s = optimalScale(curves.yObs.map((y) => (y > 0 ? y : 0)), curves.yCalc);
 
   const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, refineOccupancy: true, ...tieOpts });
-  const params = spec.params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
+  const params = spec.params.map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
   return { params, bindings: spec.bindings, profile };
 }
 

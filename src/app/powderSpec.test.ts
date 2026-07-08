@@ -25,6 +25,21 @@ describe("buildPowderSpec", () => {
     // No instrument profile ⇒ single width (Gaussian), not Caglioti.
     expect(spec.params.some((p) => p.kind === "profileW")).toBe(false);
     expect(spec.profile.shape).toBe("gaussian");
+    // Instrument / profile parameters are NOT refined by default (fixed on load).
+    expect(spec.params.filter((p) => p.kind === "peakWidth").every((p) => p.fixed)).toBe(true);
+  });
+
+  it("holds instrument / profile parameters fixed on load, but Guided refines them", () => {
+    const inst: InstrumentParameters = { kind: "constantWavelength", wavelength: 0.1665, u: -46, v: 0, w: 1.2, zero: 0 };
+    const spec = buildPowderSpec(structure, pattern, inst);
+    const profileKinds = new Set(["profileV", "profileW", "profileX", "profileY", "zeroShift"]);
+    const profile = spec.params.filter((p) => profileKinds.has(p.kind));
+    expect(profile.length).toBeGreaterThan(0);
+    // Fixed on load — the default "Refine" leaves the instrument alone.
+    expect(profile.every((p) => p.fixed)).toBe(true);
+    // Guided re-frees them (except profU / tofCalibration) for the profile stage.
+    const guided = guidedPowderParams(spec.params);
+    expect(guided.filter((p) => profileKinds.has(p.kind)).every((p) => !p.fixed)).toBe(true);
   });
 
   it("uses the instrument Caglioti profile when the .instprm carries U,V,W", () => {
