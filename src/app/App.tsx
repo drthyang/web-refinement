@@ -29,6 +29,7 @@ import {
   type MagneticExample,
 } from "@/examples/mn3gaMagnetic";
 import { MagneticPanel } from "@/components/MagneticPanel";
+import { KSearchPanel } from "@/components/KSearchPanel";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { SingleCrystalDataset as SxDataset } from "@/core/diffraction/types";
 import { buildSyntheticPowder, powderBindings } from "@/examples/synthetic";
@@ -718,9 +719,16 @@ export function App(): JSX.Element {
         return <div style={{ ...themeCard, padding: 16 }}><QualityPanel structure={structure} powderResult={powderResult} /></div>;
       case 2:
         return (
-          <div style={{ ...themeCard, padding: 16 }}>
-            <h2 style={h2}>Allowed magnetic space groups ({mag.ex.structure.name})</h2>
-            <CandidateComparison structure={mag.ex.structure} dataset={mag.dataset} magneticSiteLabels={magSiteLabels} mode="generate" />
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={{ ...themeCard, padding: 16 }}>
+              <h2 style={h2}>Propagation vector &amp; magnetic subgroups ({structure.name})</h2>
+              <p style={stepHelp}>Commensurate single-k first pass: pick the magnetic ion(s), find or enter k, and read the allowed magnetic subgroups of its little group.</p>
+              <KSearchPanel structure={structure} />
+            </div>
+            <div style={{ ...themeCard, padding: 16 }}>
+              <h2 style={h2}>Allowed magnetic space groups — k = 0 demo ({mag.ex.structure.name})</h2>
+              <CandidateComparison structure={mag.ex.structure} dataset={mag.dataset} magneticSiteLabels={magSiteLabels} mode="generate" />
+            </div>
           </div>
         );
       case 3:
