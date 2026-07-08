@@ -277,6 +277,70 @@ agent tool it exposes.**
   reads the exported files.
 - **Tool exposed:** `export_cif(model) `, `generate_report(result)`.
 
+### M6 — Powder microstructure & texture 🚧
+
+- **Goal:** turn the profile and intensities into the *microstructure* a
+  materials study reports — quantitative crystallite size, microstrain, and
+  preferred orientation / texture — not merely a lower wR.
+- **Exists:** **isotropic** size (Scherrer, Γ_L ∝ 1/cosθ, the `X` term) and
+  **isotropic** microstrain (Γ_L ∝ tanθ, the `Y` term) via the Thompson–Cox–
+  Hastings Lorentzian; single-axis **March–Dollase** preferred orientation; and
+  Debye–Scherrer cylinder absorption
+  ([`diffraction/profile.ts`](../src/core/diffraction/profile.ts),
+  [`diffraction/intensity.ts`](../src/core/diffraction/intensity.ts)).
+- **Needed:**
+  - **Anisotropic size** broadening — an ellipsoidal or spherical-harmonic
+    crystallite-shape model giving hkl-dependent Γ_L (Scherrer per direction).
+  - **Anisotropic microstrain** — the Stephens (1999) phenomenological
+    S_HKL model for direction-dependent strain broadening (the standard for
+    non-uniform strain in Rietveld).
+  - **Size–strain separation + report** — deconvolve the instrument resolution
+    (from a LaB₆/CeO₂/Si standard) and derive volume-weighted ⟨D⟩ and microstrain
+    ε (integral-breadth / Williamson–Hall).
+  - **General texture** — a spherical-harmonic ODF (arbitrary sample/crystal
+    symmetry, multiple poles) beyond the single-axis March–Dollase fibre texture.
+  - **Further corrections** — secondary **extinction**, **microabsorption**
+    (Brindley), and flat-plate / other absorption geometries.
+- **Validation gate:** recover a known size/strain from a NIST line-profile
+  standard (LaB₆ 660); March–Dollase and Stephens coefficients matched against
+  GSAS-II on the same pattern.
+- **Tool exposed:** `refine_microstructure(model, data)`,
+  `extract_size_strain(result) → {⟨D⟩, ε}`, `refine_texture(model, data)`.
+
+### M7 — Single-crystal refinement 🚧
+
+- **Goal:** refine a structure against **integrated single-crystal Bragg
+  intensities** (F² or F) through the same engine, symmetry constraints, and
+  (for magnetic) moment machinery as powder — the second half of the "Rietveld
+  *and* single-crystal" vision (§1).
+- **Exists:** the computational core is already in place and tested — a
+  `SingleCrystalDataset`/`SingleCrystalReflection` model, nuclear and magnetic
+  single-crystal structure-factor + problem builders
+  ([`workflow/singleCrystal.ts`](../src/core/workflow/singleCrystal.ts),
+  `buildSingleCrystalProblem` / `buildMagneticSingleCrystalProblem`), scale and
+  symmetry-allowed moment refinement, and per-reflection nuclear/magnetic split.
+  What is missing is the data path and the workflow/UX around it.
+- **Needed:**
+  - **Reflection I/O** — read SHELX **HKL/HKLF 4**, **FCF**, and CIF-embedded
+    reflection lists (h k l, F²/I, σ, batch); merge equivalents with **R_int**
+    and **completeness** reporting.
+  - **Single-crystal corrections** — **extinction** (Becker–Coppens primary/
+    secondary), **absorption** (analytical by crystal shape or empirical /
+    multi-scan), the single-crystal **Lorentz–polarization** geometry, and
+    batch-scale / **twin-fraction** handling.
+  - **Workflow + UI** — a single-crystal page mirroring the powder one
+    (load hkl → assign/confirm space group → free parameters → refine →
+    F_obs vs F_calc, wR2/R1, GoF), with per-reflection outlier diagnostics.
+- **Validation gate:** reproduce a published single-crystal refinement (F²
+  wR2 / R1) within tolerance; cross-check against SHELXL / GSAS-II on the same
+  hkl file.
+- **Tool exposed:** `load_hkl(file)`, `refine_single_crystal(model, hkl)`.
+
+*M6 and M7 are extensions of the atomic→magnetic spine (M1–M5), not gates on it:
+both reuse the same engine, symmetry, and scattering core, so they can be built
+in parallel with — or after — the magnetic arc, whichever a real dataset needs
+first.*
+
 ---
 
 ## 5. Agent-tools, skills & LLM-guided refinement (cross-cutting)
@@ -290,7 +354,9 @@ milestone stabilizes. The full design lives in
 - **Tool surface** mirrors §4: `load_structure` / `load_data` / `build_refinement`
   / `refine_structure` (M1) · `search_propagation_vector` (M2) ·
   `enumerate_magnetic_symmetry` (M3) · `refine_magnetic` (M4) · `export_cif` /
-  `generate_report` (M5) · `diagnose` (correlations, singular directions).
+  `generate_report` (M5) · `refine_microstructure` / `extract_size_strain` /
+  `refine_texture` (M6) · `load_hkl` / `refine_single_crystal` (M7) ·
+  `diagnose` (correlations, singular directions).
   Deliverable as an **MCP server**, **Claude Agent SDK** tool definitions, or an
   in-browser tool registry (a chat panel calling the same functions the buttons do).
 - **First agent-in-the-loop hook:** F1.5's automated next-parameter diagnostic —
@@ -317,7 +383,10 @@ milestone stabilizes. The full design lives in
 
 **Order:** F1 + F2 (coupled, first) → M1 (proves the foundation on real atomic
 data) → M2 → M3 → M4 (each gates the next) → M5 formalized last but threaded
-throughout. Agent tools exposed per-milestone.
+throughout. Agent tools exposed per-milestone. **M6 (powder microstructure &
+texture)** and **M7 (single-crystal refinement)** are parallel extensions off the
+shared core — sequence them by whichever real dataset arrives first, not by a
+gate.
 
 **Deferred until the core is correct:** WebAssembly / WebGPU acceleration for
 structure-factor summation, profile convolution, and the normal-equations solve.

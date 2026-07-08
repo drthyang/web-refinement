@@ -96,8 +96,15 @@ accidental gap — each is tracked as a roadmap item.
   probability plot** (Abrahams & Keve 1971): a straight, slope-1, intercept-0 line
   indicates a correct model *and* correctly-estimated uncertainties.
 - **Corrections modelled:** March–Dollase preferred orientation, Debye–Scherrer
-  cylinder absorption. **Not modelled:** extinction, spherical-harmonic texture,
-  flat-plate/other absorption geometries, anomalous dispersion, microabsorption.
+  cylinder absorption, isotropic size (Scherrer) and microstrain broadening.
+  **Not modelled:** anisotropic size / microstrain (Stephens), spherical-harmonic
+  texture, extinction, flat-plate/other absorption geometries, anomalous
+  dispersion, microabsorption — planned as **Roadmap M6** (powder microstructure
+  & texture).
+- **Single crystal.** The computational core (structure factor, refinement
+  problem builder, magnetic moment refinement) exists and is tested, but there is
+  no reflection-file loader, single-crystal-specific corrections (extinction,
+  absorption, twinning), or workflow/UI yet — planned as **Roadmap M7**.
 - **Input formats.** Powder patterns load from two-/three-column `x y [σ]` text,
   the GSAS-II CSV export, and the **GSAS standard powder histogram** (`.gsa` /
   `.gss` / `.fxye`: title + `BANK` record). For the histogram, `FXYE`/`FXY`
