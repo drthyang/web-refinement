@@ -40,7 +40,8 @@ export type ParameterKind =
   | "magneticScale"
   | "momentX"
   | "momentY"
-  | "momentZ";
+  | "momentZ"
+  | "momentMode";
 
 /** A single refinable (or fixed) parameter. */
 export interface RefinementParameter {
@@ -104,6 +105,13 @@ export interface ParameterBinding {
    * U tensor through the sum of all bound modes for that site.
    */
   readonly uBasis?: readonly [number, number, number, number, number, number];
+  /**
+   * Symmetry-allowed magnetic-moment mode (crystal-axis components) for a
+   * `momentMode` binding. The moment of a site is the sum of its bound modes:
+   * m = Σ value·momentBasis, so only symmetry-allowed directions can be nonzero
+   * (mirrors `positionShift`/`uAniso`). Coupled components move together.
+   */
+  readonly momentBasis?: readonly [number, number, number];
 }
 
 /** A soft linear restraint appended as pseudo-observation to least squares. */

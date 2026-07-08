@@ -30,14 +30,30 @@ export function applyMagneticMoments(
   }));
   const byLabel = new Map(moments.map((m) => [m.siteLabel, m]));
 
+  // Symmetry-mode bindings define the moment as m = Σ value·basis, so zero any
+  // mode-driven site first, then accumulate its allowed modes.
+  const modeDriven = new Set(
+    bindings.filter((b) => b.kind === "momentMode" && b.targetKey).map((b) => b.targetKey!),
+  );
+  for (const label of modeDriven) {
+    const m = byLabel.get(label);
+    if (m) (m.components as [number, number, number]) = [0, 0, 0];
+  }
+
   for (const binding of bindings) {
-    if (binding.kind !== "momentX" && binding.kind !== "momentY" && binding.kind !== "momentZ") continue;
     const v = values[binding.parameterId];
     if (v === undefined || !binding.targetKey) continue;
     const moment = byLabel.get(binding.targetKey);
     if (!moment) continue;
-    const idx = binding.kind === "momentX" ? 0 : binding.kind === "momentY" ? 1 : 2;
-    (moment.components as [number, number, number])[idx] = v;
+    if (binding.kind === "momentMode" && binding.momentBasis) {
+      const c = moment.components as [number, number, number];
+      c[0] += v * binding.momentBasis[0]!;
+      c[1] += v * binding.momentBasis[1]!;
+      c[2] += v * binding.momentBasis[2]!;
+    } else if (binding.kind === "momentX" || binding.kind === "momentY" || binding.kind === "momentZ") {
+      const idx = binding.kind === "momentX" ? 0 : binding.kind === "momentY" ? 1 : 2;
+      (moment.components as [number, number, number])[idx] = v;
+    }
   }
   return { ...magnetic, moments };
 }
