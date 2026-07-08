@@ -72,6 +72,11 @@ export default defineConfig({
   worker: {
     format: "es",
   },
+  build: {
+    // The bundled Mn₃Ga POWGEN example pattern (~240 KB, embedded via ?raw) puts
+    // the main chunk over Vite's default 500 KB notice; that is expected here.
+    chunkSizeWarningLimit: 800,
+  },
   test: {
     globals: true,
     environment: "node",

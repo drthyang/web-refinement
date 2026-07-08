@@ -19,9 +19,7 @@ import { magneticComparison } from "@/core/workflow/magnetic";
 import type { ParameterBinding } from "@/core/refinement/types";
 import { startingPowderParams } from "@/app/loadData";
 import { ComputeClient } from "@/workers/computeClient";
-import { exampleStructure } from "@/examples/highEntropyWO4";
-import { loadPowgenDefault } from "@/app/powgenData";
-import { loadMn3GaPowgen } from "@/app/mn3gaPowgen";
+import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
 import {
   buildMagneticDataset,
   exampleMagnetic,
@@ -137,7 +135,11 @@ function loadedSession(structure: StructureModel, pattern: PowderPattern, instru
 }
 
 export function App(): JSX.Element {
-  const [session, setSession] = useState<Session>(() => newSession(exampleStructure()));
+  // The bundled Mn₃Ga POWGEN 600 K TOF dataset (published) is the default the
+  // workbench opens with — embedded in the build, so it works on the deployed
+  // site with no runtime fetch or local data/ folder.
+  const example = mn3gaPowgenExample();
+  const [session, setSession] = useState<Session>(() => loadedSession(example.structure, example.pattern, example.instrument));
   const [powderResult, setPowderResult] = useState<RefinementResult | null>(null);
   const [mag, setMag] = useState(() => makeMagnetic(exampleMagnetic()));
   const [magResult, setMagResult] = useState<RefinementResult | null>(null);
@@ -149,54 +151,12 @@ export function App(): JSX.Element {
   const [fitRange, setFitRange] = useState<FitRangeSelection | null>(null);
   // Display-only x-axis unit; null = the pattern's native unit. Reset on load.
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit | null>(null);
-  const [instrument, setInstrument] = useState<InstrumentParameters>({ kind: "constantWavelength", wavelength: 1.54 });
-  const [instrumentLoaded, setInstrumentLoaded] = useState(false);
-  const [message, setMessage] = useState<string>("High-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ (P2/c). Checking for the POWGEN pattern…");
+  const [instrument, setInstrument] = useState<InstrumentParameters>(example.instrument);
+  const [instrumentLoaded, setInstrumentLoaded] = useState(true);
+  const [message, setMessage] = useState<string>(
+    `Loaded Mn₃Ga POWGEN 600 K · ${example.pattern.points.length} pts · TOF (back-to-back-exponential profile) — free parameters and refine.`,
+  );
   const client = useRef<ComputeClient>(new ComputeClient());
-  // Set once the user loads a CIF/data or resets, so the async startup POWGEN
-  // load never clobbers a session the user has already taken over.
-  const userTookOver = useRef(false);
-
-  // On startup, try to open a real POWGEN dataset from the local (git-ignored)
-  // data/ folder — served by the dev-only Vite plugin. The Mn₃Ga 600 K TOF set
-  // is preferred (it exercises the time-of-flight refinement path); otherwise
-  // fall back to the high-entropy POWGEN set, then the bundled synthetic demo.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const mn3ga = await loadMn3GaPowgen();
-      if (cancelled || userTookOver.current) return;
-      if (mn3ga) {
-        setInstrument(mn3ga.instrument);
-        setInstrumentLoaded(true);
-        setSession(loadedSession(mn3ga.structure, mn3ga.pattern, mn3ga.instrument));
-        setPowderResult(null);
-        setMessage(
-          `Loaded Mn₃Ga POWGEN 600 K · ${mn3ga.pattern.points.length} pts · TOF (back-to-back-exponential profile) — click “Refine powder” or “Guided”.`,
-        );
-        return;
-      }
-      const loaded = await loadPowgenDefault();
-      if (cancelled || userTookOver.current) return;
-      if (!loaded) {
-        setMessage(
-          import.meta.env.DEV
-            ? "High-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ (P2/c) — bundled structure (POWGEN pattern not found in data/)."
-            : "Synthetic demo pattern — load your own CIF, powder data, and instrument to refine.",
-        );
-        return;
-      }
-      const { structure: st, pattern: pt, instrument: inst } = loaded;
-      setInstrument(inst);
-      setInstrumentLoaded(true);
-      setSession(loadedSession(st, pt, inst));
-      setPowderResult(null);
-      setMessage(`Loaded POWGEN high-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ · ${pt.points.length} pts · ${pt.xUnit === "tof" ? "TOF" : pt.xUnit}.`);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const { structure, pattern, powderParams, powderSource } = session;
   // A freshly-loaded pattern is a new object; drop the window and axis choice.
@@ -343,7 +303,6 @@ export function App(): JSX.Element {
   }
 
   function onLoadCif(file: File): void {
-    userTookOver.current = true;
     file.text().then((text) => {
       try {
         const { structure: parsed, magnetic } = parseMagneticCif(text, "loaded");
@@ -371,7 +330,6 @@ export function App(): JSX.Element {
   // Unified, auto-detecting data loader: the resolver classifies the file
   // (powder vs single-crystal) and, for powder, its x-unit, then dispatches.
   function onLoadData(file: File): void {
-    userTookOver.current = true;
     file.text().then((text) => {
       try {
         const fmt = detectDataFormat({ text, filename: file.name, instrument: instrumentLoaded ? instrument : undefined });
