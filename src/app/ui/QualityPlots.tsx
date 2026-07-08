@@ -21,9 +21,14 @@ function axisLine(x1: number, y1: number, x2: number, y2: number, dash = false):
   return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={theme.border} strokeWidth={1} {...(dash ? { strokeDasharray: "4 4" } : {})} />;
 }
 
-export function QualityPlots({ obsCalc, npp }: { obsCalc: readonly ReflectionObsCalc[]; npp: NormalProbabilityPlot }): JSX.Element {
+export function QualityPlots({ obsCalc, npp, stacked = false }: {
+  obsCalc: readonly ReflectionObsCalc[];
+  npp: NormalProbabilityPlot;
+  /** One figure per row (for a narrow side rail) instead of reflowing columns. */
+  stacked?: boolean;
+}): JSX.Element {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 20, marginTop: 4 }}>
+    <div style={{ display: "grid", gridTemplateColumns: stacked ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))", gap: stacked ? 12 : 20, marginTop: 4 }}>
       <FobsFcalc rows={obsCalc} />
       <NormalProb npp={npp} />
     </div>

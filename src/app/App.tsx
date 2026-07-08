@@ -56,7 +56,7 @@ import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono, fz } from "@/app/theme";
-import { bondLengths } from "@/core/crystal/geometry";
+import { applyParameters } from "@/core/workflow/apply";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 
@@ -179,6 +179,15 @@ export function App(): JSX.Element {
   // pattern keeps the shape at "gaussian" and stays view-only.
   const tofViewOnly = powderIsTof && session.powderProfile.shape !== "tof";
   const pBindings = session.powderBindings;
+
+  // Structure with the CURRENT parameter values applied (lattice, positions,
+  // occupancies, ADPs) — what the magnetic symmetry analysis works on, so a
+  // refined cell feeds the k-search and little-group machinery directly.
+  const refinedStructure = useMemo(() => {
+    const values: Record<string, number> = {};
+    for (const p of powderParams) values[p.id] = p.value;
+    return applyParameters(structure, pBindings, values).model;
+  }, [structure, powderParams, pBindings]);
 
   const curves = useMemo(() => {
     // TOF patterns cannot be profile-fit by the minimal engine; show the observed
@@ -655,11 +664,14 @@ export function App(): JSX.Element {
 
   function renderStep(): JSX.Element {
     switch (step) {
-      case 0: // Setup & refinement: summary cards + plot + parameter panel.
+      case 0: // Setup & refinement: quality rail | plot | parameter panel.
         return (
           <>
             <SummaryCards cards={summaryCards} />
-            <div className="wb-work">
+            <div className="wb-work3">
+              <div className="wb-card-quality" style={{ ...themeCard, padding: "14px 16px", height: "clamp(500px, 64vh, 760px)", overflowY: "auto" }}>
+                <QualityPanel powderResult={powderResult} structure={structure} pattern={pattern} params={powderParams} bindings={pBindings} profile={session.powderProfile} />
+              </div>
               <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 64vh, 760px)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
                   <span style={themeLabel}>
@@ -670,6 +682,16 @@ export function App(): JSX.Element {
                       <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
                     )}
                     <ViewModeToggle value={plotMode} onChange={setPlotMode} />
+                    <button
+                      style={magHandoffBtn}
+                      title="Open the magnetic symmetry analysis with the current refined structure (lattice, positions, occupancies)"
+                      onClick={() => {
+                        setStep(1);
+                        setMessage("Refined structure passed to the magnetic symmetry analysis — k-search and symmetry now use the current parameter values.");
+                      }}
+                    >
+                      Magnetic analysis →
+                    </button>
                   </div>
                 </div>
                 {plotMode === "structure" ? (
@@ -761,18 +783,18 @@ export function App(): JSX.Element {
                 disabled={tofViewOnly}
               />
             </div>
-            <div style={{ ...themeCard, padding: "16px 18px" }}>
-              <QualityPanel structure={structure} powderResult={powderResult} pattern={pattern} params={powderParams} bindings={pBindings} profile={session.powderProfile} />
-            </div>
           </>
         );
       case 1:
         return (
           <div style={{ ...themeCard, padding: 16 }}>
-            <h2 style={h2}>Magnetic structure — k-vector, subgroups &amp; moment refinement ({structure.name})</h2>
-            <p style={stepHelp}>Commensurate single-k workflow: pick the magnetic ion(s), auto-detect or enter k, read the allowed magnetic subgroups of its little group, then preview, apply to the pattern, and refine the moments.</p>
+            <h2 style={h2}>Magnetic symmetry analysis ({structure.name})</h2>
+            <p style={stepHelp}>
+              Commensurate single-k workflow, on the refined atomic structure:
+              magnetic ions → propagation vector k → symmetry framework → magnetic space group → preview &amp; refine → back to refinement.
+            </p>
             <KSearchPanel
-              structure={structure}
+              structure={refinedStructure}
               autoPeaks={magneticPeakD}
               pattern={pattern}
               nuclearParams={powderParams}
@@ -804,7 +826,6 @@ function QualityPanel({
   bindings: readonly ParameterBinding[];
   profile: PowderProfile;
 }): JSX.Element {
-  const bonds = bondLengths(structure).slice(0, 12);
   // Validation plots (Rietveld obs/calc + normal probability) for the current fit.
   const diagnostics = useMemo(() => {
     const obsCalc = powderReflectionObsCalc(structure, pattern, params, bindings, profile);
@@ -813,45 +834,25 @@ function QualityPanel({
     const npp = normalProbabilityPlot(weightedResiduals(curves.yObs, curves.yCalc, sigmas));
     return { obsCalc, npp };
   }, [structure, pattern, params, bindings, profile]);
-  const tileHead: React.CSSProperties = { fontSize: fz.small, fontWeight: 600, color: theme.ink };
   return (
     <div>
-      <h2 style={h2}>Refinement quality &amp; geometry</h2>
-      <p style={stepHelp}>Fit quality (R, wR, GoF), refined bond lengths, and validation plots for the current model.</p>
-      <div className="wb-quality">
-        <div>
-          <strong style={tileHead}>Agreement factors</strong>
-          <table style={{ fontSize: fz.body, marginTop: 6 }}>
-            <tbody>
-              <tr><td style={kcell}>Powder</td><td>{powderResult ? `wR ${(100 * (powderResult.agreement.rWeighted ?? 0)).toFixed(2)}% · GoF ${(powderResult.agreement.goodnessOfFit ?? 0).toFixed(2)}` : "not refined"}</td></tr>
-            </tbody>
-          </table>
-          <p style={{ fontSize: fz.small, color: theme.secondary, marginTop: 8 }}>
-            GoF near 1 indicates a fit consistent with the data uncertainties. Much larger values mean an
-            incomplete model or underestimated errors.
-          </p>
-        </div>
-        <div>
-          <strong style={tileHead}>Bond lengths (≤ 3.2 Å)</strong>
-          <table style={{ fontSize: fz.small, marginTop: 6 }}>
-            <thead><tr><th style={kcell}>pair</th><th style={kcell}>d (Å)</th></tr></thead>
-            <tbody>
-              {bonds.map((b, i) => (
-                <tr key={i}><td style={kcell}>{b.from}–{b.to}</td><td style={kcell}>{b.distance.toFixed(3)}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div>
-          <strong style={tileHead}>Validation plots</strong>
-          <p style={{ fontSize: fz.small, color: theme.secondary, margin: "2px 0 8px" }}>
-            More diagnostic than wR alone: F_obs vs F_calc flags individual bad reflections;
-            the normal probability plot (Abrahams &amp; Keve 1971) reveals model error <em>and</em> whether
-            the uncertainties (weights) are right — a straight slope-1 line is the goal.
-          </p>
-          <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} />
-        </div>
-      </div>
+      <span style={themeLabel}>Refinement quality</span>
+      <table style={{ fontSize: fz.body, marginTop: 8 }}>
+        <tbody>
+          <tr>
+            <td style={kcell}>Powder</td>
+            <td>{powderResult ? `wR ${(100 * (powderResult.agreement.rWeighted ?? 0)).toFixed(2)}% · GoF ${(powderResult.agreement.goodnessOfFit ?? 0).toFixed(2)}` : "not refined"}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style={{ fontSize: fz.small, color: theme.secondary, marginTop: 6 }}>
+        GoF near 1 = fit consistent with the data uncertainties.
+      </p>
+      <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} stacked />
+      <p style={{ fontSize: fz.micro, color: theme.secondary, marginTop: 8 }}>
+        F_obs vs F_calc flags individual bad reflections; the normal probability plot
+        (Abrahams &amp; Keve 1971) is straight with slope 1 for an ideal fit &amp; weights.
+      </p>
     </div>
   );
 }
@@ -933,6 +934,7 @@ const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 
 const kcell: React.CSSProperties = { padding: "2px 10px 2px 0", color: theme.secondary, verticalAlign: "top" };
 const stepHelp: React.CSSProperties = { fontSize: 13, color: theme.secondary, marginTop: 0 };
 const smallBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "1px 9px", fontSize: 11, cursor: "pointer", marginLeft: 6 };
+const magHandoffBtn: React.CSSProperties = { border: `1px solid ${theme.primary}`, background: "#fff", color: theme.primary, borderRadius: 8, padding: "3px 11px", fontSize: 11, fontWeight: 600, fontFamily: themeMono, cursor: "pointer" };
 const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "2px 6px", fontSize: 12, color: theme.ink, cursor: "pointer" };
 const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };
 const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderTop: `1px solid ${theme.warnBorder}`, color: theme.warnInk };

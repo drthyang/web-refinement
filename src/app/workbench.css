@@ -32,25 +32,29 @@
   gap: clamp(12px, 0.9vw, 18px);
 }
 
-/* Working area: plot (wide) beside the parameter panel; stacks when narrow. */
-.wb-work {
+/* Working area: quality rail (1/6) | main refinement (2/3) | parameters (1/6). */
+.wb-work3 {
   display: grid;
-  grid-template-columns: minmax(0, 2.4fr) minmax(340px, 1fr);
+  grid-template-columns: minmax(210px, 1fr) minmax(0, 4fr) minmax(320px, 1fr);
   gap: clamp(12px, 1vw, 20px);
-  /* Stretch both columns to a common height (the plot card sets it). */
+  /* Stretch all columns to a common height (the plot card sets it). */
   align-items: stretch;
 }
 
-/* Quality tiles: agreement + geometry + validation plots reflow to fit. */
-.wb-quality {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
-  gap: clamp(16px, 1.4vw, 32px);
-  align-items: start;
+/* Mid widths: keep plot + parameters side by side, quality drops below. */
+@media (max-width: 1500px) {
+  .wb-work3 {
+    grid-template-columns: minmax(0, 2.4fr) minmax(340px, 1fr);
+  }
+  .wb-card-quality {
+    grid-column: 1 / -1;
+    order: 3;
+    height: auto !important;
+  }
 }
 
 @media (max-width: 1120px) {
-  .wb-work {
+  .wb-work3 {
     grid-template-columns: 1fr;
   }
 }

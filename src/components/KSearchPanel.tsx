@@ -46,6 +46,12 @@ const K_PRESETS: readonly { label: string; k: Vec3 }[] = [
   { label: "(⅓ ⅓ 0)", k: [1 / 3, 1 / 3, 0] },
 ];
 
+/** The two equivalent symmetry frameworks for step 3 of the workflow. */
+const FRAMEWORKS: readonly { id: "msg" | "irrep"; label: string }[] = [
+  { id: "msg", label: "Magnetic space groups" },
+  { id: "irrep", label: "Representation analysis" },
+];
+
 function parsePeaks(text: string): number[] {
   return text
     .split(/[\s,;]+/)
@@ -104,6 +110,11 @@ export function KSearchPanel({
     return { dec, modes, lg };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structure, k[0], k[1], k[2], selected]);
+
+  // Which symmetry framework drives the group selection: the Shubnikov
+  // (magnetic space group) route or the representation-analysis (irrep) route.
+  // Both converge on a magnetic space group whose moments are previewed below.
+  const [framework, setFramework] = useState<"msg" | "irrep">("msg");
 
   // Each *real* irrep is a time-reversal homomorphism θ = χ, i.e. exactly one of
   // the Shubnikov candidates above — the map lets a click on an irrep drive the
@@ -208,9 +219,14 @@ export function KSearchPanel({
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
-      {/* 1. Magnetic ions */}
+      {/* 1. Atomic structure: which sites carry a moment */}
       <section>
-        <div style={themeLabel}>Magnetic ions</div>
+        <div style={themeLabel}>1 · Atomic structure — magnetic ions</div>
+        <p style={help}>
+          {structure.name || "Structure"}
+          {structure.spaceGroup.hermannMauguin ? ` · ${structure.spaceGroup.hermannMauguin}` : ""}
+          {` · ${structure.sites.length} site${structure.sites.length === 1 ? "" : "s"} (current refined values). Tick the moment-carrying ion(s).`}
+        </p>
         {ions.length === 0 ? (
           <p style={help}>No magnetic ions in this structure (no site has a tabulated ⟨j0⟩ form factor).</p>
         ) : (
@@ -227,7 +243,7 @@ export function KSearchPanel({
 
       {/* 2. k-vector: manual + search */}
       <section>
-        <div style={themeLabel}>Propagation vector k</div>
+        <div style={themeLabel}>2 · Propagation vector k</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
           {[0, 1, 2].map((i) => (
             <input
@@ -294,115 +310,140 @@ export function KSearchPanel({
         )}
       </section>
 
-      {/* 3. Little-group magnetic subgroups */}
+      {/* 3. Choose the symmetry framework */}
       <section>
-        <div style={themeLabel}>Magnetic space groups of the little group G(k)</div>
+        <div style={themeLabel}>3 · Symmetry framework</div>
         <p style={help}>
           Little group G(k): {lgSize} of {structure.spaceGroup.operations.length} operations leave k invariant.
-          Time-reversal (θ: G→±1) enumeration gives {subgroups.length} candidate{subgroups.length === 1 ? "" : "s"}.
+          Describe the ordering it allows in either framework — both converge on a magnetic space group in step 4.
         </p>
-        <div style={{ margin: "6px 0 0", display: "grid", gap: 3 }}>
-          {subgroups.map((c, i) => (
+        <div style={{ display: "inline-flex", gap: 2, background: theme.chipBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: 2, marginTop: 6 }}>
+          {FRAMEWORKS.map((f) => (
             <button
-              key={c.id}
-              onClick={() => setSelIdx(i === selIdx ? null : i)}
+              key={f.id}
+              onClick={() => setFramework(f.id)}
               style={{
-                textAlign: "left", fontSize: 12.5, padding: "5px 9px", borderRadius: 7, cursor: "pointer",
-                border: `1px solid ${i === selIdx ? theme.primary : theme.border}`,
-                background: i === selIdx ? theme.chipBg : "#fff",
+                border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, fontWeight: 600,
+                cursor: "pointer", fontFamily: themeMono,
+                background: framework === f.id ? theme.primary : "transparent",
+                color: framework === f.id ? "#fff" : theme.secondary,
               }}
             >
-              <span style={{ fontFamily: themeMono, color: theme.secondary }}>{c.isTypeI ? "type I" : "type III"}</span> · {c.label}
+              {f.label}
             </button>
           ))}
         </div>
-        <p style={{ ...help, marginTop: 8 }}>
-          Click a subgroup to preview the moments and edit their components — this is the
-          <strong> magnetic space group (coordinate/basis-vector) route</strong>. The complementary
-          <strong> representation (irrep) route</strong> is shown below. Confirm any candidate with a
-          magnetic refinement.
+        <p style={{ ...help, marginTop: 6 }}>
+          {framework === "msg"
+            ? "Shubnikov route: enumerate the time-reversal assignments θ: G(k) → ±1 — the coordinate (basis-vector) description used by mCIF / GSAS-II."
+            : "Representation route (BasIreps / Jana style): decompose Γ_mag into irreps of G(k). Every real 1-D irrep is exactly one of the Shubnikov groups, so both frameworks meet at step 4."}
         </p>
       </section>
 
-      {/* 4. Representation analysis (irrep decomposition) */}
-      {irrepAnalysis && (
-        <section>
-          <div style={themeLabel}>Representation analysis — Γ_mag over G(k)</div>
-          {!irrepAnalysis.dec.abelian ? (
+      {/* 4. Magnetic space group — picked directly, or through an irrep */}
+      <section>
+        <div style={themeLabel}>4 · Magnetic space group</div>
+        {framework === "msg" ? (
+          <>
             <p style={help}>
-              The little co-group is <strong>non-abelian</strong>; its irrep character tables (and the
-              projective small representations for non-symmorphic BZ-boundary k) are the remaining piece
-              — see docs/MAGNETIC_SYMMETRY.md. The magnetic space-group route above still applies.
+              θ-enumeration gives {subgroups.length} candidate{subgroups.length === 1 ? "" : "s"}. Click one to
+              preview its symmetry-allowed moments in step 5; confirm any candidate with a refinement.
             </p>
-          ) : (
-            <>
-              <p style={help}>
-                Γ<sub>mag</sub> ({irrepAnalysis.dec.dimension}-dimensional) decomposes into the irreps of the abelian little
-                group as{" "}
-                <span style={{ fontFamily: themeMono, color: theme.ink }}>
-                  {irrepAnalysis.dec.terms.map((t) => `${t.multiplicity}${t.irrep.label}`).join(" ⊕ ") || "—"}
-                </span>
-                . Each irrep's basis modes are the refinable moment directions on the reference site.
+            <div style={{ margin: "6px 0 0", display: "grid", gap: 3 }}>
+              {subgroups.map((c, i) => (
+                <button
+                  key={c.id}
+                  onClick={() => setSelIdx(i === selIdx ? null : i)}
+                  style={{
+                    textAlign: "left", fontSize: 12.5, padding: "5px 9px", borderRadius: 7, cursor: "pointer",
+                    border: `1px solid ${i === selIdx ? theme.primary : theme.border}`,
+                    background: i === selIdx ? theme.chipBg : "#fff",
+                  }}
+                >
+                  <span style={{ fontFamily: themeMono, color: theme.secondary }}>{c.isTypeI ? "type I" : "type III"}</span> · {c.label}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : !irrepAnalysis ? (
+          <p style={help}>Select at least one magnetic ion in step 1.</p>
+        ) : !irrepAnalysis.dec.abelian ? (
+          <p style={help}>
+            The little co-group is <strong>non-abelian</strong>; its irrep character tables (and the
+            projective small representations for non-symmorphic BZ-boundary k) are the remaining piece
+            — see docs/MAGNETIC_SYMMETRY.md. Switch to the <strong>magnetic space groups</strong>{" "}
+            framework above — it applies to every G(k).
+          </p>
+        ) : (
+          <>
+            <p style={help}>
+              Γ<sub>mag</sub> ({irrepAnalysis.dec.dimension}-dimensional) decomposes into the irreps of the abelian little
+              group as{" "}
+              <span style={{ fontFamily: themeMono, color: theme.ink }}>
+                {irrepAnalysis.dec.terms.map((t) => `${t.multiplicity}${t.irrep.label}`).join(" ⊕ ") || "—"}
+              </span>
+              . Each irrep's basis modes are the refinable moment directions on the reference site;
+              click a real irrep to select its magnetic space group and preview the moments in step 5
+              (arrows honour the primed operations).
+            </p>
+            <div style={{ margin: "6px 0 0", display: "grid", gap: 3 }}>
+              {irrepAnalysis.dec.terms.map((t, i) => {
+                const modes = irrepAnalysis.modes[i] ?? [];
+                const modeText = modes.length ? modes.map((m) => describeMomentMode(m)).join(", ") : "—";
+                const cand = irrepCandidate[i] ?? null;
+                const active = cand != null && cand === selIdx;
+                const rowStyle: React.CSSProperties = {
+                  textAlign: "left", fontSize: 12, padding: "4px 9px", borderRadius: 7,
+                  border: `1px solid ${active ? theme.primary : theme.border}`,
+                  background: active ? theme.chipBg : "#fff",
+                  display: "flex", gap: 8, alignItems: "baseline", width: "100%",
+                };
+                const body = (
+                  <>
+                    <span style={{ fontFamily: themeMono, color: theme.primary, minWidth: 56 }}>{t.multiplicity} × {t.irrep.label}</span>
+                    <span style={{ color: theme.secondary }}>
+                      {t.irrep.real ? "real" : "complex"} · modes: <span style={{ color: theme.ink }}>{modeText}</span>
+                    </span>
+                    <span style={{ marginLeft: "auto", fontSize: 11.5, color: cand != null ? theme.primary : theme.secondary, whiteSpace: "nowrap" }}>
+                      {cand != null
+                        ? `≙ magnetic group ${cand + 1} · ${active ? "selected ↓" : "select & preview"}`
+                        : "conjugate pair — combine ± modes"}
+                    </span>
+                  </>
+                );
+                return cand != null ? (
+                  <button key={t.irrep.label} style={{ ...rowStyle, cursor: "pointer" }} onClick={() => setSelIdx(active ? null : cand)}>
+                    {body}
+                  </button>
+                ) : (
+                  <div key={t.irrep.label} style={rowStyle}>{body}</div>
+                );
+              })}
+            </div>
+            {!irrepAnalysis.dec.integerConsistent && (
+              <p style={{ ...help, marginTop: 6, color: theme.noteInk }}>
+                Non-integer multiplicities: this non-symmorphic BZ-boundary k needs the projective
+                <em> small</em> representations (ordinary irreps shown as an approximation).
               </p>
-              <div style={{ margin: "6px 0 0", display: "grid", gap: 3 }}>
-                {irrepAnalysis.dec.terms.map((t, i) => {
-                  const modes = irrepAnalysis.modes[i] ?? [];
-                  const modeText = modes.length ? modes.map((m) => describeMomentMode(m)).join(", ") : "—";
-                  const cand = irrepCandidate[i] ?? null;
-                  const active = cand != null && cand === selIdx;
-                  const rowStyle: React.CSSProperties = {
-                    textAlign: "left", fontSize: 12, padding: "4px 9px", borderRadius: 7,
-                    border: `1px solid ${active ? theme.primary : theme.border}`,
-                    background: active ? theme.chipBg : "#fff",
-                    display: "flex", gap: 8, alignItems: "baseline", width: "100%",
-                  };
-                  const body = (
-                    <>
-                      <span style={{ fontFamily: themeMono, color: theme.primary, minWidth: 56 }}>{t.multiplicity} × {t.irrep.label}</span>
-                      <span style={{ color: theme.secondary }}>
-                        {t.irrep.real ? "real" : "complex"} · modes: <span style={{ color: theme.ink }}>{modeText}</span>
-                      </span>
-                      <span style={{ marginLeft: "auto", fontSize: 11.5, color: cand != null ? theme.primary : theme.secondary, whiteSpace: "nowrap" }}>
-                        {cand != null
-                          ? `≙ magnetic group ${cand + 1} · ${active ? "shown below ↓" : "preview moments"}`
-                          : "conjugate pair — combine ± modes"}
-                      </span>
-                    </>
-                  );
-                  return cand != null ? (
-                    <button key={t.irrep.label} style={{ ...rowStyle, cursor: "pointer" }} onClick={() => setSelIdx(active ? null : cand)}>
-                      {body}
-                    </button>
-                  ) : (
-                    <div key={t.irrep.label} style={rowStyle}>{body}</div>
-                  );
-                })}
-              </div>
-              <p style={{ ...help, marginTop: 6 }}>
-                A real 1-D irrep assigns ±1 to every operation — the same data as a time-reversal
-                homomorphism — so it <em>is</em> one of the magnetic space groups above: click it to
-                preview the moment arrangement it allows (arrows honour the primed operations).
-              </p>
-              {!irrepAnalysis.dec.integerConsistent && (
-                <p style={{ ...help, marginTop: 6, color: theme.noteInk }}>
-                  Non-integer multiplicities: this non-symmorphic BZ-boundary k needs the projective
-                  <em> small</em> representations (ordinary irreps shown as an approximation).
-                </p>
-              )}
-            </>
-          )}
-        </section>
-      )}
+            )}
+          </>
+        )}
+      </section>
 
-      {/* 5. Selected subgroup: editable moments + 3D preview */}
+      {/* 5. Selected subgroup: editable moments + 3D preview + handoff */}
       {magBuild && (
         <section>
           <div style={themeLabel}>
-            Magnetic structure preview & moments
-            {selIdx != null && irrepAnalysis?.dec.abelian && (() => {
-              const labels = irrepAnalysis.dec.terms.filter((_, i) => irrepCandidate[i] === selIdx).map((t) => t.irrep.label);
-              return labels.length > 0 ? <span style={{ color: theme.secondary }}> — irrep {labels.join(", ")}</span> : null;
-            })()}
+            5 · Moment preview → back to refinement
+            {selIdx != null && (
+              <span style={{ color: theme.secondary }}>
+                {" — magnetic group "}{selIdx + 1}
+                {irrepAnalysis?.dec.abelian && (() => {
+                  const labels = irrepAnalysis.dec.terms.filter((_, i) => irrepCandidate[i] === selIdx).map((t) => t.irrep.label);
+                  return labels.length > 0 ? ` (irrep ${labels.join(", ")})` : null;
+                })()}
+              </span>
+            )}
           </div>
           {magBuild.params.length === 0 ? (
             <p style={help}>No symmetry-allowed moment on the selected ion(s) under this subgroup — the moment is forbidden here.</p>
