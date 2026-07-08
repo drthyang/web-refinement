@@ -32,19 +32,20 @@ import { color as theme, mono as themeMono, uppercaseLabel as themeLabel } from 
 // Lazy so three.js stays in its own chunk (only loaded when a group is previewed).
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 
-/** Common commensurate propagation vectors, for one-click assignment. */
-const K_PRESETS: readonly { label: string; k: Vec3 }[] = [
-  { label: "(0 0 0)", k: [0, 0, 0] },
-  { label: "(½ 0 0)", k: [0.5, 0, 0] },
-  { label: "(0 ½ 0)", k: [0, 0.5, 0] },
-  { label: "(0 0 ½)", k: [0, 0, 0.5] },
-  { label: "(½ ½ 0)", k: [0.5, 0.5, 0] },
-  { label: "(½ 0 ½)", k: [0.5, 0, 0.5] },
-  { label: "(0 ½ ½)", k: [0, 0.5, 0.5] },
-  { label: "(½ ½ ½)", k: [0.5, 0.5, 0.5] },
-  { label: "(⅓ 0 0)", k: [1 / 3, 0, 0] },
-  { label: "(⅓ ⅓ 0)", k: [1 / 3, 1 / 3, 0] },
-];
+/**
+ * Parse one k component, accepting fractions ("1/2", "-1/3") as well as
+ * decimals — exact fractions matter: 0.333 misses the little-group tolerance
+ * where 1/3 is meant.
+ */
+function parseKComponent(s: string): number {
+  const frac = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (frac) {
+    const den = Number(frac[2]);
+    return den === 0 ? 0 : Number(frac[1]) / den;
+  }
+  const v = Number(s);
+  return Number.isFinite(v) ? v : 0;
+}
 
 /** The two equivalent symmetry frameworks for step 3 of the workflow. */
 const FRAMEWORKS: readonly { id: "msg" | "irrep"; label: string }[] = [
@@ -81,7 +82,11 @@ export function KSearchPanel({
   const [kText, setKText] = useState<[string, string, string]>(["0", "0", "0"]);
   const [results, setResults] = useState<KCandidate[] | null>(null);
 
-  const k: Vec3 = [Number(kText[0]) || 0, Number(kText[1]) || 0, Number(kText[2]) || 0];
+  // k is confirmed explicitly ("Add") so the symmetry analysis below does not
+  // churn on every keystroke; the inputs hold a draft until then.
+  const [k, setAppliedK] = useState<Vec3>([0, 0, 0]);
+  const draftK: Vec3 = [parseKComponent(kText[0]), parseKComponent(kText[1]), parseKComponent(kText[2])];
+  const draftPending = draftK.some((v, i) => Math.abs(v - k[i]!) > 1e-12);
 
   const { subgroups, lgSize } = useMemo(() => {
     const ops = structure.spaceGroup.operations;
@@ -201,7 +206,12 @@ export function KSearchPanel({
     });
   }
 
-  const setK = (kk: Vec3): void => setKText([String(kk[0]), String(kk[1]), String(kk[2])]);
+  /** Confirm a k: sync the inputs, apply it, and drop the previous k's group pick. */
+  const applyK = (kk: Vec3): void => {
+    setKText([String(kk[0]), String(kk[1]), String(kk[2])]);
+    setAppliedK([kk[0], kk[1], kk[2]]);
+    setSelIdx(null);
+  };
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -230,23 +240,31 @@ export function KSearchPanel({
       {/* 2. k-vector: manual + search */}
       <section>
         <div style={themeLabel}>2 · Propagation vector k</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+        <p style={help}>Components accept exact fractions (1/2, 1/3, −1/3 …) or decimals; confirm with Add.</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
           {[0, 1, 2].map((i) => (
             <input
               key={i}
               value={kText[i]}
               onChange={(e) => setKText((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
+              onKeyDown={(e) => { if (e.key === "Enter" && draftPending) applyK(draftK); }}
+              placeholder={["0", "1/2", "1/3"][i]}
               style={kInput}
               aria-label={`k${["x", "y", "z"][i]}`}
             />
           ))}
-          <span style={{ fontSize: 13, color: theme.secondary, fontFamily: themeMono }}>= {kLabel(k)}</span>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
-          <span style={{ ...help, marginTop: 3 }}>Assign directly:</span>
-          {K_PRESETS.map((p) => (
-            <button key={p.label} style={presetBtn} title={`Set k = ${p.label}`} onClick={() => setK(p.k)}>{p.label}</button>
-          ))}
+          <button
+            style={{ ...btn, marginTop: 0, opacity: draftPending ? 1 : 0.45 }}
+            onClick={() => applyK(draftK)}
+            disabled={!draftPending}
+            title="Confirm this propagation vector — the symmetry analysis below uses it"
+          >
+            Add
+          </button>
+          <span style={{ fontSize: 13, color: theme.secondary, fontFamily: themeMono }}>
+            k = {kLabel(k)}
+            {draftPending && <span style={{ color: theme.noteInk }}> · draft {kLabel(draftK)} — press Add</span>}
+          </span>
         </div>
         <div style={{ marginTop: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -277,7 +295,7 @@ export function KSearchPanel({
                       <td style={{ ...td, fontFamily: themeMono }}>{c.label}</td>
                       <td style={td}>{c.matched}/{c.total}</td>
                       <td style={td}>{Number.isFinite(c.rmsd) ? c.rmsd.toFixed(4) : "—"}</td>
-                      <td style={td}><button style={smallBtn} onClick={() => setK(c.k)}>use</button></td>
+                      <td style={td}><button style={smallBtn} onClick={() => applyK(c.k)}>use</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -500,6 +518,5 @@ const help: React.CSSProperties = { fontSize: 12, color: theme.secondary, margin
 const kInput: React.CSSProperties = { width: 64, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "3px 7px", fontSize: 13, fontFamily: themeMono };
 const btn: React.CSSProperties = { marginTop: 6, border: "none", background: theme.primary, color: "#fff", borderRadius: 7, padding: "4px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" };
 const smallBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 6, padding: "1px 9px", fontSize: 11, cursor: "pointer" };
-const presetBtn: React.CSSProperties = { border: `1px solid ${theme.border}`, background: theme.chipBg, borderRadius: 6, padding: "2px 8px", fontSize: 11.5, fontFamily: themeMono, cursor: "pointer", color: theme.ink };
 const th: React.CSSProperties = { padding: "2px 10px 4px 0", fontWeight: 600 };
 const td: React.CSSProperties = { padding: "3px 10px 3px 0" };
