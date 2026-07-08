@@ -44,12 +44,16 @@ Label, element (+ optional isotope, oxidation state), fractional `position`,
 `occupancy ∈ [0,1]`, and `adp` (displacement parameters). ADP is a tagged union:
 
 ```ts
-{ kind: "isotropic";  bIso: number }                       // Phase 1
-{ kind: "anisotropic"; uAniso: [U11,U22,U33,U12,U13,U23] } // reserved
+{ kind: "isotropic";  bIso: number }
+{ kind: "anisotropic"; uAniso: [U11,U22,U33,U12,U13,U23] }
 ```
 
-Storing the union now means anisotropic support later needs no type change.
-Note `B_iso = 8π² U_iso`.
+Both are fully supported: the structure factor applies the matching
+Debye–Waller factor, refinement frees the **symmetry-allowed U-tensor modes**
+for anisotropic sites, and [`crystal/adp.ts`](../src/core/crystal/adp.ts)
+converts between them. A refinement typically starts isotropic and the user
+switches to anisotropic ("ADPs: anisotropic" toggle) once the fit is stable,
+seeding each site's spherical U from its current B_iso. Note `B_iso = 8π² U_iso`.
 
 ### `SymmetryOperation` and `SpaceGroup`
 An operation is an affine map on fractional coordinates,

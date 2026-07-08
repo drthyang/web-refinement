@@ -31,9 +31,10 @@ export interface UnitCell {
 }
 
 /**
- * Isotropic vs anisotropic displacement parameterization for a site.
- * Phase 1 supports isotropic only; anisotropic is reserved so the type does not
- * need to change later.
+ * Isotropic vs anisotropic displacement parameterization for a site. Both are
+ * supported end-to-end: the structure factor applies the matching Debye-Waller
+ * factor, refinement frees the symmetry-allowed U-tensor modes for anisotropic
+ * sites, and `@/core/crystal/adp` converts between the two (U_iso = B_iso/8π²).
  */
 export type DisplacementParameters =
   | {

@@ -25,6 +25,7 @@ import { startingPowderParams } from "@/app/loadData";
 import { ComputeClient } from "@/workers/computeClient";
 import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
 import { KSearchPanel } from "@/components/KSearchPanel";
+import { withAdpModel } from "@/core/crystal/adp";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
 import { detectExtraPeaks } from "@/core/magnetic/extraPeaks";
 import { powderReflectionObsCalc } from "@/core/workflow/obsCalc";
@@ -82,6 +83,8 @@ interface Session {
   backgroundTerms: number;
   /** Tie position/ADP of atoms sharing a crystallographic site (disorder). */
   siteTies: SiteTies;
+  /** Refine anisotropic (U tensor) rather than isotropic (B_iso) ADPs. */
+  anisotropicAdp?: boolean;
   /** GSAS-II's own calc/background overlay for a view-only (TOF) pattern. */
   powderOverlay?: { calc: number[]; background: number[] } | null;
   /** Provenance of the observed data driving the refinement. */
@@ -372,6 +375,48 @@ export function App(): JSX.Element {
       };
     });
     setPowderResult(null);
+  }
+
+  /**
+   * Switch the ADP model between isotropic (B_iso) and anisotropic (U tensor)
+   * and rebuild the spec. Promotion seeds each site's spherical U from its
+   * *current* (refined) B_iso — so an isotropic fit is the starting point for
+   * the anisotropic one — then the symmetry-allowed U modes refine. Non-ADP
+   * parameter values (scale, cell, positions, background, profile) are carried
+   * over unchanged; only the ADP rows are reseeded.
+   */
+  function setAnisotropicAdp(on: boolean): void {
+    setSession((s) => {
+      // Bake the current refined B_iso/U into the base structure's ADPs so the
+      // conversion seeds from the converged values (positions/cell stay in the
+      // preserved parameters, so they are not double-applied here).
+      const values: Record<string, number> = {};
+      for (const p of s.powderParams) values[p.id] = p.value;
+      const refined = applyParameters(s.structure, s.powderBindings, values).model;
+      const refinedAdp = new Map(refined.sites.map((rs) => [rs.label, rs.adp]));
+      const seeded = { ...s.structure, sites: s.structure.sites.map((site) => ({ ...site, adp: refinedAdp.get(site.label) ?? site.adp })) };
+      const promoted = withAdpModel(seeded, on ? "anisotropic" : "isotropic");
+      const spec = buildPowderSpec(promoted, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies);
+      const previous = new Map(s.powderParams.map((p) => [p.id, p]));
+      return {
+        ...s,
+        structure: promoted,
+        anisotropicAdp: on,
+        powderParams: spec.params.map((p) => {
+          // ADP rows are freshly seeded by the rebuild; everything else keeps
+          // its current (possibly refined) value and free/fixed state.
+          if (p.kind === "bIso" || p.kind === "uAniso") return p;
+          const old = previous.get(p.id);
+          return old ? { ...p, value: old.value, initialValue: old.initialValue, fixed: old.fixed } : p;
+        }),
+        powderBindings: spec.bindings,
+        powderProfile: { ...spec.profile, ...(s.powderProfile.backgroundType ? { backgroundType: s.powderProfile.backgroundType } : {}) },
+      };
+    });
+    setPowderResult(null);
+    setMessage(on
+      ? "Switched to anisotropic ADPs — each site's U tensor (symmetry-allowed modes) seeded from its B_iso. Free the ADP rows or run guided to refine them."
+      : "Switched to isotropic ADPs (B_iso).");
   }
 
   /** Reset every powder parameter to its initial value and clear the result. */
@@ -753,6 +798,11 @@ export function App(): JSX.Element {
                         <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           terms
                           <input type="number" min={1} max={24} step={1} value={session.backgroundTerms} onChange={(e) => setBackgroundTerms(Number(e.target.value))} style={bgTermsInput} />
+                        </label>
+                        <span style={{ ...themeLabel, marginLeft: 8, marginRight: 2 }} title="Displacement-parameter model: one isotropic B_iso per site, or the full anisotropic U tensor (symmetry-allowed modes)">ADPs</span>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Refine the anisotropic U tensor. Each site's U is seeded from its current B_iso; symmetry fixes which components are free. Turn on after an isotropic fit converges.">
+                          <input type="checkbox" checked={session.anisotropicAdp ?? false} onChange={(e) => setAnisotropicAdp(e.target.checked)} />
+                          anisotropic
                         </label>
                       </div>
                     )}
