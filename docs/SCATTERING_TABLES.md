@@ -73,3 +73,59 @@ a bad **Cr³⁺** ⟨j0⟩ row that had been in the hand-entered table (it norma
 **Do not hand-edit `magneticFormFactorData.ts`** — a wrong 7-coefficient row
 silently corrupts the magnetic calculation. Extend the upstream source or the
 generator and regenerate, keeping the validation gates above.
+
+## Sources & citations
+
+Full provenance for the coefficient data, for citation and reproducibility. Web
+resources were accessed **2026-07-08**.
+
+### Neutron scattering lengths (`neutron.ts`)
+
+- **Primary reference:** Sears, V. F. (1992). "Neutron scattering lengths and
+  cross sections." *Neutron News* **3**(3), 26–37.
+  doi:[10.1080/10448639208218770](https://doi.org/10.1080/10448639208218770)
+- **Convenient tabulation:** NIST Center for Neutron Research, "Neutron
+  scattering lengths and cross sections,"
+  <https://www.ncnr.nist.gov/resources/n-lengths/>
+- Cross-checked against printed values in bundled GSAS-II `.lst` files.
+
+### X-ray form factors (`xray.ts`)
+
+- **Primary reference:** Cromer, D. T. & Mann, J. B. (1968). "X-ray scattering
+  factors computed from numerical Hartree–Fock wave functions." *Acta Cryst.*
+  **A24**, 321–324.
+  doi:[10.1107/S0567739468000550](https://doi.org/10.1107/S0567739468000550)
+- **Tabulated form used** (4-Gaussian coefficients): International Tables for
+  Crystallography Vol. C, Table 6.1.1.4.
+
+### Magnetic form factors ⟨j0⟩ / ⟨j2⟩ (`magneticFormFactorData.ts`)
+
+- **Primary reference:** Brown, P. J. "Magnetic form factors," §4.4.5 in
+  *International Tables for Crystallography Vol. C* (A. J. C. Wilson & E. Prince,
+  eds.). IUCr online:
+  <https://onlinelibrary.wiley.com/iucr/itc/Cb/ch4o4v0001/sec4o4o5/>
+- **Analytic form** (three-Gaussian ⟨jₙ⟩) follows Forsyth, J. B. & Wells, M.
+  (1959), *Acta Cryst.* **12**, 412–415, extended by Brown from two terms to three.
+- **Redistribution actually imported:** the `periodictable` Python package
+  (author Paul Kienzle, released into the public domain), file `magnetic_ff.py`,
+  which transcribes the CrysFML `Magnetic_Form` table (itself the ITC-C data).
+  - Raw file: <https://raw.githubusercontent.com/pkienzle/periodictable/master/periodictable/magnetic_ff.py>
+  - Docs: <https://periodictable.readthedocs.io/en/latest/api/magnetic_ff.html>
+- **Independent copies for cross-checking:**
+  - ILL/CCSL "Magnetic Form Factors" (ffacts), <https://www.ill.eu/sites/ccsl/ffacts/>
+    — the P. J. Brown / CCSL data (returned HTTP 404 on the access date above; the
+    coefficients live on unchanged in the mirrors here).
+  - GSAS-II `atmdata.py` (`MagFormFactors`),
+    <https://subversion.xray.aps.anl.gov/pyGSAS/trunk/atmdata.py>
+- **5d transition ions (W–Ir), not yet imported:** Kobayashi, K., Nagao, T. &
+  Ito, M. (2011). "Radial integrals for the magnetic form factor of 5d transition
+  elements." *Acta Cryst.* **A67**, 473–480.
+  doi:[10.1107/S010876731102633X](https://doi.org/10.1107/S010876731102633X)
+  (the source GSAS-II uses for these ions).
+
+### Regeneration
+
+The magnetic table is produced by
+[`scripts/gen_magnetic_ff.py`](../scripts/gen_magnetic_ff.py), which fetches the
+`periodictable` raw file above and copies coefficients verbatim. Re-running it
+reproduces `magneticFormFactorData.ts` byte-for-byte from the cited source.
