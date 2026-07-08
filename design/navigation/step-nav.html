@@ -1,0 +1,36 @@
+<!-- @dsCard group="Navigation" name="Step navigation" subtitle="7-step chip nav with active state + prev/next" width="900" height="220" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Step navigation</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; color: #222; background: #fff; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin: 0 0 12px; }
+  .nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
+  .chip { border: 1px solid #ccc; background: #fff; border-radius: 16px; padding: 4px 12px; cursor: pointer; font-size: 12px; color: #555; }
+  .chip-active { background: #1f4e79; color: #fff; border-color: #1f4e79; font-weight: 600; }
+  .pager { display: flex; justify-content: space-between; max-width: 620px; }
+  .btn { border: 1px solid #bbb; background: #fff; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+  .btn-primary { background: #1f4e79; color: #fff; border-color: #1f4e79; }
+</style>
+</head>
+<body>
+  <h2>Workflow steps</h2>
+  <div class="nav">
+    <button class="chip">1. Structure (CIF)</button>
+    <button class="chip">2. Data &amp; instrument</button>
+    <button class="chip chip-active">3. Structural refinement</button>
+    <button class="chip">4. Quality</button>
+    <button class="chip">5. Magnetic candidates</button>
+    <button class="chip">6. Magnetic refinement</button>
+    <button class="chip">7. Compare groups</button>
+  </div>
+
+  <h2>Pager</h2>
+  <div class="pager">
+    <button class="btn">← Back</button>
+    <button class="btn btn-primary">Next →</button>
+  </div>
+</body>
+</html>

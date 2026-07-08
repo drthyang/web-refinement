@@ -1,0 +1,43 @@
+<!-- @dsCard group="Components" name="Badges & banners" subtitle="Source tags, disclaimer, diagnostics, status note" width="720" height="360" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Badges & banners</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; color: #222; background: #fff; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin: 22px 0 10px; }
+  h2:first-child { margin-top: 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .tag { font-size: 12px; padding: 1px 8px; border-radius: 10px; }
+  .tag-synthetic { background: #fff4f4; border: 1px solid #f0c0c0; color: #8a1f1f; }
+  .tag-loaded { background: #eaf4ea; border: 1px solid #bcdcbc; color: #1f5e1f; }
+  .banner { padding: 6px 10px; border-radius: 6px; font-size: 12px; max-width: 640px; }
+  .banner-warn { background: #fff4f4; border: 1px solid #f0c0c0; color: #8a1f1f; }
+  .banner-ok { background: #eaf4ea; border: 1px solid #bcdcbc; color: #1f5e1f; }
+  .banner-note { background: #fff8e7; border: 1px solid #ead49b; color: #5a4100; line-height: 1.4; }
+</style>
+</head>
+<body>
+  <h2>Source tags</h2>
+  <div class="row">
+    <span class="tag tag-synthetic">⚠ synthetic demo</span>
+    <span class="tag tag-loaded">✓ loaded: Mn₃Ga POWGEN 600 K (TOF, λ=0.8 Å)</span>
+  </div>
+
+  <h2>Disclaimer banner</h2>
+  <div class="banner banner-warn">
+    Early browser-native refinement workbench. Results for publication must be validated against established tools.
+  </div>
+
+  <h2>Success note</h2>
+  <div class="banner banner-ok">
+    TOF pattern — refined with a <strong>back-to-back-exponential</strong> profile (α rise, β tail, σ Gaussian) placed by difC/difA/difB.
+  </div>
+
+  <h2>Diagnostics note</h2>
+  <div class="banner banner-note">
+    SVD dropped 1 near-null direction: profX. High correlation: scale/B_Mn1 0.982.
+  </div>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<!-- @dsCard group="Foundations" name="Design tokens" subtitle="Color, type scale, radius, spacing" width="820" height="560" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Web Refinement Workbench — Tokens</title>
+<style>
+  :root {
+    /* Brand / primary */
+    --wr-primary: #1f4e79;      /* buttons, calc curve, active chip */
+    --wr-ink: #222222;          /* body text */
+    --wr-ink-soft: #555555;     /* secondary text */
+    --wr-ink-faint: #888888;    /* axis, footnotes */
+    /* Surfaces */
+    --wr-surface: #ffffff;
+    --wr-surface-muted: #fafafa; /* cards */
+    --wr-border: #e3e3e3;        /* card border */
+    --wr-border-strong: #bbbbbb; /* control border */
+    /* Status */
+    --wr-warn-bg: #fff4f4; --wr-warn-border: #f0c0c0; --wr-warn-ink: #8a1f1f;
+    --wr-ok-bg: #eaf4ea;   --wr-ok-border: #bcdcbc;   --wr-ok-ink: #1f5e1f;
+    --wr-note-bg: #fff8e7; --wr-note-border: #ead49b; --wr-note-ink: #5a4100;
+    /* Data series */
+    --wr-obs: #c1272d; --wr-calc: #1f4e79; --wr-diff: #2e7d32; --wr-bkg: #8a5a00;
+    /* Radius */
+    --wr-radius-sm: 6px; --wr-radius-md: 10px; --wr-radius-pill: 16px;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  body { margin: 0; padding: 24px; color: var(--wr-ink); background: var(--wr-surface); }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  .sub { color: var(--wr-ink-soft); font-size: 13px; margin: 0 0 20px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--wr-ink-faint); margin: 24px 0 10px; }
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+  .swatch { border: 1px solid var(--wr-border); border-radius: var(--wr-radius-sm); overflow: hidden; font-size: 11px; }
+  .chip { height: 46px; }
+  .swatch .meta { padding: 6px 8px; }
+  .swatch .name { font-weight: 600; }
+  .swatch .hex { color: var(--wr-ink-soft); font-variant-numeric: tabular-nums; }
+  .type-row { display: flex; align-items: baseline; gap: 12px; margin: 6px 0; }
+  .type-row .label { width: 90px; color: var(--wr-ink-soft); font-size: 11px; }
+  .radii { display: flex; gap: 16px; align-items: flex-end; }
+  .radii div { width: 64px; height: 44px; background: var(--wr-surface-muted); border: 1px solid var(--wr-border-strong); }
+  .series { display: flex; gap: 18px; align-items: center; font-size: 12px; }
+  .series span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+</style>
+</head>
+<body>
+  <h1>Web Refinement Workbench</h1>
+  <p class="sub">Design tokens — extracted from the current app styling</p>
+
+  <h2>Core palette</h2>
+  <div class="swatches">
+    <div class="swatch"><div class="chip" style="background:#1f4e79"></div><div class="meta"><div class="name">Primary</div><div class="hex">#1f4e79</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#222222"></div><div class="meta"><div class="name">Ink</div><div class="hex">#222222</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#555555"></div><div class="meta"><div class="name">Ink soft</div><div class="hex">#555555</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#fafafa;border-bottom:1px solid #e3e3e3"></div><div class="meta"><div class="name">Surface muted</div><div class="hex">#fafafa</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#e3e3e3"></div><div class="meta"><div class="name">Border</div><div class="hex">#e3e3e3</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#bbbbbb"></div><div class="meta"><div class="name">Border strong</div><div class="hex">#bbbbbb</div></div></div>
+  </div>
+
+  <h2>Status</h2>
+  <div class="swatches">
+    <div class="swatch"><div class="chip" style="background:#fff4f4;border-bottom:1px solid #f0c0c0"></div><div class="meta"><div class="name">Warn / synthetic</div><div class="hex">#8a1f1f on #fff4f4</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#eaf4ea;border-bottom:1px solid #bcdcbc"></div><div class="meta"><div class="name">OK / loaded</div><div class="hex">#1f5e1f on #eaf4ea</div></div></div>
+    <div class="swatch"><div class="chip" style="background:#fff8e7;border-bottom:1px solid #ead49b"></div><div class="meta"><div class="name">Note / diagnostics</div><div class="hex">#5a4100 on #fff8e7</div></div></div>
+  </div>
+
+  <h2>Data series</h2>
+  <div class="series">
+    <span><i class="dot" style="background:#c1272d"></i> obs</span>
+    <span><i class="dot" style="background:#1f4e79"></i> calc</span>
+    <span><i class="dot" style="background:#2e7d32"></i> diff</span>
+    <span><i class="dot" style="background:#8a5a00"></i> bkg</span>
+  </div>
+
+  <h2>Type scale</h2>
+  <div class="type-row"><span class="label">h1 / 17</span><span style="font-size:17px;font-weight:700">Web Refinement Workbench</span></div>
+  <div class="type-row"><span class="label">h2 / 17</span><span style="font-size:17px;font-weight:600">Step 3 — Structural refinement</span></div>
+  <div class="type-row"><span class="label">body / 13</span><span style="font-size:13px">Load your observed powder data…</span></div>
+  <div class="type-row"><span class="label">meta / 12</span><span style="font-size:12px;color:#555">4613 points · unit = TOF</span></div>
+
+  <h2>Radius</h2>
+  <div class="radii">
+    <div style="border-radius:6px"></div><div style="border-radius:10px"></div><div style="border-radius:16px"></div>
+  </div>
+</body>
+</html>

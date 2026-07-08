@@ -1,0 +1,43 @@
+<!-- @dsCard group="Components" name="Parameter table" subtitle="Grouped refinement parameters: value, esd, refine toggle" width="460" height="640" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Parameter table</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; color: #222; background: #fff; }
+  table { border-collapse: collapse; font-size: 12px; width: 400px; }
+  th { text-align: left; color: #888; font-weight: 600; padding: 4px 8px; border-bottom: 1px solid #e3e3e3; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+  td { padding: 3px 8px; border-bottom: 1px solid #f0f0f0; }
+  .group td { background: #fafafa; font-weight: 600; color: #1f4e79; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+  .val { font-variant-numeric: tabular-nums; }
+  .esd { color: #888; font-variant-numeric: tabular-nums; }
+  input[type=number] { width: 84px; font-size: 12px; padding: 2px 4px; border: 1px solid #bbb; border-radius: 4px; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+  <table>
+    <thead><tr><th>Parameter</th><th>Value</th><th>esd</th><th>Refine</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="4">Scale (1)</td></tr>
+      <tr><td>scale</td><td><input type="number" value="41.82" /></td><td class="esd">0.13</td><td><input type="checkbox" checked /></td></tr>
+      <tr class="group"><td colspan="4">Lattice (2)</td></tr>
+      <tr><td>a (Å)</td><td><input type="number" value="5.42185" /></td><td class="esd">0.0004</td><td><input type="checkbox" checked /></td></tr>
+      <tr><td>c (Å)</td><td><input type="number" value="4.37543" /></td><td class="esd">0.0003</td><td><input type="checkbox" checked /></td></tr>
+      <tr class="group"><td colspan="4">Instrument / profile (11)</td></tr>
+      <tr><td>TOF difC</td><td><input type="number" value="22585.8" /></td><td class="esd">—</td><td><input type="checkbox" /></td></tr>
+      <tr><td>TOF α₁</td><td><input type="number" value="1.62" /></td><td class="esd">0.09</td><td><input type="checkbox" checked /></td></tr>
+      <tr><td>TOF β₀</td><td><input type="number" value="0.031" /></td><td class="esd">0.002</td><td><input type="checkbox" checked /></td></tr>
+      <tr><td>TOF σ₁²</td><td><input type="number" value="1183" /></td><td class="esd">21</td><td><input type="checkbox" checked /></td></tr>
+      <tr class="group"><td colspan="4">ADPs (thermal) (2)</td></tr>
+      <tr><td>Mn1 B</td><td><input type="number" value="1.120" /></td><td class="esd">0.044</td><td><input type="checkbox" checked /></td></tr>
+      <tr><td>Ga1 B</td><td><input type="number" value="0.863" /></td><td class="esd">0.021</td><td><input type="checkbox" checked /></td></tr>
+      <tr class="group"><td colspan="4">Positions (1)</td></tr>
+      <tr><td>Mn1 x+2y</td><td><input type="number" value="0.00475" /></td><td class="esd">0.00034</td><td><input type="checkbox" checked /></td></tr>
+      <tr class="group"><td colspan="4">Occupancy (2)</td></tr>
+      <tr><td>Mn1 occ</td><td><input type="number" value="0.978" /></td><td class="esd">—</td><td><input type="checkbox" /></td></tr>
+      <tr><td>Ga1 occ</td><td><input type="number" value="1.005" /></td><td class="esd">—</td><td><input type="checkbox" /></td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

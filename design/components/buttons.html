@@ -1,0 +1,41 @@
+<!-- @dsCard group="Components" name="Buttons" subtitle="Primary, secondary, disabled, inline" width="640" height="260" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Buttons</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; color: #222; background: #fff; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin: 0 0 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+  .btn { border: 1px solid #bbb; background: #fff; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px; color: #222; }
+  .btn-primary { background: #1f4e79; color: #fff; border-color: #1f4e79; }
+  .btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+  .btn-inline { padding: 1px 8px; font-size: 11px; }
+  .label { font-size: 12px; color: #444; }
+</style>
+</head>
+<body>
+  <h2>Primary / secondary</h2>
+  <div class="row">
+    <button class="btn btn-primary">Refine selected</button>
+    <button class="btn">Guided (staged)</button>
+    <button class="btn">Export CSV</button>
+    <button class="btn btn-primary" aria-disabled="true">Refining…</button>
+    <button class="btn" aria-disabled="true">Guided (staged)</button>
+  </div>
+
+  <h2>Toolbar</h2>
+  <div class="row">
+    <button class="btn">Load CIF…</button>
+    <button class="btn">Reset to example</button>
+    <button class="btn">Export project JSON</button>
+  </div>
+
+  <h2>Inline / small</h2>
+  <div class="row">
+    <span class="label">Powder (TOF) · profile R ≈ 7.4% (live)</span>
+    <button class="btn btn-inline">Reset range</button>
+  </div>
+</body>
+</html>

@@ -1,0 +1,55 @@
+<!-- @dsCard group="Data viz" name="Pattern plot" subtitle="obs / calc / diff + background, with fit-range handles" width="820" height="440" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Pattern plot</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; color: #222; background: #fff; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin: 0 0 8px; }
+  .caption { font-size: 12px; color: #666; margin-top: 8px; }
+  svg { border: 1px solid #f0f0f0; border-radius: 6px; }
+</style>
+</head>
+<body>
+  <h2>Powder pattern — observed vs calculated</h2>
+  <svg viewBox="0 0 760 340" width="760" height="340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Powder pattern">
+    <rect x="0" y="0" width="760" height="340" fill="#fff" />
+    <!-- excluded fit-range shading -->
+    <rect x="56" y="16" width="70" height="284" fill="#1f4e79" opacity="0.06" />
+    <!-- axes -->
+    <line x1="56" y1="16" x2="56" y2="230" stroke="#888" />
+    <line x1="56" y1="230" x2="744" y2="230" stroke="#888" />
+    <!-- observed points -->
+    <g fill="#c1272d" opacity="0.7">
+      <circle cx="180" cy="150" r="1.8" /><circle cx="300" cy="120" r="1.8" /><circle cx="300" cy="118" r="1.8" />
+      <circle cx="430" cy="70" r="1.8" /><circle cx="560" cy="150" r="1.8" /><circle cx="620" cy="140" r="1.8" />
+      <circle cx="240" cy="205" r="1.6" /><circle cx="360" cy="210" r="1.6" /><circle cx="500" cy="208" r="1.6" /><circle cx="680" cy="206" r="1.6" />
+    </g>
+    <!-- calculated curve (asymmetric TOF peaks) -->
+    <polyline fill="none" stroke="#1f4e79" stroke-width="1.4"
+      points="56,222 170,220 178,150 186,205 220,221 296,220 300,120 306,206 360,221 424,221 430,70 438,200 500,221 556,221 560,150 566,205 620,221 660,221 744,220" />
+    <!-- background -->
+    <polyline fill="none" stroke="#8a5a00" stroke-width="1.2" stroke-dasharray="5 3" points="56,224 744,222" />
+    <!-- difference -->
+    <line x1="56" y1="285" x2="744" y2="285" stroke="#ccc" stroke-dasharray="3 3" />
+    <polyline fill="none" stroke="#2e7d32" stroke-width="1" points="56,285 180,284 300,283 430,281 560,286 744,285" />
+    <!-- fit-range handles -->
+    <g>
+      <line x1="126" y1="16" x2="126" y2="300" stroke="#1f4e79" stroke-width="1.5" />
+      <rect x="122" y="16" width="8" height="12" rx="2" fill="#1f4e79" />
+      <line x1="744" y1="16" x2="744" y2="300" stroke="#1f4e79" stroke-width="1.5" />
+      <rect x="740" y="16" width="8" height="12" rx="2" fill="#1f4e79" />
+    </g>
+    <!-- legend -->
+    <g font-size="11" fill="#333">
+      <circle cx="64" cy="22" r="2" fill="#c1272d" /><text x="72" y="25">obs</text>
+      <line x1="100" y1="22" x2="116" y2="22" stroke="#1f4e79" stroke-width="1.5" /><text x="120" y="25">calc</text>
+      <line x1="152" y1="22" x2="168" y2="22" stroke="#2e7d32" stroke-width="1.5" /><text x="172" y="25">diff</text>
+      <line x1="200" y1="22" x2="216" y2="22" stroke="#8a5a00" stroke-width="1.5" stroke-dasharray="5 3" /><text x="220" y="25">bkg</text>
+    </g>
+    <text x="400" y="332" text-anchor="middle" font-size="12" fill="#333">TOF (µs)</text>
+  </svg>
+  <p class="caption">Powder (TOF) · profile R ≈ 4.96% (live) · fit range 15400–92000. Drag the blue handles to set the fit range.</p>
+</body>
+</html>
