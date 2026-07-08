@@ -5,6 +5,7 @@
 
 import { useCallback, useRef } from "react";
 import type { PowderCurves } from "@/core/workflow/powder";
+import type { PhaseTicks } from "@/visualization/reflectionTicks";
 import { clippedPolylinePoints, extent, linearScale } from "@/visualization/scale";
 
 /** Inclusive abscissa window selected on the plot. */
@@ -22,7 +23,11 @@ interface Props {
   readonly fitRange?: FitRangeSelection;
   /** Called while the user drags either handle, with the updated window. */
   readonly onFitRangeChange?: (range: FitRangeSelection) => void;
+  /** Bragg reflection tick rows (one per phase / magnetic), each coloured. */
+  readonly phases?: readonly PhaseTicks[];
 }
+
+const TICK_ROW_H = 9;
 
 export function PatternPlot({
   curves,
@@ -31,12 +36,18 @@ export function PatternPlot({
   height = 380,
   fitRange,
   onFitRangeChange,
+  phases,
 }: Props): JSX.Element {
   const svgRef = useRef<SVGSVGElement>(null);
   const margin = { top: 16, right: 16, bottom: 40, left: 56 };
   const plotW = width - margin.left - margin.right;
-  const mainH = (height - margin.top - margin.bottom) * 0.72;
-  const diffH = (height - margin.top - margin.bottom) * 0.28;
+  const tickRows = phases?.length ?? 0;
+  const tickBandH = tickRows > 0 ? tickRows * TICK_ROW_H + 4 : 0;
+  const availH = height - margin.top - margin.bottom - tickBandH;
+  const mainH = availH * 0.72;
+  const diffH = availH * 0.28;
+  const tickTop = margin.top + mainH + 2;
+  const diffTop = margin.top + mainH + tickBandH;
 
   const [xMin, xMax] = extent(curves.x);
 
@@ -55,19 +66,22 @@ export function PatternPlot({
 
   const sx = linearScale(xMin, xMax, margin.left, margin.left + plotW);
   const sy = linearScale(yMin, yMax, margin.top + mainH, margin.top);
-  const sd = linearScale(
-    Math.min(dMin, -1),
-    Math.max(dMax, 1),
-    margin.top + mainH + diffH,
-    margin.top + mainH + 8,
-  );
+  const sd = linearScale(Math.min(dMin, -1), Math.max(dMax, 1), diffTop + diffH, diffTop + 8);
 
   const calcLine = clippedPolylinePoints(curves.x, curves.yCalc, sx, sy, clipLo, clipHi);
   const backgroundLine = curves.yBackground ? clippedPolylinePoints(curves.x, curves.yBackground, sx, sy, clipLo, clipHi) : "";
   const diffLine = clippedPolylinePoints(curves.x, curves.diff, sx, sd, clipLo, clipHi);
 
-  const plotBottom = margin.top + mainH + diffH;
+  const plotBottom = diffTop + diffH;
   const showHandles = fitRange !== undefined && onFitRangeChange !== undefined;
+
+  // Lay out phase legend entries after the obs/calc/diff/bkg items.
+  let legendX = margin.left + (curves.yBackground ? 192 : 140);
+  const phaseLegend = (phases ?? []).map((phase) => {
+    const x = legendX;
+    legendX += 16 + phase.label.length * 6.2 + 8;
+    return { phase, x };
+  });
 
   // Map a pointer event to a clamped data-space abscissa, correcting for any CSS
   // scaling of the SVG (the element is not laid out at its intrinsic pixel size
@@ -140,6 +154,21 @@ export function PatternPlot({
         strokeDasharray="3 3"
       />
       <polyline points={diffLine} fill="none" stroke="#2e7d32" strokeWidth={1} />
+      {/* reflection ticks: one coloured row per phase (nuclear/magnetic) */}
+      {phases?.map((phase, row) => {
+        const yc = tickTop + row * TICK_ROW_H + TICK_ROW_H / 2;
+        return (
+          <g key={phase.id} stroke={phase.color} strokeWidth={1}>
+            {phase.ticks.map((t, i) =>
+              t.x >= xMin && t.x <= xMax ? (
+                <line key={i} x1={sx(t.x)} y1={yc - 3.2} x2={sx(t.x)} y2={yc + 3.2}>
+                  <title>{`${phase.label}  ${t.hkl}  d=${t.d.toFixed(3)} Å`}</title>
+                </line>
+              ) : null,
+            )}
+          </g>
+        );
+      })}
       {/* labels */}
       <text x={margin.left + plotW / 2} y={height - 8} textAnchor="middle" fontSize={12} fill="#333">
         {xLabel}
@@ -168,6 +197,12 @@ export function PatternPlot({
             <text x={margin.left + 168} y={margin.top + 9} fill="#333">bkg</text>
           </>
         )}
+        {phaseLegend.map(({ phase, x }) => (
+          <g key={phase.id}>
+            <line x1={x} y1={margin.top + 2} x2={x} y2={margin.top + 10} stroke={phase.color} strokeWidth={1.5} />
+            <text x={x + 6} y={margin.top + 9} fill="#333">{phase.label}</text>
+          </g>
+        ))}
       </g>
       {/* fit-range handles: shaded excluded regions + draggable grips */}
       {showHandles && (

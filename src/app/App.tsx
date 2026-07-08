@@ -40,11 +40,18 @@ import {
   axisContext,
   availableDisplayUnits,
   convertAxisArray,
+  convertAxisValue,
   convertInterval,
   axisLabel,
   axisShortLabel,
   type DisplayUnit,
 } from "@/visualization/axisUnits";
+import {
+  nuclearPhaseTicks,
+  magneticPhaseTicks,
+  PHASE_COLORS,
+  MAGNETIC_COLOR,
+} from "@/visualization/reflectionTicks";
 import { bondLengths } from "@/core/crystal/geometry";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { parseInstrumentParameters } from "@/parsers/instrument";
@@ -76,6 +83,8 @@ interface Session {
   powderOverlay?: { calc: number[]; background: number[] } | null;
   /** Provenance of the observed data driving the refinement. */
   powderSource: string;
+  /** Optional magnetic model over `structure`, for magnetic reflection ticks. */
+  magnetic?: MagneticModel;
 }
 
 const SYNTHETIC_SOURCE = "synthetic (self-consistent demo)";
@@ -231,6 +240,25 @@ export function App(): JSX.Element {
   );
   const setFitRangeFromDisplay = (r: FitRangeSelection): void =>
     setFitRange(convertInterval(r, effectiveUnit, pattern.xUnit, axisCtx));
+
+  // Bragg reflection ticks (in the current display unit). Nuclear phase always;
+  // a magnetic row appears when the session carries a magnetic model. The d-range
+  // is floored so very-high-Q (tiny-d) reflections don't explode the tick count.
+  const phaseTicks = useMemo(() => {
+    const dA = convertAxisValue(patternExtent.min, pattern.xUnit, "dSpacing", axisCtx);
+    const dB = convertAxisValue(patternExtent.max, pattern.xUnit, "dSpacing", axisCtx);
+    if (!Number.isFinite(dA) || !Number.isFinite(dB)) return [];
+    const dMin = Math.max(Math.min(dA, dB), 0.4);
+    const dMax = Math.max(dA, dB);
+    const toX = (d: number): number => convertAxisValue(d, "dSpacing", effectiveUnit, axisCtx);
+    const phases = [
+      nuclearPhaseTicks(structure, dMin, dMax, toX, { id: "nuclear", label: structure.name || "nuclear", color: PHASE_COLORS[0] }),
+    ];
+    if (session.magnetic) {
+      phases.push(magneticPhaseTicks(structure, session.magnetic, dMin, dMax, toX, { id: "magnetic", label: "magnetic", color: MAGNETIC_COLOR }));
+    }
+    return phases;
+  }, [structure, session.magnetic, patternExtent, pattern.xUnit, effectiveUnit, axisCtx]);
   const magBind = useMemo(() => magneticBindings(mag.ex.magnetic), [mag.ex.magnetic]);
   const magRows = useMemo(
     () => magneticComparison(mag.ex.structure, mag.ex.magnetic, mag.dataset, mag.params, magBind),
@@ -337,7 +365,12 @@ export function App(): JSX.Element {
           const ex: MagneticExample = { structure: { ...parsed, id: "loaded-mag" }, magnetic: { ...magnetic, structureId: "loaded-mag" } as MagneticModel };
           setMag(makeMagnetic(ex));
           setMagResult(null);
-          setMessage(`Loaded magnetic CIF: ${parsed.name} · ${magnetic.moments.length} moments · ${parsed.spaceGroup.hermannMauguin ?? "BNS"}.`);
+          // Also drive the powder view from the magnetic structure so the plot
+          // shows nuclear and magnetic reflection ticks side by side.
+          const magStructure = { ...parsed, id: "loaded" };
+          setSession({ ...newSession(magStructure, instrument), magnetic: { ...magnetic, structureId: "loaded" } as MagneticModel });
+          setPowderResult(null);
+          setMessage(`Loaded magnetic CIF: ${parsed.name} · ${magnetic.moments.length} moments · ${parsed.spaceGroup.hermannMauguin ?? "BNS"}. Nuclear + magnetic ticks shown.`);
           return;
         }
         setSession(newSession({ ...parsed, id: "loaded" }, instrument));
@@ -577,6 +610,7 @@ export function App(): JSX.Element {
                 curves={displayCurves}
                 xLabel={displayXLabel}
                 fitRange={displayFitRange}
+                phases={phaseTicks}
                 {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
               />
               <p style={{ fontSize: 12, color: "#666" }}>
@@ -608,6 +642,7 @@ export function App(): JSX.Element {
                   curves={displayCurves}
                   xLabel={displayXLabel}
                   fitRange={displayFitRange}
+                  phases={phaseTicks}
                   {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                 />
                 <p style={{ fontSize: 12, color: "#666" }}>

@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#faf7f2;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#191714}
+a{color:#1f4fd8}a:hover{color:#1a41b4}
+input,button{font-family:inherit}
+input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+</style>
+</helmet>
+
+<div data-screen-label="Setup &amp; structural refinement" style="min-height:100vh;display:flex;flex-direction:column">
+
+  <div style="display:flex;align-items:center;gap:22px;padding:12px 24px;border-bottom:1px solid #e8e2d8;background:#fffdf9;box-shadow:0 1px 0 rgba(25,23,20,0.02),0 3px 10px rgba(25,23,20,0.025);flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:12px">
+      <span style="width:30px;height:30px;border-radius:8px;background:#1f4fd8;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(31,79,216,0.35);flex-shrink:0">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <circle cx="10" cy="10" r="8.3" stroke="#fff" stroke-width="1.3" opacity="0.32"></circle>
+          <circle cx="10" cy="10" r="5.2" stroke="#fff" stroke-width="1.3" opacity="0.62"></circle>
+          <circle cx="10" cy="10" r="2.2" fill="#fff"></circle>
+        </svg>
+      </span>
+      <div style="display:flex;flex-direction:column;line-height:1.15">
+        <span style="font-size:16px;font-weight:700;letter-spacing:-.02em">Web Refinement Workbench</span>
+        <span style="font-size:10.5px;color:#94897a;letter-spacing:.01em">Powder diffraction · Rietveld</span>
+      </div>
+      <span style="font-size:10.5px;color:#5f594f;font-family:'IBM Plex Mono',monospace;background:#f3eee4;border:1px solid #e8e2d8;border-radius:6px;padding:2px 7px;align-self:center">v0.9</span>
+    </div>
+
+    <span style="width:1px;height:30px;background:#e8e2d8"></span>
+
+    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+      <span style="display:inline-flex;align-items:center;gap:7px;background:#1f4fd8;color:#fff;border:1px solid #1f4fd8;border-radius:999px;padding:5px 14px;font-size:11.5px;font-weight:600;box-shadow:0 1px 2px rgba(31,79,216,0.3)">
+        <span style="font-family:'IBM Plex Mono',monospace;opacity:.75">1–3</span>Setup &amp; refinement
+      </span>
+      <span style="display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #ddd5c7;color:#5f594f;border-radius:999px;padding:5px 14px;font-size:11.5px;cursor:pointer" style-hover="border-color:#1f4fd8;color:#1f4fd8">
+        <span style="font-family:'IBM Plex Mono',monospace;color:#94897a">4</span>Quality
+      </span>
+      <span style="display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #ddd5c7;color:#5f594f;border-radius:999px;padding:5px 14px;font-size:11.5px;cursor:pointer" style-hover="border-color:#1f4fd8;color:#1f4fd8">
+        <span style="font-family:'IBM Plex Mono',monospace;color:#94897a">5</span>Candidates
+      </span>
+      <span style="display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #ddd5c7;color:#5f594f;border-radius:999px;padding:5px 14px;font-size:11.5px;cursor:pointer" style-hover="border-color:#1f4fd8;color:#1f4fd8">
+        <span style="font-family:'IBM Plex Mono',monospace;color:#94897a">6</span>Magnetic
+      </span>
+      <span style="display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #ddd5c7;color:#5f594f;border-radius:999px;padding:5px 14px;font-size:11.5px;cursor:pointer" style-hover="border-color:#1f4fd8;color:#1f4fd8">
+        <span style="font-family:'IBM Plex Mono',monospace;color:#94897a">7</span>Compare
+      </span>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-left:auto">
+      <button onClick="{{ v4.exportCsv }}" style="border:1px solid #ddd5c7;background:#fff;border-radius:8px;padding:6px 13px;font-size:12.5px;color:#191714;cursor:pointer" style-hover="background:#f5f0e7">Export CSV</button>
+      <button style="border:1px solid #ddd5c7;background:#fff;border-radius:8px;padding:6px 13px;font-size:12.5px;color:#191714;cursor:pointer" style-hover="background:#f5f0e7">Export project JSON</button>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:8px;padding:7px 24px;border-bottom:1px solid #e8e2d8;background:#f7f3ec;font-size:12px;color:#5f594f">
+    <span style="width:6px;height:6px;border-radius:50%;background:#1f4fd8;flex-shrink:0"></span>
+    <span style="font-size:9.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#94897a">Status</span>
+    <span style="color:#191714">{{ v4.message }}</span>
+  </div>
+
+  <div style="width:100%;max-width:1480px;margin:0 auto;box-sizing:border-box;flex:1">
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;padding:16px 24px 0">
+      <div style="border:1px solid #e8e2d8;border-radius:12px;background:#fff;padding:12px 16px;display:flex;flex-direction:column;gap:5px">
+        <div style="display:flex;align-items:center">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#94897a">Structure</span>
+          <button style="margin-left:auto;border:1px solid #ddd5c7;background:#fff;border-radius:7px;padding:1px 9px;font-size:11px;color:#191714;cursor:pointer" style-hover="background:#f5f0e7">Load CIF…</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;padding:1px 9px;border-radius:999px;background:#eff5ea;border:1px solid #d3e2c4;color:#3f6b25">✓ parsed</span>
+          <span style="font-size:14px;font-weight:700">Mn₃Ga · P6₃/mmc (194)</span>
+        </div>
+        <div style="font-size:11.5px;color:#5f594f;font-family:'IBM Plex Mono',monospace">a 5.42185 · c 4.37543 Å · V 111.41 ų · 2 sites</div>
+      </div>
+      <div style="border:1px solid #e8e2d8;border-radius:12px;background:#fff;padding:12px 16px;display:flex;flex-direction:column;gap:5px">
+        <div style="display:flex;align-items:center">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#94897a">Data</span>
+          <button style="margin-left:auto;border:1px solid #ddd5c7;background:#fff;border-radius:7px;padding:1px 9px;font-size:11px;color:#191714;cursor:pointer" style-hover="background:#f5f0e7">Load data…</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;padding:1px 9px;border-radius:999px;background:#eff5ea;border:1px solid #d3e2c4;color:#3f6b25">✓ loaded</span>
+          <span style="font-size:14px;font-weight:700">Mn₃Ga POWGEN 600 K</span>
+        </div>
+        <div style="font-size:11.5px;color:#5f594f;font-family:'IBM Plex Mono',monospace">4613 points · TOF 15 400 – 92 000 µs</div>
+      </div>
+      <div style="border:1px solid #e8e2d8;border-radius:12px;background:#fff;padding:12px 16px;display:flex;flex-direction:column;gap:5px">
+        <div style="display:flex;align-items:center">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#94897a">Instrument</span>
+          <button style="margin-left:auto;border:1px solid #ddd5c7;background:#fff;border-radius:7px;padding:1px 9px;font-size:11px;color:#191714;cursor:pointer" style-hover="background:#f5f0e7">Load instrument…</button>
+        </div>
+        <div style="font-size:14px;font-weight:700">POWGEN .instprm · TOF</div>
+        <div style="font-size:11.5px;color:#5f594f;font-family:'IBM Plex Mono',monospace">difC 22585.8 · difA 0.32 · difB 1.02 · Zero −1.94 µs</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;padding:16px 24px 18px;align-items:stretch">
+      <div style="grid-column:span 2;border:1px solid #e8e2d8;border-radius:12px;background:#fff;padding:14px 16px;display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#94897a">Powder pattern — observed vs calculated</span>
+          <div style="margin-left:auto;display:inline-flex;gap:2px;background:#f3eee4;border:1px solid #e8e2d8;border-radius:8px;padding:2px">
+            <button onClick="{{ v4.setTof }}" style="{{ v4.tofStyle }}">TOF</button>
+            <button onClick="{{ v4.setD }}" style="{{ v4.dStyle }}">d</button>
+            <button onClick="{{ v4.setQ }}" style="{{ v4.qStyle }}">Q</button>
+          </div>
+          <span style="font-size:11px;color:#94897a;text-transform:uppercase;letter-spacing:.06em">wR</span>
+          <span style="font-size:16px;font-weight:600;color:#1f4fd8;font-family:'IBM Plex Mono',monospace">{{ v4.wR }}%</span>
+        </div>
+        <div style="position:relative;flex:1;min-height:0">
+        <svg id="wrb-svg-v4" viewBox="0 0 860 560" preserveAspectRatio="none" onPointerDown="{{ v4.zoomDown }}" onDoubleClick="{{ v4.zoomReset }}" style="position:absolute;inset:0;display:block;width:100%;height:100%;touch-action:none;cursor:crosshair">
+          <rect x="0" y="0" width="860" height="560" fill="#fffdf9"></rect>
+          <rect x="58" y="14" width="{{ v4.exclLeftW }}" height="511" fill="#1f4fd8" opacity="0.06"></rect>
+          <rect x="{{ v4.exclRightX }}" y="14" width="{{ v4.exclRightW }}" height="511" fill="#1f4fd8" opacity="0.06"></rect>
+          <line x1="58" y1="14" x2="58" y2="380" stroke="#c9c0b0"></line>
+          <line x1="58" y1="380" x2="846" y2="380" stroke="#c9c0b0"></line>
+          <sc-for list="{{ v4.yTicks }}" as="t" hint-placeholder-count="4">
+            <line x1="54" y1="{{ t.y }}" x2="58" y2="{{ t.y }}" stroke="#c9c0b0"></line>
+          </sc-for>
+          <g font-size="9.5" fill="#94897a" font-family="IBM Plex Mono, monospace" text-anchor="end">
+            <sc-for list="{{ v4.yTicks }}" as="t" hint-placeholder-count="4">
+              <text x="51" y="{{ t.yText }}">{{ t.label }}</text>
+            </sc-for>
+          </g>
+          <g font-size="10" fill="#94897a" font-family="IBM Plex Mono, monospace" text-anchor="middle">
+            <sc-for list="{{ v4.xTicks }}" as="t" hint-placeholder-count="8">
+              <text x="{{ t.x }}" y="396">{{ t.label }}</text>
+            </sc-for>
+          </g>
+          <text x="16" y="197" text-anchor="middle" font-size="11" fill="#5f594f" transform="rotate(-90 16 197)">Intensity (a.u.)</text>
+          <text x="452" y="552" text-anchor="middle" font-size="11" fill="#5f594f">{{ v4.xAxisLabel }}</text>
+          <text x="16" y="458" text-anchor="middle" font-size="11" fill="#5f594f" transform="rotate(-90 16 458)">Difference</text>
+          <path d="{{ v4.obsPath }}" stroke="#d84a1b" stroke-width="2.6" stroke-linecap="round" fill="none" opacity="0.5"></path>
+          <polyline points="{{ v4.bkgPts }}" fill="none" stroke="#a87a10" stroke-width="1.2" stroke-dasharray="5 3" opacity="{{ v4.bkgOp }}"></polyline>
+          <polyline points="{{ v4.calcPts }}" fill="none" stroke="#1f4fd8" stroke-width="1.4"></polyline>
+          <line x1="58" y1="458" x2="846" y2="458" stroke="#e0d8c9" stroke-dasharray="3 3"></line>
+          <polyline points="{{ v4.diffPts }}" fill="none" stroke="oklch(0.55 0.12 155)" stroke-width="1"></polyline>
+          <rect x="58" y="14" width="{{ v4.exclLeftW }}" height="511" fill="#fffdf9" opacity="0.6"></rect>
+          <rect x="{{ v4.exclRightX }}" y="14" width="{{ v4.exclRightW }}" height="511" fill="#fffdf9" opacity="0.6"></rect>
+          <sc-for list="{{ v4.refl }}" as="p" hint-placeholder-count="12">
+            <g style="cursor:help">
+              <title>{{ p.tip }}</title>
+              <line x1="{{ p.x }}" y1="380" x2="{{ p.x }}" y2="397" stroke="transparent" stroke-width="8"></line>
+              <line x1="{{ p.x }}" y1="384" x2="{{ p.x }}" y2="393" stroke="#1f4fd8" stroke-width="1" opacity="0.7"></line>
+            </g>
+          </sc-for>
+          <g font-size="11" fill="#5f594f">
+            <circle cx="76" cy="24" r="2.4" fill="#d84a1b"></circle><text x="84" y="27">obs</text>
+            <line x1="116" y1="24" x2="132" y2="24" stroke="#1f4fd8" stroke-width="1.5"></line><text x="136" y="27">calc</text>
+            <line x1="172" y1="24" x2="188" y2="24" stroke="oklch(0.55 0.12 155)" stroke-width="1.5"></line><text x="192" y="27">diff</text>
+            <line x1="224" y1="24" x2="240" y2="24" stroke="#a87a10" stroke-width="1.5" stroke-dasharray="5 3"></line><text x="244" y="27">bkg</text>
+            <line x1="280" y1="20" x2="280" y2="28" stroke="#1f4fd8" stroke-width="1"></line><text x="286" y="27">hkl</text>
+          </g>
+          <sc-if value="{{ v4.zoomActive }}" hint-placeholder-val="{{ false }}">
+            <rect x="{{ v4.zoomSelX }}" y="14" width="{{ v4.zoomSelW }}" height="366" fill="#1f4fd8" opacity="0.14" stroke="#1f4fd8" stroke-width="1"></rect>
+          </sc-if>
+          <line x1="{{ v4.minPx }}" y1="14" x2="{{ v4.minPx }}" y2="525" stroke="#1f4fd8" stroke-width="1.5"></line>
+          <line x1="{{ v4.maxPx }}" y1="14" x2="{{ v4.maxPx }}" y2="525" stroke="#1f4fd8" stroke-width="1.5"></line>
+          <rect x="{{ v4.minGripX }}" y="14" width="12" height="511" fill="transparent" data-grip="1" style="cursor:ew-resize" onPointerDown="{{ v4.dragMin }}"></rect>
+          <rect x="{{ v4.maxGripX }}" y="14" width="12" height="511" fill="transparent" data-grip="1" style="cursor:ew-resize" onPointerDown="{{ v4.dragMax }}"></rect>
+          <rect x="{{ v4.minCapX }}" y="507" width="9" height="14" rx="3" fill="#1f4fd8" data-grip="1" style="cursor:ew-resize" onPointerDown="{{ v4.dragMin }}"></rect>
+          <rect x="{{ v4.maxCapX }}" y="507" width="9" height="14" rx="3" fill="#1f4fd8" data-grip="1" style="cursor:ew-resize" onPointerDown="{{ v4.dragMax }}"></rect>
+        </svg>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:#5f594f">
+          <span>Powder (TOF) · back-to-back-exponential profile{{ v4.rangeLabel }} · drag across the plot to zoom, blue handles to set the fit range.</span>
+          <sc-if value="{{ v4.zoomed }}" hint-placeholder-val="{{ false }}">
+            <span style="font-family:'IBM Plex Mono',monospace;color:#1f4fd8;white-space:nowrap">view {{ v4.viewLabel }}</span>
+            <button onClick="{{ v4.zoomOut }}" style="border:1px solid #ddd5c7;background:#fff;border-radius:7px;padding:1px 9px;font-size:11px;cursor:pointer" style-hover="background:#f5f0e7">Zoom out</button>
+            <button onClick="{{ v4.zoomReset }}" style="border:1px solid #ddd5c7;background:#fff;border-radius:7px;padding:1px 9px;font-size:11px;cursor:pointer" style-hover="background:#f5f0e7">Reset zoom</button>
+          </sc-if>
+          <sc-if value="{{ v4.rangeActive }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ v4.resetRange }}" style="border:1px solid #ddd5c7;background:#fff;border-radius:7px;padding:1px 9px;font-size:11px;cursor:pointer" style-hover="background:#f5f0e7">Reset range</button>
+          </sc-if>
+        </div>
+      </div>
+
+      <div style="border:1px solid #e8e2d8;border-radius:12px;background:#fff;display:flex;flex-direction:column;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e8e2d8">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#94897a">Powder parameters</span>
+          <span style="margin-left:auto;font-size:11px;color:#5f594f;font-family:'IBM Plex Mono',monospace">{{ v4.freeLabel }}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 104px 62px 62px;padding:6px 14px 6px 17px;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#94897a;border-bottom:1px solid #e8e2d8">
+          <span>Parameter</span><span>Value</span><span>esd</span><span>Refine</span>
+        </div>
+        <div style="max-height:520px;overflow-y:auto">
+          <sc-for list="{{ v4.groups }}" as="g" hint-placeholder-count="4">
+            <div>
+              <div onClick="{{ g.toggleOpen }}" style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:#f6f1e8;border-top:1px solid #eee7da;cursor:pointer;user-select:none">
+                <span style="font-size:9px;color:#1f4fd8;width:10px;display:inline-block">{{ g.caret }}</span>
+                <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#191714">{{ g.name }}</span>
+                <span style="font-size:10.5px;color:#94897a;font-family:'IBM Plex Mono',monospace">{{ g.countLabel }}</span>
+                <label onClick="{{ g.stop }}" style="margin-left:auto;display:flex;align-items:center;gap:4px;font-size:11px;color:#5f594f;cursor:pointer">
+                  <input type="checkbox" checked="{{ g.allFree }}" onChange="{{ g.toggleAll }}" style="accent-color:#1f4fd8">all
+                </label>
+              </div>
+              <sc-if value="{{ g.open }}" hint-placeholder-val="{{ true }}">
+                <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="2">
+                  <div onClick="{{ r.rowToggle }}" style="display:grid;grid-template-columns:1fr 104px 62px 62px;align-items:center;padding:4px 14px 4px 29px;border-top:1px solid #f2ece1;border-left:3px solid {{ r.accent }};background:{{ r.rowBg }};font-size:12.5px;cursor:{{ r.rowCursor }}" title="{{ r.title }}">
+                    <span style="color:{{ r.labelColor }}">{{ r.label }}</span>
+                    <span onClick="{{ r.stop }}"><input type="number" step="any" defaultValue="{{ r.value }}" key="{{ r.inputKey }}" onBlur="{{ r.commit }}" onKeyDown="{{ r.keyDown }}" disabled="{{ r.locked }}" style="width:88px;padding:3px 6px;border:1px solid #d8d0c2;border-radius:7px;font-size:12px;background:#fff;font-family:'IBM Plex Mono',monospace" style-focus="border-color:#1f4fd8"></span>
+                    <span style="font-size:11px;color:#94897a;font-family:'IBM Plex Mono',monospace">{{ r.esd }}</span>
+                    <span>
+                      <sc-if value="{{ r.pillFree }}" hint-placeholder-val="{{ false }}">
+                        <span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #b9c6f4;background:#eaf0fe;color:#1f4fd8;border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:600;font-family:'IBM Plex Mono',monospace">● free</span>
+                      </sc-if>
+                      <sc-if value="{{ r.pillFixed }}" hint-placeholder-val="{{ true }}">
+                        <span style="display:inline-flex;align-items:center;gap:4px;border:1px solid #e2dccf;background:#f6f2ea;color:#94897a;border-radius:999px;padding:2px 9px;font-size:10.5px;font-family:'IBM Plex Mono',monospace">○ fixed</span>
+                      </sc-if>
+                      <sc-if value="{{ r.locked }}" hint-placeholder-val="{{ false }}">
+                        <span style="display:inline-flex;align-items:center;border:1px solid #eee7da;background:#faf7f2;color:#b3a993;border-radius:999px;padding:2px 9px;font-size:10.5px;font-family:'IBM Plex Mono',monospace">calib</span>
+                      </sc-if>
+                    </span>
+                  </div>
+                </sc-for>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <div style="border-top:1px solid #e8e2d8;padding:12px 14px;display:flex;flex-direction:column;gap:8px;background:#fbf8f2">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button onClick="{{ v4.refine }}" disabled="{{ v4.busy }}" style="border:1px solid #1f4fd8;background:#1f4fd8;color:#fff;border-radius:8px;padding:7px 16px;font-size:12.5px;font-weight:600;cursor:pointer" style-hover="background:#1a41b4">{{ v4.refineLabel }}</button>
+            <button onClick="{{ v4.guided }}" disabled="{{ v4.busy }}" title="Staged: scale → background → cell → profile → ADP → positions" style="border:1px solid #ddd5c7;background:#fff;border-radius:8px;padding:7px 13px;font-size:12.5px;color:#191714;cursor:pointer" style-hover="background:#f5f0e7">{{ v4.guidedLabel }}</button>
+            <button onClick="{{ v4.reset }}" disabled="{{ v4.busy }}" style="border:1px solid #ddd5c7;background:#fff;border-radius:8px;padding:7px 13px;font-size:12.5px;color:#191714;cursor:pointer" style-hover="background:#f5f0e7">Reset</button>
+          </div>
+          <sc-if value="{{ v4.hasResult }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:7px 11px;border-radius:8px;font-size:12px;background:#eff5ea;border:1px solid #d3e2c4;color:#3f6b25">{{ v4.resultLine }}</div>
+            <sc-if value="{{ v4.hasDiag }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:7px 11px;border-radius:8px;font-size:12px;line-height:1.4;background:#faf3e3;border:1px solid #e8d9ae;color:#6b5310">{{ v4.diagText }}</div>
+            </sc-if>
+            <details style="font-size:12px;color:#5f594f">
+              <summary style="cursor:pointer">Refinement history ({{ v4.cycleCount }} cycles)</summary>
+              <div style="display:grid;grid-template-columns:56px 90px 70px;gap:2px 8px;margin-top:4px;font-family:'IBM Plex Mono',monospace">
+                <span style="color:#94897a">cycle</span><span style="color:#94897a">χ²</span><span style="color:#94897a">wR %</span>
+              </div>
+              <sc-for list="{{ v4.histRows }}" as="h" hint-placeholder-count="3">
+                <div style="display:grid;grid-template-columns:56px 90px 70px;gap:2px 8px;font-size:12px;font-family:'IBM Plex Mono',monospace">
+                  <span>{{ h.c }}</span><span>{{ h.chi }}</span><span>{{ h.wr }}</span>
+                </div>
+              </sc-for>
+            </details>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding:7px 24px;font-size:11.5px;background:#fdf0ea;border-top:1px solid #f2cdbb;color:#a03415">Early browser-native refinement workbench — results for publication must be validated against established tools.</div>
+
+  <div style="padding:10px 24px;font-size:11px;color:#94897a;border-top:1px solid #e8e2d8;background:#fffdf9;text-align:center">© 2026 Tsung-Han Yang. All rights reserved.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;simSpeed&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;min&quot;: 0.5, &quot;max&quot;: 3, &quot;step&quot;: 0.5, &quot;default&quot;: 1, &quot;unit&quot;: &quot;×&quot;, &quot;section&quot;: &quot;Behavior&quot;, &quot;tsType&quot;: &quot;number&quot; },
+  &quot;noise&quot;: { &quot;editor&quot;: &quot;range&quot;, &quot;min&quot;: 0, &quot;max&quot;: 2.5, &quot;step&quot;: 0.25, &quot;default&quot;: 1, &quot;section&quot;: &quot;Data&quot;, &quot;tsType&quot;: &quot;number&quot; },
+  &quot;showBackground&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;section&quot;: &quot;Plot&quot;, &quot;tsType&quot;: &quot;boolean&quot; }
+}">
+class Component extends DCLogic {
+  static DEFS = [
+    { id: 'scale',  label: 'scale',        g: 'Scale',      init: 36.20,   truth: 41.82,   esd: 0.13,    dec: 2, free: true },
+    { id: 'b0', label: 'bkg b₀', g: 'Background', init: 700, truth: 850,  esd: 6,   dec: 0, free: true },
+    { id: 'b1', label: 'bkg b₁', g: 'Background', init: 0,   truth: -260, esd: 4,   dec: 0, free: true },
+    { id: 'b2', label: 'bkg b₂', g: 'Background', init: 0,   truth: 90,   esd: 3,   dec: 0, free: true },
+    { id: 'b3', label: 'bkg b₃', g: 'Background', init: 0,   truth: -40,  esd: 2.5, dec: 0, free: true },
+    { id: 'b4', label: 'bkg b₄', g: 'Background', init: 0,   truth: 18,   esd: 2,   dec: 0, free: true },
+    { id: 'b5', label: 'bkg b₅', g: 'Background', init: 0,   truth: -6,   esd: 1.8, dec: 0, free: true },
+    { id: 'a', label: 'a (Å)', g: 'Lattice', init: 5.43300, truth: 5.42185, esd: 0.0004, dec: 5, free: true },
+    { id: 'c', label: 'c (Å)', g: 'Lattice', init: 4.38400, truth: 4.37543, esd: 0.0003, dec: 5, free: true },
+    { id: 'difC',   label: 'TOF difC',  g: 'Instrument / profile', init: 22585.8, truth: 22585.8, esd: null,  dec: 1, free: false, locked: true },
+    { id: 'difA',   label: 'TOF difA',  g: 'Instrument / profile', init: 0.32,    truth: 0.32,    esd: null,  dec: 2, free: false, locked: true },
+    { id: 'difB',   label: 'TOF difB',  g: 'Instrument / profile', init: 1.02,    truth: 1.02,    esd: null,  dec: 2, free: false, locked: true },
+    { id: 'zero',   label: 'Zero (µs)', g: 'Instrument / profile', init: -1.94,   truth: -1.90,   esd: 0.02,  dec: 2, free: false },
+    { id: 'alpha0', label: 'TOF α₀',    g: 'Instrument / profile', init: 0.00,    truth: 0.00,    esd: 0.01,  dec: 2, free: false },
+    { id: 'alpha1', label: 'TOF α₁',    g: 'Instrument / profile', init: 1.50,    truth: 1.62,    esd: 0.09,  dec: 2, free: true },
+    { id: 'beta0',  label: 'TOF β₀',    g: 'Instrument / profile', init: 0.020,   truth: 0.031,   esd: 0.002, dec: 3, free: true },
+    { id: 'beta1',  label: 'TOF β₁',    g: 'Instrument / profile', init: 0.000,   truth: 0.006,   esd: 0.001, dec: 3, free: false },
+    { id: 'sig0',   label: 'TOF σ₀²',   g: 'Instrument / profile', init: 0,       truth: 0,       esd: 15,    dec: 0, free: false },
+    { id: 'sig1',   label: 'TOF σ₁²',   g: 'Instrument / profile', init: 1140,    truth: 1183,    esd: 21,    dec: 0, free: true },
+    { id: 'sig2',   label: 'TOF σ₂²',   g: 'Instrument / profile', init: 0,       truth: 48,      esd: 9,     dec: 0, free: false },
+    { id: 'bMn', label: 'Mn1 B (Ų)', g: 'ADPs (thermal)', init: 0.800, truth: 1.120, esd: 0.044, dec: 3, free: false },
+    { id: 'bGa', label: 'Ga1 B (Ų)', g: 'ADPs (thermal)', init: 0.600, truth: 0.863, esd: 0.021, dec: 3, free: false },
+    { id: 'dxMn', label: 'Mn1 δ(x,2x)', g: 'Positions', init: 0.00000, truth: 0.00475, esd: 0.00034, dec: 5, free: false },
+    { id: 'occMn', label: 'Mn1 occ', g: 'Occupancy', init: 0.978, truth: 0.978, esd: 0.009, dec: 3, free: false },
+    { id: 'occGa', label: 'Ga1 occ', g: 'Occupancy', init: 1.005, truth: 1.005, esd: 0.008, dec: 3, free: false },
+  ];
+  static ORDER = ['Scale', 'Background', 'Lattice', 'Instrument / profile', 'ADPs (thermal)', 'Positions', 'Occupancy'];
+  static STAGES = [
+    ['Scale', ['scale']],
+    ['Background', ['b0', 'b1', 'b2', 'b3', 'b4', 'b5']],
+    ['Cell', ['a', 'c']],
+    ['Profile', ['zero', 'alpha1', 'beta0', 'sig1']],
+    ['ADP', ['bMn', 'bGa']],
+    ['Positions', ['dxMn']],
+  ];
+
+  constructor(props) {
+    super(props);
+    this.timers = {};
+    this.obsCache = null;
+    this._seed = 42;
+    const N = 1200;
+    this.X = Array.from({ length: N }, (_, i) => 15400 + i * 76600 / (N - 1));
+    this.peaks = [];
+    const seen = new Set();
+    for (let h = 0; h <= 5; h++) for (let k = 0; k <= h; k++) for (let l = 0; l <= 8; l++) {
+      if (h === 0 && k === 0 && l === 0) continue;
+      if (h === 0 && k === 0 && l % 2 === 1) continue;
+      const m = h * h + h * k + k * k;
+      const key = m + '_' + l;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const s1 = Math.sin(h * 12.9898 + k * 78.233 + l * 37.719) * 43758.5453;
+      const r1 = s1 - Math.floor(s1);
+      const s2 = Math.sin(h * 3.17 + k * 7.79 + l * 11.3) * 24634.63;
+      const r2 = s2 - Math.floor(s2);
+      this.peaks.push({ h, k, l, q: (4 / 3) * m, l2: l * l, amp: 0.2 + 0.8 * r1 * r1, ph: r2 * 2 - 1 });
+    }
+    this.ampNorm = 1;
+    const c0 = this.computeCurves(this.truthMap());
+    let pkMax = 0;
+    for (let i = 0; i < N; i++) pkMax = Math.max(pkMax, c0.total[i] - c0.bkg[i]);
+    this.ampNorm = 8200 / Math.max(pkMax, 1);
+    this.state = { v4: this.freshV() };
+  }
+
+  freshV() {
+    return {
+      params: Component.DEFS.map(d => ({ id: d.id, value: d.init, free: d.free, esd: null })),
+      open: { 'Scale': true, 'Background': false, 'Lattice': true, 'Instrument / profile': false, 'ADPs (thermal)': true, 'Positions': false, 'Occupancy': false },
+      fitMin: null, fitMax: null,
+      viewMin: null, viewMax: null, zoom: null,
+      xMode: 'tof',
+      busy: false, busyKind: null, stageIdx: -1, planLen: 0,
+      result: null, history: [],
+      message: 'Loaded Mn₃Ga POWGEN 600 K · 4613 pts · TOF (back-to-back-exponential profile) — free parameters and refine.',
+    };
+  }
+
+  componentWillUnmount() { Object.values(this.timers).forEach(t => t && clearInterval(t)); }
+
+  rand() {
+    let t = (this._seed += 0x6D2B79F5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  truthMap() { return new Map(Component.DEFS.map(d => [d.id, d.truth])); }
+
+  computeCurves(valMap) {
+    const V = id => valMap.get(id);
+    const X = this.X, N = X.length;
+    const bkg = new Array(N), total = new Array(N);
+    for (let i = 0; i < N; i++) {
+      const t = 2 * (X[i] - 15400) / 76600 - 1;
+      const t2 = t * t;
+      const T2 = 2 * t2 - 1, T3 = 4 * t2 * t - 3 * t, T4 = 8 * t2 * t2 - 8 * t2 + 1, T5 = 16 * t2 * t2 * t - 20 * t2 * t + 5 * t;
+      const b = V('b0') + V('b1') * t + V('b2') * T2 + V('b3') * T3 + V('b4') * T4 + V('b5') * T5;
+      bkg[i] = Math.max(b, 0);
+      total[i] = bkg[i];
+    }
+    const a = V('a'), c = V('c'), difC = V('difC'), difA = V('difA'), difB = V('difB'), zero = V('zero');
+    const occMn = V('occMn'), occGa = V('occGa');
+    const Bavg = (6 * V('bMn') * occMn + 2 * V('bGa') * occGa) / Math.max(6 * occMn + 2 * occGa, 0.1);
+    const occF = Math.pow(0.75 * occMn + 0.25 * occGa, 2);
+    for (const pk of this.peaks) {
+      const d = 1 / Math.sqrt(pk.q / (a * a) + pk.l2 / (c * c));
+      if (d < 0.72 || d > 4.35) continue;
+      const t0 = difC * d + difA * d * d + difB / d + zero;
+      let sig = Math.sqrt(Math.max(V('sig0') + V('sig1') * d * d + V('sig2') * Math.pow(d, 4), 100)) * 2;
+      sig = Math.max(sig, 110);
+      const rise = Math.max(sig * 0.55 * (1.62 / Math.max(V('alpha1'), 0.15)), 60);
+      const tau = Math.max(sig * (0.031 / Math.max(V('beta0'), 0.004)), 40);
+      const amp = this.ampNorm * (V('scale') / 41.82) * pk.amp * Math.pow(d, 1.6) * Math.exp(-Bavg / (2 * d * d)) * occF * (1 + V('dxMn') * 30 * pk.ph);
+      const lo = Math.max(0, Math.floor((t0 - 4 * rise - 15400) / 76600 * (N - 1)));
+      const hi = Math.min(N - 1, Math.ceil((t0 + 3 * sig + 6 * tau - 15400) / 76600 * (N - 1)));
+      for (let i = lo; i <= hi; i++) {
+        const u = X[i] - t0;
+        const f = u < 0 ? Math.exp(-u * u / (2 * rise * rise)) : 0.6 * Math.exp(-u * u / (2 * sig * sig)) + 0.4 * Math.exp(-u / tau);
+        total[i] += amp * f;
+      }
+    }
+    return { total, bkg };
+  }
+
+  getObs() {
+    const nf = this.props.noise != null ? this.props.noise : 1;
+    if (this.obsCache && this.obsCache.nf === nf) return this.obsCache;
+    const { total } = this.computeCurves(this.truthMap());
+    this._seed = 42;
+    const yObs = total.map(y => {
+      const g = (this.rand() + this.rand() + this.rand() + this.rand() - 2) * 1.73;
+      return Math.max(0, y + g * Math.sqrt(Math.max(y, 1)) * 1.6 * nf);
+    });
+    let mx = 0;
+    for (const y of yObs) mx = Math.max(mx, y);
+    this.obsCache = { nf, yObs, yTop: mx * 1.06 };
+    return this.obsCache;
+  }
+
+  computeWR(params, fitMin, fitMax) {
+    const valMap = new Map(params.map(p => [p.id, p.value]));
+    const { total } = this.computeCurves(valMap);
+    const { yObs } = this.getObs();
+    const lo = fitMin != null ? fitMin : 15400, hi = fitMax != null ? fitMax : 92000;
+    let num = 0, den = 0;
+    for (let i = 0; i < this.X.length; i++) {
+      const x = this.X[i];
+      if (x < lo || x > hi) continue;
+      const o = yObs[i], c = total[i], w = 1 / Math.max(o, 1);
+      num += w * (o - c) * (o - c);
+      den += w * o * o;
+    }
+    return 100 * Math.sqrt(num / Math.max(den, 1e-9));
+  }
+
+  setV(vk, patch) { this.setState(s => ({ [vk]: { ...s[vk], ...patch } })); }
+  patchParam(vk, id, patch) {
+    this.setState(s => ({ [vk]: { ...s[vk], params: s[vk].params.map(p => p.id === id ? { ...p, ...patch } : p) } }));
+  }
+  stopTimer(vk) { if (this.timers[vk]) { clearInterval(this.timers[vk]); this.timers[vk] = null; } }
+
+  viewRange(s) { return [s.viewMin != null ? s.viewMin : 15400, s.viewMax != null ? s.viewMax : 92000]; }
+
+  makeZoom(vk) {
+    return (e) => {
+      if (e.target && e.target.dataset && e.target.dataset.grip) return;
+      e.preventDefault();
+      const svg = document.getElementById('wrb-svg-' + vk);
+      if (!svg) return;
+      const r = svg.getBoundingClientRect();
+      const toPx = cx => Math.max(58, Math.min(846, (cx - r.left) * (860 / r.width)));
+      const x0 = toPx(e.clientX);
+      this.setV(vk, { zoom: { x0, x1: x0 } });
+      const move = (ev) => this.setV(vk, { zoom: { x0, x1: toPx(ev.clientX) } });
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        const s = this.state[vk];
+        const z = s.zoom;
+        this.setV(vk, { zoom: null });
+        if (!z) return;
+        const lo = Math.min(z.x0, z.x1), hi = Math.max(z.x0, z.x1);
+        if (hi - lo < 8) return;
+        const [vlo, vhi] = this.viewRange(s);
+        const span = vhi - vlo;
+        this.setV(vk, { viewMin: vlo + (lo - 58) / 788 * span, viewMax: vlo + (hi - 58) / 788 * span });
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    };
+  }
+
+  zoomOut(vk) {
+    const s = this.state[vk];
+    const [vlo, vhi] = this.viewRange(s);
+    const span = vhi - vlo, mid = (vlo + vhi) / 2;
+    const ns = Math.min(span * 2, 76600);
+    let nlo = mid - ns / 2, nhi = mid + ns / 2;
+    if (nlo < 15400) { nhi += 15400 - nlo; nlo = 15400; }
+    if (nhi > 92000) { nlo -= nhi - 92000; nhi = 92000; }
+    nlo = Math.max(15400, nlo);
+    if (ns >= 76500) { this.setV(vk, { viewMin: null, viewMax: null }); return; }
+    this.setV(vk, { viewMin: nlo, viewMax: nhi });
+  }
+
+  makeDrag(vk, which) {
+    return (e) => {
+      e.preventDefault();
+      const svg = document.getElementById('wrb-svg-' + vk);
+      if (!svg) return;
+      const move = (ev) => {
+        const r = svg.getBoundingClientRect();
+        const px = (ev.clientX - r.left) * (860 / r.width);
+        const s = this.state[vk];
+        const vr = this.viewRange(s);
+        let x = vr[0] + (px - 58) / 788 * (vr[1] - vr[0]);
+        if (which === 'min') {
+          x = Math.min(Math.max(x, 15400), (s.fitMax != null ? s.fitMax : 92000) - 1500);
+          this.setV(vk, { fitMin: x });
+        } else {
+          x = Math.max(Math.min(x, 92000), (s.fitMin != null ? s.fitMin : 15400) + 1500);
+          this.setV(vk, { fitMax: x });
+        }
+      };
+      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    };
+  }
+
+  runRefine(vk, guided) {
+    if (this.state[vk].busy) return;
+    this.stopTimer(vk);
+    const speed = this.props.simSpeed != null ? this.props.simSpeed : 1;
+    const plan = [];
+    if (guided) {
+      Component.STAGES.forEach(([name, ids], i) => {
+        for (let c = 0; c < 3; c++) plan.push({ stageIdx: i, freeIds: c === 0 ? ids : null });
+      });
+    } else {
+      for (let c = 0; c < 8; c++) plan.push({ stageIdx: -1, freeIds: null });
+    }
+    const hist = [];
+    let tick = 0;
+    this.setV(vk, { busy: true, busyKind: guided ? 'guided' : 'plain', result: null, history: [], stageIdx: guided ? 0 : -1, planLen: plan.length, message: guided ? 'Guided refinement: unlocking stages in the expert order…' : 'Refining selected parameters…' });
+    this.timers[vk] = setInterval(() => {
+      const step = plan[tick];
+      this.setState(s => {
+        const v = s[vk];
+        let params = v.params;
+        if (step.freeIds) params = params.map(p => step.freeIds.includes(p.id) ? { ...p, free: true } : p);
+        params = params.map(p => {
+          const d = Component.DEFS.find(x => x.id === p.id);
+          if (!p.free || d.locked) return p;
+          const jit = (Math.random() - 0.5) * Math.abs(d.truth - p.value) * 0.15;
+          return { ...p, value: p.value + (d.truth - p.value) * 0.55 + jit };
+        });
+        const wr = this.computeWR(params, v.fitMin, v.fitMax);
+        hist.push({ c: hist.length + 1, chi: (Math.pow(wr / 4.9, 2) * 1.38 + 0.9).toPrecision(4), wr: wr.toFixed(2) });
+        return { [vk]: { ...v, params, stageIdx: step.stageIdx, history: hist.slice() } };
+      });
+      tick++;
+      if (tick >= plan.length) {
+        this.stopTimer(vk);
+        setTimeout(() => this.finish(vk, guided, hist), 120 / speed);
+      }
+    }, (guided ? 230 : 170) / speed);
+  }
+
+  finish(vk, guided, hist) {
+    this.setState(s => {
+      const v = s[vk];
+      const params = v.params.map(p => {
+        const d = Component.DEFS.find(x => x.id === p.id);
+        return (p.free && !d.locked) ? { ...p, value: d.truth, esd: d.esd } : p;
+      });
+      const wr = this.computeWR(params, v.fitMin, v.fitMax);
+      const free = new Set(params.filter(p => p.free).map(p => p.id));
+      const diags = [];
+      if (free.has('scale') && free.has('bMn')) diags.push('High correlation: scale/B_Mn1 0.982.');
+      if (free.has('sig2')) diags.push('SVD dropped 1 near-null direction: σ₂.');
+      if (free.has('occMn') || free.has('occGa')) diags.push('Occupancies freed without a sum restraint — verify against chemistry.');
+      const result = { status: 'converged', wr: wr.toFixed(2), gof: (1 + wr / 6).toFixed(2), diag: diags.join(' ') };
+      return { [vk]: { ...v, params, busy: false, busyKind: null, stageIdx: guided ? Component.STAGES.length : -1, result, message: 'Powder ' + (guided ? 'guided ' : '') + 'refinement converged: wR = ' + wr.toFixed(2) + '% (' + hist.length + ' cycles).' } };
+    });
+  }
+
+  buildPlot(valMap, fitMin, fitMax, viewMin, viewMax) {
+    const { total, bkg } = this.computeCurves(valMap);
+    const { yObs } = this.getObs();
+    const X = this.X, N = X.length;
+    const vlo = viewMin != null ? viewMin : 15400;
+    const vhi = viewMax != null ? viewMax : 92000;
+    const vspan = (vhi - vlo) || 1;
+    const sx = t => 58 + (t - vlo) / vspan * 788;
+    let yTop = 1;
+    for (let i = 0; i < N; i++) { if (X[i] >= vlo && X[i] <= vhi) yTop = Math.max(yTop, yObs[i], total[i]); }
+    yTop *= 1.06;
+    const sy = y => 380 - Math.min(Math.max(y, 0), yTop) / yTop * 356;
+    const stepN = vspan < 55000 ? 1 : 2;
+    let obsPath = '', calcPts = '', bkgPts = '';
+    for (let i = 0; i < N; i += stepN) {
+      if (X[i] < vlo || X[i] > vhi) continue;
+      const xp = sx(X[i]).toFixed(1);
+      obsPath += 'M' + xp + ' ' + sy(yObs[i]).toFixed(1) + 'h.01';
+      calcPts += xp + ',' + sy(total[i]).toFixed(1) + ' ';
+      bkgPts += xp + ',' + sy(bkg[i]).toFixed(1) + ' ';
+    }
+    let dm = yTop * 0.04;
+    const diff = new Array(N);
+    for (let i = 0; i < N; i++) { diff[i] = yObs[i] - total[i]; if (X[i] >= vlo && X[i] <= vhi) dm = Math.max(dm, Math.abs(diff[i])); }
+    let diffPts = '';
+    for (let i = 0; i < N; i += stepN) {
+      if (X[i] < vlo || X[i] > vhi) continue;
+      const y = 458 - Math.max(-1, Math.min(1, diff[i] / dm)) * 58;
+      diffPts += sx(X[i]).toFixed(1) + ',' + y.toFixed(1) + ' ';
+    }
+    const fmin = fitMin != null ? fitMin : 15400, fmax = fitMax != null ? fitMax : 92000;
+    const aa = valMap.get('a'), cc = valMap.get('c'), dC = valMap.get('difC'), dA = valMap.get('difA'), dB = valMap.get('difB'), z = valMap.get('zero');
+    const refl = [];
+    for (const pk of this.peaks) {
+      const d = 1 / Math.sqrt(pk.q / (aa * aa) + pk.l2 / (cc * cc));
+      if (d < 0.72 || d > 4.35) continue;
+      const t0 = dC * d + dA * d * d + dB / d + z;
+      if (t0 < vlo || t0 > vhi) continue;
+      const Q = 2 * Math.PI / d;
+      refl.push({ x: +sx(t0).toFixed(1), tip: '(' + pk.h + ' ' + pk.k + ' ' + pk.l + ')   d ' + d.toFixed(3) + ' Å   Q ' + Q.toFixed(2) + ' Å⁻¹   TOF ' + Math.round(t0) + ' µs' });
+    }
+    const minPx = +Math.max(58, Math.min(846, sx(fmin))).toFixed(1);
+    const maxPx = +Math.max(58, Math.min(846, sx(fmax))).toFixed(1);
+    const yTicks = [];
+    const rough = yTop / 4;
+    const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+    const norm = rough / mag;
+    const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+    for (let v = 0; v <= yTop + 1e-6; v += step) {
+      const yy = +(380 - v / yTop * 356).toFixed(1);
+      if (yy < 12) continue;
+      const label = v >= 1000 ? +(v / 1000).toFixed(v % 1000 ? 1 : 0) + 'k' : String(Math.round(v));
+      yTicks.push({ y: yy, yText: +(yy + 3.2).toFixed(1), label });
+    }
+    return {
+      obsPath, calcPts, bkgPts, diffPts, yTicks, refl,
+      minPx, maxPx,
+      minGripX: minPx - 6, maxGripX: maxPx - 6,
+      minCapX: minPx - 4, maxCapX: maxPx - 4,
+      exclLeftW: Math.max(0, minPx - 58),
+      exclRightX: maxPx, exclRightW: Math.max(0, 846 - maxPx),
+    };
+  }
+
+  fmtEsd(esd) {
+    if (esd == null) return '—';
+    return esd >= 1 ? String(esd) : esd.toPrecision(2);
+  }
+
+  buildRows(vk, s) {
+    const pmap = new Map(s.params.map(p => [p.id, p]));
+    return Component.DEFS.map(d => {
+      const p = pmap.get(d.id);
+      const valStr = p.value.toFixed(d.dec);
+      return {
+        id: d.id, label: d.label, group: d.g,
+        value: valStr,
+        inputKey: vk + ':' + d.id + ':' + valStr,
+        esd: p.esd != null ? this.fmtEsd(p.esd) : '—',
+        free: p.free, locked: !!d.locked,
+        pillFree: p.free && !d.locked,
+        pillFixed: !p.free && !d.locked,
+        accent: p.free && !d.locked ? '#1f4fd8' : 'transparent',
+        rowBg: p.free && !d.locked ? '#fcfbff' : 'transparent',
+        rowCursor: d.locked ? 'default' : 'pointer',
+        labelColor: d.locked ? '#94897a' : '#37322a',
+        rowToggle: d.locked ? undefined : () => this.patchParam(vk, d.id, { free: !p.free }),
+        stop: (e) => e.stopPropagation(),
+        title: d.locked ? 'Held at the instrument calibration' : ('Click to ' + (p.free ? 'fix' : 'free') + ' — ' + d.g),
+        commit: (e) => {
+          const val = parseFloat(e.target.value);
+          if (!isNaN(val)) this.patchParam(vk, d.id, { value: val, esd: null });
+          else e.target.value = valStr;
+        },
+        keyDown: (e) => { if (e.key === 'Enter') e.target.blur(); },
+        toggle: () => this.patchParam(vk, d.id, { free: !p.free }),
+      };
+    });
+  }
+
+  mkGroup(vk, s, name, rows, open) {
+    const grows = rows.filter(r => r.group === name);
+    const freeN = grows.filter(r => r.free).length;
+    const allFree = grows.every(r => r.free || r.locked);
+    return {
+      name, rows: grows, open,
+      caret: open ? '▾' : '▸',
+      countLabel: freeN + '/' + grows.length + ' free',
+      allFree,
+      toggleOpen: () => this.setState(st => ({ [vk]: { ...st[vk], open: { ...st[vk].open, [name]: !st[vk].open[name] } } })),
+      toggleAll: () => {
+        const target = !allFree;
+        this.setState(st => ({
+          [vk]: {
+            ...st[vk], params: st[vk].params.map(p => {
+              const d = Component.DEFS.find(x => x.id === p.id);
+              return (d.g === name && !d.locked) ? { ...p, free: target } : p;
+            })
+          }
+        }));
+      },
+      stop: (e) => e.stopPropagation(),
+    };
+  }
+
+  buildVariant(vk) {
+    const s = this.state[vk];
+    const rows = this.buildRows(vk, s);
+    const valMap = new Map(s.params.map(p => [p.id, p.value]));
+    const plot = this.buildPlot(valMap, s.fitMin, s.fitMax, s.viewMin, s.viewMax);
+    const wr = this.computeWR(s.params, s.fitMin, s.fitMax);
+    const freeN = rows.filter(r => r.free).length;
+    const rangeActive = s.fitMin != null || s.fitMax != null;
+    const fmin = Math.round(s.fitMin != null ? s.fitMin : 15400);
+    const fmax = Math.round(s.fitMax != null ? s.fitMax : 92000);
+    const r = s.result;
+    const xMode = s.xMode || 'tof';
+    const difC = valMap.get('difC'), zero = valMap.get('zero');
+    const xAxisLabel = xMode === 'tof' ? 'TOF (µs)' : xMode === 'd' ? 'd-spacing (Å)' : 'Q (Å⁻¹)';
+    const [vlo, vhi] = this.viewRange(s);
+    const vspan = vhi - vlo;
+    const roughT = vspan / 6;
+    const magT = Math.pow(10, Math.floor(Math.log10(roughT)));
+    const nT = roughT / magT;
+    const stepT = (nT < 1.5 ? 1 : nT < 3 ? 2 : nT < 7 ? 5 : 10) * magT;
+    const xTicks = [];
+    for (let t0 = Math.ceil(vlo / stepT) * stepT; t0 <= vhi + 1e-6; t0 += stepT) {
+      const x = +(58 + (t0 - vlo) / vspan * 788).toFixed(1);
+      let label;
+      if (xMode === 'tof') label = t0 >= 1000 ? +(t0 / 1000).toFixed(t0 % 1000 ? 1 : 0) + 'k' : String(Math.round(t0));
+      else { const d = (t0 - zero) / difC; label = xMode === 'd' ? d.toFixed(2) : (2 * Math.PI / d).toFixed(2); }
+      xTicks.push({ x, label });
+    }
+    const zoomed = s.viewMin != null || s.viewMax != null;
+    const zx0 = s.zoom ? Math.min(s.zoom.x0, s.zoom.x1) : 0;
+    const seg = m => 'border:none;background:' + (xMode === m ? '#1f4fd8' : 'transparent') + ';color:' + (xMode === m ? '#fff' : '#5f594f') + ';border-radius:6px;padding:3px 11px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit';
+    return {
+      ...plot,
+      xTicks, xAxisLabel,
+      zoomDown: this.makeZoom(vk),
+      zoomOut: () => this.zoomOut(vk),
+      zoomReset: () => this.setV(vk, { viewMin: null, viewMax: null }),
+      zoomed,
+      zoomActive: !!s.zoom,
+      zoomSelX: zx0,
+      zoomSelW: s.zoom ? Math.abs(s.zoom.x1 - s.zoom.x0) : 0,
+      viewLabel: zoomed ? Math.round(vlo) + '–' + Math.round(vhi) + ' µs' : '',
+      tofStyle: seg('tof'), dStyle: seg('d'), qStyle: seg('q'),
+      setTof: () => this.setV(vk, { xMode: 'tof' }),
+      setD: () => this.setV(vk, { xMode: 'd' }),
+      setQ: () => this.setV(vk, { xMode: 'q' }),
+      bkgOp: (this.props.showBackground != null ? this.props.showBackground : true) ? '0.9' : '0',
+      wR: wr.toFixed(2),
+      message: s.message,
+      rangeActive,
+      rangeLabel: rangeActive ? ' · fit range ' + fmin + '–' + fmax + ' µs' : '',
+      resetRange: () => this.setV(vk, { fitMin: null, fitMax: null }),
+      dragMin: this.makeDrag(vk, 'min'),
+      dragMax: this.makeDrag(vk, 'max'),
+      busy: s.busy,
+      refineLabel: s.busy && s.busyKind === 'plain' ? 'Refining…' : 'Refine selected',
+      guidedLabel: s.busy && s.busyKind === 'guided' ? 'Running stages…' : 'Guided (staged)',
+      freeLabel: freeN + ' of ' + rows.length + ' free',
+      refine: () => this.runRefine(vk, false),
+      guided: () => this.runRefine(vk, true),
+      reset: () => { this.stopTimer(vk); this.setV(vk, this.freshV()); },
+      exportCsv: () => {
+        const { total, bkg } = this.computeCurves(valMap);
+        const { yObs } = this.getObs();
+        let csv = 'tof_us,yobs,ycalc,ybkg,diff\n';
+        for (let i = 0; i < this.X.length; i++) csv += this.X[i].toFixed(1) + ',' + yObs[i].toFixed(2) + ',' + total[i].toFixed(2) + ',' + bkg[i].toFixed(2) + ',' + (yObs[i] - total[i]).toFixed(2) + '\n';
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const aEl = document.createElement('a');
+        aEl.href = URL.createObjectURL(blob);
+        aEl.download = 'mn3ga-powgen-600K.csv';
+        aEl.click();
+        setTimeout(() => URL.revokeObjectURL(aEl.href), 5000);
+      },
+      hasResult: !!r,
+      resultLine: r ? 'Result: ' + r.status + ' · wR = ' + r.wr + '% · GoF = ' + r.gof : '',
+      hasDiag: !!(r && r.diag),
+      diagText: r ? r.diag : '',
+      cycleCount: s.history.length,
+      histRows: s.history,
+      groups: Component.ORDER.map(name => this.mkGroup(vk, s, name, rows, !!s.open[name])),
+    };
+  }
+
+  renderVals() {
+    return { v4: this.buildVariant('v4') };
+  }
+}
+</script>
+</body>
+</html>
