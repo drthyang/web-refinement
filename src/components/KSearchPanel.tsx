@@ -52,13 +52,6 @@ const FRAMEWORKS: readonly { id: "msg" | "irrep"; label: string }[] = [
   { id: "irrep", label: "Representation analysis" },
 ];
 
-function parsePeaks(text: string): number[] {
-  return text
-    .split(/[\s,;]+/)
-    .map((t) => Number(t))
-    .filter((v) => Number.isFinite(v) && v > 0);
-}
-
 export function KSearchPanel({
   structure,
   autoPeaks = [],
@@ -86,7 +79,6 @@ export function KSearchPanel({
   const ions = useMemo(() => magneticIonCandidates(structure), [structure]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(ions.map((i) => i.siteLabel)));
   const [kText, setKText] = useState<[string, string, string]>(["0", "0", "0"]);
-  const [peaksText, setPeaksText] = useState("");
   const [results, setResults] = useState<KCandidate[] | null>(null);
 
   const k: Vec3 = [Number(kText[0]) || 0, Number(kText[1]) || 0, Number(kText[2]) || 0];
@@ -196,15 +188,9 @@ export function KSearchPanel({
     }, 30);
   }
 
-  function runSearch(peaks?: readonly number[]): void {
-    const list = peaks ?? parsePeaks(peaksText);
-    setResults(searchPropagationVector(structure.cell, [...list], { tolerance: 0.02 }));
-  }
-
-  /** Fill the box with the auto-detected magnetic peaks and search them. */
+  /** Search candidate k-vectors from the auto-detected magnetic peaks. */
   function autoDetectAndSearch(): void {
-    setPeaksText(autoPeaks.map((d) => d.toFixed(4)).join("\n"));
-    runSearch(autoPeaks);
+    setResults(searchPropagationVector(structure.cell, [...autoPeaks], { tolerance: 0.02 }));
   }
 
   function toggleIon(label: string): void {
@@ -270,23 +256,14 @@ export function KSearchPanel({
             <span style={help}>
               {autoPeaks.length > 0
                 ? "Extra peaks from the nuclear-fit residual (refine the nuclear structure first, then all fixed)."
-                : "No extra peaks in the residual — refine the nuclear structure first, or enter d-spacings manually."}
+                : "No extra peaks in the residual — refine the nuclear structure first, or set k directly above."}
             </span>
           </div>
-          <div style={{ ...help, marginTop: 10 }}>Or enter magnetic-peak d-spacings (Å) manually, one per line or comma-separated:</div>
-          <textarea
-            value={peaksText}
-            onChange={(e) => setPeaksText(e.target.value)}
-            placeholder={"e.g.\n6.214\n3.842\n3.107"}
-            rows={3}
-            style={textarea}
-          />
-          <button style={btn} onClick={() => runSearch()}>Search k</button>
         </div>
         {results && (
           <div style={{ marginTop: 10 }}>
             {results.length === 0 ? (
-              <p style={help}>Enter at least one magnetic-peak d-spacing to search.</p>
+              <p style={help}>No candidate k reproduces the detected peaks — check the nuclear fit, or set k directly above.</p>
             ) : (
               <table style={{ fontSize: 13, borderCollapse: "collapse", width: "100%" }}>
                 <thead>
@@ -521,7 +498,6 @@ export function KSearchPanel({
 
 const help: React.CSSProperties = { fontSize: 12, color: theme.secondary, margin: "4px 0 0", maxWidth: 560 };
 const kInput: React.CSSProperties = { width: 64, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "3px 7px", fontSize: 13, fontFamily: themeMono };
-const textarea: React.CSSProperties = { display: "block", width: "100%", maxWidth: 420, marginTop: 4, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "6px 8px", fontSize: 13, fontFamily: themeMono, resize: "vertical" };
 const btn: React.CSSProperties = { marginTop: 6, border: "none", background: theme.primary, color: "#fff", borderRadius: 7, padding: "4px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" };
 const smallBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 6, padding: "1px 9px", fontSize: 11, cursor: "pointer" };
 const presetBtn: React.CSSProperties = { border: `1px solid ${theme.border}`, background: theme.chipBg, borderRadius: 6, padding: "2px 8px", fontSize: 11.5, fontFamily: themeMono, cursor: "pointer", color: theme.ink };
