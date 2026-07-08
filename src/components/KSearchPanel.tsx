@@ -21,6 +21,7 @@ import { searchPropagationVector, kLabel, type KCandidate } from "@/core/magneti
 import { generateMagneticCandidatesForK, littleGroup } from "@/core/magnetic/magneticGroups";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
+import type { MagneticModel } from "@/core/magnetic/types";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { refine } from "@/core/refinement/engine";
 import type { PowderProfile } from "@/core/workflow/powder";
@@ -43,6 +44,7 @@ export function KSearchPanel({
   nuclearParams,
   nuclearBindings,
   profile,
+  onApply,
 }: {
   structure: StructureModel;
   /** d-spacings of candidate magnetic peaks auto-detected from the pattern residual. */
@@ -52,6 +54,9 @@ export function KSearchPanel({
   nuclearParams?: readonly RefinementParameter[];
   nuclearBindings?: readonly ParameterBinding[];
   profile?: PowderProfile;
+  /** Push the current magnetic model onto the session so the refinement plot
+   *  shows the magnetic pattern + satellite ticks (null clears it). */
+  onApply?: (magnetic: MagneticModel | null) => void;
 }): JSX.Element {
   const ions = useMemo(() => magneticIonCandidates(structure), [structure]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(ions.map((i) => i.siteLabel)));
@@ -306,6 +311,14 @@ export function KSearchPanel({
                 </button>
                 {refineWR != null && (
                   <span style={{ fontSize: 12.5, color: theme.secondary, fontFamily: themeMono }}>wR = {(100 * refineWR).toFixed(1)}%</span>
+                )}
+                {onApply && (
+                  <button
+                    style={{ ...btn, marginTop: 0, background: "#fff", color: theme.primary, border: `1px solid ${theme.primary}` }}
+                    onClick={() => onApply(applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps))}
+                  >
+                    Show on refinement pattern
+                  </button>
                 )}
                 <span style={help}>Nuclear model fixed; moment amplitudes refined against the loaded pattern (shared scale).</span>
               </div>

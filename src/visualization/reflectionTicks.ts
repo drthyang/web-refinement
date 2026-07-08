@@ -5,15 +5,16 @@
  * phase. Positions are produced in d-spacing by the crystallography and mapped
  * to the plot's current display abscissa by a caller-supplied `toX`.
  *
- * Magnetic ticks cover the commensurate k = 0 case the engine supports: the
- * magnetic reflections coincide with nuclear positions, restricted to those
- * carrying non-negligible magnetic structure factor.
+ * Magnetic ticks cover the commensurate single-k case: satellites at G ± k
+ * (k = 0 → nuclear positions), restricted to those carrying a non-negligible
+ * magnetic structure factor.
  */
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { magneticStructureFactor } from "@/core/magnetic/structureFactor";
+import { dSpacing } from "@/core/crystal/unitCell";
 
 export interface ReflectionTick {
   /** Position in the plot's current display unit. */
@@ -76,17 +77,31 @@ export function magneticPhaseTicks(
   toX: (d: number) => number,
   meta: PhaseMeta,
 ): PhaseTicks {
+  // Magnetic satellites at G ± k for the (single, commensurate) propagation
+  // vector. k = 0 → the nuclear positions (the ±k satellites coincide).
+  const k = magnetic.propagation[0] ?? [0, 0, 0];
+  const isK0 = k.every((v) => Math.abs(v) < 1e-9);
   const reflections = generateReflections(structure.cell, structure.spaceGroup, dMin, dMax);
-  const squared = reflections.map((r) => magneticStructureFactor(structure, magnetic, r.h, r.k, r.l).squared);
-  const maxSq = squared.reduce((m, s) => (s > m ? s : m), 0);
+  const sat: { h: number; k: number; l: number; d: number; sq: number }[] = [];
+  for (const r of reflections) {
+    const images: [number, number, number][] = isK0
+      ? [[r.h, r.k, r.l]]
+      : [[r.h + k[0]!, r.k + k[1]!, r.l + k[2]!], [r.h - k[0]!, r.k - k[1]!, r.l - k[2]!]];
+    for (const [mh, mk, ml] of images) {
+      const d = dSpacing(structure.cell, mh, mk, ml);
+      if (!Number.isFinite(d) || d < dMin || d > dMax) continue;
+      sat.push({ h: mh, k: mk, l: ml, d, sq: magneticStructureFactor(structure, magnetic, mh, mk, ml).squared });
+    }
+  }
+  const maxSq = sat.reduce((m, s) => (s.sq > m ? s.sq : m), 0);
   const ticks: ReflectionTick[] = [];
   if (maxSq > 0) {
     const eps = maxSq * 1e-4;
-    reflections.forEach((r, i) => {
-      if (squared[i]! <= eps) return;
+    for (const r of sat) {
+      if (r.sq <= eps) continue;
       const x = toX(r.d);
       if (Number.isFinite(x)) ticks.push({ x, hkl: hklLabel(r.h, r.k, r.l), d: r.d });
-    });
+    }
   }
   return { ...meta, kind: "magnetic", ticks };
 }

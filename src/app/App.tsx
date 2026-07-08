@@ -7,6 +7,7 @@ import type { RefinementParameter, RefinementResult } from "@/core/refinement/ty
 import type { ProjectFile } from "@/core/project/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
+import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
 import { buildPowderSpec, guidedPowderParams, type SiteTies } from "@/app/powderSpec";
@@ -16,28 +17,17 @@ import { parseMagneticCif } from "@/parsers/cif";
 import { parsePowderData } from "@/parsers/powderData";
 import { parseGsasCsvPattern } from "@/parsers/gsasPattern";
 import { detectDataFormat, type DetectedFormat } from "@/parsers/detectFormat";
-import { magneticComparison } from "@/core/workflow/magnetic";
 import type { ParameterBinding } from "@/core/refinement/types";
 import { startingPowderParams } from "@/app/loadData";
 import { ComputeClient } from "@/workers/computeClient";
 import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
-import {
-  buildMagneticDataset,
-  exampleMagnetic,
-  magneticBindings,
-  magneticParameters,
-  type MagneticExample,
-} from "@/examples/mn3gaMagnetic";
-import { MagneticPanel } from "@/components/MagneticPanel";
 import { KSearchPanel } from "@/components/KSearchPanel";
 import { detectExtraPeaks } from "@/core/magnetic/extraPeaks";
 import { powderReflectionObsCalc } from "@/core/workflow/obsCalc";
 import { normalProbabilityPlot, weightedResiduals } from "@/core/refinement/diagnostics";
 import { QualityPlots } from "@/app/ui/QualityPlots";
 import type { MagneticModel } from "@/core/magnetic/types";
-import type { SingleCrystalDataset as SxDataset } from "@/core/diffraction/types";
 import { buildSyntheticPowder, powderBindings } from "@/examples/synthetic";
-import { CandidateComparison } from "@/components/CandidateComparison";
 import {
   axisContext,
   availableDisplayUnits,
@@ -67,11 +57,9 @@ import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 
 const STEPS: readonly Step[] = [
-  { num: "1–3", label: "Setup & refinement" },
-  { num: "4", label: "Quality" },
-  { num: "5", label: "Candidates" },
-  { num: "6", label: "Magnetic" },
-  { num: "7", label: "Compare" },
+  { num: "1", label: "Refinement" },
+  { num: "2", label: "Quality" },
+  { num: "3", label: "Magnetic" },
 ];
 
 const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", wavelength: 1.54 };
@@ -100,16 +88,6 @@ interface Session {
 
 const SYNTHETIC_SOURCE = "synthetic (self-consistent demo)";
 const UNIT_LABEL: Record<string, string> = { twoTheta: "2θ", q: "Q (Å⁻¹)", dSpacing: "d (Å)", tof: "TOF (µs)" };
-
-interface MagState {
-  ex: MagneticExample;
-  dataset: SxDataset;
-  params: RefinementParameter[];
-}
-
-function makeMagnetic(ex: MagneticExample): MagState {
-  return { ex, dataset: buildMagneticDataset(ex), params: magneticParameters(ex.magnetic) };
-}
 
 function newSession(structure: StructureModel, instrument: InstrumentParameters = DEFAULT_INSTRUMENT): Session {
   const pattern = buildSyntheticPowder(structure);
@@ -154,8 +132,6 @@ export function App(): JSX.Element {
   const example = mn3gaPowgenExample();
   const [session, setSession] = useState<Session>(() => loadedSession(example.structure, example.pattern, example.instrument));
   const [powderResult, setPowderResult] = useState<RefinementResult | null>(null);
-  const [mag, setMag] = useState(() => makeMagnetic(exampleMagnetic()));
-  const [magResult, setMagResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [refineKind, setRefineKind] = useState<"refine" | "guided" | null>(null);
   const [step, setStep] = useState(0);
@@ -210,8 +186,19 @@ export function App(): JSX.Element {
       const yCalc = session.powderOverlay.calc;
       return { x, yObs, yCalc, yBackground: session.powderOverlay.background, diff: yObs.map((o, i) => o - (yCalc[i] ?? 0)) };
     }
-    return powderCurves(structure, pattern, powderParams, pBindings, session.powderProfile);
-  }, [structure, pattern, powderParams, pBindings, session.powderProfile, powderIsTof, session.powderOverlay]);
+    const nuclear = powderCurves(structure, pattern, powderParams, pBindings, session.powderProfile);
+    // When a magnetic model has been applied, add its contribution (satellites at
+    // G ± k) on top of the nuclear calc so the refinement plot shows the total.
+    if (session.magnetic && session.magnetic.moments.length > 0) {
+      const comp = magneticPowderComponents(structure, session.magnetic, pattern, powderParams, pBindings, {
+        shape: session.powderProfile.shape,
+        ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+      });
+      const yCalc = nuclear.yCalc.map((v, i) => v + (comp.yMagnetic[i] ?? 0));
+      return { ...nuclear, yCalc, diff: nuclear.yObs.map((o, i) => o - (yCalc[i] ?? 0)) };
+    }
+    return nuclear;
+  }, [structure, pattern, powderParams, pBindings, session.powderProfile, powderIsTof, session.powderOverlay, session.magnetic]);
   // Full pattern extent; the plot handles default to this until the user drags.
   const patternExtent = useMemo<FitRangeSelection>(() => {
     const xs = curves.x;
@@ -279,34 +266,20 @@ export function App(): JSX.Element {
     }
     return phases;
   }, [structure, session.magnetic, patternExtent, pattern.xUnit, effectiveUnit, axisCtx]);
-  const magBind = useMemo(() => magneticBindings(mag.ex.magnetic), [mag.ex.magnetic]);
-  const magRows = useMemo(
-    () => magneticComparison(mag.ex.structure, mag.ex.magnetic, mag.dataset, mag.params, magBind),
-    [mag, magBind],
-  );
 
   function patchPowder(id: string, patch: Partial<RefinementParameter>): void {
     setSession((s) => ({ ...s, powderParams: s.powderParams.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   }
-  function patchMag(id: string, patch: Partial<RefinementParameter>): void {
-    setMag((m) => ({ ...m, params: m.params.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
-  }
 
-  async function runMagnetic(): Promise<void> {
-    setBusy("mag");
-    try {
-      const result = await client.current.refineMagnetic({
-        structure: mag.ex.structure, magnetic: mag.ex.magnetic, dataset: mag.dataset,
-        parameters: mag.params, bindings: magBind, options: { maxIterations: 30 },
-      });
-      setMag((m) => ({ ...m, params: m.params.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value })) }));
-      setMagResult(result);
-      setMessage(`Magnetic refinement ${result.status}: R = ${(100 * result.agreement.rFactor).toFixed(2)}%.`);
-    } catch (e) {
-      setMessage(`Magnetic refinement failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setBusy(null);
-    }
+  /** Apply the magnetic model built in the Magnetic tab onto the session so the
+   *  refinement plot shows the magnetic pattern + satellite ticks. null clears it. */
+  function applyMagneticToSession(magnetic: MagneticModel | null): void {
+    setSession((s) => {
+      const next = { ...s };
+      if (magnetic) next.magnetic = magnetic; else delete next.magnetic;
+      return next;
+    });
+    setMessage(magnetic ? `Magnetic model applied — pattern now includes the magnetic contribution (${magnetic.moments.length} moment${magnetic.moments.length === 1 ? "" : "s"}).` : "Magnetic contribution cleared from the pattern.");
   }
 
   const profileReq = (): { shape: PeakShape; eta?: number; lorentz?: boolean; backgroundType?: BackgroundType } => ({
@@ -409,15 +382,12 @@ export function App(): JSX.Element {
       try {
         const { structure: parsed, magnetic } = parseMagneticCif(text, "loaded");
         if (magnetic) {
-          const ex: MagneticExample = { structure: { ...parsed, id: "loaded-mag" }, magnetic: { ...magnetic, structureId: "loaded-mag" } as MagneticModel };
-          setMag(makeMagnetic(ex));
-          setMagResult(null);
-          // Also drive the powder view from the magnetic structure so the plot
-          // shows nuclear and magnetic reflection ticks side by side.
+          // Drive the powder view from the magnetic structure so the plot shows
+          // the nuclear + magnetic pattern and reflection ticks.
           const magStructure = { ...parsed, id: "loaded" };
           setSession({ ...newSession(magStructure, instrument), magnetic: { ...magnetic, structureId: "loaded" } as MagneticModel });
           setPowderResult(null);
-          setMessage(`Loaded magnetic CIF: ${parsed.name} · ${magnetic.moments.length} moments · ${parsed.spaceGroup.hermannMauguin ?? "BNS"}. Nuclear + magnetic ticks shown.`);
+          setMessage(`Loaded magnetic CIF: ${parsed.name} · ${magnetic.moments.length} moments · ${parsed.spaceGroup.hermannMauguin ?? "BNS"}. Nuclear + magnetic pattern shown.`);
           return;
         }
         setSession(newSession({ ...parsed, id: "loaded" }, instrument));
@@ -628,7 +598,6 @@ export function App(): JSX.Element {
   );
 
   function renderStep(): JSX.Element {
-    const magSiteLabels = mag.ex.magnetic.moments.map((m) => m.siteLabel);
     switch (step) {
       case 0: // Setup & refinement: summary cards + plot + parameter panel.
         return (
@@ -737,48 +706,18 @@ export function App(): JSX.Element {
         return <div style={{ ...themeCard, padding: 16 }}><QualityPanel structure={structure} powderResult={powderResult} pattern={pattern} params={powderParams} bindings={pBindings} profile={session.powderProfile} /></div>;
       case 2:
         return (
-          <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ ...themeCard, padding: 16 }}>
-              <h2 style={h2}>Propagation vector &amp; magnetic subgroups ({structure.name})</h2>
-              <p style={stepHelp}>Commensurate single-k first pass: pick the magnetic ion(s), find or enter k, and read the allowed magnetic subgroups of its little group.</p>
-              <KSearchPanel
-                structure={structure}
-                autoPeaks={magneticPeakD}
-                pattern={pattern}
-                nuclearParams={powderParams}
-                nuclearBindings={pBindings}
-                profile={session.powderProfile}
-              />
-            </div>
-            <div style={{ ...themeCard, padding: 16 }}>
-              <h2 style={h2}>Allowed magnetic space groups — k = 0 demo ({mag.ex.structure.name})</h2>
-              <CandidateComparison structure={mag.ex.structure} dataset={mag.dataset} magneticSiteLabels={magSiteLabels} mode="generate" />
-            </div>
-          </div>
-        );
-      case 3:
-        return (
           <div style={{ ...themeCard, padding: 16 }}>
-            <h2 style={h2}>Magnetic refinement ({mag.ex.structure.name})</h2>
-            <p style={stepHelp}>Refine moment components (μB, crystal axes) with proper constraints; nuclear and magnetic intensities kept separate.</p>
-            <MagneticPanel
-              structure={mag.ex.structure}
-              magnetic={mag.ex.magnetic}
-              parameters={mag.params}
-              bindings={magBind}
-              rows={magRows}
-              result={magResult}
-              busy={busy !== null}
-              onChange={patchMag}
-              onRefine={runMagnetic}
+            <h2 style={h2}>Magnetic structure — k-vector, subgroups &amp; moment refinement ({structure.name})</h2>
+            <p style={stepHelp}>Commensurate single-k workflow: pick the magnetic ion(s), auto-detect or enter k, read the allowed magnetic subgroups of its little group, then preview, apply to the pattern, and refine the moments.</p>
+            <KSearchPanel
+              structure={structure}
+              autoPeaks={magneticPeakD}
+              pattern={pattern}
+              nuclearParams={powderParams}
+              nuclearBindings={pBindings}
+              profile={session.powderProfile}
+              onApply={applyMagneticToSession}
             />
-          </div>
-        );
-      case 4:
-        return (
-          <div style={{ ...themeCard, padding: 16 }}>
-            <h2 style={h2}>Compare magnetic space groups</h2>
-            <CandidateComparison structure={mag.ex.structure} dataset={mag.dataset} magneticSiteLabels={magSiteLabels} mode="compare" />
           </div>
         );
       default:
