@@ -8,6 +8,7 @@
  */
 
 import type { Vec3 } from "@/core/math/types";
+import type { SymmetryOperation } from "@/core/crystal/types";
 
 /**
  * Frame in which a moment vector's components are expressed.
@@ -52,6 +53,16 @@ export interface MagneticModel {
   /** Propagation vector(s). Phase 5 assumes a single k. */
   readonly propagation: readonly PropagationVector[];
   readonly moments: readonly MagneticMoment[];
+  /**
+   * Magnetic (Shubnikov) operations of the chosen subgroup, each carrying its
+   * time-reversal sign (`timeReversal`). When present, the magnetic structure
+   * factor expands each site's moment over **these** operations — deduplicating
+   * the crystallographic orbit — instead of the nuclear space-group operations
+   * with θ = 1. This is essential for k ≠ 0: expanding over the nuclear group
+   * (θ = 1) is a ferromagnetic arrangement and gives *zero* satellite intensity,
+   * and it over-counts special positions. Absent ⇒ legacy nuclear-op expansion.
+   */
+  readonly operations?: readonly SymmetryOperation[];
   /**
    * Magnetic domains as a future extension: relative populations of symmetry-
    * related domains. Empty/absent means a single domain.

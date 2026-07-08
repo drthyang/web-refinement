@@ -68,13 +68,29 @@ export function magneticStructureFactor(
   let fy = ZERO;
   let fz = ZERO;
 
+  // Expand each moment over the *magnetic* subgroup operations (θ-signed) when
+  // the model carries them, deduplicating the crystallographic orbit; otherwise
+  // fall back to the nuclear operations (legacy k = 0 / no-subgroup behaviour).
+  // Expanding over the nuclear group with θ = 1 is a ferromagnetic arrangement:
+  // it gives zero intensity at k ≠ 0 satellites and over-counts special positions.
+  const ops = magnetic.operations ?? structure.spaceGroup.operations;
+  const dedup = magnetic.operations !== undefined;
+
   for (const moment of magnetic.moments) {
     const site = structure.sites.find((st) => st.label === moment.siteLabel);
     if (!site) continue;
     const ffId = formFactorId(structure, moment.siteLabel, moment.formFactorId);
     const fMag = table.has(ffId) ? table.j0(ffId, s) : 1;
+    const seen = dedup ? new Set<string>() : null;
 
-    for (const op of structure.spaceGroup.operations) {
+    for (const op of ops) {
+      const p = applyOperation(op, site.position);
+      if (seen) {
+        // One atom per unique position in the cell (no special-position over-count).
+        const key = p.map((v) => (((v % 1) + 1) % 1).toFixed(4)).join(",");
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
       // Transform the moment as an axial vector in the crystal-axis frame:
       // m' = θ · det(R) · R · m (θ = time-reversal flag ±1), then convert to
       // Cartesian and project perpendicular to Q. Rotate-then-project matters:
@@ -93,7 +109,6 @@ export function magneticStructureFactor(
           : crystalComponentsToCartesian(structure.cell, rotatedComps);
       const mPerp = perpendicularMoment(mCart, q);
 
-      const p = applyOperation(op, site.position);
       const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
       const ph = expι(phase);
       const w = MAGNETIC_PREFACTOR * site.occupancy * fMag;

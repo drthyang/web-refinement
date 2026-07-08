@@ -144,7 +144,9 @@ export function buildMagneticModel(
   }
 
   return {
-    magnetic: { id: magId, structureId: structure.id, propagation: [k], moments },
+    // Carry the magnetic subgroup operations so the structure factor expands the
+    // moments over the correct (θ-signed) symmetry — not the nuclear group.
+    magnetic: { id: magId, structureId: structure.id, propagation: [k], moments, operations: subgroupOps },
     params,
     bindings,
     activeSites,
