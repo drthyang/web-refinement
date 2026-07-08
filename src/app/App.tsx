@@ -18,6 +18,7 @@ import { powderPatternCsv, projectJson } from "@/core/export/exporters";
 import { parseMagneticCif } from "@/parsers/cif";
 import { parsePowderData } from "@/parsers/powderData";
 import { parseGsasCsvPattern } from "@/parsers/gsasPattern";
+import { isGsasHistogram, parseGsasHistogramPattern } from "@/parsers/gsasHistogram";
 import { detectDataFormat, type DetectedFormat } from "@/parsers/detectFormat";
 import type { ParameterBinding } from "@/core/refinement/types";
 import { startingPowderParams } from "@/app/loadData";
@@ -54,15 +55,14 @@ import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 // Lazy so three.js (~550 kB) only loads when the user opens the 3D view.
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
-import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono } from "@/app/theme";
+import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono, fz } from "@/app/theme";
 import { bondLengths } from "@/core/crystal/geometry";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 
 const STEPS: readonly Step[] = [
   { num: "1", label: "Refinement" },
-  { num: "2", label: "Quality" },
-  { num: "3", label: "Magnetic" },
+  { num: "2", label: "Magnetic" },
 ];
 
 const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", wavelength: 1.54 };
@@ -471,11 +471,14 @@ export function App(): JSX.Element {
   function applyPowder(text: string, filename: string, fmt: DetectedFormat, tag: string): void {
     const id = `${structure.id}-powder`;
     const isGsasCsv = /(^|,)\s*"?obs"?\s*,/i.test(text) && /calc/i.test(text);
+    const isGsasHist = isGsasHistogram(text);
     if (fmt.xUnit === "tof") {
       const overlay = isGsasCsv ? parseGsasCsvPattern(text, id, filename) : null;
       const parsed = overlay
         ? overlay.pattern
-        : parsePowderData(text, { id, name: filename, xUnit: "tof", radiation: { kind: "neutron-tof" } });
+        : isGsasHist
+          ? parseGsasHistogramPattern(text, id, filename, { radiation: { kind: "neutron-tof" } })
+          : parsePowderData(text, { id, name: filename, xUnit: "tof", radiation: { kind: "neutron-tof" } });
       if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
       const tofInstrument = instrumentLoaded && instrument.kind === "tof" ? instrument : null;
       // A GSAS-II CSV carries its own calc/background (shown as a reference
@@ -507,7 +510,9 @@ export function App(): JSX.Element {
       setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag}. ${spec.params.length} parameters, back-to-back-exponential profile — click “Refine powder” or “Guided”. ${fmt.note}`);
       return;
     }
-    const parsed = parsePowderData(text, { id, name: filename, xUnit: fmt.xUnit, radiation: fmt.radiation, ...(fmt.radiation.kind !== "neutron-tof" ? { wavelength: fmt.radiation.wavelength } : {}) });
+    const parsed = isGsasHist
+      ? parseGsasHistogramPattern(text, id, filename, { radiation: fmt.radiation })
+      : parsePowderData(text, { id, name: filename, xUnit: fmt.xUnit, radiation: fmt.radiation, ...(fmt.radiation.kind !== "neutron-tof" ? { wavelength: fmt.radiation.wavelength } : {}) });
     if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
     // Constant-wavelength data: a still-selected TOF instrument (e.g. the bundled
     // default) doesn't apply, so fall back to a constant-wavelength default and
@@ -614,7 +619,7 @@ export function App(): JSX.Element {
       meta: `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
     },
     {
-      label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.csv,text/plain", onFile: onLoadData,
+      label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
       chip: isSynthetic ? "⚠ synthetic" : "✓ loaded",
       title: isSynthetic ? "Synthetic demo pattern" : powderSource,
       meta: `${pattern.points.length} points · ${UNIT_LABEL[pattern.xUnit]} ${patternExtent.min.toFixed(0)}–${patternExtent.max.toFixed(0)}`,
@@ -638,7 +643,7 @@ export function App(): JSX.Element {
         onExportProject={exportProject}
       />
       <StatusBar message={message} />
-      <main style={{ flex: 1, maxWidth: 1480, width: "100%", margin: "0 auto", padding: "16px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+      <main className="wb-main" style={{ flex: 1 }}>
         {renderStep()}
       </main>
       <div style={disclaimerBar}>
@@ -654,8 +659,8 @@ export function App(): JSX.Element {
         return (
           <>
             <SummaryCards cards={summaryCards} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, alignItems: "stretch" }}>
-              <div style={{ ...themeCard, gridColumn: "span 2", padding: "14px 16px", display: "flex", flexDirection: "column" }}>
+            <div className="wb-work">
+              <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
                   <span style={themeLabel}>
                     {plotMode === "structure" ? "Crystal structure — unit cell" : "Powder pattern — observed vs calculated"}
@@ -755,11 +760,12 @@ export function App(): JSX.Element {
                 disabled={tofViewOnly}
               />
             </div>
+            <div style={{ ...themeCard, padding: "16px 18px" }}>
+              <QualityPanel structure={structure} powderResult={powderResult} pattern={pattern} params={powderParams} bindings={pBindings} profile={session.powderProfile} />
+            </div>
           </>
         );
       case 1:
-        return <div style={{ ...themeCard, padding: 16 }}><QualityPanel structure={structure} powderResult={powderResult} pattern={pattern} params={powderParams} bindings={pBindings} profile={session.powderProfile} /></div>;
-      case 2:
         return (
           <div style={{ ...themeCard, padding: 16 }}>
             <h2 style={h2}>Magnetic structure — k-vector, subgroups &amp; moment refinement ({structure.name})</h2>
@@ -806,26 +812,27 @@ function QualityPanel({
     const npp = normalProbabilityPlot(weightedResiduals(curves.yObs, curves.yCalc, sigmas));
     return { obsCalc, npp };
   }, [structure, pattern, params, bindings, profile]);
+  const tileHead: React.CSSProperties = { fontSize: fz.small, fontWeight: 600, color: theme.ink };
   return (
     <div>
-      <h2 style={h2}>Step 4 — Refinement quality &amp; structure investigation</h2>
-      <p style={stepHelp}>Assess fit quality (R, wR, GoF) and inspect the refined geometry (bond lengths) before proceeding to magnetism.</p>
-      <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
+      <h2 style={h2}>Refinement quality &amp; geometry</h2>
+      <p style={stepHelp}>Fit quality (R, wR, GoF), refined bond lengths, and validation plots for the current model.</p>
+      <div className="wb-quality">
         <div>
-          <strong style={{ fontSize: 13 }}>Agreement factors</strong>
-          <table style={{ fontSize: 13, marginTop: 6 }}>
+          <strong style={tileHead}>Agreement factors</strong>
+          <table style={{ fontSize: fz.body, marginTop: 6 }}>
             <tbody>
               <tr><td style={kcell}>Powder</td><td>{powderResult ? `wR ${(100 * (powderResult.agreement.rWeighted ?? 0)).toFixed(2)}% · GoF ${(powderResult.agreement.goodnessOfFit ?? 0).toFixed(2)}` : "not refined"}</td></tr>
             </tbody>
           </table>
-          <p style={{ fontSize: 12, color: "#666", maxWidth: 320 }}>
+          <p style={{ fontSize: fz.small, color: theme.secondary, marginTop: 8 }}>
             GoF near 1 indicates a fit consistent with the data uncertainties. Much larger values mean an
             incomplete model or underestimated errors.
           </p>
         </div>
         <div>
-          <strong style={{ fontSize: 13 }}>Bond lengths (≤ 3.2 Å)</strong>
-          <table style={{ fontSize: 12, marginTop: 6 }}>
+          <strong style={tileHead}>Bond lengths (≤ 3.2 Å)</strong>
+          <table style={{ fontSize: fz.small, marginTop: 6 }}>
             <thead><tr><th style={kcell}>pair</th><th style={kcell}>d (Å)</th></tr></thead>
             <tbody>
               {bonds.map((b, i) => (
@@ -834,15 +841,15 @@ function QualityPanel({
             </tbody>
           </table>
         </div>
-      </div>
-      <div style={{ marginTop: 20 }}>
-        <strong style={{ fontSize: 13 }}>Validation plots</strong>
-        <p style={{ fontSize: 12, color: theme.secondary, maxWidth: 640, margin: "2px 0 0" }}>
-          More diagnostic than wR alone: F_obs vs F_calc flags individual bad reflections;
-          the normal probability plot (Abrahams &amp; Keve 1971) reveals model error <em>and</em> whether
-          the uncertainties (weights) are right — a straight slope-1 line is the goal.
-        </p>
-        <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} />
+        <div>
+          <strong style={tileHead}>Validation plots</strong>
+          <p style={{ fontSize: fz.small, color: theme.secondary, margin: "2px 0 8px" }}>
+            More diagnostic than wR alone: F_obs vs F_calc flags individual bad reflections;
+            the normal probability plot (Abrahams &amp; Keve 1971) reveals model error <em>and</em> whether
+            the uncertainties (weights) are right — a straight slope-1 line is the goal.
+          </p>
+          <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} />
+        </div>
       </div>
     </div>
   );

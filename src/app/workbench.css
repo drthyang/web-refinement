@@ -1,0 +1,55 @@
+/*
+ * Layout + fluid-type layer for the workbench. Inline component styles handle
+ * most of the look; this file owns the few things inline styles cannot do —
+ * viewport-responsive type tokens (clamp) and media-query grid reflow — so the
+ * UI fills wide windows yet stays comfortable and readable on small ones.
+ */
+
+:root {
+  /* Fluid type scale: grows gently with the viewport, capped for comfort. */
+  --fz-micro: clamp(10.5px, 0.18vw + 9px, 12.5px);
+  --fz-small: clamp(11.5px, 0.24vw + 9.6px, 14px);
+  --fz-body: clamp(12.5px, 0.3vw + 10px, 15.5px);
+  --fz-large: clamp(14px, 0.42vw + 11px, 18px);
+  --fz-title: clamp(15px, 0.55vw + 12px, 22px);
+}
+
+/* Main content column: fills the window on wide screens, comfortable gutters. */
+.wb-main {
+  width: 100%;
+  max-width: 2100px;
+  margin: 0 auto;
+  padding: clamp(12px, 1.4vw, 30px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(12px, 1vw, 22px);
+}
+
+/* Auto-reflowing tile row (summary cards, quality tiles): never crowds. */
+.wb-autofit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: clamp(12px, 0.9vw, 18px);
+}
+
+/* Working area: plot (wide) beside the parameter panel; stacks when narrow. */
+.wb-work {
+  display: grid;
+  grid-template-columns: minmax(0, 2.4fr) minmax(340px, 1fr);
+  gap: clamp(12px, 1vw, 20px);
+  align-items: start;
+}
+
+/* Quality tiles: agreement + geometry + validation plots reflow to fit. */
+.wb-quality {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: clamp(16px, 1.4vw, 32px);
+  align-items: start;
+}
+
+@media (max-width: 1120px) {
+  .wb-work {
+    grid-template-columns: 1fr;
+  }
+}

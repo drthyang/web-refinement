@@ -52,6 +52,20 @@ export const color = {
 export const mono = "'IBM Plex Mono', ui-monospace, monospace";
 export const sans = "'IBM Plex Sans', system-ui, sans-serif";
 
+/**
+ * Fluid font-size tokens (defined in workbench.css as clamp() CSS variables).
+ * Usable directly in inline styles — `fontSize: fz.body` — so text grows gently
+ * with the window while staying comfortable and capped. Prefer these over bare
+ * pixel literals for anything a reader looks at.
+ */
+export const fz = {
+  micro: "var(--fz-micro)",
+  small: "var(--fz-small)",
+  body: "var(--fz-body)",
+  large: "var(--fz-large)",
+  title: "var(--fz-title)",
+} as const;
+
 export const radius = { card: 12, button: 8, small: 7, chip: 6, pill: 999 } as const;
 
 export const shadow = {
@@ -62,9 +76,9 @@ export const shadow = {
 
 import type { CSSProperties } from "react";
 
-/** Uppercase micro-label (10px, 600, tracked) used across cards/panels. */
+/** Uppercase micro-label (tracked) used across cards/panels. */
 export const uppercaseLabel: CSSProperties = {
-  fontSize: 10,
+  fontSize: fz.micro,
   fontWeight: 600,
   letterSpacing: "0.08em",
   textTransform: "uppercase",
@@ -81,8 +95,8 @@ export const ghostButton: CSSProperties = {
   border: `1px solid ${color.control}`,
   background: color.surface,
   borderRadius: radius.small,
-  padding: "1px 9px",
-  fontSize: 11,
+  padding: "2px 10px",
+  fontSize: fz.micro,
   color: color.ink,
   cursor: "pointer",
 };
@@ -91,8 +105,8 @@ export const secondaryButton: CSSProperties = {
   border: `1px solid ${color.control}`,
   background: color.surface,
   borderRadius: radius.button,
-  padding: "6px 13px",
-  fontSize: 12.5,
+  padding: "7px 15px",
+  fontSize: fz.small,
   color: color.ink,
   cursor: "pointer",
 };
@@ -102,8 +116,8 @@ export const primaryButton: CSSProperties = {
   background: color.primary,
   color: "#fff",
   borderRadius: radius.button,
-  padding: "7px 16px",
-  fontSize: 12.5,
+  padding: "8px 18px",
+  fontSize: fz.small,
   fontWeight: 600,
   cursor: "pointer",
 };

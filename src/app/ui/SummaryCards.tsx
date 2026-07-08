@@ -4,7 +4,7 @@
  */
 
 import { useState, type CSSProperties } from "react";
-import { card, color, mono, radius, uppercaseLabel } from "@/app/theme";
+import { card, color, mono, radius, uppercaseLabel, fz } from "@/app/theme";
 
 export interface SummaryCardData {
   readonly label: string;
@@ -18,7 +18,7 @@ export interface SummaryCardData {
 
 export function SummaryCards({ cards }: { cards: readonly SummaryCardData[] }): JSX.Element {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+    <div className="wb-autofit">
       {cards.map((c) => (
         <SummaryCard key={c.label} data={c} />
       ))}
@@ -28,7 +28,7 @@ export function SummaryCards({ cards }: { cards: readonly SummaryCardData[] }): 
 
 function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
   return (
-    <div style={{ ...card, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 5 }}>
+    <div style={{ ...card, padding: "14px 18px", display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", alignItems: "center" }}>
         <span style={uppercaseLabel}>{data.label}</span>
         <LoadButton label={data.loadLabel} accept={data.accept} onFile={data.onFile} />
@@ -36,8 +36,8 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
       <div>
         <span style={okChip}>{data.chip}</span>
       </div>
-      <div style={{ fontSize: 14, fontWeight: 700 }}>{data.title}</div>
-      <div style={{ fontSize: 11.5, color: color.secondary, fontFamily: mono }}>{data.meta}</div>
+      <div style={{ fontSize: fz.large, fontWeight: 700, lineHeight: 1.25 }}>{data.title}</div>
+      <div style={{ fontSize: fz.small, color: color.secondary, fontFamily: mono }}>{data.meta}</div>
     </div>
   );
 }
@@ -52,8 +52,8 @@ function LoadButton({ label, accept, onFile }: { label: string; accept: string; 
         marginLeft: "auto",
         border: `1px solid ${color.control}`,
         borderRadius: radius.small,
-        padding: "1px 9px",
-        fontSize: 11,
+        padding: "2px 10px",
+        fontSize: fz.micro,
         color: color.ink,
         cursor: "pointer",
         background: hover ? "#f5f0e7" : "transparent",
@@ -75,8 +75,8 @@ function LoadButton({ label, accept, onFile }: { label: string; accept: string; 
 }
 
 const okChip: CSSProperties = {
-  fontSize: 11,
-  padding: "1px 9px",
+  fontSize: fz.micro,
+  padding: "2px 10px",
   borderRadius: radius.pill,
   background: color.okBg,
   border: `1px solid ${color.okBorder}`,

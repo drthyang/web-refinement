@@ -9,10 +9,13 @@
 
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import type { NormalProbabilityPlot } from "@/core/refinement/diagnostics";
-import { color as theme, mono as themeMono } from "@/app/theme";
+import { color as theme, mono as themeMono, fz } from "@/app/theme";
 
+// SVG user-space size; the rendered box is fluid (viewBox + width:100%).
 const SIZE = 300;
 const PAD = 42;
+/** Responsive square: fills its column up to a comfortable cap, keeps aspect. */
+const svgStyle: React.CSSProperties = { width: "100%", height: "auto", maxWidth: 360, display: "block" };
 
 function axisLine(x1: number, y1: number, x2: number, y2: number, dash = false): JSX.Element {
   return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={theme.border} strokeWidth={1} {...(dash ? { strokeDasharray: "4 4" } : {})} />;
@@ -20,7 +23,7 @@ function axisLine(x1: number, y1: number, x2: number, y2: number, dash = false):
 
 export function QualityPlots({ obsCalc, npp }: { obsCalc: readonly ReflectionObsCalc[]; npp: NormalProbabilityPlot }): JSX.Element {
   return (
-    <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginTop: 10 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 20, marginTop: 4 }}>
       <FobsFcalc rows={obsCalc} />
       <NormalProb npp={npp} />
     </div>
@@ -34,7 +37,7 @@ function FobsFcalc({ rows }: { rows: readonly ReflectionObsCalc[] }): JSX.Elemen
   const sy = (v: number): number => SIZE - PAD - (v / max) * (SIZE - 2 * PAD);
   return (
     <figure style={{ margin: 0 }}>
-      <svg width={SIZE} height={SIZE} role="img" aria-label="F observed vs F calculated">
+      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} style={svgStyle} role="img" aria-label="F observed vs F calculated">
         {axisLine(PAD, SIZE - PAD, SIZE - PAD, SIZE - PAD)}
         {axisLine(PAD, PAD, PAD, SIZE - PAD)}
         {/* F_obs = F_calc reference line. */}
@@ -58,7 +61,7 @@ function NormalProb({ npp }: { npp: NormalProbabilityPlot }): JSX.Element {
   const sy = (v: number): number => SIZE - PAD - ((v + lim) / (2 * lim)) * (SIZE - 2 * PAD);
   return (
     <figure style={{ margin: 0 }}>
-      <svg width={SIZE} height={SIZE} role="img" aria-label="Normal probability plot">
+      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} style={svgStyle} role="img" aria-label="Normal probability plot">
         {axisLine(PAD, sy(0), SIZE - PAD, sy(0), true)}
         {axisLine(sx(0), PAD, sx(0), SIZE - PAD, true)}
         {/* Ideal slope-1 / intercept-0 line. */}
@@ -77,4 +80,4 @@ function NormalProb({ npp }: { npp: NormalProbabilityPlot }): JSX.Element {
   );
 }
 
-const cap: React.CSSProperties = { fontSize: 11.5, color: theme.secondary, maxWidth: SIZE, marginTop: 4 };
+const cap: React.CSSProperties = { fontSize: fz.micro, color: theme.secondary, maxWidth: 360, marginTop: 5 };
