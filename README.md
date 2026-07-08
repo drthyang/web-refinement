@@ -81,4 +81,6 @@ calculations run in Web Workers. Full detail in
 
 ## License
 
-MIT.
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only).
+
+This is a web application: if you run a modified version on a network server, you must make the complete corresponding source code available to its users (AGPL §13).
