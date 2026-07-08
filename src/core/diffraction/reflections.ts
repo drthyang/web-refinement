@@ -101,11 +101,17 @@ export function generateReflections(
   const invDMax2 = 1 / (dMax * dMax); // lower bound on 1/d²
   const invDMin2 = 1 / (dMin * dMin); // upper bound on 1/d²
 
-  const nMax = Math.ceil(Math.max(cell.a, cell.b, cell.c) / dMin) + 1;
+  // Miller-index search half-width. Capped so an unreasonable cell edge (a typo
+  // like 54.2→542, or a diverged refinement value) cannot blow the triple loop
+  // up to astronomical size and freeze the thread. NMAX_CAP=160 covers cells up
+  // to ~80 Å at dMin=0.5 — far beyond any inorganic powder this tool targets.
+  const NMAX_CAP = 120;
+  const MAX_REFLECTIONS = 12000; // a physical powder cell yields far fewer
+  const nMax = Math.min(NMAX_CAP, Math.ceil(Math.max(cell.a, cell.b, cell.c) / dMin) + 1);
   const seen = new Set<number>(); // every individual (hkl) already assigned to a family
   const reflections: Reflection[] = [];
 
-  for (let h = -nMax; h <= nMax; h++) {
+  outer: for (let h = -nMax; h <= nMax; h++) {
     for (let k = -nMax; k <= nMax; k++) {
       for (let l = -nMax; l <= nMax; l++) {
         if (h === 0 && k === 0 && l === 0) continue;
@@ -122,6 +128,9 @@ export function generateReflections(
         const repInvd2 = A.a11 * rep.h * rep.h + A.a22 * rep.k * rep.k + A.a33 * rep.l * rep.l + A.a12 * rep.h * rep.k + A.a13 * rep.h * rep.l + A.a23 * rep.k * rep.l;
         const d = 1 / Math.sqrt(repInvd2);
         reflections.push({ h: rep.h, k: rep.k, l: rep.l, d, q: (2 * Math.PI) / d, multiplicity: family.size });
+        // Bail out on a pathological cell (a typo/diverged value) rather than
+        // grinding through an enormous reciprocal shell and freezing the thread.
+        if (reflections.length >= MAX_REFLECTIONS) break outer;
       }
     }
   }

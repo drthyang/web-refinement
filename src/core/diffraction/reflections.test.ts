@@ -21,6 +21,17 @@ describe("reflection generation (P6₃/mmc)", () => {
     }
   });
 
+  it("stays bounded (does not hang) for an unreasonably large cell edge", () => {
+    // A typo'd or diverged cell value must not blow the Miller loop up to an
+    // astronomical size — the nMax cap keeps it fast and finite.
+    const huge: UnitCell = { ...cell, a: 5000, b: 5000 };
+    const t0 = Date.now();
+    const out = generateReflections(huge, sg, 0.5, 6.0);
+    expect(Date.now() - t0).toBeLessThan(1500);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.length).toBeLessThanOrEqual(12000);
+  });
+
   it("excludes the 6₃ screw-absent (0 0 1) but keeps (0 0 2)", () => {
     const has001 = refl.some((r) => Math.abs(r.d - cell.c) < 1e-3);
     expect(has001).toBe(false);
