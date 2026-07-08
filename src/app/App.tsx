@@ -8,6 +8,7 @@ import type { ProjectFile } from "@/core/project/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import type { PeakShape } from "@/core/diffraction/profile";
+import type { BackgroundType } from "@/core/diffraction/background";
 import { buildPowderSpec, guidedPowderParams } from "@/app/powderSpec";
 import { DEFAULT_STAGE_KINDS } from "@/core/workflow/structureRefinement";
 import { powderPatternCsv, projectJson } from "@/core/export/exporters";
@@ -280,11 +281,39 @@ export function App(): JSX.Element {
     }
   }
 
-  const profileReq = (): { shape: PeakShape; eta?: number; lorentz?: boolean } => ({
+  const profileReq = (): { shape: PeakShape; eta?: number; lorentz?: boolean; backgroundType?: BackgroundType } => ({
     shape: session.powderProfile.shape,
     ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
     ...(session.powderProfile.lorentz !== undefined ? { lorentz: session.powderProfile.lorentz } : {}),
+    ...(session.powderProfile.backgroundType !== undefined ? { backgroundType: session.powderProfile.backgroundType } : {}),
   });
+
+  /** Change the smooth-background basis (reinterprets the same coefficients). */
+  function setBackgroundType(backgroundType: BackgroundType): void {
+    setSession((s) => ({ ...s, powderProfile: { ...s.powderProfile, backgroundType } }));
+    setPowderResult(null);
+  }
+
+  /** Change the number of background coefficients (rebuilds the spec, keeping
+   *  every other parameter's value/free state and the chosen background type). */
+  function setBackgroundTerms(n: number): void {
+    const count = Math.max(0, Math.min(24, Math.trunc(n)));
+    setSession((s) => {
+      const spec = buildPowderSpec(s.structure, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, count);
+      const previous = new Map(s.powderParams.map((p) => [p.id, p]));
+      return {
+        ...s,
+        backgroundTerms: count,
+        powderParams: spec.params.map((p) => {
+          const old = previous.get(p.id);
+          return old ? { ...p, value: old.value, initialValue: old.initialValue, fixed: old.fixed } : p;
+        }),
+        powderBindings: spec.bindings,
+        powderProfile: { ...spec.profile, ...(s.powderProfile.backgroundType ? { backgroundType: s.powderProfile.backgroundType } : {}) },
+      };
+    });
+    setPowderResult(null);
+  }
 
   /** Reset every powder parameter to its initial value and clear the result. */
   function resetPowderParams(): void {
@@ -585,6 +614,24 @@ export function App(): JSX.Element {
                     <button style={smallBtn} onClick={() => setFitRange(null)}>Reset range</button>
                   )}
                 </p>
+                {!tofViewOnly && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: 12, color: theme.secondary }}>
+                    <span style={{ ...themeLabel, marginRight: 2 }}>Background</span>
+                    <select
+                      value={session.powderProfile.backgroundType ?? "chebyshev"}
+                      onChange={(e) => setBackgroundType(e.target.value as BackgroundType)}
+                      style={bgSelect}
+                    >
+                      <option value="chebyshev">Chebyshev</option>
+                      <option value="cosine">Cosine (Fourier)</option>
+                      <option value="powerSeries">Power series</option>
+                    </select>
+                    <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      terms
+                      <input type="number" min={1} max={24} step={1} value={session.backgroundTerms} onChange={(e) => setBackgroundTerms(Number(e.target.value))} style={bgTermsInput} />
+                    </label>
+                  </div>
+                )}
               </div>
               <ParameterPanel
                 params={powderParams}
@@ -716,5 +763,7 @@ const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 
 const kcell: React.CSSProperties = { padding: "2px 10px 2px 0", color: theme.secondary, verticalAlign: "top" };
 const stepHelp: React.CSSProperties = { fontSize: 13, color: theme.secondary, marginTop: 0 };
 const smallBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "1px 9px", fontSize: 11, cursor: "pointer", marginLeft: 6 };
+const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "2px 6px", fontSize: 12, color: theme.ink, cursor: "pointer" };
+const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };
 const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderTop: `1px solid ${theme.warnBorder}`, color: theme.warnInk };
 const copyrightBar: React.CSSProperties = { padding: "10px 24px", fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised, textAlign: "center" };

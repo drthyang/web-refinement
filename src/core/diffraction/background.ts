@@ -9,7 +9,18 @@
  * refinement.
  */
 
-export type BackgroundType = "polynomial" | "chebyshev";
+/**
+ * Smooth-background basis (GSAS-II-style). The three refinable forms below each
+ * use N coefficients over the same normalized abscissa, so switching type keeps
+ * the coefficient count and stays well-conditioned across a wide range
+ * (2θ/Q/d/TOF):
+ *  - `chebyshev`   — Chebyshev polynomials Tₙ(t), t ∈ [−1, 1] (default).
+ *  - `cosine`      — Fourier cosine series Σ cₙ·cos(nπ·s), s ∈ [0, 1].
+ *  - `powerSeries` — polynomial in the *normalized* t ∈ [−1, 1] (Σ cₙ·tⁿ).
+ * `polynomial` is the raw-power series (c0 + c1·x + …), kept for compatibility;
+ * it overflows on a wide abscissa and is not offered for refinement.
+ */
+export type BackgroundType = "chebyshev" | "cosine" | "powerSeries" | "polynomial";
 
 /** Map an abscissa value onto the Chebyshev domain t ∈ [−1, 1]. */
 function toChebyshevT(x: number, xMin: number, xMax: number): number {
@@ -39,6 +50,41 @@ export function chebyshevBackground(
   return sum;
 }
 
+/** Fourier cosine series Σ cₙ·cos(nπ·s) with s = (x−xMin)/(xMax−xMin) ∈ [0, 1].
+ *  n=0 gives the constant c₀; all terms are bounded (|cos| ≤ 1). */
+export function cosineBackground(
+  x: number,
+  coeffs: readonly number[],
+  xMin: number,
+  xMax: number,
+): number {
+  if (coeffs.length === 0) return 0;
+  const span = xMax - xMin;
+  const s = span > 0 ? (x - xMin) / span : 0;
+  let sum = 0;
+  for (let n = 0; n < coeffs.length; n++) sum += coeffs[n]! * Math.cos(n * Math.PI * s);
+  return sum;
+}
+
+/** Power series Σ cₙ·tⁿ in the *normalized* t ∈ [−1, 1] — a monomial basis that,
+ *  unlike the raw-power polynomial, stays finite on a wide abscissa. */
+export function powerSeriesBackground(
+  x: number,
+  coeffs: readonly number[],
+  xMin: number,
+  xMax: number,
+): number {
+  if (coeffs.length === 0) return 0;
+  const t = toChebyshevT(x, xMin, xMax);
+  let sum = 0;
+  let tp = 1;
+  for (const c of coeffs) {
+    sum += c * tp;
+    tp *= t;
+  }
+  return sum;
+}
+
 /** Raw-power polynomial c0 + c1·x + c2·x² + … (kept for compatibility). */
 export function polynomialBackground(x: number, coeffs: readonly number[]): number {
   let value = 0;
@@ -59,7 +105,14 @@ export function evaluateBackground(
   xMax: number,
 ): number {
   if (!coeffs || coeffs.length === 0) return 0;
-  return type === "chebyshev"
-    ? chebyshevBackground(x, coeffs, xMin, xMax)
-    : polynomialBackground(x, coeffs);
+  switch (type) {
+    case "chebyshev":
+      return chebyshevBackground(x, coeffs, xMin, xMax);
+    case "cosine":
+      return cosineBackground(x, coeffs, xMin, xMax);
+    case "powerSeries":
+      return powerSeriesBackground(x, coeffs, xMin, xMax);
+    case "polynomial":
+      return polynomialBackground(x, coeffs);
+  }
 }
