@@ -28,6 +28,30 @@ describe("refinement engine (Levenberg–Marquardt)", () => {
     expect(result.esd.scale).toBeGreaterThanOrEqual(0);
   });
 
+  it("calls onIteration once per accepted cycle with the current calc + agreement", () => {
+    const model = [1, 4, 9, 16, 25];
+    const observations = Float64Array.from(model.map((m) => 2.5 * m));
+    const weights = Float64Array.from(model.map(() => 1));
+    const parameters: RefinementParameter[] = [
+      { id: "scale", label: "scale", kind: "scale", value: 1, initialValue: 1, fixed: false },
+    ];
+    const problem: RefinementProblem = {
+      parameters, observations, weights,
+      calculate: (v) => Float64Array.from(model.map((m) => (v.scale ?? 1) * m)),
+    };
+    const cycles: number[] = [];
+    const result = refine(problem, {
+      onIteration: (yCalc, agreement) => {
+        expect(yCalc.length).toBe(model.length);
+        cycles.push(agreement.rWeighted ?? 1);
+      },
+    });
+    // One callback per recorded history cycle, and the residual is non-increasing.
+    expect(cycles.length).toBe(result.history.length);
+    expect(cycles.length).toBeGreaterThan(0);
+    for (let i = 1; i < cycles.length; i++) expect(cycles[i]!).toBeLessThanOrEqual(cycles[i - 1]! + 1e-9);
+  });
+
   it("recovers two parameters of a non-linear model", () => {
     // y = a·exp(b·x); true a=3, b=0.5.
     const xs = [0, 0.5, 1, 1.5, 2, 2.5, 3];

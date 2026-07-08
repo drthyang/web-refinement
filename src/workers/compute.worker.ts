@@ -11,10 +11,17 @@ import { buildSingleCrystalProblem } from "@/core/workflow/singleCrystal";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
 import { runPowderRefinement } from "@/workers/runPowder";
 
+const post = (msg: unknown): void => (self as DedicatedWorkerGlobalScope).postMessage(msg);
+
 function handle(req: ComputeRequest): ComputeResponse {
   try {
     if (req.type === "refinePowder") {
-      return { requestId: req.requestId, ok: true, result: runPowderRefinement(req) };
+      // Emit each accepted cycle's calculated curve as a progress message so the
+      // UI can animate convergence; the final result is returned below.
+      const result = runPowderRefinement(req, (yCalc, rWeighted) =>
+        post({ requestId: req.requestId, progress: { yCalc, rWeighted } }),
+      );
+      return { requestId: req.requestId, ok: true, result };
     }
     if (req.type === "refineMagnetic") {
       const problem = buildMagneticSingleCrystalProblem(

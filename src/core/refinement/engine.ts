@@ -377,6 +377,7 @@ export function refine(
       n,
     );
     history.push({ iteration: iter + 1, chiSquared: current.chi, agreement });
+    opts.onIteration?.(current.yCalc, agreement);
 
     if (!stepAccepted) {
       // No downhill step exists. If the gradient is essentially zero we are at

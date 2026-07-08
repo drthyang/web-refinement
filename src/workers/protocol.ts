@@ -79,3 +79,13 @@ export interface ComputeFailure {
 }
 
 export type ComputeResponse = ComputeSuccess | ComputeFailure;
+
+/** Per-cycle progress emitted during a powder refinement (before the final
+ *  response), so the UI can animate the calculated curve as it converges. */
+export interface ComputeProgress {
+  readonly requestId: number;
+  readonly progress: { readonly yCalc: number[]; readonly rWeighted: number };
+}
+
+/** Anything the worker may post back: progress ticks then a final response. */
+export type WorkerMessage = ComputeResponse | ComputeProgress;

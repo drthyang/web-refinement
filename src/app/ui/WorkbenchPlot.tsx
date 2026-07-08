@@ -6,7 +6,7 @@
  * and drag-to-zoom on the x-axis. Fed by the real refinement curves.
  */
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { PowderCurves } from "@/core/workflow/powder";
 import type { PhaseTicks } from "@/visualization/reflectionTicks";
 import { color, mono } from "@/app/theme";
@@ -27,17 +27,21 @@ interface Props {
 }
 
 // Fixed plot geometry (SVG user units); the SVG stretches to its container.
+// Vertical stack (top→bottom): intensity plot, x-axis ticks/labels, a Bragg
+// reflection tick band, then the difference band — each with clear separation.
 const X0 = 58;
 const X1 = 846;
 const XW = X1 - X0; // 788
 const TOP = 14;
-const BASE = 380; // main-region baseline
-const MAINH = BASE - TOP - 10; // 356
-const DIFF_Y = 458;
-const DIFF_A = 58; // difference band half-height
-const TICK_TOP = 384;
-const TICK_BOT = 393;
-const CAP_Y = 507;
+const BASE = 356; // main-region baseline
+const MAINH = BASE - TOP - 6; // intensity drawable height
+const X_LABEL_Y = 372; // x-axis tick labels (below the axis marks)
+const TICK_TOP = 382; // Bragg tick band (below the x-axis labels)
+const TICK_BOT = 391;
+const TICK_ROW = 6; // vertical step per phase row
+const DIFF_Y = 470; // difference-band zero line
+const DIFF_A = 46; // difference band half-height
+const CAP_Y = 522; // fit-handle caps, below the difference band
 
 function niceNum(x: number, round: boolean): number {
   if (x <= 0) return 1;
@@ -90,20 +94,20 @@ export function WorkbenchPlot({
   const fitHi = fitRange ? fitRange.max : fullMax;
   const fitActive = fitRange !== undefined && (fitLo > fullMin + 1e-9 || fitHi < fullMax - 1e-9);
 
-  // y auto-scale to the data in view.
+  // y auto-scale to the *observed* data in view only. Basing it on the calc too
+  // would make the axis (and every marker) rescale on every refinement cycle;
+  // observed peaks dominate the height anyway, so this keeps the frame stable.
+  const yObs = curves.yObs;
   let yTop = 1;
   for (let i = 0; i < xs.length; i++) {
-    if (xs[i]! < vlo || xs[i]! > vhi) continue;
-    yTop = Math.max(yTop, curves.yObs[i]!, curves.yCalc[i]!);
+    if (xs[i]! >= vlo && xs[i]! <= vhi) yTop = Math.max(yTop, yObs[i]!);
   }
   yTop *= 1.06;
   const sy = (y: number): number => BASE - (Math.min(Math.max(y, 0), yTop) / yTop) * MAINH;
 
-  let dm = 1;
-  for (let i = 0; i < xs.length; i++) {
-    if (xs[i]! < vlo || xs[i]! > vhi || xs[i]! < fitLo || xs[i]! > fitHi) continue;
-    dm = Math.max(dm, Math.abs(curves.diff[i]!));
-  }
+  // Difference band scaled to a fixed fraction of the pattern height — stable
+  // across cycles (auto-scaling it to max|diff| would jump as the fit converges).
+  const dm = yTop * 0.06;
   const sdiff = (d: number): number => DIFF_Y - (Math.min(Math.max(d, -dm), dm) / dm) * DIFF_A;
 
   const poly = (ys: readonly number[], map: (y: number) => number, lo: number, hi: number): string => {
@@ -119,6 +123,46 @@ export function WorkbenchPlot({
   const calcLine = poly(curves.yCalc, sy, fitLo, fitHi);
   const bkgLine = curves.yBackground ? poly(curves.yBackground, sy, fitLo, fitHi) : "";
   const diffLine = poly(curves.diff, sdiff, fitLo, fitHi);
+
+  // Observed markers are the heaviest part of the SVG (thousands of circles) and
+  // do not change while the calculated curve animates during a refinement, so
+  // memoize them on their stable inputs — React then skips re-rendering them
+  // every cycle, keeping the live update cheap and flicker-free.
+  const obsMarkers = useMemo(() => {
+    const mx = (x: number): number => X0 + ((x - vlo) / vspan) * XW;
+    const my = (y: number): number => BASE - (Math.min(Math.max(y, 0), yTop) / yTop) * MAINH;
+    const out: JSX.Element[] = [];
+    for (let i = 0; i < xs.length; i += 2) {
+      const x = xs[i]!;
+      if (x < vlo || x > vhi) continue;
+      out.push(<circle key={i} cx={mx(x)} cy={my(yObs[i]!)} r={1.3} fill={color.obs} opacity={0.5} />);
+    }
+    return out;
+  }, [xs, yObs, vlo, vhi, vspan, yTop]);
+
+  // Bragg tick rows are also static during a refinement (positions depend on the
+  // structure, not the fit) and there can be hundreds — memoize them too.
+  const braggTicks = useMemo(() => {
+    const mx = (x: number): number => X0 + ((x - vlo) / vspan) * XW;
+    return (phases ?? []).map((phase, row) => {
+      const y1 = TICK_TOP + row * TICK_ROW;
+      const y2 = TICK_BOT + row * TICK_ROW;
+      return (
+        <g key={phase.id} stroke={phase.color}>
+          {phase.ticks.map((t, i) =>
+            t.x >= vlo && t.x <= vhi ? (
+              <g key={i} className="wb-tick">
+                <line className="wb-mark" x1={mx(t.x)} y1={y1} x2={mx(t.x)} y2={y2} strokeWidth={1} />
+                <line x1={mx(t.x)} y1={y1} x2={mx(t.x)} y2={y2} stroke="transparent" strokeWidth={7}>
+                  <title>{`${phase.label}  (${t.hkl})  d ${t.d.toFixed(3)} Å`}</title>
+                </line>
+              </g>
+            ) : null,
+          )}
+        </g>
+      );
+    });
+  }, [phases, vlo, vhi, vspan]);
 
   // Y / X nice ticks.
   const yStep = niceNum(yTop / 4, true);
@@ -222,21 +266,17 @@ export function WorkbenchPlot({
         {xTicks.map((v) => (
           <g key={v}>
             <line x1={sx(v)} y1={BASE} x2={sx(v)} y2={BASE + 4} stroke="#c9c0b0" />
-            <text x={sx(v)} y={396} textAnchor="middle" fontSize={10} fontFamily={mono} fill={color.faint}>
+            <text x={sx(v)} y={X_LABEL_Y} textAnchor="middle" fontSize={10} fontFamily={mono} fill={color.faint}>
               {formatX(v, vspan)}
             </text>
           </g>
         ))}
-        <text x={(X0 + X1) / 2} y={552} textAnchor="middle" fontSize={11} fontFamily={mono} fill={color.faint}>
+        <text x={(X0 + X1) / 2} y={550} textAnchor="middle" fontSize={11} fontFamily={mono} fill={color.faint}>
           {xLabel}
         </text>
 
-        {/* observed markers */}
-        {xs.map((x, i) =>
-          i % 2 === 0 && x >= vlo && x <= vhi ? (
-            <circle key={i} cx={sx(x)} cy={sy(curves.yObs[i]!)} r={1.3} fill={color.obs} opacity={0.5} />
-          ) : null,
-        )}
+        {/* observed markers (memoized — see obsMarkers) */}
+        {obsMarkers}
         {/* background, calc */}
         {showBackground && curves.yBackground && <polyline points={bkgLine} fill="none" stroke={color.bkg} strokeWidth={1.2} strokeDasharray="5 3" opacity={0.9} />}
         <polyline points={calcLine} fill="none" stroke={color.calc} strokeWidth={1.4} />
@@ -248,18 +288,10 @@ export function WorkbenchPlot({
           Difference
         </text>
 
-        {/* Bragg reflection ticks, one coloured row per phase */}
-        {phases?.map((phase, row) => (
-          <g key={phase.id} stroke={phase.color} strokeWidth={1} opacity={0.75}>
-            {phase.ticks.map((t, i) =>
-              t.x >= vlo && t.x <= vhi ? (
-                <line key={i} x1={sx(t.x)} y1={TICK_TOP + row * 5} x2={sx(t.x)} y2={TICK_BOT + row * 5}>
-                  <title>{`${phase.label}  (${t.hkl})  d ${t.d.toFixed(3)} Å`}</title>
-                </line>
-              ) : null,
-            )}
-          </g>
-        ))}
+        {/* Bragg reflection ticks, one coloured row per phase. Each tick has a
+            wide transparent hit line so it brightens on hover (see <style>). */}
+        <style>{".wb-tick .wb-mark{stroke-opacity:.7}.wb-tick:hover .wb-mark{stroke-opacity:1;stroke-width:2}"}</style>
+        {braggTicks}
 
         {/* excluded-region scrims (dim data outside the fit range) */}
         {fitActive && (

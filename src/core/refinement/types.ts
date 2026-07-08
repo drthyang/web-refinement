@@ -235,4 +235,11 @@ export interface RefinementOptions {
   readonly correlationThreshold?: number;
   /** Maximum number of high-correlation pairs kept in diagnostics. */
   readonly maxReportedCorrelations?: number;
+  /**
+   * Runtime-only per-cycle callback for live progress (never serialized through
+   * the worker protocol — set locally by the worker/runner, not by requests).
+   * Called after each accepted iteration with the current calculated vector and
+   * its agreement factors.
+   */
+  readonly onIteration?: (yCalc: Float64Array, agreement: AgreementFactors) => void;
 }

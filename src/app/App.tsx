@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APP_VERSION, PROJECT_SCHEMA_VERSION } from "@/app/constants";
 import { downloadText } from "@/app/download";
 import type { StructureModel } from "@/core/crystal/types";
@@ -158,6 +158,22 @@ export function App(): JSX.Element {
   );
   const client = useRef<ComputeClient>(new ComputeClient());
 
+  // Live per-cycle refinement preview: the worker streams the calculated curve
+  // each accepted cycle. We hold the latest in a ref and flush to a render tick
+  // at most every ~60 ms so fast cycles don't thrash the plot — the curve
+  // animates toward convergence without flicker. (A time throttle rather than
+  // requestAnimationFrame, which doesn't fire in a backgrounded/headless tab.)
+  const livePreview = useRef<{ yCalc: number[]; rWeighted: number } | null>(null);
+  const lastFlush = useRef(0);
+  const [liveTick, setLiveTick] = useState(0);
+  const onPowderProgress = useCallback((yCalc: number[], rWeighted: number): void => {
+    livePreview.current = { yCalc, rWeighted };
+    const now = performance.now();
+    if (now - lastFlush.current < 60) return;
+    lastFlush.current = now;
+    setLiveTick((t) => t + 1);
+  }, []);
+
   const { structure, pattern, powderParams, powderSource } = session;
   // A freshly-loaded pattern is a new object; drop the window and axis choice.
   useEffect(() => {
@@ -199,6 +215,14 @@ export function App(): JSX.Element {
     () => (effectiveUnit === pattern.xUnit ? curves : { ...curves, x: convertAxisArray(curves.x, pattern.xUnit, effectiveUnit, axisCtx) }),
     [curves, effectiveUnit, pattern.xUnit, axisCtx],
   );
+  // During a refinement, overlay the live per-cycle calculated curve (streamed
+  // from the worker) onto the plot so it animates toward convergence.
+  const plotCurves = useMemo(() => {
+    const lp = livePreview.current;
+    if (busy !== "powder" || !lp || lp.yCalc.length !== displayCurves.yObs.length) return displayCurves;
+    return { ...displayCurves, yCalc: lp.yCalc, diff: displayCurves.yObs.map((o, i) => o - (lp.yCalc[i] ?? 0)) };
+    // liveTick bumps each animation frame to pull the latest ref value.
+  }, [displayCurves, busy, liveTick]);
   const displayXLabel = axisLabel(effectiveUnit);
   // Fit-range handles live in display space; convert to/from the native window.
   const displayFitRange = useMemo(
@@ -282,7 +306,7 @@ export function App(): JSX.Element {
         ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),
         ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         options: { maxIterations: guided ? 15 : 20 },
-      });
+      }, onPowderProgress);
       setSession((s) => ({
         ...s,
         // Guided refinement frees parameters internally; reflect that in the table.
@@ -297,6 +321,7 @@ export function App(): JSX.Element {
     } catch (e) {
       setMessage(`Powder refinement failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
+      livePreview.current = null;
       setBusy(null);
       setRefineKind(null);
     }
@@ -401,10 +426,18 @@ export function App(): JSX.Element {
         const parsed = parseInstrumentParameters(text);
         setInstrument(parsed);
         setInstrumentLoaded(true);
+        // Rebuild the powder spec so the profile reflects the new instrument —
+        // otherwise loading structure-then-instrument would leave the old
+        // (default) profile in place, making load order matter.
+        setSession((s) => {
+          const spec = buildPowderSpec(s.structure, s.pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms);
+          return { ...s, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile };
+        });
+        setPowderResult(null);
         setMessage(
           parsed.kind === "tof"
-            ? `Loaded TOF instrument: difC=${parsed.difC.toFixed(2)}, Zero=${(parsed.zero ?? 0).toFixed(3)}.`
-            : `Loaded CW instrument: λ=${parsed.wavelength} Å.`,
+            ? `Loaded TOF instrument: difC=${parsed.difC.toFixed(2)}, Zero=${(parsed.zero ?? 0).toFixed(3)}. Profile re-seeded.`
+            : `Loaded CW instrument: λ=${parsed.wavelength} Å. Profile re-seeded.`,
         );
       } catch (e) {
         setMessage(`Instrument parse failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -519,9 +552,9 @@ export function App(): JSX.Element {
                   </div>
                 </div>
                 <WorkbenchPlot
-                  curves={displayCurves}
+                  curves={plotCurves}
                   xLabel={displayXLabel}
-                  wRpct={wRpct}
+                  wRpct={busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(1) : wRpct}
                   fitRange={displayFitRange}
                   phases={phaseTicks}
                   {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
