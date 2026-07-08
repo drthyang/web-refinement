@@ -31,6 +31,9 @@ import {
 import { MagneticPanel } from "@/components/MagneticPanel";
 import { KSearchPanel } from "@/components/KSearchPanel";
 import { detectExtraPeaks } from "@/core/magnetic/extraPeaks";
+import { powderReflectionObsCalc } from "@/core/workflow/obsCalc";
+import { normalProbabilityPlot, weightedResiduals } from "@/core/refinement/diagnostics";
+import { QualityPlots } from "@/app/ui/QualityPlots";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { SingleCrystalDataset as SxDataset } from "@/core/diffraction/types";
 import { buildSyntheticPowder, powderBindings } from "@/examples/synthetic";
@@ -727,7 +730,7 @@ export function App(): JSX.Element {
           </>
         );
       case 1:
-        return <div style={{ ...themeCard, padding: 16 }}><QualityPanel structure={structure} powderResult={powderResult} /></div>;
+        return <div style={{ ...themeCard, padding: 16 }}><QualityPanel structure={structure} powderResult={powderResult} pattern={pattern} params={powderParams} bindings={pBindings} profile={session.powderProfile} /></div>;
       case 2:
         return (
           <div style={{ display: "grid", gap: 14 }}>
@@ -780,8 +783,30 @@ export function App(): JSX.Element {
   }
 }
 
-function QualityPanel({ structure, powderResult }: { structure: StructureModel; powderResult: RefinementResult | null }): JSX.Element {
+function QualityPanel({
+  structure,
+  powderResult,
+  pattern,
+  params,
+  bindings,
+  profile,
+}: {
+  structure: StructureModel;
+  powderResult: RefinementResult | null;
+  pattern: PowderPattern;
+  params: readonly RefinementParameter[];
+  bindings: readonly ParameterBinding[];
+  profile: PowderProfile;
+}): JSX.Element {
   const bonds = bondLengths(structure).slice(0, 12);
+  // Validation plots (Rietveld obs/calc + normal probability) for the current fit.
+  const diagnostics = useMemo(() => {
+    const obsCalc = powderReflectionObsCalc(structure, pattern, params, bindings, profile);
+    const curves = powderCurves(structure, pattern, params, bindings, profile);
+    const sigmas = pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1));
+    const npp = normalProbabilityPlot(weightedResiduals(curves.yObs, curves.yCalc, sigmas));
+    return { obsCalc, npp };
+  }, [structure, pattern, params, bindings, profile]);
   return (
     <div>
       <h2 style={h2}>Step 4 — Refinement quality &amp; structure investigation</h2>
@@ -810,6 +835,15 @@ function QualityPanel({ structure, powderResult }: { structure: StructureModel; 
             </tbody>
           </table>
         </div>
+      </div>
+      <div style={{ marginTop: 20 }}>
+        <strong style={{ fontSize: 13 }}>Validation plots</strong>
+        <p style={{ fontSize: 12, color: theme.secondary, maxWidth: 640, margin: "2px 0 0" }}>
+          More diagnostic than wR alone: F_obs vs F_calc flags individual bad reflections;
+          the normal probability plot (Abrahams &amp; Keve 1971) reveals model error <em>and</em> whether
+          the uncertainties (weights) are right — a straight slope-1 line is the goal.
+        </p>
+        <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} />
       </div>
     </div>
   );
