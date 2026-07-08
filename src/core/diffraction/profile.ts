@@ -6,8 +6,9 @@
  *  - Gaussian
  *  - pseudo-Voigt (Gaussian/Lorentzian mix via η)
  *
- * Peak width follows a simplified Caglioti form FWHM² = U·tan²θ + V·tanθ + W;
- * the minimal engine exposes a single width parameter and optional U,V,W.
+ * Peak width follows the Caglioti form FWHM² = U·tan²θ + V·tanθ + W (Caglioti,
+ * Paoletti & Ricci, *Nucl. Instrum.* 3 (1958) 223); the minimal engine exposes a
+ * single width parameter and optional U,V,W.
  */
 
 import { evaluateBackground, type BackgroundType } from "@/core/diffraction/background";
@@ -70,6 +71,8 @@ export function lorentzianFwhm(twoThetaDeg: number, p: LorentzianParams): number
  *   Γ⁵ = Γ_G⁵ + 2.69269 Γ_G⁴Γ_L + 2.42843 Γ_G³Γ_L² + 4.47163 Γ_G²Γ_L³
  *        + 0.07842 Γ_G Γ_L⁴ + Γ_L⁵
  *   η  = 1.36603 (Γ_L/Γ) − 0.47719 (Γ_L/Γ)² + 0.11116 (Γ_L/Γ)³
+ *
+ * Reference: Thompson, Cox & Hastings, *J. Appl. Cryst.* 20 (1987) 79.
  */
 export function tchPseudoVoigt(gammaG: number, gammaL: number): { fwhm: number; eta: number } {
   const g = Math.max(gammaG, 1e-9);

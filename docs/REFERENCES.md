@@ -56,6 +56,38 @@ Web resources accessed **2026-07-08**.
   The 5d W–Ir magnetic form factors — **not imported**. Cite only if/when those
   ions are added to the table.
 
+## Physics formulas implemented (each tied to code)
+
+- **Neutron magnetic scattering length** p = γ_n·r_e/2 = 2.695 fm/μ_B, and the
+  Halpern–Johnson perpendicular-moment projection M⊥ = M − (M·Q̂)Q̂ — Squires,
+  G. L., *Introduction to the Theory of Thermal Neutron Scattering* (CUP);
+  Lovesey, S. W., *Theory of Neutron Scattering from Condensed Matter*, Vol. 2.
+  → [`magnetic/structureFactor.ts`](../src/core/magnetic/structureFactor.ts),
+  [`magnetic/moment.ts`](../src/core/magnetic/moment.ts).
+- **Peak-width (Caglioti)** FWHM² = U tan²θ + V tanθ + W — Caglioti, G.,
+  Paoletti, A. & Ricci, F. P. (1958). *Nucl. Instrum.* **3**, 223.
+- **Thompson–Cox–Hastings pseudo-Voigt** (Voigt FWHM combination + η polynomial)
+  — Thompson, P., Cox, D. E. & Hastings, J. B. (1987). *J. Appl. Cryst.* **20**,
+  79. → [`diffraction/profile.ts`](../src/core/diffraction/profile.ts).
+- **Finger–Cox–Jephcoat** axial-divergence asymmetry — Finger, L. W., Cox, D. E.
+  & Jephcoat, A. P. (1994). *J. Appl. Cryst.* **27**, 892.
+- **TOF back-to-back-exponential ⊗ Gaussian** peak shape — Von Dreele, R. B.,
+  Jorgensen, J. D. & Windsor, C. G. (1982). *J. Appl. Cryst.* **15**, 581.
+- **March–Dollase** preferred orientation — Dollase, W. A. (1986).
+  *J. Appl. Cryst.* **19**, 267. → [`diffraction/intensity.ts`](../src/core/diffraction/intensity.ts).
+- **X-ray polarization factor** (1−P)cos²2θ + P — Azaroff, L. V. (1955).
+  *Acta Cryst.* **8**, 701; GSAS-II `Polarization`.
+- **R factors, R_exp, goodness of fit** (with N = contributing observations) —
+  Toby, B. H. (2006). "R factors in Rietveld analysis." *Powder Diffr.* **21**,
+  67; Young, R. A. (ed.), *The Rietveld Method* (IUCr/OUP, 1993).
+  → [`refinement/factors.ts`](../src/core/refinement/factors.ts).
+- **Normal probability plot** — Abrahams, S. C. & Keve, E. T. (1971).
+  *Acta Cryst.* **A27**, 157. → [`refinement/diagnostics.ts`](../src/core/refinement/diagnostics.ts).
+- **Magnetic representation analysis** — Bertaut, E. F. (1968). *Acta Cryst.*
+  **A24**, 217; Izyumov, Naish & Ozerov, *Neutron Diffraction of Magnetic
+  Materials*; Bradley, C. J. & Cracknell, A. P. (1972), *The Mathematical Theory
+  of Symmetry in Solids*. → [`magnetic/*`](../src/core/magnetic/).
+
 ## Method background (informs the engine; no single source)
 
 - The refinement engine's numerics — Levenberg–Marquardt, diagonal (Jacobi)

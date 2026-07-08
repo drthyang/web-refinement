@@ -5,6 +5,13 @@
  *   R_wp = sqrt( Σ w (y_obs − y_calc)² / Σ w·y_obs² )
  *   R_exp = sqrt( (N − P) / Σ w·y_obs² )
  *   GoF  = R_wp / R_exp   (χ² = GoF²)
+ *
+ * N is the number of observations that actually contribute — points with a
+ * positive weight — not the raw array length: excluded/masked points (a fit
+ * range, or a sentinel plateau) carry weight 0 and must not inflate N − P, or
+ * R_exp, GoF and the ESDs derived from the reduced χ² come out optimistic.
+ * Reference: Toby, B. H. (2006), "R factors in Rietveld analysis," *Powder
+ * Diffr.* 21, 67; Young, *The Rietveld Method* (1993), Ch. 1.
  */
 
 import type { AgreementFactors } from "@/core/refinement/types";
@@ -67,11 +74,14 @@ export function computeAgreementFactors(
   let sumAbsDiff = 0;
   let sumWObs2 = 0;
   let sumWDiff2 = 0;
-  const n = yObs.length;
+  // Count only the observations that contribute (positive weight); masked/
+  // excluded points are dropped from every sum AND from N in N − P.
+  let nUsed = 0;
 
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < yObs.length; i++) {
     const w = weights[i]!;
     if (w <= 0) continue; // excluded/masked point — omit from every agreement sum
+    nUsed++;
     const o = yObs[i]!;
     const c = yCalc[i]!;
     const diff = o - c;
@@ -83,9 +93,10 @@ export function computeAgreementFactors(
 
   const rFactor = sumAbsObs > 0 ? sumAbsDiff / sumAbsObs : 0;
   const rWeighted = sumWObs2 > 0 ? Math.sqrt(sumWDiff2 / sumWObs2) : 0;
-  const dof = Math.max(n - nParams, 1);
+  const dof = Math.max(nUsed - nParams, 1);
   const rExpected = sumWObs2 > 0 ? Math.sqrt(dof / sumWObs2) : 0;
-  const goodnessOfFit = rExpected > 0 ? (rWeighted / rExpected) ** 2 : 0;
+  // Goodness of fit S = R_wp / R_exp (GSAS-II's "GOF"); the reduced χ² is S².
+  const goodnessOfFit = rExpected > 0 ? rWeighted / rExpected : 0;
 
   return { rFactor, rWeighted, rExpected, goodnessOfFit };
 }

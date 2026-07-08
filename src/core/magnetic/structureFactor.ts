@@ -1,12 +1,12 @@
 /**
- * Magnetic structure factor (simplified, dipole approximation):
+ * Magnetic structure factor (spin-only ⟨j0⟩ form-factor approximation):
  *
  *   F_M(hkl) = p · Σ_j f_mag,j(s) · M⊥,j · exp[2πi(h·x_j + k·y_j + l·z_j)]
  *
  * F_M is a complex vector; the magnetic intensity is |F_M|² summed over its
- * three Cartesian components. The constant p = 0.2695 fm/μ_B converts moment
+ * three Cartesian components. The constant p = 2.695 fm/μ_B converts moment
  * (μ_B) to a neutron scattering length so nuclear and magnetic intensities are
- * on the same scale.
+ * on the same scale (nuclear b is tabulated in fm).
  *
  * Nuclear and magnetic contributions are kept strictly separate: this module
  * never touches nuclear code.
@@ -24,8 +24,16 @@ import { crystalComponentsToCartesian, perpendicularMoment, qCartesian } from "@
 import { determinant } from "@/core/math/mat3";
 
 const TWO_PI = 2 * Math.PI;
-/** Magnetic scattering length per Bohr magneton (fm/μ_B): (γ r_e)/2 · g/2. */
-export const MAGNETIC_PREFACTOR = 0.2695;
+/**
+ * Magnetic scattering length per Bohr magneton, in **fm/μ_B**:
+ *   p = γ_n·r_e/2 = 1.91304 × 2.81794 fm / 2 = 2.695 fm/μ_B,
+ * the same physical constant usually quoted as 0.2695 × 10⁻¹² cm/μ_B (since
+ * 0.2695 × 10⁻¹² cm = 2.695 fm). It must be in fm here because the nuclear
+ * scattering lengths it shares an intensity scale with are tabulated in fm
+ * (see neutronData.ts). Reference: Squires, *Thermal Neutron Scattering*,
+ * §7; Lovesey, *Theory of Neutron Scattering from Condensed Matter*, Vol. 2.
+ */
+export const MAGNETIC_PREFACTOR = 2.695;
 
 /** Resolve the ⟨j0⟩ form-factor id for a moment (explicit, or element+ox state). */
 function formFactorId(

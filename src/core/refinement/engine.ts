@@ -408,7 +408,12 @@ export function refine(
   // robust crystallographic least-squares pattern used by GSAS-II: keep stable
   // directions, drop near-null ones, and report the troublemakers.
   const esd: Record<string, number> = {};
-  const dof = Math.max(problem.observations.length - n, 1);
+  // Degrees of freedom use the number of *contributing* observations (positive
+  // weight), not the raw array length — masked/excluded points must not inflate
+  // N, or the reduced χ² and every ESD derived from it come out optimistic.
+  let nUsed = 0;
+  for (let i = 0; i < problem.weights.length; i++) if (problem.weights[i]! > 0) nUsed++;
+  const dof = Math.max(nUsed - n, 1);
   const reducedChi = current.chi / dof;
   const finalResiduals = weightedResiduals(problem.observations, current.yCalc, problem.weights);
   const finalJacobian = computeJacobian(problem, freeParams, freeValues, current.yCalc);

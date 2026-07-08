@@ -51,14 +51,19 @@ export type DisplacementParameters =
 export interface AtomSite {
   /** Unique label within the structure, e.g. "Fe1". */
   readonly label: string;
-  /**
-   * Element symbol, e.g. "Fe", "O". Isotope-specific scattering (e.g. neutron)
-   * is resolved via `isotope` when present, otherwise natural abundance.
-   */
+  /** Element symbol, e.g. "Fe", "O". */
   readonly element: string;
-  /** Optional isotope mass number for neutron scattering, e.g. 57 for 57Fe. */
+  /**
+   * Optional isotope mass number for neutron scattering, e.g. 2 for D or 57 for
+   * ⁵⁷Fe. Currently only deuterium (H, mass 2) is isotope-resolved; other
+   * isotopes fall back to natural-abundance b (see neutron.ts).
+   */
   readonly isotope?: number;
-  /** Formal oxidation state, used to pick the correct X-ray/magnetic form factor. */
+  /**
+   * Formal oxidation state. Used to pick the magnetic ⟨j0⟩/⟨j2⟩ ion; the X-ray
+   * form factors are neutral-atom Cromer–Mann only (no ionic species yet), so
+   * this does not affect X-ray scattering today.
+   */
   readonly oxidationState?: number;
   /** Fractional coordinates [x, y, z] in the crystallographic basis. */
   readonly position: Vec3;

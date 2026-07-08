@@ -10,7 +10,17 @@
 /** Probe radiation. Determines which scattering table (b vs f) is used. */
 export type Radiation =
   | { readonly kind: "neutron"; readonly wavelength: number }
-  | { readonly kind: "xray"; readonly wavelength: number }
+  | {
+      readonly kind: "xray";
+      readonly wavelength: number;
+      /**
+       * Polarization fraction P (the beam fraction polarized perpendicular to
+       * the diffraction plane). The CW polarization factor is (1−P)·cos²2θ + P;
+       * P = 0.5 is the unpolarized lab value ((1+cos²2θ)/2), a monochromated
+       * synchrotron is ~0.9–0.95. Absent ⇒ 0.5. (GSAS-II "Polariz.")
+       */
+      readonly polarization?: number;
+    }
   /** Time-of-flight neutron: no single wavelength; d-spacing comes from TOF. */
   | { readonly kind: "neutron-tof" };
 

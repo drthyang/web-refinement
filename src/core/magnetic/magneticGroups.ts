@@ -206,6 +206,13 @@ export function generateMagneticCandidates(
  * Transform a reciprocal-space vector (Miller-like) by an operation's rotation.
  * This codebase's convention is h' = Rᵀ·h (see `isReflectionAbsent`), so the
  * propagation vector transforms the same way. Translations do not act on k.
+ *
+ * Note: the strictly-geometric contragredient map of a dual-basis vector is
+ * R⁻ᵀ·k (it differs from Rᵀ·k in oblique settings). This does NOT affect the
+ * little group ({@link littleGroup}) or the star of k *as a set*: because the
+ * group is closed under inverse and both Rᵀ and R⁻ᵀ map the reciprocal lattice
+ * to itself, {R : Rᵀk ≡ k} = {R : R⁻ᵀk ≡ k}. Only if this were used to *label*
+ * individual k-arms (not set membership) would R⁻ᵀ be required.
  */
 export function transformK(op: SymmetryOperation, k: Vec3): Vec3 {
   const R = op.rotation;

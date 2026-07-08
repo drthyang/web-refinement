@@ -15,8 +15,18 @@ import { NEUTRON_B } from "@/core/scattering/neutronData";
 
 export { NEUTRON_B };
 
-export function neutronScatteringLength(element: string): number {
-  const b = NEUTRON_B[element];
+/**
+ * Bound coherent scattering length (fm), optionally for a specific isotope.
+ * Only **deuterium** (H with mass number 2 → the tabulated `D`) is
+ * isotope-resolved today — it is the dominant isotope case in neutron work
+ * (H/D contrast), and natural H and D differ in sign and magnitude (−3.739 vs
+ * +6.671 fm), so ignoring it would badly corrupt |F|². Any other `isotope`
+ * falls back to the natural-abundance value (the table is keyed by element;
+ * per-isotope lengths are a future addition).
+ */
+export function neutronScatteringLength(element: string, isotope?: number): number {
+  const key = element === "H" && isotope === 2 ? "D" : element;
+  const b = NEUTRON_B[key];
   if (b === undefined) {
     throw new Error(`No neutron scattering length for element "${element}"`);
   }
@@ -24,8 +34,8 @@ export function neutronScatteringLength(element: string): number {
 }
 
 export const neutronTable: ScatteringTable = {
-  factor(element: string): number {
-    return neutronScatteringLength(element);
+  factor(element: string, _s: number, isotope?: number): number {
+    return neutronScatteringLength(element, isotope);
   },
   has(element: string): boolean {
     return element in NEUTRON_B;

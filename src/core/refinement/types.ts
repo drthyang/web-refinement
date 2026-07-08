@@ -144,7 +144,7 @@ export interface AgreementFactors {
   readonly rWeighted?: number;
   /** Expected weighted R (statistical floor), for goodness-of-fit. */
   readonly rExpected?: number;
-  /** Goodness of fit, χ² = (Rwp / Rexp)². */
+  /** Goodness of fit S = Rwp / Rexp (GSAS-II's "GOF"); reduced χ² = S². */
   readonly goodnessOfFit?: number;
 }
 

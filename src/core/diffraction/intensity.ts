@@ -23,7 +23,8 @@ import { nuclearStructureFactorSquared } from "@/core/diffraction/structureFacto
  * preferred-orientation axis (as reciprocal indices) and the March coefficient
  * r (r = 1 ⇒ no texture):
  *   P(α) = (r²·cos²α + sin²α / r)^(−3/2),
- * where α is the angle between the reflection's reciprocal vector and the PO axis.
+ * where α is the angle between the reflection's reciprocal vector and the PO
+ * axis. Reference: Dollase, W. A. (1986), *J. Appl. Cryst.* 19, 267.
  */
 export function marchDollase(
   cell: UnitCell,
@@ -85,7 +86,11 @@ export function cylinderAbsorption(muR: number, twoThetaDeg: number): number {
 /**
  * Lorentz(-polarization) factor for a powder experiment.
  *  - neutron (CW): L = 1 / (sin²θ · cosθ)
- *  - X-ray (CW):   Lp = (1 + cos²2θ) / (sin²θ · cosθ)
+ *  - X-ray (CW):   Lp = [(1−P)·cos²2θ + P] / (sin²θ · cosθ), P = polarization
+ *    fraction (GSAS-II Polariz.). P = 0.5 ⇒ the unpolarized (1+cos²2θ)/2 form;
+ *    a monochromated synchrotron beam has P ≈ 0.9–0.95, which materially
+ *    re-weights mid-angle reflections. Reference: Azaroff (1955); GSAS-II
+ *    `Polarization`. Pecharsky & Zavalij, *Fundamentals of Powder Diffraction*.
  *  - neutron (TOF): L = d⁴ — the fixed-2θ time-of-flight Lorentz factor
  *    (Buras & Gerward; GSAS-II). The sin θ prefactor is constant per detector
  *    bank and absorbed into the refined scale.
@@ -100,7 +105,8 @@ export function lorentzPolarization(radiation: Radiation, d: number): number {
   const lorentz = 1 / (sinT * sinT * cosT);
   if (radiation.kind === "xray") {
     const cos2T = Math.cos(2 * theta);
-    return ((1 + cos2T * cos2T) / 2) * lorentz;
+    const p = radiation.polarization ?? 0.5;
+    return ((1 - p) * cos2T * cos2T + p) * lorentz;
   }
   return lorentz;
 }

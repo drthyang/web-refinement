@@ -49,12 +49,17 @@ accidental gap — each is tracked as a roadmap item.
   fixed-point/manual background, debye/real-space, or automatic peak-stripping.
 - **Powder profiles.** Constant-wavelength: Gaussian / pseudo-Voigt with Caglioti
   U/V/W width, a Thompson–Cox–Hastings Lorentzian size–strain term, and Finger–
-  Cox–Jephcoat axial asymmetry. Time-of-flight: a back-to-
+  Cox–Jephcoat axial asymmetry (modelled for the low-angle tail, 2θ < 90°; the
+  high-angle asymmetry is not modelled). Time-of-flight: a back-to-
   back-exponential ⊗ Gaussian peak shape with d-dependent α/β/σ, placed by the
   difC/difA/difB constants (GSAS-II convention) and the d⁴ TOF Lorentz factor.
   The TOF **α/β/σ coefficients refine** in the profile stage; difC is held at the
   instrument calibration. Not yet modelled: the Ikeda–Carpenter moderator shape
   and TOF absorption/extinction.
+- **Lorentz–polarization.** Neutron CW 1/(sin²θ cosθ); X-ray CW multiplies the
+  polarization factor (1−P)cos²2θ + P with the instrument's polarization fraction
+  P (P = 0.5 unpolarized, ~0.9–0.95 monochromated synchrotron); TOF ∝ d⁴. The
+  per-detector-bank constant prefactors are absorbed into the refined scale.
 - **Magnetic model.** Commensurate **single-k moment refinement**, k = 0 *and*
   k ≠ 0: moments refine as the symmetry-allowed modes of the chosen magnetic
   subgroup, magnetic satellites are placed at G ± k, and the magnetic intensity
@@ -69,9 +74,11 @@ accidental gap — each is tracked as a roadmap item.
   amplitudes). Co-located
   (disordered) magnetic ions can be **tied to the same moment**. mCIF (BNS)
   parsing + axial-vector transformation are implemented; moment components use the
-  normalized crystal-axis convention. **Not yet validated:** the absolute moment
-  magnitude in the k-formalism (a convention factor pending a GSAS-II cross-check
-  — directions and relative sizes are correct). Candidates carry standard
+  normalized crystal-axis convention. The magnetic scattering length is
+  p = γ_n·r_e/2 = **2.695 fm/μ_B** (fm to match the nuclear b scale), so moment
+  magnitudes are on a physical footing; an end-to-end absolute-magnitude
+  cross-check against GSAS-II on real data is still pending, but directions and
+  relative sizes are well defined. Candidates carry standard
   **BNS/OG labels** (bundled ISO-MAG table; types I/III, standard settings).
   **Not done:** the **star of k** (multi-arm domains / multi-k) and full
   **representation (irrep) analysis**; satellite multiplicity is approximated by the parent nuclear

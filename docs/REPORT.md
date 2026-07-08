@@ -111,8 +111,10 @@ This unlocked and validated the magnetic workflow:
   `_atom_site_moment.crystalaxis_*` loop into a `MagneticModel`.
 - **Magnetic structure factor** transforms moments as axial vectors
   (`m' = θ·det(R)·R·m`), projects perpendicular to Q (`M⊥`), and sums with the
-  0.2695 fm/μB prefactor. Nuclear and magnetic intensities are reported
-  separately (`I = scale_N·|F_N|² + scale_M·|F_M⊥|²`).
+  p = 2.695 fm/μB prefactor (= γ_n·r_e/2, the constant usually quoted as
+  0.2695 × 10⁻¹² cm; in fm because nuclear b is tabulated in fm). Nuclear and
+  magnetic intensities are reported separately
+  (`I = scale_N·|F_N|² + scale_M·|F_M⊥|²`).
 - **Moment refinement** (single crystal) refines moment components; validated by
   recovering a perturbed moment from synthetic data and, in-browser, recovering
   Mn1 mₐ from −0.5 back to −1.577 μB.

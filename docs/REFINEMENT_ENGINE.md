@@ -89,11 +89,13 @@ Reported after every iteration (`AgreementFactors`):
 R    = Σ|y_obs − y_calc| / Σ|y_obs|
 R_wp = sqrt( Σ w (y_obs − y_calc)² / Σ w·y_obs² )
 R_exp = sqrt( (N − P) / Σ w·y_obs² )
-GoF  = (R_wp / R_exp)²          # χ² per degree of freedom
+GoF  = R_wp / R_exp            # goodness of fit S (GSAS-II "GOF"); χ² per dof = S²
 ```
 
-`N` = number of observations, `P` = number of free parameters. `R_wp`/`R_exp`/GoF
-require weights; unweighted `R` is always available.
+`N` = number of *contributing* observations (points with positive weight;
+masked/excluded points do not count), `P` = number of free parameters.
+`R_wp`/`R_exp`/GoF require weights; unweighted `R` is always available.
+Reference: Toby (2006), *Powder Diffr.* 21, 67.
 
 ## Uncertainty estimation
 
