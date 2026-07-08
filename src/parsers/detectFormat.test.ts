@@ -49,15 +49,24 @@ describe("detectDataFormat — x-unit priority chain", () => {
     expect(d.radiation).toEqual({ kind: "neutron-tof" });
   });
 
-  it("(3) instrument decides when the header is silent", () => {
-    const tof = detectDataFormat({ text: xy, filename: "x.dat", instrument: { kind: "tof", difC: 5000 } });
+  it("(3) instrument decides when the header is silent and the magnitude agrees", () => {
+    // TOF instrument + TOF-magnitude data (thousands of µs) → tof.
+    const tof = detectDataFormat({ text: "3390 48\n3393 50\n3396 53\n3400 49", filename: "x.dat", instrument: { kind: "tof", difC: 5000 } });
     expect(tof.xUnit).toBe("tof");
     expect(tof.source).toBe("instrument");
 
+    // CW instrument + 2θ-magnitude data → twoTheta.
     const cw = detectDataFormat({ text: xy, filename: "x.dat", instrument: { kind: "constantWavelength", wavelength: 2.4 } });
     expect(cw.xUnit).toBe("twoTheta");
     expect(cw.source).toBe("instrument");
     expect(cw.radiation).toEqual({ kind: "neutron", wavelength: 2.4 });
+  });
+
+  it("does not read constant-wavelength data as TOF just because a TOF instrument is selected", () => {
+    // 2θ-range data (≤ 40) cannot be TOF (thousands of µs), so a still-selected
+    // TOF instrument must not force it view-only.
+    const d = detectDataFormat({ text: xy, filename: "x.xy", instrument: { kind: "tof", difC: 22585.8 } });
+    expect(d.xUnit).not.toBe("tof");
   });
 
   it("preserves X-ray radiation from a GSAS-II PXC instrument file", () => {

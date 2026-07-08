@@ -164,11 +164,26 @@ export function detectDataFormat(input: DetectInput): DetectedFormat {
     return { dataType, xUnit: headerUnit, radiation: radiationFor(headerUnit, instrument), source: "header", confidence: "high", note: `Unit read from the file header/columns (${headerUnit}).` };
   }
 
+  const rows = numericRows(text);
   if (instrument) {
-    const xUnit: PowderXUnit = instrument.kind === "tof" ? "tof" : "twoTheta";
-    return { dataType, xUnit, radiation: radiationFor(xUnit, instrument), source: "instrument", confidence: "high", note: `Unit from the loaded instrument (${instrument.kind === "tof" ? "TOF" : "constant-wavelength → 2θ"}).` };
+    // The loaded instrument sets TOF vs constant-wavelength — but only trust it
+    // when the data's own magnitude agrees. TOF abscissae run to thousands of µs;
+    // 2θ/Q/d are small. This stops constant-wavelength data (e.g. X-ray 2θ) from
+    // being misread as TOF just because a TOF instrument is still selected, which
+    // would wrongly lock it to view-only.
+    const xs = rows.map((r) => r[0]!).filter(Number.isFinite);
+    const xMaxAbs = xs.length ? Math.max(...xs) : 0;
+    const magnitudeIsTof = xMaxAbs > 1000;
+    if (instrument.kind === "tof" && magnitudeIsTof) {
+      return { dataType, xUnit: "tof", radiation: radiationFor("tof", instrument), source: "instrument", confidence: "high", note: "Unit from the loaded instrument (TOF)." };
+    }
+    if (instrument.kind === "constantWavelength" && !magnitudeIsTof) {
+      return { dataType, xUnit: "twoTheta", radiation: radiationFor("twoTheta", instrument), source: "instrument", confidence: "high", note: "Unit from the loaded instrument (constant-wavelength → 2θ)." };
+    }
+    // Instrument kind conflicts with the data magnitude — ignore it and fall
+    // through to the range heuristic so the data itself decides.
   }
 
-  const heur = unitFromRange(numericRows(text));
+  const heur = unitFromRange(rows);
   return { dataType, xUnit: heur.xUnit, radiation: radiationFor(heur.xUnit, instrument), source: "heuristic", confidence: "low", note: `No unit in header or instrument; guessed from data range: ${heur.note}.` };
 }

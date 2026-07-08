@@ -411,10 +411,17 @@ export function App(): JSX.Element {
     }
     const parsed = parsePowderData(text, { id, name: filename, xUnit: fmt.xUnit, radiation: fmt.radiation, ...(fmt.radiation.kind !== "neutron-tof" ? { wavelength: fmt.radiation.wavelength } : {}) });
     if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
-    // Full symmetry-allowed parameter set, seeded from the loaded instrument
-    // (Caglioti profile + zero when the .instprm carries them).
-    const spec = buildPowderSpec(structure, parsed, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, session.powderProfile.lorentz, session.backgroundTerms);
+    // Constant-wavelength data: a still-selected TOF instrument (e.g. the bundled
+    // default) doesn't apply, so fall back to a constant-wavelength default and
+    // reset the instrument — loading a different dataset type auto-switches the
+    // workbench into the matching mode instead of staying view-only.
+    const cwInstrument = instrumentLoaded && instrument.kind === "constantWavelength" ? instrument : DEFAULT_INSTRUMENT;
+    const spec = buildPowderSpec(structure, parsed, cwInstrument, session.powderProfile.lorentz, session.backgroundTerms);
     setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+    if (instrument.kind === "tof") {
+      setInstrument(DEFAULT_INSTRUMENT);
+      setInstrumentLoaded(false);
+    }
     setPowderResult(null);
     const nParams = spec.params.length;
     setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · unit=${fmt.xUnit} ${tag}. ${nParams} symmetry-allowed parameters. Scale auto-estimated — click “Refine powder” or “Guided”. ${fmt.note}`);
@@ -430,8 +437,15 @@ export function App(): JSX.Element {
         // otherwise loading structure-then-instrument would leave the old
         // (default) profile in place, making load order matter.
         setSession((s) => {
-          const spec = buildPowderSpec(s.structure, s.pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms);
-          return { ...s, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile };
+          // For a constant-wavelength instrument on a non-TOF pattern, adopt its
+          // radiation (X-ray vs neutron) and wavelength so the physics is correct
+          // regardless of whether the data or the instrument was loaded first.
+          const pattern =
+            parsed.kind === "constantWavelength" && s.pattern.xUnit !== "tof"
+              ? { ...s.pattern, radiation: { kind: parsed.radiationKind ?? "neutron", wavelength: parsed.wavelength }, wavelength: parsed.wavelength }
+              : s.pattern;
+          const spec = buildPowderSpec(s.structure, pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms);
+          return { ...s, pattern, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile };
         });
         setPowderResult(null);
         setMessage(
