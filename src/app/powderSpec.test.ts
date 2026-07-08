@@ -42,6 +42,18 @@ describe("buildPowderSpec", () => {
     expect(bkg.map((p) => p.id)).toEqual(["bkg0", "bkg1", "bkg2", "bkg3", "bkg4", "bkg5", "bkg6", "bkg7"]);
   });
 
+  it("shows occupancy rows but keeps them fixed — on load and through Guided", () => {
+    const spec = buildPowderSpec(structure, pattern, { kind: "constantWavelength", wavelength: 1.54 });
+    const occ = spec.params.filter((p) => p.kind === "occupancy");
+    // One occupancy row per site, seeded from the model and fixed on load.
+    expect(occ.map((p) => p.id).sort()).toEqual(["occ_Ga1", "occ_Mn1"]);
+    expect(occ.every((p) => p.fixed)).toBe(true);
+    // Guided unlocks other structural rows but must NOT free occupancy.
+    const guided = guidedPowderParams(spec.params);
+    expect(guided.filter((p) => p.kind === "occupancy").every((p) => p.fixed)).toBe(true);
+    expect(guided.filter((p) => p.kind === "bIso").every((p) => !p.fixed)).toBe(true);
+  });
+
   it("unlocks UI-fixed structural rows for Guided while preserving intentionally fixed profile terms", () => {
     const inst: InstrumentParameters = { kind: "constantWavelength", wavelength: 0.1665, u: -46, v: 0, w: 1.2, zero: 0 };
     const spec = buildPowderSpec(structure, pattern, inst);

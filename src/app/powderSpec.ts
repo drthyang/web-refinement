@@ -22,6 +22,18 @@ const STRUCTURAL_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "positionShift", "bIso", "uAniso", "occupancy", "poRatio", "absorption",
 ]);
 
+/**
+ * Occupancies are *shown* (fixed on load) but never freed automatically — not on
+ * first load and not by the guided sequence. They correlate strongly with scale
+ * and ADP, and a meaningful refinement usually needs a chemically-motivated
+ * occupancy-sum restraint the app cannot infer, so the user frees them per row
+ * (and adds restraints) deliberately. `guidedPowderParams` unlocks every other
+ * structural kind but leaves these alone.
+ */
+const GUIDED_UNLOCK_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>(
+  [...STRUCTURAL_KINDS].filter((k) => k !== "occupancy"),
+);
+
 export interface PowderSpec {
   readonly params: RefinementParameter[];
   readonly bindings: ParameterBinding[];
@@ -52,10 +64,10 @@ export function buildPowderSpec(
     };
     const zero = instrument.zero ?? 0;
     const profile: PowderProfile = { shape: "tof" };
-    const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, tof });
+    const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, tof, refineOccupancy: true });
     const seedCurves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
     const s = optimalScale(seedCurves.yObs.map((y) => (y > 0 ? y : 0)), seedCurves.yCalc);
-    const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof });
+    const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof, refineOccupancy: true });
     const params = spec.params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
     return { params, bindings: spec.bindings, profile };
   }
@@ -78,11 +90,11 @@ export function buildPowderSpec(
   // wR ≈ 10% → 5.5%). Only meaningful on a 2θ pattern.
   const profOpt = caglioti ? { caglioti, lorentzian: { x: 1, y: 0 } } : {};
   // Seed the scale from the data with a unit-scale evaluation.
-  const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, ...profOpt });
+  const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, ...profOpt, refineOccupancy: true });
   const curves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
   const s = optimalScale(curves.yObs.map((y) => (y > 0 ? y : 0)), curves.yCalc);
 
-  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt });
+  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, refineOccupancy: true });
   const params = spec.params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
   return { params, bindings: spec.bindings, profile };
 }
@@ -91,8 +103,9 @@ export function buildPowderSpec(
  * Guided refinement uses the staged plan to unlock structural rows in the
  * expert order. UI-fixed structural rows must therefore be sent as unlockable,
  * while intentionally fixed profile terms (notably profU when refineU=false)
- * remain fixed.
+ * remain fixed. Occupancies are deliberately excluded (see GUIDED_UNLOCK_KINDS):
+ * they stay fixed unless the user frees a row by hand.
  */
 export function guidedPowderParams(params: readonly RefinementParameter[]): RefinementParameter[] {
-  return params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: false } : { ...p }));
+  return params.map((p) => (GUIDED_UNLOCK_KINDS.has(p.kind) ? { ...p, fixed: false } : { ...p }));
 }
