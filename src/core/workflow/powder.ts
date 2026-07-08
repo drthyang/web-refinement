@@ -2,9 +2,10 @@
  * Powder atomic refinement workflow: structure + powder pattern + parameters →
  * RefinementProblem, plus obs/calc/difference curves for plotting and export.
  *
- * Minimal engine: constant-wavelength data (2θ, d, or Q). The single peak-width
- * parameter is used directly as the profile FWHM in the pattern's x-unit. TOF
- * profile handling is out of scope (see LIMITATIONS.md).
+ * Handles constant-wavelength data (2θ, d, or Q) with a Caglioti/TCH width and
+ * time-of-flight data with the back-to-back-exponential profile. `placePeaks`
+ * factors out the abscissa placement + instrument profile so the magnetic path
+ * (satellites at G±k) reuses the exact same positioning and resolution.
  */
 
 import type { StructureModel } from "@/core/crystal/types";
@@ -120,11 +121,33 @@ function buildTofPeaks(
   return peaks;
 }
 
+/** d-range (Å) spanned by the pattern, CW or TOF (uses the applied calibration). */
+export function reflectionDRange(pattern: PowderPattern, applied: AppliedModel): { dMin: number; dMax: number } {
+  return pattern.xUnit === "tof" && applied.tof !== undefined
+    ? tofDRange(pattern, applied.tof, applied.zeroShift)
+    : dRange(pattern);
+}
+
 export function buildPeaks(pattern: PowderPattern, applied: AppliedModel, applyLorentz = true): ProfilePeak[] {
-  const isTof = pattern.xUnit === "tof" && applied.tof !== undefined;
-  const { dMin, dMax } = isTof ? tofDRange(pattern, applied.tof!, applied.zeroShift) : dRange(pattern);
+  const { dMin, dMax } = reflectionDRange(pattern, applied);
   const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
   const intensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, applied.scale, applied.po, applyLorentz);
+  return placePeaks(pattern, applied, intensities);
+}
+
+/**
+ * Place pre-computed {d, intensity} peaks at the pattern's abscissa with the
+ * instrument profile: CW Caglioti/TCH-pseudo-Voigt width, Finger–Cox–Jephcoat
+ * axial asymmetry and cylinder absorption on a 2θ pattern, or the TOF
+ * back-to-back-exponential shape. Shared by the nuclear peaks and the magnetic
+ * satellites so both get identical positioning + resolution.
+ */
+export function placePeaks(
+  pattern: PowderPattern,
+  applied: AppliedModel,
+  intensities: readonly { d: number; intensity: number }[],
+): ProfilePeak[] {
+  const isTof = pattern.xUnit === "tof" && applied.tof !== undefined;
   if (isTof) return buildTofPeaks(intensities, applied);
   const constWidth = Math.max(applied.peakWidth, 1e-4);
   // Angle-dependent Caglioti width only makes sense on a 2θ abscissa (the form

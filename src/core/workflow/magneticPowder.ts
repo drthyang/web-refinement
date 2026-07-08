@@ -3,9 +3,14 @@
  * intensities into a single powder profile, keeping the two components
  * separable, and refine moments + scales against an observed pattern.
  *
- * Minimal engine: the magnetic intensity for a reflection uses the perpendicular
- * projection for the representative reflection of each family; a full cone
- * average over symmetry-equivalent Q directions is a documented approximation.
+ * Nuclear and magnetic peaks share the same CW/TOF placement (via powder.ts
+ * `buildPeaks`/`placePeaks`) and one shared (GSAS-II) scale. Magnetic peaks are
+ * satellites at G±k for a single commensurate k.
+ *
+ * Documented approximations: the magnetic intensity uses the perpendicular
+ * projection for the representative reflection of each family (no full cone
+ * average over symmetry-equivalent Q directions), and satellite multiplicity is
+ * approximated by the parent nuclear multiplicity.
  */
 
 import type { StructureModel } from "@/core/crystal/types";
@@ -18,24 +23,12 @@ import { weightsFromSigma } from "@/core/refinement/factors";
 import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters } from "@/core/workflow/apply";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
+import { buildPeaks, placePeaks, reflectionDRange } from "@/core/workflow/powder";
 import { generateReflections } from "@/core/diffraction/reflections";
-import { powderPeakIntensities, lorentzPolarization } from "@/core/diffraction/intensity";
+import { lorentzPolarization } from "@/core/diffraction/intensity";
 import { magneticStructureFactor } from "@/core/magnetic/structureFactor";
-import { braggTheta, dSpacing } from "@/core/crystal/unitCell";
+import { dSpacing } from "@/core/crystal/unitCell";
 import { synthesizePattern } from "@/core/diffraction/profile";
-
-function dToTwoTheta(pattern: PowderPattern, d: number): number {
-  const wl = pattern.wavelength ?? (pattern.radiation.kind !== "neutron-tof" ? pattern.radiation.wavelength : 1.54);
-  const theta = braggTheta(d, wl);
-  return Number.isNaN(theta) ? NaN : (2 * theta * 180) / Math.PI;
-}
-
-function dRange(pattern: PowderPattern): { dMin: number; dMax: number } {
-  const xs = pattern.points.map((p) => p.x);
-  const wl = pattern.wavelength ?? (pattern.radiation.kind !== "neutron-tof" ? pattern.radiation.wavelength : 1.54);
-  const dAt = (tt: number) => wl / (2 * Math.sin((tt / 2) * (Math.PI / 180)));
-  return { dMin: dAt(Math.max(...xs)), dMax: dAt(Math.min(...xs)) };
-}
 
 export interface MagneticPowderComponents {
   readonly x: number[];
@@ -60,11 +53,15 @@ function buildCombinedPeaks(
 ): Peaks {
   const applied = applyParameters(structure, bindings, values);
   const appliedMag = applyMagneticMoments(magnetic, bindings, values);
+
+  // Nuclear peaks: reuse the full CW/TOF placement (Caglioti/TCH/FCJ 2θ width or
+  // the TOF back-to-back-exponential shape), so magnetic data of either kind fits.
+  const nuclear = buildPeaks(pattern, applied, true);
+
   // Shared (GSAS-II) scale: the nuclear histogram scale multiplies the magnetic
   // intensity too. An optional `magneticScale` binding is a dimensionless ratio
   // on top (default 1 = fully shared). No explicit V_mag/V_nuc factor is needed:
-  // the propagation-vector (k) formalism keeps moments on the nuclear cell, so
-  // the satellites at G±k are already on the nuclear scale.
+  // the propagation-vector (k) formalism keeps moments on the nuclear cell.
   const magFactor = bindings.some((b) => b.kind === "magneticScale")
     ? values[bindings.find((b) => b.kind === "magneticScale")!.parameterId] ?? 1
     : 1;
@@ -73,37 +70,26 @@ function buildCombinedPeaks(
   const kVec = appliedMag.propagation[0] ?? [0, 0, 0];
   const isK0 = kVec.every((v) => Math.abs(v) < 1e-9);
 
-  const { dMin, dMax } = dRange(pattern);
+  // Magnetic satellites at G ± k (single commensurate k). k = 0 → the nuclear
+  // position (the ±k satellites coincide, so emit once). |F_M|² evaluated at the
+  // non-integer satellite indices carries the k-phase automatically. Parent
+  // nuclear multiplicity approximates the exact star-of-k satellite multiplicity.
+  const { dMin, dMax } = reflectionDRange(pattern, applied);
   const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
-  const fwhm = Math.max(applied.peakWidth, 1e-4);
-
-  const nuclearIntensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, applied.scale);
-  const nuclear: ProfilePeak[] = [];
-  const magneticPeaks: ProfilePeak[] = [];
-
-  for (let i = 0; i < reflections.length; i++) {
-    const r = reflections[i]!;
-    const center = dToTwoTheta(pattern, r.d);
-    if (!Number.isNaN(center)) nuclear.push({ center, intensity: nuclearIntensities[i]!.intensity, fwhm });
-
-    // Magnetic satellites at G ± k (single commensurate k). k = 0 → the nuclear
-    // position (the two ±k satellites coincide there, so emit once). The magnetic
-    // structure factor evaluated at the non-integer satellite indices carries the
-    // k-phase modulation automatically. Parent nuclear multiplicity is used as an
-    // approximation to the exact star-of-k satellite multiplicity.
+  const magIntensities: { d: number; intensity: number }[] = [];
+  for (const r of reflections) {
     const sats: [number, number, number][] = isK0
       ? [[r.h, r.k, r.l]]
       : [[r.h + kVec[0]!, r.k + kVec[1]!, r.l + kVec[2]!], [r.h - kVec[0]!, r.k - kVec[1]!, r.l - kVec[2]!]];
     for (const [mh, mk, ml] of sats) {
       const dSat = dSpacing(applied.model.cell, mh, mk, ml);
       if (!Number.isFinite(dSat) || dSat <= 0 || dSat < dMin || dSat > dMax) continue;
-      const centerSat = dToTwoTheta(pattern, dSat);
-      if (Number.isNaN(centerSat)) continue;
       const fm2 = magneticStructureFactor(applied.model, appliedMag, mh, mk, ml).squared;
       const lp = lorentzPolarization(pattern.radiation, dSat);
-      magneticPeaks.push({ center: centerSat, intensity: magScale * r.multiplicity * lp * fm2, fwhm });
+      magIntensities.push({ d: dSat, intensity: magScale * r.multiplicity * lp * fm2 });
     }
   }
+  const magneticPeaks = placePeaks(pattern, applied, magIntensities);
   return { nuclear, magnetic: magneticPeaks };
 }
 
