@@ -24,6 +24,15 @@ import { covalentRadius, elementColor } from "@/app/ui/elementData";
 import { buildCellAtoms, displayMoment, magneticSupercell } from "@/app/ui/cellModel";
 
 const MAX_BOND_LABELS = 80; // labelling every bond of a big cell is unreadable
+const MAX_ATOM_LABELS = 400; // ditto for atom labels in a large supercell
+
+/** Material finish presets for the atom spheres (Phong highlight strength). */
+const FINISHES = {
+  matte: { shininess: 4, specular: 0x000000 },
+  standard: { shininess: 60, specular: 0x222222 },
+  glossy: { shininess: 140, specular: 0x666666 },
+} as const;
+type Finish = keyof typeof FINISHES;
 
 /** Draw `text` to a canvas and wrap it in a camera-facing sprite (world-sized). */
 function makeLabelSprite(text: string, worldHeight: number, colorCss: string): THREE.Sprite {
@@ -65,9 +74,12 @@ export function StructureView({
 }): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [showBondLengths, setShowBondLengths] = useState(false);
+  const [showAtomLabels, setShowAtomLabels] = useState(false);
   const [perspective, setPerspective] = useState(true);
   const [showAxes, setShowAxes] = useState(true);
   const [magneticCell, setMagneticCell] = useState(false);
+  const [lightLevel, setLightLevel] = useState(1);
+  const [finish, setFinish] = useState<Finish>("standard");
 
   // The magnetic supercell (> the atomic cell only for a non-zero commensurate k).
   const superK = useMemo<[number, number, number]>(
@@ -114,8 +126,8 @@ export function StructureView({
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.85));
-    const dl = new THREE.DirectionalLight(0xffffff, 0.55);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.85 * lightLevel));
+    const dl = new THREE.DirectionalLight(0xffffff, 0.55 * lightLevel);
     dl.position.set(1, 1.5, 1);
     scene.add(dl);
 
@@ -130,12 +142,22 @@ export function StructureView({
       if (!g) { g = new THREE.SphereGeometry(r, 20, 20); geoCache.set(key, g); }
       return g;
     };
+    const { shininess, specular } = FINISHES[finish];
     for (const at of atoms) {
       const r = covalentRadius(at.element) * 0.38;
-      const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(elementColor(at.element)), shininess: 60, specular: 0x222222 });
+      const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(elementColor(at.element)), shininess, specular });
       const mesh = new THREE.Mesh(getGeo(r), mat);
       mesh.position.set(at.xyz[0], at.xyz[1], at.xyz[2]);
       scene.add(mesh);
+    }
+
+    // Atom site labels, floated just above each sphere.
+    if (showAtomLabels && atoms.length <= MAX_ATOM_LABELS) {
+      for (const at of atoms) {
+        const s = makeLabelSprite(at.label, labelH * 0.9, "#1f2937");
+        s.position.set(at.xyz[0], at.xyz[1] + covalentRadius(at.element) * 0.38 + labelH * 0.55, at.xyz[2]);
+        scene.add(s);
+      }
     }
 
     // Magnetic moment arrows (axial vectors): each atom's moment comes from
@@ -266,7 +288,7 @@ export function StructureView({
       try { renderer.forceContextLoss(); } catch { /* free the WebGL context for rebuilds */ }
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
-  }, [atoms, corners, center, span, showBondLengths, perspective, showAxes, structure, moments, propagation]);
+  }, [atoms, corners, center, span, showBondLengths, showAtomLabels, lightLevel, finish, perspective, showAxes, structure, moments, propagation]);
 
   const hasCell = structure.cell.a > 0 && structure.cell.b > 0 && structure.cell.c > 0;
   if (!hasCell || atoms.length === 0) {
@@ -277,16 +299,43 @@ export function StructureView({
     );
   }
   return (
-    <div>
-      <div style={{ display: "flex", gap: 16, marginBottom: 6, fontSize: 12, color: theme.secondary, fontFamily: themeMono }}>
+    // Fill whatever the host card gives us (flex column); in an unconstrained
+    // context the canvas keeps its 360 px minimum.
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", marginBottom: 6, fontSize: 12, color: theme.secondary, fontFamily: themeMono, alignItems: "center" }}>
         <ViewerToggle label="Bond lengths" checked={showBondLengths} onChange={setShowBondLengths} />
+        <ViewerToggle label="Atom labels" checked={showAtomLabels} onChange={setShowAtomLabels} />
         <ViewerToggle label="Perspective" checked={perspective} onChange={setPerspective} />
         <ViewerToggle label="Axes" checked={showAxes} onChange={setShowAxes} />
         {canMagneticCell && (
           <ViewerToggle label={`Magnetic cell (${superK.join("×")})`} checked={magneticCell} onChange={setMagneticCell} />
         )}
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }} title="Scene light level">
+          Light
+          <input
+            type="range"
+            min={0.3}
+            max={2}
+            step={0.05}
+            value={lightLevel}
+            onChange={(e) => setLightLevel(Number(e.target.value))}
+            style={{ width: 72 }}
+          />
+        </label>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }} title="Sphere surface finish (specular highlight)">
+          Finish
+          <select
+            value={finish}
+            onChange={(e) => setFinish(e.target.value as Finish)}
+            style={{ fontSize: 11.5, fontFamily: "inherit", border: `1px solid ${theme.border}`, borderRadius: 6, padding: "1px 4px", color: theme.ink, background: "#fff" }}
+          >
+            <option value="matte">matte</option>
+            <option value="standard">standard</option>
+            <option value="glossy">glossy</option>
+          </select>
+        </label>
       </div>
-      <div ref={mountRef} style={{ width: "100%", height: 360, cursor: "grab", borderRadius: 10, overflow: "hidden" }} />
+      <div ref={mountRef} style={{ width: "100%", flex: 1, minHeight: 360, cursor: "grab", borderRadius: 10, overflow: "hidden" }} />
     </div>
   );
 }

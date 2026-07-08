@@ -674,7 +674,7 @@ export function App(): JSX.Element {
                 </div>
                 {plotMode === "structure" ? (
                   <>
-                    <Suspense fallback={<div style={{ height: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D viewer…</div>}>
+                    <Suspense fallback={<div style={{ flex: 1, minHeight: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D viewer…</div>}>
                       <StructureView
                         structure={structure}
                         {...(sessionMoments ? { moments: sessionMoments } : {})}
@@ -901,7 +901,7 @@ function ViewModeToggle({
 }): JSX.Element {
   const opts: readonly { id: "curves" | "structure"; label: string }[] = [
     { id: "curves", label: "Refinement" },
-    { id: "structure", label: "3D" },
+    { id: "structure", label: "3D Model" },
   ];
   return (
     <div style={{ display: "inline-flex", gap: 2, background: theme.chipBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: 2 }}>
