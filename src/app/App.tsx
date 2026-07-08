@@ -7,7 +7,9 @@ import type { RefinementParameter, RefinementResult } from "@/core/refinement/ty
 import type { ProjectFile } from "@/core/project/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
-import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
+import { magneticPowderComponents, buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
+import { applyMagneticMoments } from "@/core/workflow/magnetic";
+import { refine } from "@/core/refinement/engine";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
 import { buildPowderSpec, guidedPowderParams, type SiteTies } from "@/app/powderSpec";
@@ -291,6 +293,25 @@ export function App(): JSX.Element {
     setMessage(magnetic ? `Magnetic model applied — pattern now includes the magnetic contribution (${magnetic.moments.length} moment${magnetic.moments.length === 1 ? "" : "s"}).` : "Magnetic contribution cleared from the pattern.");
   }
 
+  /** Hand the magnetic model + moment parameters to the refinement page: add the
+   *  (freed) moment-mode params + bindings to the powder set and switch to the
+   *  Refinement tab, where "Refine" now fits nuclear + magnetic together. */
+  function continueRefinementWithMagnetic(
+    magnetic: MagneticModel,
+    momentParams: readonly RefinementParameter[],
+    momentBindings: readonly ParameterBinding[],
+  ): void {
+    setSession((s) => ({
+      ...s,
+      magnetic,
+      powderParams: [...s.powderParams.filter((p) => p.kind !== "momentMode"), ...momentParams.map((p) => ({ ...p, fixed: false }))],
+      powderBindings: [...s.powderBindings.filter((b) => b.kind !== "momentMode"), ...momentBindings],
+    }));
+    setPowderResult(null);
+    setStep(0);
+    setMessage(`Magnetic model passed to the refinement page — ${momentParams.length} moment parameter${momentParams.length === 1 ? "" : "s"} added (Magnetic group). Click Refine to fit nuclear + magnetic together.`);
+  }
+
   const profileReq = (): { shape: PeakShape; eta?: number; lorentz?: boolean; backgroundType?: BackgroundType } => ({
     shape: session.powderProfile.shape,
     ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
@@ -360,6 +381,27 @@ export function App(): JSX.Element {
     setBusy("powder");
     setRefineKind(guided ? "guided" : "refine");
     try {
+      // Magnetic-aware branch: when a magnetic model + moment parameters are
+      // present, refine nuclear + moments together (shared scale) on the main
+      // thread. (A Web Worker path is a future optimization; the solve is small.)
+      if (session.magnetic && powderParams.some((p) => p.kind === "momentMode")) {
+        await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
+        const magParams = guided ? guidedPowderParams(powderParams) : powderParams;
+        const problem = buildMagneticPowderProblem(structure, session.magnetic, pattern, magParams, pBindings, {
+          shape: session.powderProfile.shape,
+          ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+        });
+        const result = refine(problem, { maxIterations: guided ? 15 : 20 });
+        const refinedMag = applyMagneticMoments(session.magnetic, pBindings, result.parameters);
+        setSession((s) => ({
+          ...s,
+          magnetic: refinedMag,
+          powderParams: s.powderParams.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value, ...(guided ? { fixed: false } : {}) })),
+        }));
+        setPowderResult(result);
+        setMessage(`Nuclear + magnetic refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`);
+        return;
+      }
       const result = await client.current.refinePowder({
         structure, pattern, parameters: guided ? guidedPowderParams(powderParams) : powderParams, bindings: pBindings, ...profileReq(),
         ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),
@@ -730,6 +772,7 @@ export function App(): JSX.Element {
               nuclearBindings={pBindings}
               profile={session.powderProfile}
               onApply={applyMagneticToSession}
+              onContinue={continueRefinementWithMagnetic}
             />
           </div>
         );

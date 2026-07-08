@@ -45,6 +45,7 @@ export function KSearchPanel({
   nuclearBindings,
   profile,
   onApply,
+  onContinue,
 }: {
   structure: StructureModel;
   /** d-spacings of candidate magnetic peaks auto-detected from the pattern residual. */
@@ -57,6 +58,8 @@ export function KSearchPanel({
   /** Push the current magnetic model onto the session so the refinement plot
    *  shows the magnetic pattern + satellite ticks (null clears it). */
   onApply?: (magnetic: MagneticModel | null) => void;
+  /** Hand the magnetic model + moment params/bindings to the refinement page. */
+  onContinue?: (magnetic: MagneticModel, params: readonly RefinementParameter[], bindings: readonly ParameterBinding[]) => void;
 }): JSX.Element {
   const ions = useMemo(() => magneticIonCandidates(structure), [structure]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(ions.map((i) => i.siteLabel)));
@@ -320,8 +323,20 @@ export function KSearchPanel({
                     Show on refinement pattern
                   </button>
                 )}
-                <span style={help}>Nuclear model fixed; moment amplitudes refined against the loaded pattern (shared scale).</span>
+                {onContinue && (
+                  <button
+                    style={{ ...btn, marginTop: 0 }}
+                    onClick={() => onContinue(
+                      applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps),
+                      magBuild.params.map((p) => ({ ...p, value: amps[p.id] ?? p.value, initialValue: amps[p.id] ?? p.value })),
+                      magBuild.bindings,
+                    )}
+                  >
+                    Continue in refinement page →
+                  </button>
+                )}
               </div>
+              <span style={help}>&ldquo;Refine moments&rdquo; fits the moments here (nuclear fixed, shared scale). &ldquo;Continue&rdquo; adds the moment parameters to the main refinement to fit nuclear + magnetic together.</span>
               <Suspense fallback={<div style={{ height: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D preview…</div>}>
                 <StructureView structure={structure} propagation={k} {...(momentsMap ? { moments: momentsMap } : {})} />
               </Suspense>
