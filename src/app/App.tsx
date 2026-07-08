@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APP_VERSION, PROJECT_SCHEMA_VERSION } from "@/app/constants";
 import { downloadText } from "@/app/download";
 import type { StructureModel } from "@/core/crystal/types";
@@ -53,6 +53,8 @@ import { WorkbenchHeader, type Step } from "@/app/ui/WorkbenchHeader";
 import { StatusBar } from "@/app/ui/StatusBar";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
+// Lazy so three.js (~550 kB) only loads when the user opens the 3D view.
+const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono } from "@/app/theme";
 import { bondLengths } from "@/core/crystal/geometry";
@@ -152,6 +154,7 @@ export function App(): JSX.Element {
   const [fitRange, setFitRange] = useState<FitRangeSelection | null>(null);
   // Display-only x-axis unit; null = the pattern's native unit. Reset on load.
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit | null>(null);
+  const [plotMode, setPlotMode] = useState<"curves" | "structure">("curves");
   const [instrument, setInstrument] = useState<InstrumentParameters>(example.instrument);
   const [instrumentLoaded, setInstrumentLoaded] = useState(true);
   const [message, setMessage] = useState<string>(
@@ -589,48 +592,68 @@ export function App(): JSX.Element {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, alignItems: "stretch" }}>
               <div style={{ ...themeCard, gridColumn: "span 2", padding: "14px 16px", display: "flex", flexDirection: "column" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                  <span style={themeLabel}>Powder pattern — observed vs calculated</span>
-                  <div style={{ marginLeft: "auto" }}>
-                    <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
+                  <span style={themeLabel}>
+                    {plotMode === "structure" ? "Crystal structure — unit cell" : "Powder pattern — observed vs calculated"}
+                  </span>
+                  <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+                    {plotMode === "curves" && (
+                      <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
+                    )}
+                    <ViewModeToggle value={plotMode} onChange={setPlotMode} />
                   </div>
                 </div>
-                <WorkbenchPlot
-                  curves={plotCurves}
-                  xLabel={displayXLabel}
-                  wRpct={busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(1) : wRpct}
-                  fitRange={displayFitRange}
-                  phases={phaseTicks}
-                  {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
-                />
-                <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
-                  {tofViewOnly
-                    ? session.powderOverlay
-                      ? "Observed (points) with GSAS-II fit overlay."
-                      : "Observed TOF pattern — view-only (load a TOF instrument with difC to refine)."
-                    : `Powder${powderIsTof ? " (TOF) · back-to-back-exponential profile" : ""}`}
-                  {fitRangeActive && ` · fit range ${displayFitRange.min.toFixed(2)}–${displayFitRange.max.toFixed(2)} ${axisShortLabel(effectiveUnit)}`}
-                  {!tofViewOnly && " · drag across the plot to zoom, blue handles to set the fit range."}
-                  {fitRangeActive && (
-                    <button style={smallBtn} onClick={() => setFitRange(null)}>Reset range</button>
-                  )}
-                </p>
-                {!tofViewOnly && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: 12, color: theme.secondary }}>
-                    <span style={{ ...themeLabel, marginRight: 2 }}>Background</span>
-                    <select
-                      value={session.powderProfile.backgroundType ?? "chebyshev"}
-                      onChange={(e) => setBackgroundType(e.target.value as BackgroundType)}
-                      style={bgSelect}
-                    >
-                      <option value="chebyshev">Chebyshev</option>
-                      <option value="cosine">Cosine (Fourier)</option>
-                      <option value="powerSeries">Power series</option>
-                    </select>
-                    <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      terms
-                      <input type="number" min={1} max={24} step={1} value={session.backgroundTerms} onChange={(e) => setBackgroundTerms(Number(e.target.value))} style={bgTermsInput} />
-                    </label>
-                  </div>
+                {plotMode === "structure" ? (
+                  <>
+                    <Suspense fallback={<div style={{ height: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D viewer…</div>}>
+                      <StructureView structure={structure} />
+                    </Suspense>
+                    <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
+                      {structure.name || "Structure"}
+                      {structure.spaceGroup.hermannMauguin ? ` · ${structure.spaceGroup.hermannMauguin}` : ""}
+                      {` · ${structure.sites.length} site${structure.sites.length === 1 ? "" : "s"} · drag to rotate, scroll to zoom.`}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <WorkbenchPlot
+                      curves={plotCurves}
+                      xLabel={displayXLabel}
+                      wRpct={busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(1) : wRpct}
+                      fitRange={displayFitRange}
+                      phases={phaseTicks}
+                      {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
+                    />
+                    <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
+                      {tofViewOnly
+                        ? session.powderOverlay
+                          ? "Observed (points) with GSAS-II fit overlay."
+                          : "Observed TOF pattern — view-only (load a TOF instrument with difC to refine)."
+                        : `Powder${powderIsTof ? " (TOF) · back-to-back-exponential profile" : ""}`}
+                      {fitRangeActive && ` · fit range ${displayFitRange.min.toFixed(2)}–${displayFitRange.max.toFixed(2)} ${axisShortLabel(effectiveUnit)}`}
+                      {!tofViewOnly && " · drag across the plot to zoom, blue handles to set the fit range."}
+                      {fitRangeActive && (
+                        <button style={smallBtn} onClick={() => setFitRange(null)}>Reset range</button>
+                      )}
+                    </p>
+                    {!tofViewOnly && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: 12, color: theme.secondary }}>
+                        <span style={{ ...themeLabel, marginRight: 2 }}>Background</span>
+                        <select
+                          value={session.powderProfile.backgroundType ?? "chebyshev"}
+                          onChange={(e) => setBackgroundType(e.target.value as BackgroundType)}
+                          style={bgSelect}
+                        >
+                          <option value="chebyshev">Chebyshev</option>
+                          <option value="cosine">Cosine (Fourier)</option>
+                          <option value="powerSeries">Power series</option>
+                        </select>
+                        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          terms
+                          <input type="number" min={1} max={24} step={1} value={session.backgroundTerms} onChange={(e) => setBackgroundTerms(Number(e.target.value))} style={bgTermsInput} />
+                        </label>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
               <ParameterPanel
@@ -753,6 +776,43 @@ function AxisUnitToggle({
           }}
         >
           {axisShortLabel(u)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ViewModeToggle({
+  value,
+  onChange,
+}: {
+  value: "curves" | "structure";
+  onChange: (m: "curves" | "structure") => void;
+}): JSX.Element {
+  const opts: readonly { id: "curves" | "structure"; label: string }[] = [
+    { id: "curves", label: "Curves" },
+    { id: "structure", label: "3D" },
+  ];
+  return (
+    <div style={{ display: "inline-flex", gap: 2, background: theme.chipBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: 2 }}>
+      {opts.map((o) => (
+        <button
+          key={o.id}
+          onClick={() => onChange(o.id)}
+          title={o.id === "structure" ? "3D crystal-structure model" : "Observed vs calculated curves"}
+          style={{
+            border: "none",
+            borderRadius: 6,
+            padding: "3px 11px",
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: themeMono,
+            background: o.id === value ? theme.primary : "transparent",
+            color: o.id === value ? "#fff" : theme.secondary,
+          }}
+        >
+          {o.label}
         </button>
       ))}
     </div>
