@@ -20,6 +20,7 @@
 
 import type { PowderXUnit, Radiation } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
+import { gsasHistogramUnit } from "@/parsers/gsasHistogram";
 
 export type DataType = "powder" | "single-crystal";
 export type DetectionSource = "override" | "header" | "instrument" | "filename" | "heuristic";
@@ -156,6 +157,21 @@ export function detectDataFormat(input: DetectInput): DetectedFormat {
   // setting (content introspection beats configuration).
   if (isGsasCsvPattern(text)) {
     return { dataType, xUnit: "tof", radiation: { kind: "neutron-tof" }, source: "header", confidence: "high", note: "GSAS-II CSV export — a TOF histogram." };
+  }
+
+  // A raw GSAS standard powder histogram (BANK record). The binning type fixes
+  // the abscissa: SLOG/RALF → TOF (µs); CONST → constant-wavelength 2θ.
+  const gsasUnit = gsasHistogramUnit(text);
+  if (gsasUnit) {
+    const radiation: Radiation = gsasUnit === "tof" ? { kind: "neutron-tof" } : radiationFor("twoTheta", instrument);
+    return {
+      dataType,
+      xUnit: gsasUnit,
+      radiation,
+      source: "header",
+      confidence: "high",
+      note: `GSAS powder histogram (BANK record) — ${gsasUnit === "tof" ? "time-of-flight" : "constant-wavelength 2θ"}.`,
+    };
   }
 
   const header = headerLines(text);

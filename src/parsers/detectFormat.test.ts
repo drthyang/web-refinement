@@ -87,6 +87,19 @@ describe("detectDataFormat — x-unit priority chain", () => {
     expect(d.confidence).toBe("high");
   });
 
+  it("recognizes a raw GSAS histogram: SLOG→TOF, CONST→2θ, beating a mismatched instrument", () => {
+    const slog = "Run 1 Wavelength: 1.5 A\nBANK 2 3 3 SLOG 11293 248344 0.0007999 0 FXYE\n11297 310 13\n11306 345 13\n11315 427 14";
+    const d = detectDataFormat({ text: slog, filename: "PG3.gsa", instrument: { kind: "constantWavelength", wavelength: 1.54 } });
+    expect(d.xUnit).toBe("tof");
+    expect(d.radiation).toEqual({ kind: "neutron-tof" });
+    expect(d.source).toBe("header");
+    expect(d.confidence).toBe("high");
+
+    const cw = detectDataFormat({ text: "CW\nBANK 1 3 3 CONST 1000 200 0 0 FXYE\n1000 50 7\n1200 60 8\n1400 55 7", filename: "cw.gsa" });
+    expect(cw.xUnit).toBe("twoTheta");
+    expect(cw.source).toBe("header");
+  });
+
   it("(5) range heuristic is the low-confidence last resort", () => {
     const big = detectDataFormat({ text: "3390 5\n50000 8\n90000 3", filename: "x.dat" });
     expect(big.xUnit).toBe("tof");
