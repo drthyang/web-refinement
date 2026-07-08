@@ -209,9 +209,12 @@ export function decomposeMagneticRepresentation(
  *
  *   basis ⊂ image of  Σ_{g fixing r₀} χ_Γ(g)* · e^{2πi k·L_g} · det(R_g)·R_g
  *
- * (the axial-vector projection operator restricted to the site stabilizer). The
- * number of independent vectors returned is the irrep's multiplicity on that
- * site. Returns [] when the irrep does not act on the site.
+ * (the axial-vector projection operator restricted to the site stabilizer).
+ * For a real irrep the number of vectors is its multiplicity on the site; for a
+ * complex irrep the real span of the conjugate pair is returned (e.g. one
+ * complex dimension → two real in-plane directions), so both members of a
+ * conjugate pair report the same real modes. Returns [] when the irrep does
+ * not act on the site.
  */
 export function projectIrrepModes(
   structure: StructureModel,

@@ -24,7 +24,7 @@
 
 import type { Mat3, Vec3 } from "@/core/math/types";
 import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
-import { applyOperation } from "@/core/crystal/symmetry";
+import { applyOperation, equivalentPositions } from "@/core/crystal/symmetry";
 
 /**
  * Character of the axial-vector (magnetic moment) representation for a rotation
@@ -49,21 +49,28 @@ export interface RepCharacterTerm {
 
 const isInteger = (v: number): boolean => Math.abs(v - Math.round(v)) < 1e-3;
 
+/** Periodic (mod-1) coincidence of two fractional positions. */
+function samePosition(a: Vec3, b: Vec3, tol = 1e-3): boolean {
+  for (let i = 0; i < 3; i++) {
+    const d = Math.abs(a[i]! - b[i]!);
+    if (Math.min(d, 1 - d) > tol) return false;
+  }
+  return true;
+}
+
 /** Distinct magnetic atoms in one cell: the orbit of the given sites. */
 function magneticAtoms(structure: StructureModel, siteLabels: readonly string[]): Vec3[] {
   const atoms: Vec3[] = [];
-  const seen = new Set<string>();
   const ops = structure.spaceGroup.operations.length
     ? structure.spaceGroup.operations
     : [{ rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] as Mat3, translation: [0, 0, 0] as Vec3, xyz: "x,y,z" }];
   for (const label of siteLabels) {
     const site = structure.sites.find((s) => s.label === label);
     if (!site) continue;
-    for (const op of ops) {
-      const raw = applyOperation(op, site.position);
-      const p: Vec3 = [((raw[0] % 1) + 1) % 1, ((raw[1] % 1) + 1) % 1, ((raw[2] % 1) + 1) % 1];
-      const key = p.map((v) => v.toFixed(3)).join(",");
-      if (!seen.has(key)) { seen.add(key); atoms.push(p); }
+    // Periodic-distance dedup (shared with site-multiplicity), then merge
+    // across labels so co-located (disordered) sites count once.
+    for (const p of equivalentPositions(ops, site.position)) {
+      if (!atoms.some((q) => samePosition(q, p))) atoms.push(p);
     }
   }
   return atoms;
