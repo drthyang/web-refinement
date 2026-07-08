@@ -193,10 +193,15 @@ agent tool it exposes.**
   Recovers a known k and distinguishes (½,0,0) from (0,0,½) in a non-cubic cell
   ([`kSearch.test.ts`](../src/core/magnetic/kSearch.test.ts)); wired into the
   Candidates step. Standard powder k-search (FullProf `k_search`; Bertaut 1968).
+  **Validated end-to-end on real data:** the full M2 pipeline (6 K − paramagnetic
+  difference → extra-peak detection → k-search) recovers **k = (½,0,0)** for the
+  AWO₄ high-entropy tungstate from real POWGEN neutron data
+  ([`realAwo4Magnetic.test.ts`](../src/core/workflow/realAwo4Magnetic.test.ts)).
 - **Needed:** scoring by magnetic *intensity* (Le Bail), not just position;
   incommensurate / multi-k handling; a commensurate/incommensurate flag.
-- **Validation gate:** ✅ recovers k for a known AFM at a zone boundary; Γ returns
-  no match for genuinely magnetic peaks. Intensity-scored gate still open.
+- **Validation gate:** ✅ recovers k for a known AFM at a zone boundary (synthetic
+  *and* real AWO₄ 6 K neutron data); Γ returns no match for genuinely magnetic
+  peaks. Intensity-scored gate still open.
 - **Tool exposed:** `search_propagation_vector(nuclear, magnetic_peaks) →
   ranked k candidates`.
 
@@ -219,19 +224,34 @@ agent tool it exposes.**
 - **Tool exposed:** `enumerate_magnetic_symmetry(parent, k) → candidate groups +
   moment bases (+ standard labels)`.
 
-### M4 — Magnetic structure refinement ⬜
+### M4 — Magnetic structure refinement 🚧
 
 - **Goal:** refine **moment basis-mode amplitudes** (never raw M_x/M_y/M_z) for
   each M3 candidate against magnetic data, and rank candidates by fit *and*
   physical plausibility.
 - **Exists:** k = 0 magnetic powder + single-crystal moment refinement; candidate
-  comparison; a moment-magnitude recovery test.
-- **Needed:** parameterize refinement over the irrep/basis amplitudes from M3;
-  magnetic supercell handling and Fourier-coefficient moment models
-  (sine / helical / conical) for k ≠ 0; use F1's global search to resolve
-  sign/phase ambiguity; candidate ranking with correlation-aware diagnostics.
-- **Validation gate:** recover a known basis-mode amplitude for k ≠ 0; ranked
-  candidates put the true magnetic structure first on a golden case.
+  comparison; a moment-magnitude recovery test. **Now also the k ≠ 0 core:** a
+  single-k **Fourier-coefficient magnetic structure factor**
+  ([`magnetic/fourierMoment.ts`](../src/core/magnetic/fourierMoment.ts)) that
+  carries a *complex* coefficient S_j per site — so SDW (real S), circular helix
+  (S_Re ⊥ S_Im, equal magnitude), and elliptical/cycloidal fall out — computes the
+  satellite structure factor at H ± k with the per-atom phase and the M⊥
+  projection, and refines **symmetry-adapted mode amplitudes** through the LM
+  engine. The **validation gate below is met** (helix + two-site SDW amplitude
+  recovery, [`fourierMoment.test.ts`](../src/core/magnetic/fourierMoment.test.ts)).
+  This closes the gap where the old real-moment path could only do *collinear*
+  commensurate structures.
+- **Needed:** wire the Fourier model into the powder/single-crystal workflow +
+  worker paths (replacing the collinear-only real-moment satellite intensity in
+  [`magneticPowder.ts`](../src/core/workflow/magneticPowder.ts)) and connect it to
+  the M3 irrep/basis output so amplitudes come from symmetry, not by hand;
+  magnetic-supercell bookkeeping and multi-arm (star of k) domains; use F1's
+  global search to resolve sign/phase ambiguity; candidate ranking with
+  correlation-aware diagnostics (the engine already produces them; the ranker
+  ignores them).
+- **Validation gate:** ✅ recover a known basis-mode amplitude for k ≠ 0
+  (`fourierMoment.test.ts`). Still open: ranked candidates put the true magnetic
+  structure first on a golden case.
 - **Tool exposed:** `refine_magnetic(candidate, data) → refined moments + fit`;
   the **"magnetic structure determination" skill** chains M2 → M3 → M4.
 

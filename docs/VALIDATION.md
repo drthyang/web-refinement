@@ -46,10 +46,13 @@ comparison recorded here.
 | Magnetic CIF (mCIF) parsing + BNS ops | golden (GSAS) | ✅ `parsers/magneticCif.test.ts` |
 | Magnetic moment magnitudes | golden (GSAS `.lst`) | ✅ `parsers/magneticCif.test.ts` |
 | GSAS reflection-list (Fo²/Fc²) parsing | golden | ✅ `parsers/magneticCif.test.ts` |
+| GSAS `.gsa` powder histogram (BANK/SLOG/FXYE) | unit + real POWGEN files | ✅ `parsers/gsasHistogram.test.ts` |
 | Magnetic single-crystal workflow + moment refinement | integration (GSAS structure) | ✅ `core/workflow/magneticWorkflow.test.ts` |
 | Magnetic candidate generation (k=0 index-2 subgroups) | golden (P2₁/m → P2₁'/m') | ✅ `core/magnetic/magneticGroups.test.ts` |
 | Allowed moment directions per site | golden (a–c plane) | ✅ `core/magnetic/magneticGroups.test.ts` |
 | Candidate comparison ranks correct group best | integration (30 K) | ✅ `core/workflow/magneticCompare.test.ts` |
+| k-search recovers k=(½,0,0) (AWO₄ P2/c cell) | unit | ✅ `core/magnetic/kSearch.test.ts` |
+| k-search recovers k=(½,0,0) from **real** AWO₄ 6 K neutron data | integration (real POWGEN) | ✅ `core/workflow/realAwo4Magnetic.test.ts` |
 | Moment-size restraint → physical magnitudes | integration | ✅ `core/workflow/magneticCompare.test.ts` |
 | TOF ↔ d conversion (POWGEN calibration) | golden (GSAS `.lst`) | ✅ `core/diffraction/instrument.test.ts` |
 | Instrument-file parsing | unit | ✅ `core/diffraction/instrument.test.ts` |
@@ -58,6 +61,7 @@ comparison recorded here.
 | Multi-phase powder (2-phase recovery) | integration | ✅ `core/workflow/multiPhase.test.ts` |
 | Le Bail extraction (pattern reconstruction) | integration | ✅ `core/workflow/leBail.test.ts` |
 | Magnetic powder (separable components + refine) | integration | ✅ `core/workflow/magneticPowder.test.ts` |
+| k≠0 Fourier structure factor (SDW/helix) + amplitude recovery | unit + self-consistent | ✅ `core/magnetic/fourierMoment.test.ts` |
 | Grouped (equal-value) constraints | unit | ✅ `core/refinement/engine.test.ts` |
 | Real 200 K/350 K CIF + reflection lists | golden (GSAS d-spacings) | ✅ `parsers/realData.test.ts` |
 | Plot scaling math | unit | ✅ `visualization/scale.test.ts` |

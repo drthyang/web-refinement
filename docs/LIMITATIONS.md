@@ -84,6 +84,14 @@ accidental gap — each is tracked as a roadmap item.
 - **Corrections modelled:** March–Dollase preferred orientation, Debye–Scherrer
   cylinder absorption. **Not modelled:** extinction, spherical-harmonic texture,
   flat-plate/other absorption geometries, anomalous dispersion, microabsorption.
+- **Input formats.** Powder patterns load from two-/three-column `x y [σ]` text,
+  the GSAS-II CSV export, and the **GSAS standard powder histogram** (`.gsa` /
+  `.gss` / `.fxye`: title + `BANK` record). For the histogram, `FXYE`/`FXY`
+  (explicit abscissa) with `SLOG`/`RALF` (TOF µs) and `CONST` (CW 2θ, centidegrees
+  ÷ 100) binning are validated against real POWGEN files; `STD`/`ESD` fixed-column
+  packing follows GSAS-II's reader and is covered by synthetic tests only. A
+  `CONST` bank is assumed constant-wavelength (the common case) — a rare
+  constant-µs-step TOF `CONST` bank would need an explicit unit override.
 - **Output.** Reproducible project JSON with history. **No refined CIF/mCIF
   export, atom table with esds, or report generation yet.** (Roadmap M5.)
 
