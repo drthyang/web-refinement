@@ -9,7 +9,7 @@
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
-import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
+import { momentBindingKey, type MagneticModel, type MagneticMoment } from "@/core/magnetic/types";
 import type { Vec3 } from "@/core/math/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
@@ -28,22 +28,25 @@ export function applyMagneticMoments(
     ...m,
     components: [...m.components] as Vec3,
   }));
-  const byLabel = new Map(moments.map((m) => [m.siteLabel, m]));
+  // Keyed by the binding key (site label + split-orbit suffix): a magnetic
+  // subgroup that splits a site's crystallographic orbit yields several moment
+  // entries per site label, each addressed independently.
+  const byKey = new Map(moments.map((m) => [momentBindingKey(m), m]));
 
   // Symmetry-mode bindings define the moment as m = Σ value·basis, so zero any
   // mode-driven site first, then accumulate its allowed modes.
   const modeDriven = new Set(
     bindings.filter((b) => b.kind === "momentMode" && b.targetKey).map((b) => b.targetKey!),
   );
-  for (const label of modeDriven) {
-    const m = byLabel.get(label);
+  for (const key of modeDriven) {
+    const m = byKey.get(key);
     if (m) (m.components as [number, number, number]) = [0, 0, 0];
   }
 
   for (const binding of bindings) {
     const v = values[binding.parameterId];
     if (v === undefined || !binding.targetKey) continue;
-    const moment = byLabel.get(binding.targetKey);
+    const moment = byKey.get(binding.targetKey);
     if (!moment) continue;
     if (binding.kind === "momentMode" && binding.momentBasis) {
       const c = moment.components as [number, number, number];

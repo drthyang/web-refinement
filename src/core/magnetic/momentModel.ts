@@ -18,9 +18,10 @@
 
 import type { AtomSite, StructureModel, SymmetryOperation } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
-import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
+import { momentBindingKey, type MagneticModel, type MagneticMoment } from "@/core/magnetic/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
+import { applyOperation } from "@/core/crystal/symmetry";
 
 export interface MagneticModelBuild {
   readonly magnetic: MagneticModel;
@@ -45,6 +46,62 @@ export function describeMomentMode(basis: Vec3): string {
       return `${sign}${coeff}${names[i]}`;
     })
     .join("");
+}
+
+function wrap01(v: number): number {
+  return ((v % 1) + 1) % 1;
+}
+
+function samePosition(a: Vec3, b: Vec3): boolean {
+  for (let i = 0; i < 3; i++) {
+    let d = Math.abs(a[i]! - b[i]!);
+    d = Math.min(d, 1 - d);
+    if (d > 1e-3) return false;
+  }
+  return true;
+}
+
+/**
+ * Representative positions of the orbits into which the magnetic subgroup
+ * splits a site's crystallographic orbit. The nuclear group G generates the
+ * full orbit of `position`; the (possibly smaller) magnetic group G_M — for
+ * k ≠ 0 the little group — partitions it into G_M-orbits. Each is an
+ * independent magnetic sublattice: its moment is NOT related by any magnetic
+ * operation to the others', so it needs its own allowed-moment basis and
+ * amplitudes. (Without the split, split-orbit atoms would silently carry no
+ * moment at all — zero magnetic intensity and no arrow in the viewer.)
+ *
+ * The first representative is the site position itself, so single-orbit cases
+ * reduce to the pre-existing behaviour and parameter naming.
+ */
+function magneticOrbitRepresentatives(
+  nuclearOps: readonly SymmetryOperation[],
+  magneticOps: readonly SymmetryOperation[],
+  position: Vec3,
+): Vec3[] {
+  const orbit: Vec3[] = [];
+  for (const op of nuclearOps) {
+    const raw = applyOperation(op, position);
+    const p: Vec3 = [wrap01(raw[0]), wrap01(raw[1]), wrap01(raw[2])];
+    if (!orbit.some((q) => samePosition(q, p))) orbit.push(p);
+  }
+  const site: Vec3 = [wrap01(position[0]!), wrap01(position[1]!), wrap01(position[2]!)];
+  const assigned = orbit.map(() => false);
+  const reps: Vec3[] = [];
+  const claim = (rep: Vec3): void => {
+    reps.push(rep);
+    for (const op of magneticOps) {
+      const raw = applyOperation(op, rep);
+      const p: Vec3 = [wrap01(raw[0]), wrap01(raw[1]), wrap01(raw[2])];
+      const idx = orbit.findIndex((q) => samePosition(q, p));
+      if (idx >= 0) assigned[idx] = true;
+    }
+  };
+  claim(site);
+  for (let i = 0; i < orbit.length; i++) {
+    if (!assigned[i]) claim(orbit[i]!);
+  }
+  return reps;
 }
 
 /** Group sites that share a fractional position (periodic, per-component). */
@@ -97,50 +154,69 @@ export function buildMagneticModel(
 
   for (const group of groupByPosition(ionSites, tieSameSite)) {
     const rep = group[0]!;
-    const allowed = allowedMomentDirections(subgroupOps, rep.position, k);
-    if (allowed.dimension === 0) continue; // moment forbidden by symmetry here
+    // The magnetic subgroup may split the site's crystallographic orbit
+    // (G_M ⊂ G for a k ≠ 0 little group). Every split orbit is an independent
+    // magnetic sublattice: it gets its own allowed-moment basis, parameters,
+    // and moment entry (anchored at the orbit's representative position).
+    const orbitReps = magneticOrbitRepresentatives(structure.spaceGroup.operations, subgroupOps, rep.position);
 
-    // Seed: the first allowed mode at moment0, the rest at 0.
-    const amps = allowed.basis.map((_, i) => (i === 0 ? moment0 : 0));
-    const seed: [number, number, number] = [0, 0, 0];
-    allowed.basis.forEach((b, i) => {
-      const a = amps[i]!;
-      seed[0] += a * b[0]!;
-      seed[1] += a * b[1]!;
-      seed[2] += a * b[2]!;
-    });
+    orbitReps.forEach((orbitPos, oi) => {
+      const orbitIndex = oi + 1;
+      const allowed = allowedMomentDirections(subgroupOps, orbitPos, k);
+      if (allowed.dimension === 0) return; // moment forbidden by symmetry here
 
-    // One shared set of moment-mode params (keyed by the group representative),
-    // bound to every member so their moments stay equal.
-    const groupLabel = group.length > 1 ? `${rep.label}+${group.length - 1}` : rep.label;
-    allowed.basis.forEach((b, i) => {
-      const id = `mom_${rep.label}_${i}`;
-      const modeName = describeMomentMode(b);
-      const suffix = allowed.basis.length > 1 ? ` ${i + 1}` : "";
-      params.push({
-        id,
-        label: `${groupLabel} M${suffix} (${modeName})`,
-        kind: "momentMode",
-        value: amps[i]!,
-        initialValue: amps[i]!,
-        min: -12,
-        max: 12,
-        fixed: true, // shown but fixed on build; freed by the user like atomic rows
+      // Seed: the first allowed mode at moment0, the rest at 0.
+      const amps = allowed.basis.map((_, i) => (i === 0 ? moment0 : 0));
+      const seed: [number, number, number] = [0, 0, 0];
+      allowed.basis.forEach((b, i) => {
+        const a = amps[i]!;
+        seed[0] += a * b[0]!;
+        seed[1] += a * b[1]!;
+        seed[2] += a * b[2]!;
       });
+
+      // One shared set of moment-mode params (keyed by the group representative),
+      // bound to every member so their moments stay equal. Split orbits (≥ 2)
+      // carry the orbit index in the id/label and binding key.
+      const orbitId = orbitIndex > 1 ? `o${orbitIndex}_` : "";
+      const orbitTag = orbitIndex > 1 ? ` orbit ${orbitIndex}` : "";
+      const groupLabel = group.length > 1 ? `${rep.label}+${group.length - 1}` : rep.label;
+      allowed.basis.forEach((b, i) => {
+        const id = `mom_${rep.label}_${orbitId}${i}`;
+        const modeName = describeMomentMode(b);
+        const suffix = allowed.basis.length > 1 ? ` ${i + 1}` : "";
+        params.push({
+          id,
+          label: `${groupLabel}${orbitTag} M${suffix} (${modeName})`,
+          kind: "momentMode",
+          value: amps[i]!,
+          initialValue: amps[i]!,
+          min: -12,
+          max: 12,
+          fixed: true, // shown but fixed on build; freed by the user like atomic rows
+        });
+        for (const m of group) {
+          bindings.push({
+            parameterId: id,
+            kind: "momentMode",
+            targetId: magId,
+            targetKey: momentBindingKey({ siteLabel: m.label, orbitIndex }),
+            momentBasis: b,
+          });
+        }
+      });
+
       for (const m of group) {
-        bindings.push({ parameterId: id, kind: "momentMode", targetId: magId, targetKey: m.label, momentBasis: b });
+        moments.push({
+          siteLabel: m.label,
+          frame: "crystallographic",
+          components: [...seed] as Vec3,
+          formFactorId: `${m.element}${m.oxidationState ?? 2}`,
+          ...(orbitIndex > 1 ? { position: orbitPos, orbitIndex } : {}),
+        });
+        if (!activeSites.includes(m.label)) activeSites.push(m.label);
       }
     });
-
-    for (const m of group) {
-      moments.push({
-        siteLabel: m.label,
-        frame: "crystallographic",
-        components: [...seed] as Vec3,
-        formFactorId: `${m.element}${m.oxidationState ?? 2}`,
-      });
-      activeSites.push(m.label);
-    }
   }
 
   return {

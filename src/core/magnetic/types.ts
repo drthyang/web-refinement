@@ -36,6 +36,31 @@ export interface MagneticMoment {
    * approximation). When absent it is resolved from element + oxidation state.
    */
   readonly formFactorId?: string;
+  /**
+   * Fractional position this moment expands from (defaults to the site
+   * position). Set when the magnetic subgroup splits the site's
+   * crystallographic orbit (G_M ⊂ G, e.g. a k ≠ 0 little group): each split
+   * orbit is an independent magnetic sublattice, carried as its own moment
+   * entry anchored at the orbit's representative position.
+   */
+  readonly position?: Vec3;
+  /**
+   * 1-based index of the split orbit this entry describes (absent or 1 = the
+   * orbit containing the site's own position). Only ≥ 2 for split orbits.
+   */
+  readonly orbitIndex?: number;
+}
+
+/**
+ * The key refinement bindings use to address one moment entry
+ * (`ParameterBinding.targetKey`): the site label, suffixed with the split-orbit
+ * index when the magnetic subgroup splits the site's crystallographic orbit
+ * (several moment entries then share one site label).
+ */
+export function momentBindingKey(m: Pick<MagneticMoment, "siteLabel" | "orbitIndex">): string {
+  return m.orbitIndex !== undefined && m.orbitIndex > 1
+    ? `${m.siteLabel}#${m.orbitIndex}`
+    : m.siteLabel;
 }
 
 /**

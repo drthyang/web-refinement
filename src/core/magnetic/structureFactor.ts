@@ -82,9 +82,12 @@ export function magneticStructureFactor(
     const ffId = formFactorId(structure, moment.siteLabel, moment.formFactorId);
     const fMag = table.has(ffId) ? table.j0(ffId, s) : 1;
     const seen = dedup ? new Set<string>() : null;
+    // A split-orbit moment (magnetic subgroup ⊂ nuclear group) expands from its
+    // own orbit-representative position, not the site's asymmetric-unit one.
+    const basePos = moment.position ?? site.position;
 
     for (const op of ops) {
-      const p = applyOperation(op, site.position);
+      const p = applyOperation(op, basePos);
       if (seen) {
         // One atom per unique position in the cell (no special-position over-count).
         const key = p.map((v) => (((v % 1) + 1) % 1).toFixed(4)).join(",");

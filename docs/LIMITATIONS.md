@@ -63,7 +63,10 @@ accidental gap — each is tracked as a roadmap item.
   recovered end-to-end) and, at k = 0, against GSAS-II moment magnitudes. Symmetry
   tools: a low-Q **single-k search** (ranks candidate k from magnetic-peak
   *positions*, G ± k — positions, not intensities) and enumeration of the **little
-  group of k** with its **time-reversal (GF(2)) magnetic subgroups**. Co-located
+  group of k** with its **time-reversal (GF(2)) magnetic subgroups**; when the
+  little group **splits a site's crystallographic orbit**, each split orbit
+  refines as an independent sublattice (own allowed-moment basis and
+  amplitudes). Co-located
   (disordered) magnetic ions can be **tied to the same moment**. mCIF (BNS)
   parsing + axial-vector transformation are implemented; moment components use the
   normalized crystal-axis convention. **Not yet validated:** the absolute moment

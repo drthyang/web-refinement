@@ -27,7 +27,8 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { refine } from "@/core/refinement/engine";
 import type { PowderProfile } from "@/core/workflow/powder";
-import { color as theme, mono as themeMono, uppercaseLabel as themeLabel } from "@/app/theme";
+import { momentEntriesFrom } from "@/app/ui/cellModel";
+import { card as themeCard, color as theme, mono as themeMono, uppercaseLabel as themeLabel } from "@/app/theme";
 
 // Lazy so three.js stays in its own chunk (only loaded when a group is previewed).
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
@@ -154,12 +155,11 @@ export function KSearchPanel({
     setAmps(init);
   }, [magBuild]);
 
-  const momentsMap = useMemo(() => {
+  // Moment entries for the 3D view (one per site — or per split orbit when the
+  // magnetic group splits a site's crystallographic orbit), with amps applied.
+  const momentEntries = useMemo(() => {
     if (!magBuild) return undefined;
-    const applied = applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps);
-    const map = new Map<string, Vec3>();
-    for (const m of applied.moments) map.set(m.siteLabel, [...m.components] as Vec3);
-    return map;
+    return momentEntriesFrom(applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps));
   }, [magBuild, amps]);
 
   // Optional moment refinement against the loaded pattern: nuclear model held
@@ -214,7 +214,34 @@ export function KSearchPanel({
   };
 
   return (
-    <div style={{ display: "grid", gap: 18 }}>
+    <div className="wb-mag2">
+      {/* Left panel: the 3D model, always visible. Defaults to the magnetic
+          (super)cell whenever k defines one; arrows appear once a magnetic
+          group is selected on the right. */}
+      <section style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", position: "sticky", top: 12, alignSelf: "start", height: "clamp(480px, 78vh, 900px)" }}>
+        <div style={{ ...themeLabel, marginBottom: 8 }}>
+          3D model — {magBuild ? "moment preview" : "refined structure"}
+          <span style={{ color: theme.secondary, textTransform: "none", letterSpacing: 0 }}>
+            {" "}· k = {kLabel(k)}
+          </span>
+        </div>
+        <Suspense fallback={<div style={{ flex: 1, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D model…</div>}>
+          <StructureView
+            structure={structure}
+            propagation={k}
+            {...(magBuild ? { magneticOperations: magBuild.magnetic.operations ?? [] } : {})}
+            {...(momentEntries ? { moments: momentEntries } : {})}
+          />
+        </Suspense>
+        <p style={{ ...help, maxWidth: "none" }}>
+          {magBuild
+            ? "Red arrows are the ordered moments (axial vectors) on the magnetic sites, shown over the magnetic unit cell. Atoms without an arrow have a symmetry-forbidden moment under the selected group. Absolute magnitude carries a convention factor to cross-check vs GSAS-II; directions and relative sizes are well defined."
+            : "Refined nuclear structure. Pick a magnetic space group in step 4 to preview its symmetry-allowed moments here."}
+        </p>
+      </section>
+
+      {/* Right panel: the workflow controls (steps 1–5). */}
+      <div style={{ ...themeCard, padding: 16, display: "grid", gap: 18, alignContent: "start", minWidth: 0 }}>
       {/* 1. Atomic structure: which sites carry a moment */}
       <section>
         <div style={themeLabel}>1 · Atomic structure — magnetic ions</div>
@@ -495,24 +522,12 @@ export function KSearchPanel({
                   </button>
                 )}
               </div>
-              <span style={help}>&ldquo;Refine moments&rdquo; fits the moments here (nuclear fixed, shared scale). &ldquo;Continue&rdquo; adds the moment parameters to the main refinement to fit nuclear + magnetic together.</span>
-              <Suspense fallback={<div style={{ height: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D preview…</div>}>
-                <StructureView
-                  structure={structure}
-                  propagation={k}
-                  magneticOperations={magBuild.magnetic.operations ?? []}
-                  {...(momentsMap ? { moments: momentsMap } : {})}
-                />
-              </Suspense>
-              <p style={help}>
-                Red arrows are the ordered moments (axial vectors) on the magnetic sites. Absolute
-                magnitude carries a convention factor to cross-check vs GSAS-II; directions and
-                relative sizes are well defined.
-              </p>
+              <span style={help}>&ldquo;Refine moments&rdquo; fits the moments here (nuclear fixed, shared scale) — the 3D model on the left updates live. &ldquo;Continue&rdquo; adds the moment parameters to the main refinement to fit nuclear + magnetic together.</span>
             </div>
           )}
         </section>
       )}
+      </div>
     </div>
   );
 }

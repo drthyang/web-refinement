@@ -160,3 +160,30 @@ describe("displayMoment — commensurate k-phase", () => {
     expect(xs[1]).toBeCloseTo(1, 6);
   });
 });
+
+describe("buildCellAtoms — split-orbit moment entries", () => {
+  // Nuclear group {1, 2z}, magnetic group = {1} only: the 2-atom orbit splits
+  // into two 1-atom orbits. With per-orbit moment entries every atom finds its
+  // anchor; without them the split-off atom has no arrow (legacy behaviour,
+  // asserted above).
+  const nuc = [parseSymmetryOperation("x,y,z"), parseSymmetryOperation("-x,-y,z")];
+  const s = { ...cubicP1([{ label: "A1", element: "Mn", position: [0.1, 0.2, 0.3], occupancy: 1, adp: iso }]), spaceGroup: { operations: nuc } };
+  const magOps = [parseMagneticSymmetryOperation("x,y,z,+1")];
+
+  it("every nuclear-orbit atom carries an arrow from its own orbit's entry", () => {
+    const entries = [
+      { key: "A1", siteLabel: "A1", components: [0, 0, 1] as Vec3 },
+      { key: "A1#2", siteLabel: "A1", position: [0.9, 0.8, 0.3] as Vec3, components: [0, 0, -2] as Vec3 },
+    ];
+    const atoms = buildCellAtoms(s, [1, 1, 1], magOps, entries);
+    expect(atoms).toHaveLength(2);
+    // Both atoms have a placing op, each keyed to its orbit's entry.
+    expect(atoms.map((a) => a.mag?.momentKey).sort()).toEqual(["A1", "A1#2"]);
+    // And each arrow uses its own entry's components.
+    for (const a of atoms) {
+      const entry = entries.find((e) => e.key === a.mag!.momentKey)!;
+      const arrow = displayMoment(a, entry.components)!;
+      expect(arrow[2]).toBeCloseTo(entry.components[2]!, 6);
+    }
+  });
+});

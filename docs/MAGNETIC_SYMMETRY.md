@@ -29,6 +29,17 @@ the refinable moment modes (the "coordinates"/basis vectors FullProf refines).
 This route drives the moment model + refinement
 ([`buildMagneticModel`](../src/core/magnetic/momentModel.ts)).
 
+**Orbit splitting.** When `G_k` is smaller than the parent group, it can split a
+site's crystallographic orbit; each split orbit is an **independent magnetic
+sublattice** (no magnetic operation relates its moment to the others'). The
+moment model decomposes every magnetic site's orbit into `G_k`-orbits and gives
+each its own allowed-moment basis, amplitudes ("`Mn1 orbit 2 M …`"), and moment
+entry anchored at the orbit's representative position — the structure factor and
+the 3D viewer expand each entry over the magnetic operations from that anchor.
+A split orbit whose allowed dimension is 0 genuinely carries no moment (the
+viewer draws no arrow there and says why). Tested in
+[`orbitSplitting.test.ts`](../src/core/magnetic/orbitSplitting.test.ts).
+
 **Tested:** k=0 candidate set (P2₁/m → P2₁'/m'), allowed-moment dimensions, the
 simple-AFM recovery ([`magneticSimpleAfm.test.ts`](../src/core/workflow/magneticSimpleAfm.test.ts)).
 

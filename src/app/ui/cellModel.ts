@@ -16,6 +16,7 @@
 
 import type { Mat3, Vec3 } from "@/core/math/types";
 import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
+import { momentBindingKey, type MagneticModel } from "@/core/magnetic/types";
 import { fractionalToCartesian } from "@/core/crystal/unitCell";
 import { applyOperation } from "@/core/crystal/symmetry";
 import { determinant } from "@/core/math/mat3";
@@ -27,6 +28,32 @@ export interface MomentPlacing {
   readonly theta: 1 | -1;
   /** Returning lattice translation L (image = wrapped position + L). */
   readonly latt: Vec3;
+  /** Key of the moment entry this atom's arrow derives from (defaults to the
+   *  site label; split orbits carry a `#n` suffix — see momentBindingKey). */
+  readonly momentKey: string;
+}
+
+/**
+ * One moment entry for the viewer: the refined components plus the anchor the
+ * magnetic group expands it from. `key` matches `MomentPlacing.momentKey`.
+ */
+export interface MomentEntry {
+  readonly key: string;
+  readonly siteLabel: string;
+  /** Orbit-representative fractional position (defaults to the site position). */
+  readonly position?: Vec3;
+  /** Crystal-axis moment components (µ_B). */
+  readonly components: Vec3;
+}
+
+/** The viewer's moment entries for a magnetic model (split orbits included). */
+export function momentEntriesFrom(magnetic: MagneticModel): MomentEntry[] {
+  return magnetic.moments.map((m) => ({
+    key: momentBindingKey(m),
+    siteLabel: m.siteLabel,
+    ...(m.position ? { position: m.position } : {}),
+    components: [...m.components] as Vec3,
+  }));
 }
 
 /** One rendered atom: element, site label, Cartesian position (Å), placing op. */
@@ -104,12 +131,20 @@ function coincide(a: Vec3, b: Vec3): boolean {
  *
  * `magneticOps` (θ-signed Shubnikov operations, e.g. the chosen subgroup): when
  * given, each atom's moment-placing operation is looked up among them, so arrows
- * honour time reversal; atoms not reachable by a magnetic operation get none.
+ * honour time reversal.
+ *
+ * `momentEntries`: the model's moment anchors. When the magnetic group splits a
+ * site's crystallographic orbit, each split orbit has its own entry (anchored at
+ * its representative position) — the placing search runs per anchor, so every
+ * atom finds the entry whose G_M-orbit it belongs to. Without entries the site
+ * position is the single anchor (legacy behaviour); an atom reachable from no
+ * anchor carries no arrow (its moment is not defined by the model).
  */
 export function buildCellAtoms(
   structure: StructureModel,
   supercell: readonly [number, number, number] = [1, 1, 1],
   magneticOps?: readonly SymmetryOperation[],
+  momentEntries?: readonly MomentEntry[],
 ): CellAtom[] {
   const [nx, ny, nz] = supercell;
   const single = nx === 1 && ny === 1 && nz === 1;
@@ -126,15 +161,20 @@ export function buildCellAtoms(
     atoms.push({ element, label, xyz: fractionalToCartesian(structure.cell, frac), rot, ...(mag ? { mag } : {}), cellIndex });
   };
 
-  // The moment-placing op for the atom at `frac` (site image, wrapped): the
-  // (first) op in `list` reaching that position, with its θ and returning L.
-  const placingFor = (list: readonly SymmetryOperation[], sitePos: Vec3, frac: Vec3): MomentPlacing | undefined => {
+  // The moment-placing op for the atom at `frac`: the (first) op in `list`
+  // carrying `anchorPos` onto that position, with its θ and returning L.
+  const placingFor = (
+    list: readonly SymmetryOperation[],
+    anchorPos: Vec3,
+    frac: Vec3,
+    momentKey: string,
+  ): MomentPlacing | undefined => {
     for (const op of list) {
-      const raw = applyOperation(op, sitePos);
+      const raw = applyOperation(op, anchorPos);
       const w: Vec3 = [wrap01(raw[0]), wrap01(raw[1]), wrap01(raw[2])];
       if (!coincide(w, frac)) continue;
       const latt: Vec3 = [Math.round(raw[0] - w[0]!), Math.round(raw[1] - w[1]!), Math.round(raw[2] - w[2]!)];
-      return { rot: op.rotation, theta: (op.timeReversal ?? 1) as 1 | -1, latt };
+      return { rot: op.rotation, theta: (op.timeReversal ?? 1) as 1 | -1, latt, momentKey };
     }
     return undefined;
   };
@@ -147,8 +187,19 @@ export function buildCellAtoms(
       const frac: Vec3 = [wrap01(raw[0]), wrap01(raw[1]), wrap01(raw[2])];
       if (!placed.some((q) => coincide(q.frac, frac))) placed.push({ frac, rot: op.rotation });
     }
+    // The anchors this site's arrows can derive from: its moment entries
+    // (one per split orbit) or, absent a model, the site position itself.
+    const anchors: { key: string; pos: Vec3 }[] = momentEntries
+      ? momentEntries
+          .filter((e) => e.siteLabel === site.label)
+          .map((e) => ({ key: e.key, pos: e.position ?? site.position }))
+      : [{ key: site.label, pos: site.position }];
     for (const { frac, rot } of placed) {
-      const mag = placingFor(magneticOps ?? ops, site.position, frac);
+      let mag: MomentPlacing | undefined;
+      for (const anchor of anchors) {
+        mag = placingFor(magneticOps ?? ops, anchor.pos, frac, anchor.key);
+        if (mag) break;
+      }
       if (single) {
         // Duplicate across each near-zero axis so faces/edges/corners are filled.
         // Each duplicate belongs to the next cell along that axis (its k-phase cell index).

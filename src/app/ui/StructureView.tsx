@@ -21,7 +21,7 @@ import { fractionalToCartesian } from "@/core/crystal/unitCell";
 import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
 import { color as theme, mono as themeMono } from "@/app/theme";
 import { covalentRadius, elementColor } from "@/app/ui/elementData";
-import { buildCellAtoms, displayMoment, magneticSupercell } from "@/app/ui/cellModel";
+import { buildCellAtoms, displayMoment, magneticSupercell, type MomentEntry } from "@/app/ui/cellModel";
 
 const MAX_BOND_LABELS = 80; // labelling every bond of a big cell is unreadable
 const MAX_ATOM_LABELS = 400; // ditto for atom labels in a large supercell
@@ -63,8 +63,10 @@ export function StructureView({
   magneticOperations,
 }: {
   structure: StructureModel;
-  /** Magnetic moments to overlay as arrows: site label → crystal-axis components (µ_B). */
-  moments?: ReadonlyMap<string, Vec3>;
+  /** Magnetic moment entries to overlay as arrows (one per site — or per split
+   *  orbit when the magnetic group splits a site's crystallographic orbit).
+   *  Build with `momentEntriesFrom(magneticModel)`. */
+  moments?: readonly MomentEntry[];
   /** Propagation vector k — enables the magnetic-supercell view (moments modulated by cos 2π k·n). */
   propagation?: Vec3;
   /** θ-signed Shubnikov operations of the chosen magnetic group: arrows on
@@ -77,7 +79,9 @@ export function StructureView({
   const [showAtomLabels, setShowAtomLabels] = useState(false);
   const [perspective, setPerspective] = useState(true);
   const [showAxes, setShowAxes] = useState(true);
-  const [magneticCell, setMagneticCell] = useState(false);
+  // The magnetic (super)cell is the default view whenever k makes one (> 1×1×1):
+  // a magnetic refinement should open showing the full magnetic repeat.
+  const [magneticCell, setMagneticCell] = useState(true);
   const [lightLevel, setLightLevel] = useState(1);
   const [finish, setFinish] = useState<Finish>("standard");
 
@@ -97,7 +101,10 @@ export function StructureView({
   const canMagneticCell = superK[0] * superK[1] * superK[2] > 1;
   const supercell: [number, number, number] = magneticCell && canMagneticCell ? superK : [1, 1, 1];
 
-  const atoms = useMemo(() => buildCellAtoms(structure, supercell, magneticOperations), [structure, magneticOperations, supercell[0], supercell[1], supercell[2]]); // eslint-disable-line react-hooks/exhaustive-deps
+  const atoms = useMemo(
+    () => buildCellAtoms(structure, supercell, magneticOperations, moments),
+    [structure, magneticOperations, moments, supercell[0], supercell[1], supercell[2]], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   // Cartesian cell corners + centre + body-diagonal span, for edges and camera.
   const { corners, center, span } = useMemo(() => {
@@ -176,15 +183,16 @@ export function StructureView({
     // displayMoment — the θ-signed axial transform of its placing operation with
     // the commensurate k-phase (cell index + returning translation) — then
     // crystal-axis components → Cartesian for the arrow. Length ∝ |moment|.
-    if (moments && moments.size > 0) {
+    if (moments && moments.length > 0) {
+      const byKey = new Map(moments.map((e) => [e.key, e.components]));
       let maxMom = 0;
-      for (const m of moments.values()) {
-        const c = crystalComponentsToCartesian(structure.cell, m);
+      for (const e of moments) {
+        const c = crystalComponentsToCartesian(structure.cell, e.components);
         maxMom = Math.max(maxMom, Math.hypot(c[0]!, c[1]!, c[2]!));
       }
       const arrowUnit = maxMom > 1e-6 ? (span * 0.42) / maxMom : 0;
       for (const at of atoms) {
-        const m = arrowUnit > 0 ? moments.get(at.label) : undefined;
+        const m = arrowUnit > 0 && at.mag ? byKey.get(at.mag.momentKey) : undefined;
         if (!m) continue;
         const mc = displayMoment(at, m, propagation);
         if (!mc) continue;

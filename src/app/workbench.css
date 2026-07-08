@@ -41,6 +41,25 @@
   align-items: stretch;
 }
 
+/* Magnetic page: 3D model (left) | workflow controls (right). */
+.wb-mag2 {
+  display: grid;
+  grid-template-columns: minmax(360px, 5fr) minmax(380px, 6fr);
+  gap: clamp(12px, 1vw, 20px);
+  align-items: start;
+}
+
+/* Narrow: stack, model first (it is the sticky orientation anchor when wide). */
+@media (max-width: 1120px) {
+  .wb-mag2 {
+    grid-template-columns: 1fr;
+  }
+  .wb-mag2 > section {
+    position: static !important;
+    height: clamp(420px, 60vh, 640px) !important;
+  }
+}
+
 /* Mid widths: keep plot + parameters side by side, quality drops below. */
 @media (max-width: 1500px) {
   .wb-work3 {

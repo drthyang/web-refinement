@@ -25,12 +25,12 @@ import { startingPowderParams } from "@/app/loadData";
 import { ComputeClient } from "@/workers/computeClient";
 import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
 import { KSearchPanel } from "@/components/KSearchPanel";
+import { momentEntriesFrom } from "@/app/ui/cellModel";
 import { detectExtraPeaks } from "@/core/magnetic/extraPeaks";
 import { powderReflectionObsCalc } from "@/core/workflow/obsCalc";
 import { normalProbabilityPlot, weightedResiduals } from "@/core/refinement/diagnostics";
 import { QualityPlots } from "@/app/ui/QualityPlots";
 import type { MagneticModel } from "@/core/magnetic/types";
-import type { Vec3 } from "@/core/math/types";
 import { buildSyntheticPowder, powderBindings } from "@/examples/synthetic";
 import {
   axisContext,
@@ -280,13 +280,11 @@ export function App(): JSX.Element {
     return phases;
   }, [structure, session.magnetic, patternExtent, pattern.xUnit, effectiveUnit, axisCtx]);
 
-  // Refined moments (site → crystal-axis components) for the 3D structure view.
-  const sessionMoments = useMemo<Map<string, Vec3> | undefined>(() => {
-    if (!session.magnetic) return undefined;
-    const map = new Map<string, Vec3>();
-    for (const m of session.magnetic.moments) map.set(m.siteLabel, [...m.components] as Vec3);
-    return map;
-  }, [session.magnetic]);
+  // Refined moment entries (per site / split orbit) for the 3D structure view.
+  const sessionMoments = useMemo(
+    () => (session.magnetic ? momentEntriesFrom(session.magnetic) : undefined),
+    [session.magnetic],
+  );
 
   function patchPowder(id: string, patch: Partial<RefinementParameter>): void {
     setSession((s) => ({ ...s, powderParams: s.powderParams.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
@@ -795,12 +793,15 @@ export function App(): JSX.Element {
         );
       case 1:
         return (
-          <div style={{ ...themeCard, padding: 16 }}>
-            <h2 style={h2}>Magnetic symmetry analysis ({structure.name})</h2>
-            <p style={stepHelp}>
-              Commensurate single-k workflow, on the refined atomic structure:
-              magnetic ions → propagation vector k → symmetry framework → magnetic space group → preview &amp; refine → back to refinement.
-            </p>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={{ ...themeCard, padding: "14px 16px" }}>
+              <h2 style={{ ...h2, marginBottom: 4 }}>Magnetic symmetry analysis ({structure.name})</h2>
+              <p style={{ ...stepHelp, marginBottom: 0 }}>
+                Commensurate single-k workflow, on the refined atomic structure:
+                magnetic ions → propagation vector k → symmetry framework → magnetic space group → preview &amp; refine → back to refinement.
+                The 3D model (left) shows the magnetic unit cell with the selected group&rsquo;s moments.
+              </p>
+            </div>
             <KSearchPanel
               structure={refinedStructure}
               autoPeaks={magneticPeakD}
