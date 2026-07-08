@@ -57,6 +57,7 @@ const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono, fz } from "@/app/theme";
 import { applyParameters } from "@/core/workflow/apply";
+import { excludedPointMask } from "@/core/refinement/factors";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 
@@ -591,18 +592,25 @@ export function App(): JSX.Element {
   }
 
   const wRpct = (() => {
-    // For a TOF overlay, only measure the fit region (where GSAS-II's calc > 0);
-    // points outside the refined range would otherwise inflate the residual.
+    // The page's single wR readout: the true weighted R_wp with the engine's
+    // definition and point selection (1/σ² weights, excluded-sentinel plateau,
+    // active fit range; for a TOF overlay only where the reference calc > 0),
+    // so it matches the refinement result at convergence and stays live as
+    // parameters are edited.
+    const excluded = excludedPointMask(curves.yObs);
     let num = 0, den = 0;
     for (let i = 0; i < curves.yObs.length; i++) {
       const c = curves.yCalc[i] ?? 0;
+      if (excluded[i]) continue;
       if (powderIsTof && c <= 0) continue;
-      // Match the refined window: exclude points outside an active fit range.
       if (fitRangeActive && (curves.x[i]! < fitRange!.min || curves.x[i]! > fitRange!.max)) continue;
-      num += Math.abs(curves.yObs[i]! - c);
-      den += Math.abs(curves.yObs[i]!);
+      const o = curves.yObs[i]!;
+      const s = pattern.points[i]?.sigma ?? (o > 0 ? Math.sqrt(o) : 1);
+      const w = s > 0 ? 1 / (s * s) : 1;
+      num += w * (o - c) * (o - c);
+      den += w * o * o;
     }
-    return (100 * num / Math.max(den, 1e-9)).toFixed(1);
+    return (100 * Math.sqrt(num / Math.max(den, 1e-12))).toFixed(2);
   })();
 
   function exportCsv(): void {
@@ -715,7 +723,7 @@ export function App(): JSX.Element {
                     <WorkbenchPlot
                       curves={plotCurves}
                       xLabel={displayXLabel}
-                      wRpct={busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(1) : wRpct}
+                      wRpct={busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(2) : wRpct}
                       fitRange={displayFitRange}
                       phases={phaseTicks}
                       {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
@@ -840,13 +848,13 @@ function QualityPanel({
       <table style={{ fontSize: fz.body, marginTop: 8 }}>
         <tbody>
           <tr>
-            <td style={kcell}>Powder</td>
-            <td>{powderResult ? `wR ${(100 * (powderResult.agreement.rWeighted ?? 0)).toFixed(2)}% · GoF ${(powderResult.agreement.goodnessOfFit ?? 0).toFixed(2)}` : "not refined"}</td>
+            <td style={kcell}>GoF</td>
+            <td>{powderResult ? (powderResult.agreement.goodnessOfFit ?? 0).toFixed(2) : "not refined"}</td>
           </tr>
         </tbody>
       </table>
       <p style={{ fontSize: fz.small, color: theme.secondary, marginTop: 6 }}>
-        GoF near 1 = fit consistent with the data uncertainties.
+        GoF near 1 = fit consistent with the data uncertainties. wR is shown live on the pattern.
       </p>
       <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} stacked />
       <p style={{ fontSize: fz.micro, color: theme.secondary, marginTop: 8 }}>

@@ -171,13 +171,13 @@ function StatusPill({ param, locked }: { param: RefinementParameter; locked: boo
 }
 
 function ResultBanner({ result }: { result: RefinementResult }): JSX.Element {
-  const a = result.agreement;
   const d = result.diagnostics;
   const hasDiag = d !== undefined && (d.svdZeroCount > 0 || d.highCorrelations.length > 0 || d.atBounds.length > 0);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {/* wR lives on the pattern plot (one readout per page); GoF in the quality rail. */}
       <div style={{ ...banner, background: color.okBg, border: `1px solid ${color.okBorder}`, color: color.okInk }}>
-        Result: {result.status} · wR = {(100 * (a.rWeighted ?? 0)).toFixed(2)}%{a.goodnessOfFit !== undefined ? ` · GoF = ${a.goodnessOfFit.toFixed(2)}` : ""}
+        Result: {result.status} · {result.history.length} cycle{result.history.length === 1 ? "" : "s"}
       </div>
       {hasDiag && d && (
         <div style={{ ...banner, background: color.noteBg, border: `1px solid ${color.noteBorder}`, color: color.noteInk }}>
