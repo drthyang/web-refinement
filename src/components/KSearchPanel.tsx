@@ -19,7 +19,6 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { searchPropagationVector, kLabel, type KCandidate } from "@/core/magnetic/kSearch";
 import { generateMagneticCandidatesForK, littleGroup } from "@/core/magnetic/magneticGroups";
-import { magneticRepresentationDimension } from "@/core/magnetic/magneticRepresentation";
 import { decomposeMagneticRepresentation, projectIrrepModes } from "@/core/magnetic/irreps";
 import { describeMomentMode } from "@/core/magnetic/momentModel";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
@@ -92,7 +91,6 @@ export function KSearchPanel({
     return { subgroups: generateMagneticCandidatesForK(ops, k), lgSize: littleGroup(ops, k).length };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structure, k[0], k[1], k[2]]);
-  const repDim = useMemo(() => magneticRepresentationDimension(structure, [...selected]), [structure, selected]);
 
   // Representation-analysis (irrep) route: decompose Γ_mag over G(k) into the
   // irreps of its (abelian) little co-group and project the basis modes each one
@@ -331,7 +329,7 @@ export function KSearchPanel({
           ) : (
             <>
               <p style={help}>
-                Γ<sub>mag</sub> ({repDim}-dimensional) decomposes into the irreps of the abelian little
+                Γ<sub>mag</sub> ({irrepAnalysis.dec.dimension}-dimensional) decomposes into the irreps of the abelian little
                 group as{" "}
                 <span style={{ fontFamily: themeMono, color: theme.ink }}>
                   {irrepAnalysis.dec.terms.map((t) => `${t.multiplicity}${t.irrep.label}`).join(" ⊕ ") || "—"}
