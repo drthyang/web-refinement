@@ -48,6 +48,13 @@ export interface KSearchOptions {
   readonly hklRange?: number;
   /** Max candidates returned. Default 12. */
   readonly limit?: number;
+  /**
+   * Only consider observed peaks below this |Q| (Å⁻¹), with Q = 2π/d. The
+   * magnetic form factor falls off fast with Q, so magnetic peaks live at low Q;
+   * restricting the search there suppresses spurious high-Q matches. Default 6
+   * (≈ d > 1.05 Å). Set 0 or Infinity to disable.
+   */
+  readonly maxQ?: number;
 }
 
 const FRAC_LABEL: ReadonlyMap<string, string> = new Map([
@@ -114,8 +121,10 @@ export function searchPropagationVector(
   observedD: readonly number[],
   options: KSearchOptions = {},
 ): KCandidate[] {
-  const { tolerance = 0.02, denominators = [2, 3, 4, 6], hklRange = 4, limit = 12 } = options;
-  const obs = observedD.filter((d) => Number.isFinite(d) && d > 0);
+  const { tolerance = 0.02, denominators = [2, 3, 4, 6], hklRange = 4, limit = 12, maxQ = 6 } = options;
+  // Q = 2π/d; keep only low-Q peaks (large d), where magnetic scattering lives.
+  const dMinQ = maxQ > 0 && Number.isFinite(maxQ) ? (2 * Math.PI) / maxQ : 0;
+  const obs = observedD.filter((d) => Number.isFinite(d) && d > 0 && d >= dMinQ);
   if (obs.length === 0) return [];
   const dMax = Math.max(...obs) * 1.05;
   const dMin = Math.min(...obs) * 0.95;

@@ -47,4 +47,14 @@ describe("propagation-vector (k) search", () => {
     expect(kLabel([0.5, 0, 0])).toBe("(½ 0 0)");
     expect(kLabel([1 / 3, 1 / 3, 0])).toBe("(⅓ ⅓ 0)");
   });
+
+  it("ignores high-Q peaks (magnetic scattering lives at low Q)", () => {
+    const lowQ = [dOf(0, 0, 0.5), dOf(1, 0, 0.5)]; // large d, Q ≪ 6
+    const highQd = 0.5; // d = 0.5 Å → Q = 2π/0.5 ≈ 12.6 Å⁻¹, above the default maxQ = 6
+    const result = searchPropagationVector(ortho, [...lowQ, highQd], { tolerance: 0.005 });
+    expect(result[0]!.total).toBe(2); // the high-Q peak is dropped before scoring
+    expect(result[0]!.k).toEqual([0, 0, 0.5]);
+    // Disabling the cut keeps all three.
+    expect(searchPropagationVector(ortho, [...lowQ, highQd], { tolerance: 0.005, maxQ: 0 })[0]!.total).toBe(3);
+  });
 });
