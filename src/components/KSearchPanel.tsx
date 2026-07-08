@@ -19,6 +19,7 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { searchPropagationVector, kLabel, type KCandidate } from "@/core/magnetic/kSearch";
 import { generateMagneticCandidatesForK, littleGroup } from "@/core/magnetic/magneticGroups";
+import { magneticRepresentationDimension } from "@/core/magnetic/magneticRepresentation";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import type { MagneticModel } from "@/core/magnetic/types";
@@ -29,6 +30,20 @@ import { color as theme, mono as themeMono, uppercaseLabel as themeLabel } from 
 
 // Lazy so three.js stays in its own chunk (only loaded when a group is previewed).
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
+
+/** Common commensurate propagation vectors, for one-click assignment. */
+const K_PRESETS: readonly { label: string; k: Vec3 }[] = [
+  { label: "(0 0 0)", k: [0, 0, 0] },
+  { label: "(½ 0 0)", k: [0.5, 0, 0] },
+  { label: "(0 ½ 0)", k: [0, 0.5, 0] },
+  { label: "(0 0 ½)", k: [0, 0, 0.5] },
+  { label: "(½ ½ 0)", k: [0.5, 0.5, 0] },
+  { label: "(½ 0 ½)", k: [0.5, 0, 0.5] },
+  { label: "(0 ½ ½)", k: [0, 0.5, 0.5] },
+  { label: "(½ ½ ½)", k: [0.5, 0.5, 0.5] },
+  { label: "(⅓ 0 0)", k: [1 / 3, 0, 0] },
+  { label: "(⅓ ⅓ 0)", k: [1 / 3, 1 / 3, 0] },
+];
 
 function parsePeaks(text: string): number[] {
   return text
@@ -75,6 +90,7 @@ export function KSearchPanel({
     return { subgroups: generateMagneticCandidatesForK(ops, k), lgSize: littleGroup(ops, k).length };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structure, k[0], k[1], k[2]]);
+  const repDim = useMemo(() => magneticRepresentationDimension(structure, [...selected]), [structure, selected]);
 
   // Selected magnetic subgroup → symmetry-allowed moment model over the real
   // structure, with editable moment-mode amplitudes and a 3D preview.
@@ -203,6 +219,12 @@ export function KSearchPanel({
           ))}
           <span style={{ fontSize: 13, color: theme.secondary, fontFamily: themeMono }}>= {kLabel(k)}</span>
         </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
+          <span style={{ ...help, marginTop: 3 }}>Assign directly:</span>
+          {K_PRESETS.map((p) => (
+            <button key={p.label} style={presetBtn} title={`Set k = ${p.label}`} onClick={() => setK(p.k)}>{p.label}</button>
+          ))}
+        </div>
         <div style={{ marginTop: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <button style={{ ...btn, marginTop: 0, opacity: autoPeaks.length === 0 ? 0.5 : 1 }} onClick={autoDetectAndSearch} disabled={autoPeaks.length === 0}>
@@ -253,7 +275,7 @@ export function KSearchPanel({
 
       {/* 3. Little-group magnetic subgroups */}
       <section>
-        <div style={themeLabel}>Magnetic subgroups of the little group G(k)</div>
+        <div style={themeLabel}>Magnetic space groups of the little group G(k)</div>
         <p style={help}>
           Little group G(k): {lgSize} of {structure.spaceGroup.operations.length} operations leave k invariant.
           Time-reversal (θ: G→±1) enumeration gives {subgroups.length} candidate{subgroups.length === 1 ? "" : "s"}.
@@ -274,9 +296,12 @@ export function KSearchPanel({
           ))}
         </div>
         <p style={{ ...help, marginTop: 8 }}>
-          Click a subgroup to preview the moments and edit their components. Note: little-group
-          magnetic subgroups only — no BNS/OG labels, star-of-k arms, or representation (irrep)
-          analysis yet. Confirm a candidate with a magnetic refinement.
+          Click a subgroup to preview the moments and edit their components — this is the
+          <strong> magnetic space group (coordinate/basis-vector) route</strong>. The complementary
+          <strong> representation (irrep) route</strong> is being built: the magnetic representation
+          here is <strong>{repDim}-dimensional</strong> over G(k); its character + decomposition are
+          implemented, with the full irrep tables and BNS/OG labels still to come (see
+          docs/MAGNETIC_SYMMETRY.md). Confirm any candidate with a magnetic refinement.
         </p>
       </section>
 
@@ -358,5 +383,6 @@ const kInput: React.CSSProperties = { width: 64, border: `1px solid ${theme.cont
 const textarea: React.CSSProperties = { display: "block", width: "100%", maxWidth: 420, marginTop: 4, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "6px 8px", fontSize: 13, fontFamily: themeMono, resize: "vertical" };
 const btn: React.CSSProperties = { marginTop: 6, border: "none", background: theme.primary, color: "#fff", borderRadius: 7, padding: "4px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" };
 const smallBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 6, padding: "1px 9px", fontSize: 11, cursor: "pointer" };
+const presetBtn: React.CSSProperties = { border: `1px solid ${theme.border}`, background: theme.chipBg, borderRadius: 6, padding: "2px 8px", fontSize: 11.5, fontFamily: themeMono, cursor: "pointer", color: theme.ink };
 const th: React.CSSProperties = { padding: "2px 10px 4px 0", fontWeight: 600 };
 const td: React.CSSProperties = { padding: "3px 10px 3px 0" };
