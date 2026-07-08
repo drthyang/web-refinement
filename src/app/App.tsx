@@ -9,8 +9,8 @@ import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
-import { buildPowderSpec, guidedPowderParams } from "@/app/powderSpec";
-import { DEFAULT_STAGE_KINDS } from "@/core/workflow/structureRefinement";
+import { buildPowderSpec, guidedPowderParams, type SiteTies } from "@/app/powderSpec";
+import { DEFAULT_STAGE_KINDS, siteGroups } from "@/core/workflow/structureRefinement";
 import { powderPatternCsv, projectJson } from "@/core/export/exporters";
 import { parseMagneticCif } from "@/parsers/cif";
 import { parsePowderData } from "@/parsers/powderData";
@@ -71,6 +71,7 @@ const STEPS: readonly Step[] = [
 
 const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", wavelength: 1.54 };
 const DEFAULT_BACKGROUND_TERMS = 4;
+const DEFAULT_TIES: SiteTies = { positions: true, adp: true };
 
 interface Session {
   structure: StructureModel;
@@ -82,6 +83,8 @@ interface Session {
   powderProfile: PowderProfile;
   /** Number of Chebyshev background coefficients in the powder model. */
   backgroundTerms: number;
+  /** Tie position/ADP of atoms sharing a crystallographic site (disorder). */
+  siteTies: SiteTies;
   /** GSAS-II's own calc/background overlay for a view-only (TOF) pattern. */
   powderOverlay?: { calc: number[]; background: number[] } | null;
   /** Provenance of the observed data driving the refinement. */
@@ -105,7 +108,7 @@ function makeMagnetic(ex: MagneticExample): MagState {
 
 function newSession(structure: StructureModel, instrument: InstrumentParameters = DEFAULT_INSTRUMENT): Session {
   const pattern = buildSyntheticPowder(structure);
-  const spec = buildPowderSpec(structure, pattern, instrument, true, DEFAULT_BACKGROUND_TERMS);
+  const spec = buildPowderSpec(structure, pattern, instrument, true, DEFAULT_BACKGROUND_TERMS, DEFAULT_TIES);
   return {
     structure,
     pattern,
@@ -113,6 +116,7 @@ function newSession(structure: StructureModel, instrument: InstrumentParameters 
     powderBindings: spec.bindings,
     powderProfile: spec.profile,
     backgroundTerms: DEFAULT_BACKGROUND_TERMS,
+    siteTies: DEFAULT_TIES,
     powderSource: SYNTHETIC_SOURCE,
   };
 }
@@ -124,7 +128,7 @@ function newSession(structure: StructureModel, instrument: InstrumentParameters 
  * estimates the scale from the observed counts.
  */
 function loadedSession(structure: StructureModel, pattern: PowderPattern, instrument: InstrumentParameters): Session {
-  const spec = buildPowderSpec(structure, pattern, instrument, true, DEFAULT_BACKGROUND_TERMS);
+  const spec = buildPowderSpec(structure, pattern, instrument, true, DEFAULT_BACKGROUND_TERMS, DEFAULT_TIES);
   return {
     structure,
     pattern,
@@ -132,6 +136,7 @@ function loadedSession(structure: StructureModel, pattern: PowderPattern, instru
     powderBindings: spec.bindings,
     powderProfile: spec.profile,
     backgroundTerms: DEFAULT_BACKGROUND_TERMS,
+    siteTies: DEFAULT_TIES,
     powderOverlay: null,
     powderSource: pattern.name,
   };
@@ -213,6 +218,11 @@ export function App(): JSX.Element {
 
   // Display-axis unit conversion (view only — data/refinement stay native).
   const axisCtx = useMemo(() => axisContext(pattern, instrumentLoaded ? instrument : undefined), [pattern, instrument, instrumentLoaded]);
+  // A disordered site (≥2 atoms sharing a position) enables the tie controls.
+  const hasSharedSite = useMemo(
+    () => siteGroups(structure.sites, true).some((g) => g.members.length > 1),
+    [structure],
+  );
   const displayUnits = useMemo(() => availableDisplayUnits(axisCtx), [axisCtx]);
   const effectiveUnit: DisplayUnit = displayUnit ?? pattern.xUnit;
   const displayCurves = useMemo(
@@ -302,11 +312,31 @@ export function App(): JSX.Element {
   function setBackgroundTerms(n: number): void {
     const count = Math.max(0, Math.min(24, Math.trunc(n)));
     setSession((s) => {
-      const spec = buildPowderSpec(s.structure, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, count);
+      const spec = buildPowderSpec(s.structure, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, count, s.siteTies);
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
         backgroundTerms: count,
+        powderParams: spec.params.map((p) => {
+          const old = previous.get(p.id);
+          return old ? { ...p, value: old.value, initialValue: old.initialValue, fixed: old.fixed } : p;
+        }),
+        powderBindings: spec.bindings,
+        powderProfile: { ...spec.profile, ...(s.powderProfile.backgroundType ? { backgroundType: s.powderProfile.backgroundType } : {}) },
+      };
+    });
+    setPowderResult(null);
+  }
+
+  /** Toggle tying position/ADP across shared (disordered) sites; rebuilds the spec. */
+  function setSiteTies(update: Partial<SiteTies>): void {
+    setSession((s) => {
+      const ties = { ...s.siteTies, ...update };
+      const spec = buildPowderSpec(s.structure, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, ties);
+      const previous = new Map(s.powderParams.map((p) => [p.id, p]));
+      return {
+        ...s,
+        siteTies: ties,
         powderParams: spec.params.map((p) => {
           const old = previous.get(p.id);
           return old ? { ...p, value: old.value, initialValue: old.initialValue, fixed: old.fixed } : p;
@@ -435,7 +465,7 @@ export function App(): JSX.Element {
         );
         return;
       }
-      const spec = buildPowderSpec(structure, parsed, tofInstrument, true, session.backgroundTerms);
+      const spec = buildPowderSpec(structure, parsed, tofInstrument, true, session.backgroundTerms, session.siteTies);
       setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
       setPowderResult(null);
       setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag}. ${spec.params.length} parameters, back-to-back-exponential profile — click “Refine powder” or “Guided”. ${fmt.note}`);
@@ -448,7 +478,7 @@ export function App(): JSX.Element {
     // reset the instrument — loading a different dataset type auto-switches the
     // workbench into the matching mode instead of staying view-only.
     const cwInstrument = instrumentLoaded && instrument.kind === "constantWavelength" ? instrument : DEFAULT_INSTRUMENT;
-    const spec = buildPowderSpec(structure, parsed, cwInstrument, session.powderProfile.lorentz, session.backgroundTerms);
+    const spec = buildPowderSpec(structure, parsed, cwInstrument, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
     setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
     if (instrument.kind === "tof") {
       setInstrument(DEFAULT_INSTRUMENT);
@@ -476,7 +506,7 @@ export function App(): JSX.Element {
             parsed.kind === "constantWavelength" && s.pattern.xUnit !== "tof"
               ? { ...s.pattern, radiation: { kind: parsed.radiationKind ?? "neutron", wavelength: parsed.wavelength }, wavelength: parsed.wavelength }
               : s.pattern;
-          const spec = buildPowderSpec(s.structure, pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms);
+          const spec = buildPowderSpec(s.structure, pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies);
           return { ...s, pattern, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile };
         });
         setPowderResult(null);
@@ -650,6 +680,19 @@ export function App(): JSX.Element {
                         <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           terms
                           <input type="number" min={1} max={24} step={1} value={session.backgroundTerms} onChange={(e) => setBackgroundTerms(Number(e.target.value))} style={bgTermsInput} />
+                        </label>
+                      </div>
+                    )}
+                    {!tofViewOnly && hasSharedSite && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6, fontSize: 12, color: theme.secondary }}>
+                        <span style={{ ...themeLabel, marginRight: 2 }} title="Atoms sharing one crystallographic site (occupancy disorder)">Shared site</span>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                          <input type="checkbox" checked={session.siteTies.positions ?? true} onChange={(e) => setSiteTies({ positions: e.target.checked })} />
+                          tie position
+                        </label>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                          <input type="checkbox" checked={session.siteTies.adp ?? true} onChange={(e) => setSiteTies({ adp: e.target.checked })} />
+                          tie ADP
                         </label>
                       </div>
                     )}

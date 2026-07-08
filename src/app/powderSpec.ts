@@ -40,13 +40,24 @@ export interface PowderSpec {
   readonly profile: PowderProfile;
 }
 
+/** Whether atoms sharing a crystallographic site are tied (see structureRefinement). */
+export interface SiteTies {
+  readonly positions?: boolean;
+  readonly adp?: boolean;
+}
+
 export function buildPowderSpec(
   structure: StructureModel,
   pattern: PowderPattern,
   instrument: InstrumentParameters,
   lorentz = true,
   backgroundTerms = 4,
+  ties: SiteTies = {},
 ): PowderSpec {
+  const tieOpts = {
+    tieSharedPositions: ties.positions ?? true,
+    tieSharedAdp: ties.adp ?? true,
+  };
   // Time-of-flight: back-to-back-exponential profile driven by the diffractometer
   // constants (difC/difA/difB) plus α/β/σ shape coefficients. The .instprm here
   // rarely carries the shape coefficients, so seed them: σ scales with difC·Δd
@@ -68,10 +79,10 @@ export function buildPowderSpec(
     };
     const zero = instrument.zero ?? 0;
     const profile: PowderProfile = { shape: "tof" };
-    const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, tof, refineOccupancy: true });
+    const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, tof, refineOccupancy: true, ...tieOpts });
     const seedCurves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
     const s = optimalScale(seedCurves.yObs.map((y) => (y > 0 ? y : 0)), seedCurves.yCalc);
-    const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof, refineOccupancy: true });
+    const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof, refineOccupancy: true, ...tieOpts });
     const params = spec.params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
     return { params, bindings: spec.bindings, profile };
   }
@@ -94,11 +105,11 @@ export function buildPowderSpec(
   // wR ≈ 10% → 5.5%). Only meaningful on a 2θ pattern.
   const profOpt = caglioti ? { caglioti, lorentzian: { x: 1, y: 0 } } : {};
   // Seed the scale from the data with a unit-scale evaluation.
-  const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, ...profOpt, refineOccupancy: true });
+  const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, ...profOpt, refineOccupancy: true, ...tieOpts });
   const curves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
   const s = optimalScale(curves.yObs.map((y) => (y > 0 ? y : 0)), curves.yCalc);
 
-  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, refineOccupancy: true });
+  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, refineOccupancy: true, ...tieOpts });
   const params = spec.params.map((p) => (STRUCTURAL_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
   return { params, bindings: spec.bindings, profile };
 }

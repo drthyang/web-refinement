@@ -10,7 +10,8 @@
  * sites), and isotropic ADPs damp the high-angle intensities.
  */
 
-import type { StructureModel } from "@/core/crystal/types";
+import type { AtomSite, StructureModel } from "@/core/crystal/types";
+import type { Vec3 } from "@/core/math/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { LinearRestraint, ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementOptions } from "@/core/refinement/types";
@@ -79,6 +80,24 @@ export interface StructureRefinementOptions {
   readonly refinePositions?: boolean;
   /** Refine site occupancies. Default false. */
   readonly refineOccupancy?: boolean;
+  /**
+   * Tie the atomic **position** of atoms sharing one crystallographic site
+   * (identical fractional coordinates — a mixed/disordered site, e.g. the six 3d
+   * cations of the high-entropy tungstate). One symmetry-adapted position mode is
+   * emitted per shared site and bound to every member, so they move together and
+   * never split. Default true — atoms literally at the same site must stay
+   * coincident. Set false to refine each independently (rarely physical).
+   */
+  readonly tieSharedPositions?: boolean;
+  /** As `tieSharedPositions`, for the isotropic/anisotropic **ADP**. Default true. */
+  readonly tieSharedAdp?: boolean;
+  /**
+   * Add an automatic Σ(occupancy) restraint per shared site, holding the total
+   * site occupancy at its starting value while the mixing ratio refines (so the
+   * disordered fractions can vary without the whole site emptying or over-filling).
+   * Only acts on sites with ≥2 members. Default true.
+   */
+  readonly restrainSharedOccupancy?: boolean;
   /**
    * Soft linear restraints on occupancies. Use coefficients to express total
    * occupancy, sublattice totals, or charge-balance terms. Targets default to
@@ -172,6 +191,9 @@ export function buildStructureRefinement(
     refineAnisotropicAdp = refineAdp,
     refinePositions = true,
     refineOccupancy = false,
+    tieSharedPositions = true,
+    tieSharedAdp = true,
+    restrainSharedOccupancy = true,
     occupancyRestraints = [],
     positionBound = 0.2,
     preferredOrientation,
@@ -286,24 +308,26 @@ export function buildStructureRefinement(
   // Per-site ADP. Isotropic sites refine B_iso; anisotropic sites refine the
   // symmetry-adapted U tensor modes allowed by site symmetry.
   if (refineAdp) {
-    for (const site of structure.sites) {
-      if (site.adp.kind !== "isotropic") continue;
-      const id = `B_${site.label}`;
-      params.push({ id, label: `${site.label} B`, kind: "bIso", value: startB, initialValue: startB, min: 0, max: 10, fixed: false });
-      bindings.push({ parameterId: id, kind: "bIso", targetId: structure.id, targetKey: site.label });
+    for (const g of siteGroups(structure.sites, tieSharedAdp)) {
+      if (g.rep.adp.kind !== "isotropic") continue;
+      const id = `B_${g.key}`;
+      params.push({ id, label: `${groupLabel(g)} B`, kind: "bIso", value: startB, initialValue: startB, min: 0, max: 10, fixed: false });
+      for (const m of g.members) {
+        if (m.adp.kind === "isotropic") bindings.push({ parameterId: id, kind: "bIso", targetId: structure.id, targetKey: m.label });
+      }
     }
   }
   if (refineAnisotropicAdp) {
-    for (const site of structure.sites) {
-      if (site.adp.kind !== "anisotropic") continue;
-      const allowed = allowedAnisotropicAdpModes(structure.spaceGroup.operations, site.position, site.adp.uAniso);
+    for (const g of siteGroups(structure.sites, tieSharedAdp)) {
+      if (g.rep.adp.kind !== "anisotropic") continue;
+      const allowed = allowedAnisotropicAdpModes(structure.spaceGroup.operations, g.rep.position, g.rep.adp.uAniso);
       allowed.modes.forEach((mode, i) => {
-        const id = `U_${site.label}_${i}`;
+        const id = `U_${g.key}_${i}`;
         const abs = Math.abs(mode.coefficient);
         const span = Math.max(0.02, abs * 4);
         params.push({
           id,
-          label: `${site.label} ${mode.label}`,
+          label: `${groupLabel(g)} ${mode.label}`,
           kind: "uAniso",
           value: mode.coefficient,
           initialValue: mode.coefficient,
@@ -311,7 +335,9 @@ export function buildStructureRefinement(
           max: mode.diagonal ? Math.max(0.2, mode.coefficient + span) : mode.coefficient + span,
           fixed: false,
         });
-        bindings.push({ parameterId: id, kind: "uAniso", targetId: structure.id, targetKey: site.label, uBasis: mode.basis });
+        for (const m of g.members) {
+          if (m.adp.kind === "anisotropic") bindings.push({ parameterId: id, kind: "uAniso", targetId: structure.id, targetKey: m.label, uBasis: mode.basis });
+        }
       });
     }
   }
@@ -320,15 +346,15 @@ export function buildStructureRefinement(
   // starting at 0 (no shift from the model position). Fully fixed sites (e.g.
   // the origin) emit nothing.
   if (refinePositions) {
-    for (const site of structure.sites) {
-      const { basis } = allowedPositionShifts(structure.spaceGroup.operations, site.position);
+    for (const g of siteGroups(structure.sites, tieSharedPositions)) {
+      const { basis } = allowedPositionShifts(structure.spaceGroup.operations, g.rep.position);
       basis.forEach((axis, i) => {
-        const id = `pos_${site.label}_${i}`;
+        const id = `pos_${g.key}_${i}`;
         // Label by the direction the mode moves: "x"/"y"/"z" for a general site,
         // or the coupled combination for a special site (e.g. "x+y+z" at (x,x,x)).
-        const label = `${site.label} ${describePositionMode(axis)}`;
+        const label = `${groupLabel(g)} ${describePositionMode(axis)}`;
         params.push({ id, label, kind: "positionShift", value: 0, initialValue: 0, min: -positionBound, max: positionBound, fixed: false });
-        bindings.push({ parameterId: id, kind: "positionShift", targetId: structure.id, targetKey: site.label, axis });
+        for (const m of g.members) bindings.push({ parameterId: id, kind: "positionShift", targetId: structure.id, targetKey: m.label, axis });
       });
     }
   }
@@ -341,6 +367,7 @@ export function buildStructureRefinement(
       bindings.push({ parameterId: id, kind: "occupancy", targetId: structure.id, targetKey: site.label });
     }
     restraints.push(...buildOccupancyRestraints(structure, occupancyRestraints));
+    if (restrainSharedOccupancy) restraints.push(...sharedOccupancyRestraints(structure.sites));
   }
 
   // Corrections: preferred orientation (March–Dollase) and cylinder absorption.
@@ -397,6 +424,67 @@ function buildOccupancyRestraints(
       terms,
     };
   });
+}
+
+/** A set of atom sites treated as one crystallographic site for tying. */
+interface SiteGroup {
+  readonly key: string;
+  readonly rep: AtomSite;
+  readonly members: readonly AtomSite[];
+}
+
+/** True if two fractional positions coincide (periodic, per-component). */
+function positionsCoincide(a: Vec3, b: Vec3, tol = 1e-3): boolean {
+  for (let i = 0; i < 3; i++) {
+    let d = Math.abs(a[i]! - b[i]!);
+    d = Math.min(d, 1 - d); // wrap across the cell boundary
+    if (d > tol) return false;
+  }
+  return true;
+}
+
+/**
+ * Group atom sites that share a fractional position — a mixed/disordered
+ * crystallographic site (e.g. the six 3d cations of the high-entropy tungstate).
+ * With `tie = false` every site is its own group (independent parameters). The
+ * group key is the first member's label, so ordered structures keep their
+ * original parameter ids.
+ */
+export function siteGroups(sites: readonly AtomSite[], tie = true): SiteGroup[] {
+  if (!tie) return sites.map((s) => ({ key: s.label, rep: s, members: [s] }));
+  const groups: { key: string; rep: AtomSite; members: AtomSite[] }[] = [];
+  for (const s of sites) {
+    const g = groups.find((grp) => positionsCoincide(grp.rep.position, s.position));
+    if (g) g.members.push(s);
+    else groups.push({ key: s.label, rep: s, members: [s] });
+  }
+  return groups;
+}
+
+/** Parameter label for a group: "Co1" alone, or "Co1+5" for a shared site. */
+function groupLabel(g: SiteGroup): string {
+  return g.members.length > 1 ? `${g.rep.label}+${g.members.length - 1}` : g.rep.label;
+}
+
+/**
+ * Automatic Σ(occupancy) = const restraint per shared site: holds the total site
+ * occupancy at its starting value so the disordered mixing ratio can refine
+ * without the site emptying or over-filling. Coefficient 1 per member (fractional
+ * occupancies of one site sum directly); only sites with ≥2 members get one.
+ */
+function sharedOccupancyRestraints(sites: readonly AtomSite[]): LinearRestraint[] {
+  const out: LinearRestraint[] = [];
+  for (const g of siteGroups(sites, true)) {
+    if (g.members.length < 2) continue;
+    out.push({
+      id: `occ_sum_${g.key}`,
+      label: `Σ occ @ ${g.rep.label} site`,
+      target: g.members.reduce((acc, m) => acc + m.occupancy, 0),
+      sigma: 0.01,
+      terms: g.members.map((m) => ({ parameterId: `occ_${m.label}`, coefficient: 1 })),
+    });
+  }
+  return out;
 }
 
 /**
