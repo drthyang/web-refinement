@@ -18,6 +18,8 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { StructureModel } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
 import { fractionalToCartesian } from "@/core/crystal/unitCell";
+import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
+import { determinant } from "@/core/math/mat3";
 import { color as theme, mono as themeMono } from "@/app/theme";
 import { covalentRadius, elementColor } from "@/app/ui/elementData";
 import { buildCellAtoms } from "@/app/ui/cellModel";
@@ -46,7 +48,14 @@ function makeLabelSprite(text: string, worldHeight: number, colorCss: string): T
   return sprite;
 }
 
-export function StructureView({ structure }: { structure: StructureModel }): JSX.Element {
+export function StructureView({
+  structure,
+  moments,
+}: {
+  structure: StructureModel;
+  /** Magnetic moments to overlay as arrows: site label → crystal-axis components (µ_B). */
+  moments?: ReadonlyMap<string, Vec3>;
+}): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [showBondLengths, setShowBondLengths] = useState(false);
   const [perspective, setPerspective] = useState(true);
@@ -110,6 +119,36 @@ export function StructureView({ structure }: { structure: StructureModel }): JSX
       const mesh = new THREE.Mesh(getGeo(r), mat);
       mesh.position.set(at.xyz[0], at.xyz[1], at.xyz[2]);
       scene.add(mesh);
+    }
+
+    // Magnetic moment arrows (axial vectors). Each atom's moment is transformed
+    // by the placing operation's rotation, m′ = det(R)·R·m, then crystal-axis
+    // components → Cartesian for the arrow direction. Length ∝ |moment|.
+    if (moments && moments.size > 0) {
+      let maxMom = 0;
+      for (const m of moments.values()) {
+        const c = crystalComponentsToCartesian(structure.cell, m);
+        maxMom = Math.max(maxMom, Math.hypot(c[0]!, c[1]!, c[2]!));
+      }
+      const arrowUnit = maxMom > 1e-6 ? (span * 0.42) / maxMom : 0;
+      for (const at of atoms) {
+        const m = arrowUnit > 0 ? moments.get(at.label) : undefined;
+        if (!m) continue;
+        const R = at.rot;
+        const det = determinant(R);
+        const mc: Vec3 = [
+          det * (R[0]![0]! * m[0]! + R[0]![1]! * m[1]! + R[0]![2]! * m[2]!),
+          det * (R[1]![0]! * m[0]! + R[1]![1]! * m[1]! + R[1]![2]! * m[2]!),
+          det * (R[2]![0]! * m[0]! + R[2]![1]! * m[1]! + R[2]![2]! * m[2]!),
+        ];
+        const cart = crystalComponentsToCartesian(structure.cell, mc);
+        const len = Math.hypot(cart[0]!, cart[1]!, cart[2]!);
+        if (len < 1e-6) continue;
+        const dir = new THREE.Vector3(cart[0]! / len, cart[1]! / len, cart[2]! / len);
+        const L = len * arrowUnit;
+        const start = new THREE.Vector3(at.xyz[0], at.xyz[1], at.xyz[2]).addScaledVector(dir, -L / 2);
+        scene.add(new THREE.ArrowHelper(dir, start, L, 0xe11d48, L * 0.26, L * 0.16));
+      }
     }
 
     // Bonds — cylinders between atoms within 1.15×(sum of covalent radii).
@@ -214,7 +253,7 @@ export function StructureView({ structure }: { structure: StructureModel }): JSX
       try { renderer.forceContextLoss(); } catch { /* free the WebGL context for rebuilds */ }
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
-  }, [atoms, corners, center, span, showBondLengths, perspective, showAxes, structure]);
+  }, [atoms, corners, center, span, showBondLengths, perspective, showAxes, structure, moments]);
 
   const hasCell = structure.cell.a > 0 && structure.cell.b > 0 && structure.cell.c > 0;
   if (!hasCell || atoms.length === 0) {

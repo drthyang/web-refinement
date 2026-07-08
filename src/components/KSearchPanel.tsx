@@ -11,13 +11,18 @@
  * this is presentation only.
  */
 
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { StructureModel } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { searchPropagationVector, kLabel, type KCandidate } from "@/core/magnetic/kSearch";
 import { generateMagneticCandidatesForK, littleGroup } from "@/core/magnetic/magneticGroups";
+import { buildMagneticModel } from "@/core/magnetic/momentModel";
+import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { color as theme, mono as themeMono, uppercaseLabel as themeLabel } from "@/app/theme";
+
+// Lazy so three.js stays in its own chunk (only loaded when a group is previewed).
+const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 
 function parsePeaks(text: string): number[] {
   return text
@@ -46,7 +51,35 @@ export function KSearchPanel({
     const ops = structure.spaceGroup.operations;
     if (ops.length === 0) return { subgroups: [], lgSize: 0 };
     return { subgroups: generateMagneticCandidatesForK(ops, k), lgSize: littleGroup(ops, k).length };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structure, k[0], k[1], k[2]]);
+
+  // Selected magnetic subgroup → symmetry-allowed moment model over the real
+  // structure, with editable moment-mode amplitudes and a 3D preview.
+  const [selIdx, setSelIdx] = useState<number | null>(null);
+  const [amps, setAmps] = useState<Record<string, number>>({});
+
+  const magBuild = useMemo(() => {
+    const sub = selIdx != null ? subgroups[selIdx] : undefined;
+    if (!sub) return null;
+    return buildMagneticModel(structure, k, [...selected], sub.operations, { moment: 2 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selIdx, subgroups, structure, k[0], k[1], k[2], selected]);
+
+  useEffect(() => {
+    if (!magBuild) return;
+    const init: Record<string, number> = {};
+    for (const p of magBuild.params) init[p.id] = p.value;
+    setAmps(init);
+  }, [magBuild]);
+
+  const momentsMap = useMemo(() => {
+    if (!magBuild) return undefined;
+    const applied = applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps);
+    const map = new Map<string, Vec3>();
+    for (const m of applied.moments) map.set(m.siteLabel, [...m.components] as Vec3);
+    return map;
+  }, [magBuild, amps]);
 
   function runSearch(peaks?: readonly number[]): void {
     const list = peaks ?? parsePeaks(peaksText);
@@ -158,18 +191,62 @@ export function KSearchPanel({
           Little group G(k): {lgSize} of {structure.spaceGroup.operations.length} operations leave k invariant.
           Time-reversal (θ: G→±1) enumeration gives {subgroups.length} candidate{subgroups.length === 1 ? "" : "s"}.
         </p>
-        <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 13 }}>
-          {subgroups.map((c) => (
-            <li key={c.id} style={{ marginBottom: 2 }}>
-              <span style={{ fontFamily: themeMono }}>{c.isTypeI ? "type I" : "type III"}</span> · {c.label}
-            </li>
+        <div style={{ margin: "6px 0 0", display: "grid", gap: 3 }}>
+          {subgroups.map((c, i) => (
+            <button
+              key={c.id}
+              onClick={() => setSelIdx(i === selIdx ? null : i)}
+              style={{
+                textAlign: "left", fontSize: 12.5, padding: "5px 9px", borderRadius: 7, cursor: "pointer",
+                border: `1px solid ${i === selIdx ? theme.primary : theme.border}`,
+                background: i === selIdx ? theme.chipBg : "#fff",
+              }}
+            >
+              <span style={{ fontFamily: themeMono, color: theme.secondary }}>{c.isTypeI ? "type I" : "type III"}</span> · {c.label}
+            </button>
           ))}
-        </ul>
+        </div>
         <p style={{ ...help, marginTop: 8 }}>
-          Note: little-group magnetic subgroups only — no BNS/OG labels, star-of-k arms, or
-          representation (irrep) analysis yet. Confirm a candidate with a magnetic refinement.
+          Click a subgroup to preview the moments and edit their components. Note: little-group
+          magnetic subgroups only — no BNS/OG labels, star-of-k arms, or representation (irrep)
+          analysis yet. Confirm a candidate with a magnetic refinement.
         </p>
       </section>
+
+      {/* 4. Selected subgroup: editable moments + 3D preview */}
+      {magBuild && (
+        <section>
+          <div style={themeLabel}>Magnetic structure preview & moments</div>
+          {magBuild.params.length === 0 ? (
+            <p style={help}>No symmetry-allowed moment on the selected ion(s) under this subgroup — the moment is forbidden here.</p>
+          ) : (
+            <div style={{ display: "grid", gap: 12, marginTop: 6 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                {magBuild.params.map((p) => (
+                  <label key={p.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+                    <span style={{ color: theme.secondary }}>{p.label} (µ_B)</span>
+                    <input
+                      type="number"
+                      step={0.1}
+                      value={amps[p.id] ?? p.value}
+                      onChange={(e) => setAmps((a) => ({ ...a, [p.id]: Number(e.target.value) }))}
+                      style={kInput}
+                    />
+                  </label>
+                ))}
+              </div>
+              <Suspense fallback={<div style={{ height: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D preview…</div>}>
+                <StructureView structure={structure} {...(momentsMap ? { moments: momentsMap } : {})} />
+              </Suspense>
+              <p style={help}>
+                Red arrows are the ordered moments (axial vectors) on the magnetic sites. Absolute
+                magnitude carries a convention factor to cross-check vs GSAS-II; directions and
+                relative sizes are well defined.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
