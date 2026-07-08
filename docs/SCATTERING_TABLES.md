@@ -76,8 +76,11 @@ generator and regenerate, keeping the validation gates above.
 
 ## Sources & citations
 
-Full provenance for the coefficient data, for citation and reproducibility. Web
-resources were accessed **2026-07-08**.
+Full provenance for the coefficient data, for citation and reproducibility. See
+[`REFERENCES.md`](./REFERENCES.md) for the project-wide bibliography (including
+**GSAS-II**, Toby & Von Dreele 2013 — the validation reference whose `.lst`
+neutron `b` and `atmdata` magnetic conventions were cross-checked against the
+tables below). Web resources accessed **2026-07-08**.
 
 ### Neutron scattering lengths (`neutron.ts`)
 

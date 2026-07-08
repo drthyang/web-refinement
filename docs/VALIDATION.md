@@ -15,7 +15,13 @@ comparison recorded here.
    recorded below.
 4. Documentation states plainly which features are *validated* vs *approximate*.
 
-## Test matrix (101 tests, all passing)
+> **GSAS-II is the primary external reference** for the golden-value and
+> benchmark tests below — Toby & Von Dreele (2013), *J. Appl. Cryst.* **46**, 544
+> ([10.1107/S0021889813003531](https://doi.org/10.1107/S0021889813003531)). We
+> reimplement independently (no code copied), but its outputs are our correctness
+> gate and must be cited. Full bibliography in [`REFERENCES.md`](./REFERENCES.md).
+
+## Test matrix (246 tests, all passing)
 
 | Area | Test kind | Status |
 | --- | --- | --- |

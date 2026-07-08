@@ -75,6 +75,7 @@ calculations run in Web Workers. Full detail in
 - [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project JSON format
 - [docs/REFINEMENT_PROCEDURE.md](docs/REFINEMENT_PROCEDURE.md) — the guided 7-step workflow
 - [docs/COMPARISON.md](docs/COMPARISON.md) — features vs GSAS-II / Jana2020 / FullProf
+- [docs/REFERENCES.md](docs/REFERENCES.md) — bibliography: papers, data sources, and GSAS-II (validation reference)
 - [docs/REPORT.md](docs/REPORT.md) — build & validation report
 - [docs/archive/](docs/archive/) — superseded plans (POWDER_ROADMAP, MATURITY_PLAN), kept for detail
 
