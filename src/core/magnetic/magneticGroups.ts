@@ -19,6 +19,7 @@
  */
 
 import type { SymmetryOperation } from "@/core/crystal/types";
+import type { Vec3 } from "@/core/math/types";
 import { composeOperations, operationKey } from "@/core/crystal/symmetry";
 
 export interface MagneticCandidate {
@@ -183,6 +184,66 @@ export function generateMagneticCandidates(
   // Type I first, then by decreasing symmetry (more unprimed ops).
   candidates.sort((a, b) => Number(b.isTypeI) - Number(a.isTypeI) || b.unprimedCount - a.unprimedCount);
   return candidates;
+}
+
+/**
+ * Transform a reciprocal-space vector (Miller-like) by an operation's rotation.
+ * This codebase's convention is h' = Rᵀ·h (see `isReflectionAbsent`), so the
+ * propagation vector transforms the same way. Translations do not act on k.
+ */
+export function transformK(op: SymmetryOperation, k: Vec3): Vec3 {
+  const R = op.rotation;
+  return [
+    R[0][0] * k[0] + R[1][0] * k[1] + R[2][0] * k[2],
+    R[0][1] * k[0] + R[1][1] * k[1] + R[2][1] * k[2],
+    R[0][2] * k[0] + R[1][2] * k[1] + R[2][2] * k[2],
+  ];
+}
+
+/** True if Rᵀ·k ≡ k modulo a reciprocal-lattice (integer) vector. */
+function leavesKInvariant(op: SymmetryOperation, k: Vec3, tol: number): boolean {
+  const kp = transformK(op, k);
+  for (let i = 0; i < 3; i++) {
+    const diff = kp[i]! - k[i]!;
+    if (Math.abs(diff - Math.round(diff)) > tol) return false;
+  }
+  return true;
+}
+
+/**
+ * The little group (group of the wavevector) G_k: the operations of the parent
+ * group whose rotation leaves k invariant modulo a reciprocal-lattice vector,
+ * Rᵀ·k ≡ k (mod 1). For k = 0 this is the whole parent group.
+ *
+ * Reference: Bradley & Cracknell, *The Mathematical Theory of Symmetry in
+ * Solids* (1972), §3.7 (the group of the wavevector).
+ */
+export function littleGroup(
+  parentOps: readonly SymmetryOperation[],
+  k: Vec3,
+  tol = 1e-4,
+): SymmetryOperation[] {
+  return parentOps.filter((op) => leavesKInvariant(op, k, tol));
+}
+
+/**
+ * Candidate magnetic space groups for a **commensurate** propagation vector k:
+ * enumerate the time-reversal homomorphisms θ: G_k → {±1} on the little group
+ * (the same GF(2) construction as the k = 0 case, restricted to G_k). For k = 0
+ * this reduces exactly to {@link generateMagneticCandidates}.
+ *
+ * This yields the little-group magnetic subgroups — the correct symmetry
+ * starting point for a commensurate single-k structure. It does **not** perform
+ * representation (irrep) analysis, enumerate the full star of k, or attach
+ * standard BNS/OG labels; those are the M3/M4 follow-ups (see ROADMAP).
+ *
+ * Reference: Bertaut, *Acta Cryst.* A24 (1968) 217; Bradley & Cracknell (1972).
+ */
+export function generateMagneticCandidatesForK(
+  parentOps: readonly SymmetryOperation[],
+  k: Vec3,
+): MagneticCandidate[] {
+  return generateMagneticCandidates(littleGroup(parentOps, k));
 }
 
 // operationKey is re-exported for callers that key candidates by their op set.
