@@ -12,7 +12,7 @@ This statement appears in the app UI and the README, not only here.
 ## Current scope
 
 A working static app performs **atomic/nuclear structure refinement** for both
-single-crystal and powder data (269 passing tests), with the scientific
+single-crystal and powder data (293 passing tests), with the scientific
 foundations for magnetic refinement in place. The Levenberg–Marquardt engine,
 symmetry-adapted constrained parameters, Chebyshev / cosine / power-series
 backgrounds, Caglioti profile, Le Bail extraction, multi-phase powder, and
@@ -52,24 +52,35 @@ accidental gap — each is tracked as a roadmap item.
   The TOF **α/β/σ coefficients refine** in the profile stage; difC is held at the
   instrument calibration. Not yet modelled: the Ikeda–Carpenter moderator shape
   and TOF absorption/extinction.
-- **Magnetic model.** Moment **refinement** is **commensurate k = 0** (single-
-  crystal + powder, validated against GSAS-II magnitudes); mCIF (BNS) parsing and
-  axial-vector moment transformation are implemented. Beyond k = 0, two symmetry
-  tools now exist: a **commensurate single-k search** that ranks candidate
-  propagation vectors from magnetic-peak *positions* (G ± k scoring — position
-  only, not intensities), and enumeration of the **little group of k** with its
-  **time-reversal (GF(2)) magnetic subgroups** for any commensurate k. Still
-  **not** done: magnetic *refinement* at k ≠ 0, standard **BNS/OG labels**, the
-  **star of k** (multi-arm domains), and **representation (irrep) analysis** — so
-  a k ≠ 0 candidate is a symmetry *starting point*, not yet a refinable model.
-  (Roadmap M2–M4.) Moment components in a non-orthogonal cell use the normalized
-  crystal-axis convention (reproduces the GSAS-II magnitude for monoclinic Mn₃Ga).
+- **Magnetic model.** Commensurate **single-k moment refinement**, k = 0 *and*
+  k ≠ 0: moments refine as the symmetry-allowed modes of the chosen magnetic
+  subgroup, magnetic satellites are placed at G ± k, and the magnetic intensity
+  shares the nuclear histogram scale (GSAS-II convention). Works for CW and TOF
+  data, validated **self-consistently** (a known simple AFM at k = (0,0,½) is
+  recovered end-to-end) and, at k = 0, against GSAS-II moment magnitudes. Symmetry
+  tools: a low-Q **single-k search** (ranks candidate k from magnetic-peak
+  *positions*, G ± k — positions, not intensities) and enumeration of the **little
+  group of k** with its **time-reversal (GF(2)) magnetic subgroups**. Co-located
+  (disordered) magnetic ions can be **tied to the same moment**. mCIF (BNS)
+  parsing + axial-vector transformation are implemented; moment components use the
+  normalized crystal-axis convention. **Not yet validated:** the absolute moment
+  magnitude in the k-formalism (a convention factor pending a GSAS-II cross-check
+  — directions and relative sizes are correct). **Not done:** standard **BNS/OG
+  labels**, the **star of k** (multi-arm domains / multi-k), and **representation
+  (irrep) analysis**; satellite multiplicity is approximated by the parent nuclear
+  multiplicity. (Roadmap M2–M4.)
 - **Disorder.** Atoms sharing one crystallographic site (mixed/disordered
   occupancy, e.g. the six 3d cations of the high-entropy tungstate) refine with
-  **tied position and ADP** and an automatic **Σ(occupancy) restraint** per site,
-  so the mixing ratio refines while the total site occupancy is held. Not
-  modelled: split/positional disorder, anti-site swaps across *different* sites,
-  or occupancy–ADP correlation beyond the single-site tie.
+  **tied position and ADP**, an automatic **Σ(occupancy) restraint** per site
+  (optionally constrained to exactly **1**), and — in magnetic refinement — the
+  option to **tie the moment** across the co-located ions. Each is a UI toggle
+  shown when a shared site is present. Not modelled: split/positional disorder,
+  anti-site swaps across *different* sites, or occupancy–ADP correlation beyond
+  the single-site tie.
+- **Refinement diagnostics.** Beyond R/wR/GoF, the Quality tab shows an
+  **F_obs vs F_calc** plot (Rietveld-decomposed per reflection) and a **normal
+  probability plot** (Abrahams & Keve 1971): a straight, slope-1, intercept-0 line
+  indicates a correct model *and* correctly-estimated uncertainties.
 - **Corrections modelled:** March–Dollase preferred orientation, Debye–Scherrer
   cylinder absorption. **Not modelled:** extinction, spherical-harmonic texture,
   flat-plate/other absorption geometries, anomalous dispersion, microabsorption.

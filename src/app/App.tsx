@@ -709,6 +709,10 @@ export function App(): JSX.Element {
                           <input type="checkbox" checked={session.siteTies.adp ?? true} onChange={(e) => setSiteTies({ adp: e.target.checked })} />
                           tie ADP
                         </label>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Constrain the total occupancy of the shared site to 1 (fully occupied)">
+                          <input type="checkbox" checked={session.siteTies.occupancyToUnity ?? false} onChange={(e) => setSiteTies({ occupancyToUnity: e.target.checked })} />
+                          Σ occ = 1
+                        </label>
                       </div>
                     )}
                   </>

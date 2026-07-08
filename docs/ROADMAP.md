@@ -43,7 +43,7 @@ only symmetry-allowed parameters, use global search only for starting models.
 
 ## 2. Current state (honest baseline)
 
-What genuinely works today (269 passing tests; real-data validated):
+What genuinely works today (293 passing tests; real-data validated):
 
 - **Refinement engine** — Levenberg–Marquardt with diagonal preconditioning,
   SVD-truncated pseudo-inverse, per-cycle shift limiting, bound projection,

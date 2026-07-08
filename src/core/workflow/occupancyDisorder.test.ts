@@ -59,6 +59,14 @@ describe("occupancy-disorder refinement (shared-site ties)", () => {
     expect(sum.target).toBeCloseTo(1.0, 1);
   });
 
+  it("constrains Σ occupancy to exactly 1 when requested", () => {
+    const spec = buildStructureRefinement(structure, pattern, { refineOccupancy: true, constrainOccupancyToUnity: true });
+    expect(spec.restraints.find((r) => r.id === "occ_sum_Co1")!.target).toBe(1);
+    // Default keeps the starting-model sum (6 × 0.167 = 1.002 > 1).
+    const dflt = buildStructureRefinement(structure, pattern, { refineOccupancy: true });
+    expect(dflt.restraints.find((r) => r.id === "occ_sum_Co1")!.target).toBeGreaterThan(1);
+  });
+
   it("keeps the six atoms coincident when a tied position mode is moved", () => {
     const spec = buildStructureRefinement(structure, pattern, {});
     const pos = spec.params.find((p) => p.kind === "positionShift" && p.id.startsWith("pos_Co1_"));

@@ -99,6 +99,11 @@ export interface StructureRefinementOptions {
    */
   readonly restrainSharedOccupancy?: boolean;
   /**
+   * Make the shared-site Σ(occupancy) restraint target **1** (a fully-occupied
+   * mixed site) instead of the starting-model sum. Default false (keep the sum).
+   */
+  readonly constrainOccupancyToUnity?: boolean;
+  /**
    * Soft linear restraints on occupancies. Use coefficients to express total
    * occupancy, sublattice totals, or charge-balance terms. Targets default to
    * the starting model's weighted sum.
@@ -194,6 +199,7 @@ export function buildStructureRefinement(
     tieSharedPositions = true,
     tieSharedAdp = true,
     restrainSharedOccupancy = true,
+    constrainOccupancyToUnity = false,
     occupancyRestraints = [],
     positionBound = 0.2,
     preferredOrientation,
@@ -367,7 +373,7 @@ export function buildStructureRefinement(
       bindings.push({ parameterId: id, kind: "occupancy", targetId: structure.id, targetKey: site.label });
     }
     restraints.push(...buildOccupancyRestraints(structure, occupancyRestraints));
-    if (restrainSharedOccupancy) restraints.push(...sharedOccupancyRestraints(structure.sites));
+    if (restrainSharedOccupancy) restraints.push(...sharedOccupancyRestraints(structure.sites, constrainOccupancyToUnity));
   }
 
   // Corrections: preferred orientation (March–Dollase) and cylinder absorption.
@@ -467,19 +473,23 @@ function groupLabel(g: SiteGroup): string {
 }
 
 /**
- * Automatic Σ(occupancy) = const restraint per shared site: holds the total site
- * occupancy at its starting value so the disordered mixing ratio can refine
- * without the site emptying or over-filling. Coefficient 1 per member (fractional
- * occupancies of one site sum directly); only sites with ≥2 members get one.
+ * Automatic Σ(occupancy) restraint per shared site: holds the total site
+ * occupancy so the disordered mixing ratio can refine without the site emptying
+ * or over-filling. Coefficient 1 per member (fractional occupancies of one site
+ * sum directly); only sites with ≥2 members get one.
+ *
+ * `toUnity` sets the target to exactly **1** (a fully-occupied mixed site — the
+ * common physical case) instead of the starting-model sum.
  */
-function sharedOccupancyRestraints(sites: readonly AtomSite[]): LinearRestraint[] {
+function sharedOccupancyRestraints(sites: readonly AtomSite[], toUnity = false): LinearRestraint[] {
   const out: LinearRestraint[] = [];
   for (const g of siteGroups(sites, true)) {
     if (g.members.length < 2) continue;
+    const startSum = g.members.reduce((acc, m) => acc + m.occupancy, 0);
     out.push({
       id: `occ_sum_${g.key}`,
-      label: `Σ occ @ ${g.rep.label} site`,
-      target: g.members.reduce((acc, m) => acc + m.occupancy, 0),
+      label: `Σ occ @ ${g.rep.label} site${toUnity ? " = 1" : ""}`,
+      target: toUnity ? 1 : startSum,
       sigma: 0.01,
       terms: g.members.map((m) => ({ parameterId: `occ_${m.label}`, coefficient: 1 })),
     });

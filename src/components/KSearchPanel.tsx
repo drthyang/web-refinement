@@ -72,13 +72,27 @@ export function KSearchPanel({
   // structure, with editable moment-mode amplitudes and a 3D preview.
   const [selIdx, setSelIdx] = useState<number | null>(null);
   const [amps, setAmps] = useState<Record<string, number>>({});
+  const [tieMoments, setTieMoments] = useState(true);
+
+  // True when ≥2 selected magnetic ions share one crystallographic site (disorder).
+  const hasSharedMagSite = useMemo(() => {
+    const sel = [...selected]
+      .map((l) => structure.sites.find((s) => s.label === l))
+      .filter((s): s is NonNullable<typeof s> => s !== undefined);
+    const coincide = (a: Vec3, b: Vec3): boolean =>
+      [0, 1, 2].every((i) => { const d = Math.abs(a[i]! - b[i]!); return Math.min(d, 1 - d) < 1e-3; });
+    for (let i = 0; i < sel.length; i++) for (let j = i + 1; j < sel.length; j++) {
+      if (coincide(sel[i]!.position, sel[j]!.position)) return true;
+    }
+    return false;
+  }, [selected, structure]);
 
   const magBuild = useMemo(() => {
     const sub = selIdx != null ? subgroups[selIdx] : undefined;
     if (!sub) return null;
-    return buildMagneticModel(structure, k, [...selected], sub.operations, { moment: 2 });
+    return buildMagneticModel(structure, k, [...selected], sub.operations, { moment: 2, tieSameSite: tieMoments });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selIdx, subgroups, structure, k[0], k[1], k[2], selected]);
+  }, [selIdx, subgroups, structure, k[0], k[1], k[2], selected, tieMoments]);
 
   useEffect(() => {
     if (!magBuild) return;
@@ -280,6 +294,12 @@ export function KSearchPanel({
                   </label>
                 ))}
               </div>
+              {hasSharedMagSite && (
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, color: theme.secondary }} title="Constrain co-located (disordered) magnetic ions to the same moment vector">
+                  <input type="checkbox" checked={tieMoments} onChange={(e) => setTieMoments(e.target.checked)} />
+                  Same moment on shared site
+                </label>
+              )}
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <button style={{ ...btn, marginTop: 0, opacity: canRefine && !refining ? 1 : 0.5 }} onClick={runRefine} disabled={!canRefine || refining}>
                   {refining ? "Refining…" : "Refine moments"}

@@ -21,7 +21,7 @@ comparison recorded here.
 > reimplement independently (no code copied), but its outputs are our correctness
 > gate and must be cited. Full bibliography in [`REFERENCES.md`](./REFERENCES.md).
 
-## Test matrix (269 tests, all passing)
+## Test matrix (293 tests, all passing)
 
 | Area | Test kind | Status |
 | --- | --- | --- |

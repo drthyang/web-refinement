@@ -52,6 +52,38 @@ describe("buildMagneticModel (symmetry-allowed moment modes)", () => {
   });
 });
 
+describe("buildMagneticModel — same-site moment tie (occupancy disorder)", () => {
+  // Two magnetic species sharing one crystallographic site.
+  const disordered: StructureModel = {
+    ...p1Fe,
+    sites: [
+      { label: "Fe1", element: "Fe", oxidationState: 3, position: [0.1, 0.2, 0.3], occupancy: 0.5, adp: iso },
+      { label: "Ni1", element: "Ni", oxidationState: 2, position: [0.1, 0.2, 0.3], occupancy: 0.5, adp: iso },
+    ],
+  };
+
+  it("drives both co-located sites from one shared moment (default)", () => {
+    const build = buildMagneticModel(disordered, [0, 0, 0], ["Fe1", "Ni1"], [identity]);
+    const modes = build.params.filter((p) => p.kind === "momentMode");
+    expect(modes).toHaveLength(3); // one shared P1 set, not 6
+    for (const p of modes) {
+      const bound = build.bindings.filter((b) => b.parameterId === p.id).map((b) => b.targetKey).sort();
+      expect(bound).toEqual(["Fe1", "Ni1"]); // each mode binds to both members
+    }
+    // Both sites present, with identical moment after applying amplitudes.
+    const applied = applyMagneticMoments(build.magnetic, build.bindings, { mom_Fe1_0: 3, mom_Fe1_1: 1, mom_Fe1_2: 0.5 });
+    const fe = applied.moments.find((m) => m.siteLabel === "Fe1")!.components;
+    const ni = applied.moments.find((m) => m.siteLabel === "Ni1")!.components;
+    expect(fe).toEqual([3, 1, 0.5]);
+    expect(ni).toEqual(fe); // same moment on the shared site
+  });
+
+  it("untying gives an independent moment per site", () => {
+    const build = buildMagneticModel(disordered, [0, 0, 0], ["Fe1", "Ni1"], [identity], { tieSameSite: false });
+    expect(build.params.filter((p) => p.kind === "momentMode")).toHaveLength(6); // 3 per site
+  });
+});
+
 describe("shared nuclear/magnetic scale (GSAS-II convention)", () => {
   const { structure, magnetic } = exampleMagnetic();
   const grid = Array.from({ length: 400 }, (_, i) => 10 + (i * 100) / 400);

@@ -44,6 +44,8 @@ export interface PowderSpec {
 export interface SiteTies {
   readonly positions?: boolean;
   readonly adp?: boolean;
+  /** Constrain Σ(occupancy) on a shared site to exactly 1 (vs. the starting sum). */
+  readonly occupancyToUnity?: boolean;
 }
 
 export function buildPowderSpec(
@@ -57,6 +59,7 @@ export function buildPowderSpec(
   const tieOpts = {
     tieSharedPositions: ties.positions ?? true,
     tieSharedAdp: ties.adp ?? true,
+    constrainOccupancyToUnity: ties.occupancyToUnity ?? false,
   };
   // Time-of-flight: back-to-back-exponential profile driven by the diffractometer
   // constants (difC/difA/difB) plus α/β/σ shape coefficients. The .instprm here

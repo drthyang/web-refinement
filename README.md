@@ -12,15 +12,23 @@ WebAssembly/WebGPU are future accelerators.
 
 ## Status
 
-**Working app — atomic/nuclear refinement (single-crystal + powder) plus
-magnetic k = 0.** The scientific core, Levenberg–Marquardt refinement engine,
-symmetry-adapted constrained parameters, CIF parsing, plots, and Web Worker
-compute are implemented and tested (**269 tests**). Crystallographic and
-scattering foundations are validated against bundled GSAS-II refinements (see
+**Working app — atomic/nuclear refinement (single-crystal + powder) plus a
+commensurate single-k magnetic workflow.** The scientific core, Levenberg–
+Marquardt refinement engine, symmetry-adapted constrained parameters, CIF
+parsing, a 3D structure/moment viewer, plots, and Web Worker compute are
+implemented and tested (**293 tests**). Crystallographic and scattering
+foundations are validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
-Magnetic single-crystal + powder refinement and k = 0 space-group candidate
-generation work; the magnetic k-vector search, non-zero-k analysis, and refined-
-structure export are the next milestones. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+The magnetic workflow runs end to end: **auto-detect magnetic peaks → k-vector
+search → little-group magnetic subgroups → editable moment preview → moment
+refinement** (k = 0 *and* k ≠ 0, CW and TOF, on one shared scale). Occupancy-
+disorder sites refine with tied position/ADP, a Σ(occupancy) restraint (optionally
+= 1), and an optional shared moment. Fit quality is judged with **F_obs vs F_calc
+and normal-probability plots**, not just wR. Standard BNS labels, the star of k /
+multi-k, representation analysis, and refined CIF/mCIF export are the next
+milestones; see [docs/ROADMAP.md](docs/ROADMAP.md) and
+[docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
 Two forward-looking directions are documented and being built toward: an
 **LLM AI-guided refinement** loop and exposing the app's pure core as
