@@ -81,6 +81,14 @@ export function StructureView({
   const [lightLevel, setLightLevel] = useState(1);
   const [finish, setFinish] = useState<Finish>("standard");
 
+  // Keep the user's camera across scene rebuilds (overlay toggles, moment
+  // edits); a fresh default framing only when the structure/cell/supercell
+  // changes. Lights and materials live in refs so their knobs mutate the live
+  // scene without any rebuild.
+  const viewStateRef = useRef<{ key: string; pos: readonly number[]; target: readonly number[]; zoom: number } | null>(null);
+  const lightsRef = useRef<{ ambient: THREE.AmbientLight; directional: THREE.DirectionalLight } | null>(null);
+  const atomMatsRef = useRef<THREE.MeshPhongMaterial[]>([]);
+
   // The magnetic supercell (> the atomic cell only for a non-zero commensurate k).
   const superK = useMemo<[number, number, number]>(
     () => (propagation ? magneticSupercell(propagation) : [1, 1, 1]),
@@ -126,10 +134,12 @@ export function StructureView({
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.85 * lightLevel));
+    const ambient = new THREE.AmbientLight(0xffffff, 0.85 * lightLevel);
+    scene.add(ambient);
     const dl = new THREE.DirectionalLight(0xffffff, 0.55 * lightLevel);
     dl.position.set(1, 1.5, 1);
     scene.add(dl);
+    lightsRef.current = { ambient, directional: dl };
 
     const centerV = new THREE.Vector3(center[0], center[1], center[2]);
     const labelH = span * 0.05; // world height of text sprites
@@ -143,9 +153,11 @@ export function StructureView({
       return g;
     };
     const { shininess, specular } = FINISHES[finish];
+    atomMatsRef.current = [];
     for (const at of atoms) {
       const r = covalentRadius(at.element) * 0.38;
       const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(elementColor(at.element)), shininess, specular });
+      atomMatsRef.current.push(mat);
       const mesh = new THREE.Mesh(getGeo(r), mat);
       mesh.position.set(at.xyz[0], at.xyz[1], at.xyz[2]);
       scene.add(mesh);
@@ -251,10 +263,24 @@ export function StructureView({
       }
     }
 
-    // Camera: fit the cell, looking slightly down the body diagonal.
-    camera.position.copy(centerV).add(new THREE.Vector3(span * 0.55, span * 0.45, span * 1.1 + 4));
-    camera.lookAt(centerV);
-    controls.target.copy(centerV);
+    // Camera: restore the user's saved view when the scene is the same
+    // structure/cell/supercell (rebuilds from overlay or moment edits must not
+    // reset the orientation); otherwise fit the cell, looking slightly down
+    // the body diagonal.
+    const { a, b, c, alpha, beta, gamma } = structure.cell;
+    const viewKey = `${structure.id}|${a},${b},${c},${alpha},${beta},${gamma}|${supercell.join("x")}`;
+    const saved = viewStateRef.current;
+    if (saved && saved.key === viewKey) {
+      camera.position.set(saved.pos[0]!, saved.pos[1]!, saved.pos[2]!);
+      controls.target.set(saved.target[0]!, saved.target[1]!, saved.target[2]!);
+      if (!(camera instanceof THREE.PerspectiveCamera)) camera.zoom = saved.zoom;
+      camera.updateProjectionMatrix();
+      camera.lookAt(controls.target);
+    } else {
+      camera.position.copy(centerV).add(new THREE.Vector3(span * 0.55, span * 0.45, span * 1.1 + 4));
+      camera.lookAt(centerV);
+      controls.target.copy(centerV);
+    }
     controls.update();
 
     let raf = 0;
@@ -281,6 +307,10 @@ export function StructureView({
     ro.observe(mount);
 
     return () => {
+      // Remember where the user left the camera for the next rebuild.
+      viewStateRef.current = { key: viewKey, pos: camera.position.toArray(), target: controls.target.toArray(), zoom: camera.zoom };
+      lightsRef.current = null;
+      atomMatsRef.current = [];
       cancelAnimationFrame(raf);
       ro.disconnect();
       controls.dispose();
@@ -288,7 +318,26 @@ export function StructureView({
       try { renderer.forceContextLoss(); } catch { /* free the WebGL context for rebuilds */ }
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
-  }, [atoms, corners, center, span, showBondLengths, showAtomLabels, lightLevel, finish, perspective, showAxes, structure, moments, propagation]);
+    // lightLevel and finish are intentionally NOT dependencies: their knobs
+    // mutate the live lights/materials below without rebuilding the scene.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [atoms, corners, center, span, showBondLengths, showAtomLabels, perspective, showAxes, structure, moments, propagation]);
+
+  // Light knob → in-place intensity update (the rAF loop shows it next frame).
+  useEffect(() => {
+    if (!lightsRef.current) return;
+    lightsRef.current.ambient.intensity = 0.85 * lightLevel;
+    lightsRef.current.directional.intensity = 0.55 * lightLevel;
+  }, [lightLevel]);
+
+  // Finish knob → in-place material update, camera untouched.
+  useEffect(() => {
+    const { shininess, specular } = FINISHES[finish];
+    for (const m of atomMatsRef.current) {
+      m.shininess = shininess;
+      m.specular.set(specular);
+    }
+  }, [finish]);
 
   const hasCell = structure.cell.a > 0 && structure.cell.b > 0 && structure.cell.c > 0;
   if (!hasCell || atoms.length === 0) {
