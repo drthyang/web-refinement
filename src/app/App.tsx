@@ -660,7 +660,7 @@ export function App(): JSX.Element {
           <>
             <SummaryCards cards={summaryCards} />
             <div className="wb-work">
-              <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column" }}>
+              <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 64vh, 760px)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
                   <span style={themeLabel}>
                     {plotMode === "structure" ? "Crystal structure — unit cell" : "Powder pattern — observed vs calculated"}

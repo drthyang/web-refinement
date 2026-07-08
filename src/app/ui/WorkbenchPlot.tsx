@@ -30,15 +30,15 @@ interface Props {
 // Vertical stack (top→bottom): intensity plot, x-axis ticks/labels, a Bragg
 // reflection tick band, then the difference band — each with clear separation.
 const X0 = 58;
-const X1 = 846;
-const XW = X1 - X0; // 788
+const RIGHT_PAD = 14; // right margin; the drawable width fills to boxW − RIGHT_PAD
+const VB_H = 560; // viewBox height (user units); width is measured to avoid distortion
 const TOP = 14;
 const BASE = 356; // main-region baseline
 const MAINH = BASE - TOP - 6; // intensity drawable height
 const X_LABEL_Y = 372; // x-axis tick labels (below the axis marks)
 const TICK_TOP = 382; // Bragg tick band (below the x-axis labels)
 const TICK_BOT = 391;
-const TICK_ROW = 6; // vertical step per phase row
+const TICK_ROW = 13; // vertical step per phase row (> tick height so rows never overlap)
 const DIFF_Y = 470; // difference-band zero line
 const DIFF_A = 46; // difference band half-height
 const CAP_Y = 522; // fit-handle caps, below the difference band
@@ -81,6 +81,23 @@ export function WorkbenchPlot({
 
   const [view, setView] = useState<{ min: number; max: number } | null>(null);
   const [rubber, setRubber] = useState<{ x0: number; x1: number } | null>(null);
+
+  // The viewBox width tracks the rendered pixel aspect ratio so the plot fills
+  // its (width-controlled, fixed-height) box with SQUARE units — no horizontal
+  // text/line stretching, and the plot uses the full width at any window size.
+  const [boxW, setBoxW] = useState(860);
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      if (r.height > 0) setBoxW(Math.max(560, Math.round((VB_H * r.width) / r.height)));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const X1 = boxW - RIGHT_PAD;
+  const XW = X1 - X0;
   // When the domain changes (new data, or an x-axis unit switch), default the
   // zoom to the active fit range — switching units lands on the region being
   // fitted — or to the full range when no window is set. Keyed only on the
@@ -116,9 +133,15 @@ export function WorkbenchPlot({
   yTop *= 1.06;
   const sy = (y: number): number => BASE - (Math.min(Math.max(y, 0), yTop) / yTop) * MAINH;
 
-  // Difference band scaled to a fixed fraction of the pattern height — stable
-  // across cycles (auto-scaling it to max|diff| would jump as the fit converges).
-  const dm = yTop * 0.06;
+  // Difference band scaled to its own max in view (with headroom) so a poor fit
+  // fills the band instead of clipping flat against its edge; a floor keeps a
+  // near-perfect fit from blowing up noise. It rescales as the fit converges,
+  // which reads as the residual shrinking — the intended Rietveld behaviour.
+  let dPeak = 0;
+  for (let i = 0; i < xs.length; i++) {
+    if (xs[i]! >= vlo && xs[i]! <= vhi) dPeak = Math.max(dPeak, Math.abs(curves.diff[i] ?? 0));
+  }
+  const dm = Math.max(dPeak * 1.1, yTop * 0.02, 1e-9);
   const sdiff = (d: number): number => DIFF_Y - (Math.min(Math.max(d, -dm), dm) / dm) * DIFF_A;
 
   const poly = (ys: readonly number[], map: (y: number) => number, lo: number, hi: number): string => {
@@ -149,7 +172,7 @@ export function WorkbenchPlot({
       out.push(<circle key={i} cx={mx(x)} cy={my(yObs[i]!)} r={1.3} fill={color.obs} opacity={0.5} />);
     }
     return out;
-  }, [xs, yObs, vlo, vhi, vspan, yTop]);
+  }, [xs, yObs, vlo, vhi, vspan, yTop, XW]);
 
   // Bragg tick rows are also static during a refinement (positions depend on the
   // structure, not the fit) and there can be hundreds — memoize them too.
@@ -173,7 +196,7 @@ export function WorkbenchPlot({
         </g>
       );
     });
-  }, [phases, vlo, vhi, vspan]);
+  }, [phases, vlo, vhi, vspan, XW]);
 
   // Y / X nice ticks.
   const yStep = niceNum(yTop / 4, true);
@@ -188,10 +211,10 @@ export function WorkbenchPlot({
     (clientX: number): number => {
       const rect = svgRef.current?.getBoundingClientRect();
       if (!rect) return vlo;
-      const px = ((clientX - rect.left) / rect.width) * 860; // user-space px
+      const px = ((clientX - rect.left) / rect.width) * boxW; // user-space px
       return vlo + ((px - X0) / XW) * vspan;
     },
-    [vlo, vspan],
+    [vlo, vspan, boxW, XW],
   );
 
   const startGrip = (which: "min" | "max") => (e: React.PointerEvent): void => {
@@ -245,16 +268,16 @@ export function WorkbenchPlot({
   const maxPx = sx(Math.min(fullMax, Math.max(fullMin, fitHi)));
 
   return (
-    <div style={{ position: "relative", flex: 1, minHeight: 480 }}>
+    <div style={{ position: "relative", width: "100%", flex: 1, minHeight: 320 }}>
       <svg
         ref={svgRef}
-        viewBox="0 0 860 560"
+        viewBox={`0 0 ${boxW} ${VB_H}`}
         preserveAspectRatio="none"
         onPointerDown={startZoom}
         onDoubleClick={() => setView(null)}
         style={{ position: "absolute", inset: 0, display: "block", width: "100%", height: "100%", touchAction: "none", cursor: "crosshair" }}
       >
-        <rect x={0} y={0} width={860} height={560} fill={color.raised} />
+        <rect x={0} y={0} width={boxW} height={VB_H} fill={color.raised} />
 
         {/* axes */}
         <line x1={X0} y1={TOP} x2={X0} y2={BASE} stroke="#c9c0b0" />

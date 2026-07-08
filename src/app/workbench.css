@@ -37,7 +37,8 @@
   display: grid;
   grid-template-columns: minmax(0, 2.4fr) minmax(340px, 1fr);
   gap: clamp(12px, 1vw, 20px);
-  align-items: start;
+  /* Stretch both columns to a common height (the plot card sets it). */
+  align-items: stretch;
 }
 
 /* Quality tiles: agreement + geometry + validation plots reflow to fit. */

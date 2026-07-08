@@ -81,7 +81,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onGuided, onRe
   };
 
   return (
-    <div style={{ ...card, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ ...card, display: "flex", flexDirection: "column", overflow: "hidden", height: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", padding: "10px 14px" }}>
         <span style={uppercaseLabel}>Powder parameters</span>
         <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 11, color: color.faint }}>{freeCount} of {params.length} free</span>
@@ -92,7 +92,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onGuided, onRe
         <span>esd</span>
         <span>Refine</span>
       </div>
-      <div style={{ maxHeight: 520, overflowY: "auto" }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {groups.map((g) => {
           const togglable = g.rows.filter((p) => !isLocked(p));
           const groupFree = togglable.filter((p) => !p.fixed).length;
