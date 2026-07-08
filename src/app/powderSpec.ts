@@ -52,7 +52,11 @@ export function buildPowderSpec(
   // rarely carries the shape coefficients, so seed them: σ scales with difC·Δd
   // (a POWGEN-like resolution), and α/β take moderator-scale (µs) starting
   // values. The profile stage then refines them against the data.
-  if (instrument.kind === "tof") {
+  // The pattern's unit — not the instrument alone — decides the branch: a TOF
+  // pattern with a TOF calibration gets the back-to-back-exponential profile; a
+  // 2θ pattern always gets the constant-wavelength profile even if a TOF
+  // instrument happens to be loaded (e.g. after "Reset to example").
+  if (pattern.xUnit === "tof" && instrument.kind === "tof") {
     const resolution = 0.0015; // Δd/d ballpark → σ_TOF ≈ difC·d·Δd/d
     const tof = {
       difC: instrument.difC,

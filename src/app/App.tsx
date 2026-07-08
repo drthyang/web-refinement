@@ -36,6 +36,15 @@ import { buildSyntheticPowder, powderBindings } from "@/examples/synthetic";
 import { ParameterTable } from "@/components/ParameterTable";
 import { CandidateComparison } from "@/components/CandidateComparison";
 import { PatternPlot, type FitRangeSelection } from "@/visualization/PatternPlot";
+import {
+  axisContext,
+  availableDisplayUnits,
+  convertAxisArray,
+  convertInterval,
+  axisLabel,
+  axisShortLabel,
+  type DisplayUnit,
+} from "@/visualization/axisUnits";
 import { bondLengths } from "@/core/crystal/geometry";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { parseInstrumentParameters } from "@/parsers/instrument";
@@ -126,6 +135,8 @@ export function App(): JSX.Element {
   // Optional refinement window; null = fit the full pattern. Reset when the
   // observed pattern changes (see effect below).
   const [fitRange, setFitRange] = useState<FitRangeSelection | null>(null);
+  // Display-only x-axis unit; null = the pattern's native unit. Reset on load.
+  const [displayUnit, setDisplayUnit] = useState<DisplayUnit | null>(null);
   const [instrument, setInstrument] = useState<InstrumentParameters>({ kind: "constantWavelength", wavelength: 1.54 });
   const [instrumentLoaded, setInstrumentLoaded] = useState(false);
   const [message, setMessage] = useState<string>("High-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ (P2/c). Checking for the POWGEN pattern…");
@@ -172,14 +183,16 @@ export function App(): JSX.Element {
   }, []);
 
   const { structure, pattern, powderParams, powderSource } = session;
-  // A freshly-loaded pattern is a new object; drop any window from the old one.
-  useEffect(() => setFitRange(null), [pattern]);
+  // A freshly-loaded pattern is a new object; drop the window and axis choice.
+  useEffect(() => {
+    setFitRange(null);
+    setDisplayUnit(null);
+  }, [pattern]);
   const powderIsTof = pattern.xUnit === "tof";
   // A TOF pattern refines only when a back-to-back-exponential profile was built
   // (i.e. a TOF calibration was available). A GSAS overlay or an uncalibrated TOF
   // pattern keeps the shape at "gaussian" and stays view-only.
   const tofViewOnly = powderIsTof && session.powderProfile.shape !== "tof";
-  const powderXLabel = pattern.xUnit === "twoTheta" ? "2θ (°)" : UNIT_LABEL[pattern.xUnit] ?? "x";
   const pBindings = session.powderBindings;
 
   const curves = useMemo(() => {
@@ -201,6 +214,23 @@ export function App(): JSX.Element {
   const effectiveFitRange = fitRange ?? patternExtent;
   const fitRangeActive =
     fitRange !== null && (fitRange.min > patternExtent.min || fitRange.max < patternExtent.max);
+
+  // Display-axis unit conversion (view only — data/refinement stay native).
+  const axisCtx = useMemo(() => axisContext(pattern, instrumentLoaded ? instrument : undefined), [pattern, instrument, instrumentLoaded]);
+  const displayUnits = useMemo(() => availableDisplayUnits(axisCtx), [axisCtx]);
+  const effectiveUnit: DisplayUnit = displayUnit ?? pattern.xUnit;
+  const displayCurves = useMemo(
+    () => (effectiveUnit === pattern.xUnit ? curves : { ...curves, x: convertAxisArray(curves.x, pattern.xUnit, effectiveUnit, axisCtx) }),
+    [curves, effectiveUnit, pattern.xUnit, axisCtx],
+  );
+  const displayXLabel = axisLabel(effectiveUnit);
+  // Fit-range handles live in display space; convert to/from the native window.
+  const displayFitRange = useMemo(
+    () => convertInterval(effectiveFitRange, pattern.xUnit, effectiveUnit, axisCtx),
+    [effectiveFitRange, pattern.xUnit, effectiveUnit, axisCtx],
+  );
+  const setFitRangeFromDisplay = (r: FitRangeSelection): void =>
+    setFitRange(convertInterval(r, effectiveUnit, pattern.xUnit, axisCtx));
   const magBind = useMemo(() => magneticBindings(mag.ex.magnetic), [mag.ex.magnetic]);
   const magRows = useMemo(
     () => magneticComparison(mag.ex.structure, mag.ex.magnetic, mag.dataset, mag.params, magBind),
@@ -542,11 +572,12 @@ export function App(): JSX.Element {
               </tbody>
             </table>
             <div style={{ overflowX: "auto" }}>
+              <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
               <PatternPlot
-                curves={curves}
-                xLabel={powderXLabel}
-                fitRange={effectiveFitRange}
-                {...(tofViewOnly ? {} : { onFitRangeChange: setFitRange })}
+                curves={displayCurves}
+                xLabel={displayXLabel}
+                fitRange={displayFitRange}
+                {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
               />
               <p style={{ fontSize: 12, color: "#666" }}>
                 {tofViewOnly
@@ -572,11 +603,12 @@ export function App(): JSX.Element {
             </p>
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
               <div style={{ overflowX: "auto" }}>
+                <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
                 <PatternPlot
-                  curves={curves}
-                  xLabel={powderXLabel}
-                  fitRange={effectiveFitRange}
-                  {...(tofViewOnly ? {} : { onFitRangeChange: setFitRange })}
+                  curves={displayCurves}
+                  xLabel={displayXLabel}
+                  fitRange={displayFitRange}
+                  {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                 />
                 <p style={{ fontSize: 12, color: "#666" }}>
                   {tofViewOnly
@@ -584,7 +616,7 @@ export function App(): JSX.Element {
                       ? `Powder (TOF) · GSAS-II fit residual ≈ ${wRpct}%`
                       : "Powder (TOF) · view-only (no TOF calibration loaded)"
                     : `Powder${powderIsTof ? " (TOF)" : ""} · profile R ≈ ${wRpct}% (live)`}
-                  {fitRangeActive && ` · fit range ${effectiveFitRange.min.toFixed(2)}–${effectiveFitRange.max.toFixed(2)}`}.
+                  {fitRangeActive && ` · fit range ${displayFitRange.min.toFixed(2)}–${displayFitRange.max.toFixed(2)} ${axisShortLabel(effectiveUnit)}`}.
                   {!tofViewOnly && (
                     <>
                       {" "}Drag the blue handles to set the fit range.
@@ -718,6 +750,33 @@ function QualityPanel({ structure, powderResult }: { structure: StructureModel; 
   );
 }
 
+function AxisUnitToggle({
+  units,
+  value,
+  onChange,
+}: {
+  units: readonly DisplayUnit[];
+  value: DisplayUnit;
+  onChange: (u: DisplayUnit) => void;
+}): JSX.Element | null {
+  if (units.length <= 1) return null;
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 6 }}>
+      <span style={{ fontSize: 12, color: "#666", marginRight: 2 }}>x-axis:</span>
+      {units.map((u) => (
+        <button
+          key={u}
+          onClick={() => onChange(u)}
+          style={{ ...unitChip, ...(u === value ? unitChipActive : {}) }}
+          title={axisLabel(u)}
+        >
+          {axisShortLabel(u)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SourceTag({ source, synthetic }: { source: string; synthetic: string }): JSX.Element {
   const isSynthetic = source === synthetic;
   return (
@@ -802,3 +861,5 @@ const stepNav: React.CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap"
 const stepChip: React.CSSProperties = { border: "1px solid #ccc", background: "#fff", borderRadius: 16, padding: "4px 12px", cursor: "pointer", fontSize: 12, color: "#555" };
 const stepChipActive: React.CSSProperties = { background: "#1f4e79", color: "#fff", border: "1px solid #1f4e79", fontWeight: 600 };
 const stepHelp: React.CSSProperties = { fontSize: 13, color: "#555", marginTop: 0 };
+const unitChip: React.CSSProperties = { border: "1px solid #ccc", background: "#fff", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 12, color: "#555", minWidth: 30 };
+const unitChipActive: React.CSSProperties = { background: "#1f4e79", color: "#fff", border: "1px solid #1f4e79", fontWeight: 600 };
