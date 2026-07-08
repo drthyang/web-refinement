@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildCellAtoms } from "@/app/ui/cellModel";
+import { buildCellAtoms, magneticSupercell } from "@/app/ui/cellModel";
 import type { StructureModel } from "@/core/crystal/types";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 
@@ -19,6 +19,29 @@ function cubicP1(sites: StructureModel["sites"]): StructureModel {
 }
 
 const iso = { kind: "isotropic", bIso: 0.5 } as const;
+
+describe("magneticSupercell", () => {
+  it("is the denominator of each k component", () => {
+    expect(magneticSupercell([0, 0, 0])).toEqual([1, 1, 1]);
+    expect(magneticSupercell([0, 0, 0.5])).toEqual([1, 1, 2]);
+    expect(magneticSupercell([1 / 3, 0, 0])).toEqual([3, 1, 1]);
+    expect(magneticSupercell([0.25, 0.5, 0])).toEqual([4, 2, 1]);
+  });
+});
+
+describe("buildCellAtoms — supercell tiling", () => {
+  it("tiles the cell N times, tagging each copy with its cell index", () => {
+    const atoms = buildCellAtoms(
+      cubicP1([{ label: "A1", element: "Fe", position: [0.25, 0.5, 0.75], occupancy: 1, adp: iso }]),
+      [1, 1, 2],
+    );
+    expect(atoms).toHaveLength(2); // two cells stacked along c
+    const zs = atoms.map((a) => a.xyz[2]).sort((x, y) => x - y);
+    expect(zs[0]).toBeCloseTo(0.75 * 5, 6); // cell 0
+    expect(zs[1]).toBeCloseTo(0.75 * 5 + 5, 6); // cell 1 (+c)
+    expect(atoms.map((a) => a.cellIndex[2]).sort()).toEqual([0, 1]);
+  });
+});
 
 describe("buildCellAtoms", () => {
   it("places a general-position atom once, in Cartesian Å", () => {

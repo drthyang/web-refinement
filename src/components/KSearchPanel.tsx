@@ -323,7 +323,7 @@ export function KSearchPanel({
                 <span style={help}>Nuclear model fixed; moment amplitudes refined against the loaded pattern (shared scale).</span>
               </div>
               <Suspense fallback={<div style={{ height: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D preview…</div>}>
-                <StructureView structure={structure} {...(momentsMap ? { moments: momentsMap } : {})} />
+                <StructureView structure={structure} propagation={k} {...(momentsMap ? { moments: momentsMap } : {})} />
               </Suspense>
               <p style={help}>
                 Red arrows are the ordered moments (axial vectors) on the magnetic sites. Absolute

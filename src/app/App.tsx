@@ -27,6 +27,7 @@ import { powderReflectionObsCalc } from "@/core/workflow/obsCalc";
 import { normalProbabilityPlot, weightedResiduals } from "@/core/refinement/diagnostics";
 import { QualityPlots } from "@/app/ui/QualityPlots";
 import type { MagneticModel } from "@/core/magnetic/types";
+import type { Vec3 } from "@/core/math/types";
 import { buildSyntheticPowder, powderBindings } from "@/examples/synthetic";
 import {
   axisContext,
@@ -266,6 +267,14 @@ export function App(): JSX.Element {
     }
     return phases;
   }, [structure, session.magnetic, patternExtent, pattern.xUnit, effectiveUnit, axisCtx]);
+
+  // Refined moments (site → crystal-axis components) for the 3D structure view.
+  const sessionMoments = useMemo<Map<string, Vec3> | undefined>(() => {
+    if (!session.magnetic) return undefined;
+    const map = new Map<string, Vec3>();
+    for (const m of session.magnetic.moments) map.set(m.siteLabel, [...m.components] as Vec3);
+    return map;
+  }, [session.magnetic]);
 
   function patchPowder(id: string, patch: Partial<RefinementParameter>): void {
     setSession((s) => ({ ...s, powderParams: s.powderParams.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
@@ -619,7 +628,11 @@ export function App(): JSX.Element {
                 {plotMode === "structure" ? (
                   <>
                     <Suspense fallback={<div style={{ height: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D viewer…</div>}>
-                      <StructureView structure={structure} />
+                      <StructureView
+                        structure={structure}
+                        {...(sessionMoments ? { moments: sessionMoments } : {})}
+                        {...(session.magnetic?.propagation[0] ? { propagation: session.magnetic.propagation[0] } : {})}
+                      />
                     </Suspense>
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
                       {structure.name || "Structure"}

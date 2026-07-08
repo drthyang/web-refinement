@@ -22,7 +22,7 @@ import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
 import { determinant } from "@/core/math/mat3";
 import { color as theme, mono as themeMono } from "@/app/theme";
 import { covalentRadius, elementColor } from "@/app/ui/elementData";
-import { buildCellAtoms } from "@/app/ui/cellModel";
+import { buildCellAtoms, magneticSupercell } from "@/app/ui/cellModel";
 
 const MAX_BOND_LABELS = 80; // labelling every bond of a big cell is unreadable
 
@@ -51,28 +51,41 @@ function makeLabelSprite(text: string, worldHeight: number, colorCss: string): T
 export function StructureView({
   structure,
   moments,
+  propagation,
 }: {
   structure: StructureModel;
   /** Magnetic moments to overlay as arrows: site label → crystal-axis components (µ_B). */
   moments?: ReadonlyMap<string, Vec3>;
+  /** Propagation vector k — enables the magnetic-supercell view (moments modulated by cos 2π k·n). */
+  propagation?: Vec3;
 }): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [showBondLengths, setShowBondLengths] = useState(false);
   const [perspective, setPerspective] = useState(true);
   const [showAxes, setShowAxes] = useState(true);
+  const [magneticCell, setMagneticCell] = useState(false);
 
-  const atoms = useMemo(() => buildCellAtoms(structure), [structure]);
+  // The magnetic supercell (> the atomic cell only for a non-zero commensurate k).
+  const superK = useMemo<[number, number, number]>(
+    () => (propagation ? magneticSupercell(propagation) : [1, 1, 1]),
+    [propagation],
+  );
+  const canMagneticCell = superK[0] * superK[1] * superK[2] > 1;
+  const supercell: [number, number, number] = magneticCell && canMagneticCell ? superK : [1, 1, 1];
+
+  const atoms = useMemo(() => buildCellAtoms(structure, supercell), [structure, supercell[0], supercell[1], supercell[2]]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cartesian cell corners + centre + body-diagonal span, for edges and camera.
   const { corners, center, span } = useMemo(() => {
+    const [nx, ny, nz] = supercell;
     const c: Vec3[] = [];
     for (const i of [0, 1]) for (const j of [0, 1]) for (const k of [0, 1]) {
-      c.push(fractionalToCartesian(structure.cell, [i, j, k]));
+      c.push(fractionalToCartesian(structure.cell, [i * nx, j * ny, k * nz]));
     }
-    const ctr = fractionalToCartesian(structure.cell, [0.5, 0.5, 0.5]);
-    const diag = fractionalToCartesian(structure.cell, [1, 1, 1]);
+    const ctr = fractionalToCartesian(structure.cell, [nx / 2, ny / 2, nz / 2]);
+    const diag = fractionalToCartesian(structure.cell, [nx, ny, nz]);
     return { corners: c, center: ctr, span: Math.hypot(diag[0], diag[1], diag[2]) || 10 };
-  }, [structure]);
+  }, [structure, supercell[0], supercell[1], supercell[2]]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -136,10 +149,17 @@ export function StructureView({
         if (!m) continue;
         const R = at.rot;
         const det = determinant(R);
+        // Commensurate k-phase: the moment in cell n is modulated by cos(2π k·n),
+        // so it flips between cells in the magnetic supercell (e.g. AFM for k=½).
+        const n = at.cellIndex;
+        const kmod = propagation
+          ? Math.cos(2 * Math.PI * (propagation[0]! * n[0]! + propagation[1]! * n[1]! + propagation[2]! * n[2]!))
+          : 1;
+        const w = kmod * det;
         const mc: Vec3 = [
-          det * (R[0]![0]! * m[0]! + R[0]![1]! * m[1]! + R[0]![2]! * m[2]!),
-          det * (R[1]![0]! * m[0]! + R[1]![1]! * m[1]! + R[1]![2]! * m[2]!),
-          det * (R[2]![0]! * m[0]! + R[2]![1]! * m[1]! + R[2]![2]! * m[2]!),
+          w * (R[0]![0]! * m[0]! + R[0]![1]! * m[1]! + R[0]![2]! * m[2]!),
+          w * (R[1]![0]! * m[0]! + R[1]![1]! * m[1]! + R[1]![2]! * m[2]!),
+          w * (R[2]![0]! * m[0]! + R[2]![1]! * m[1]! + R[2]![2]! * m[2]!),
         ];
         const cart = crystalComponentsToCartesian(structure.cell, mc);
         const len = Math.hypot(cart[0]!, cart[1]!, cart[2]!);
@@ -253,7 +273,7 @@ export function StructureView({
       try { renderer.forceContextLoss(); } catch { /* free the WebGL context for rebuilds */ }
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
-  }, [atoms, corners, center, span, showBondLengths, perspective, showAxes, structure, moments]);
+  }, [atoms, corners, center, span, showBondLengths, perspective, showAxes, structure, moments, propagation]);
 
   const hasCell = structure.cell.a > 0 && structure.cell.b > 0 && structure.cell.c > 0;
   if (!hasCell || atoms.length === 0) {
@@ -269,6 +289,9 @@ export function StructureView({
         <ViewerToggle label="Bond lengths" checked={showBondLengths} onChange={setShowBondLengths} />
         <ViewerToggle label="Perspective" checked={perspective} onChange={setPerspective} />
         <ViewerToggle label="Axes" checked={showAxes} onChange={setShowAxes} />
+        {canMagneticCell && (
+          <ViewerToggle label={`Magnetic cell (${superK.join("×")})`} checked={magneticCell} onChange={setMagneticCell} />
+        )}
       </div>
       <div ref={mountRef} style={{ width: "100%", height: 360, cursor: "grab", borderRadius: 10, overflow: "hidden" }} />
     </div>

@@ -20,6 +20,21 @@ export interface CellAtom {
   readonly label: string;
   readonly xyz: Vec3;
   readonly rot: Mat3;
+  /** Integer cell translation n of the atom's copy (for k-phase moment modulation). */
+  readonly cellIndex: readonly [number, number, number];
+}
+
+/**
+ * Magnetic supercell size for a commensurate k: Nᵢ = smallest integer making
+ * Nᵢ·kᵢ an integer (the denominator of kᵢ). k = 0 → (1,1,1); k = (0,0,½) → (1,1,2).
+ */
+export function magneticSupercell(k: Vec3): [number, number, number] {
+  const denom = (v: number): number => {
+    if (Math.abs(v) < 1e-6) return 1;
+    for (let n = 1; n <= 12; n++) if (Math.abs(v * n - Math.round(v * n)) < 1e-4) return n;
+    return 1;
+  };
+  return [denom(k[0]!), denom(k[1]!), denom(k[2]!)];
 }
 
 /** Fractional coord within this of 0 → also drawn at +1 (fill faces/edges/corners). */
@@ -43,21 +58,29 @@ function coincide(a: Vec3, b: Vec3): boolean {
 }
 
 /**
- * Expand `structure` into the atoms of one unit cell: symmetry-equivalent
- * positions plus boundary duplicates. Deduped per site by wrapped position.
+ * Expand `structure` into the atoms of one unit cell (default) or a `supercell`
+ * of the atomic cell (e.g. the magnetic supercell for a commensurate k). For the
+ * single cell, boundary atoms are duplicated so faces/edges/corners look complete;
+ * for a supercell the wrapped atoms are tiled across the cells (each tagged with
+ * its integer cell index, for k-phase moment modulation). Deduped per site.
  */
-export function buildCellAtoms(structure: StructureModel): CellAtom[] {
+export function buildCellAtoms(
+  structure: StructureModel,
+  supercell: readonly [number, number, number] = [1, 1, 1],
+): CellAtom[] {
+  const [nx, ny, nz] = supercell;
+  const single = nx === 1 && ny === 1 && nz === 1;
   const ops = structure.spaceGroup.operations.length
     ? structure.spaceGroup.operations
     : [{ rotation: IDENTITY, translation: [0, 0, 0] as Vec3, xyz: "x,y,z" }];
   const atoms: CellAtom[] = [];
   const seen = new Set<string>();
-  const push = (element: string, label: string, frac: Vec3, rot: Mat3): void => {
+  const push = (element: string, label: string, frac: Vec3, rot: Mat3, cellIndex: [number, number, number]): void => {
     if (atoms.length >= MAX_ATOMS) return;
     const key = `${label}|${frac.map((v) => v.toFixed(3)).join(",")}`;
     if (seen.has(key)) return;
     seen.add(key);
-    atoms.push({ element, label, xyz: fractionalToCartesian(structure.cell, frac), rot });
+    atoms.push({ element, label, xyz: fractionalToCartesian(structure.cell, frac), rot, cellIndex });
   };
 
   for (const site of structure.sites) {
@@ -69,12 +92,23 @@ export function buildCellAtoms(structure: StructureModel): CellAtom[] {
       if (!placed.some((q) => coincide(q.frac, frac))) placed.push({ frac, rot: op.rotation });
     }
     for (const { frac, rot } of placed) {
-      // Duplicate across each near-zero axis so faces/edges/corners are filled.
-      const axisImages = [0, 1, 2].map((i) => (frac[i]! < BOUNDARY_EPS ? [0, 1] : [0]));
-      for (const dx of axisImages[0]!) {
-        for (const dy of axisImages[1]!) {
-          for (const dz of axisImages[2]!) {
-            push(site.element, site.label, [frac[0]! + dx, frac[1]! + dy, frac[2]! + dz], rot);
+      if (single) {
+        // Duplicate across each near-zero axis so faces/edges/corners are filled.
+        const axisImages = [0, 1, 2].map((i) => (frac[i]! < BOUNDARY_EPS ? [0, 1] : [0]));
+        for (const dx of axisImages[0]!) {
+          for (const dy of axisImages[1]!) {
+            for (const dz of axisImages[2]!) {
+              push(site.element, site.label, [frac[0]! + dx, frac[1]! + dy, frac[2]! + dz], rot, [0, 0, 0]);
+            }
+          }
+        }
+      } else {
+        // Tile the wrapped atom across the supercell, tagging each with its cell.
+        for (let i = 0; i < nx; i++) {
+          for (let j = 0; j < ny; j++) {
+            for (let k = 0; k < nz; k++) {
+              push(site.element, site.label, [frac[0]! + i, frac[1]! + j, frac[2]! + k], rot, [i, j, k]);
+            }
           }
         }
       }
