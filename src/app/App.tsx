@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { APP_NAME, APP_VERSION, PROJECT_SCHEMA_VERSION } from "@/app/constants";
+import { APP_VERSION, PROJECT_SCHEMA_VERSION } from "@/app/constants";
 import { downloadText } from "@/app/download";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
@@ -33,9 +33,7 @@ import { MagneticPanel } from "@/components/MagneticPanel";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { SingleCrystalDataset as SxDataset } from "@/core/diffraction/types";
 import { buildSyntheticPowder, powderBindings } from "@/examples/synthetic";
-import { ParameterTable } from "@/components/ParameterTable";
 import { CandidateComparison } from "@/components/CandidateComparison";
-import { PatternPlot, type FitRangeSelection } from "@/visualization/PatternPlot";
 import {
   axisContext,
   availableDisplayUnits,
@@ -52,19 +50,23 @@ import {
   PHASE_COLORS,
   MAGNETIC_COLOR,
 } from "@/visualization/reflectionTicks";
+import { WorkbenchHeader, type Step } from "@/app/ui/WorkbenchHeader";
+import { StatusBar } from "@/app/ui/StatusBar";
+import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
+import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
+import { ParameterPanel } from "@/app/ui/ParameterPanel";
+import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono } from "@/app/theme";
 import { bondLengths } from "@/core/crystal/geometry";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 
-const STEPS = [
-  "1. Structure (CIF)",
-  "2. Data & instrument",
-  "3. Structural refinement",
-  "4. Quality",
-  "5. Magnetic candidates",
-  "6. Magnetic refinement",
-  "7. Compare groups",
-] as const;
+const STEPS: readonly Step[] = [
+  { num: "1–3", label: "Setup & refinement" },
+  { num: "4", label: "Quality" },
+  { num: "5", label: "Candidates" },
+  { num: "6", label: "Magnetic" },
+  { num: "7", label: "Compare" },
+];
 
 const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", wavelength: 1.54 };
 const DEFAULT_BACKGROUND_TERMS = 4;
@@ -140,6 +142,7 @@ export function App(): JSX.Element {
   const [mag, setMag] = useState(() => makeMagnetic(exampleMagnetic()));
   const [magResult, setMagResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [refineKind, setRefineKind] = useState<"refine" | "guided" | null>(null);
   const [step, setStep] = useState(0);
   // Optional refinement window; null = fit the full pattern. Reset when the
   // observed pattern changes (see effect below).
@@ -272,39 +275,6 @@ export function App(): JSX.Element {
     setMag((m) => ({ ...m, params: m.params.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   }
 
-  function setBackgroundTerms(backgroundTerms: number): void {
-    const count = Math.max(0, Math.min(20, Math.trunc(backgroundTerms)));
-    setSession((s) => {
-      const spec = buildPowderSpec(
-        s.structure,
-        s.pattern,
-        instrumentLoaded ? instrument : DEFAULT_INSTRUMENT,
-        s.powderProfile.lorentz,
-        count,
-      );
-      const previous = new Map(s.powderParams.map((p) => [p.id, p]));
-      return {
-        ...s,
-        backgroundTerms: count,
-        powderParams: spec.params.map((p) => {
-          const old = previous.get(p.id);
-          return old
-            ? {
-                ...p,
-                value: old.value,
-                initialValue: old.initialValue,
-                fixed: old.fixed,
-                ...(old.esd !== undefined ? { esd: old.esd } : {}),
-              }
-            : p;
-        }),
-        powderBindings: spec.bindings,
-        powderProfile: spec.profile,
-      };
-    });
-    setPowderResult(null);
-  }
-
   async function runMagnetic(): Promise<void> {
     setBusy("mag");
     try {
@@ -328,9 +298,20 @@ export function App(): JSX.Element {
     ...(session.powderProfile.lorentz !== undefined ? { lorentz: session.powderProfile.lorentz } : {}),
   });
 
+  /** Reset every powder parameter to its initial value and clear the result. */
+  function resetPowderParams(): void {
+    setSession((s) => ({
+      ...s,
+      powderParams: s.powderParams.map(({ esd: _esd, ...p }) => ({ ...p, value: p.initialValue })),
+    }));
+    setPowderResult(null);
+    setMessage("Parameters reset to initial values.");
+  }
+
   /** Flat co-refinement of the currently-freed parameters. */
   async function runPowder(guided = false): Promise<void> {
     setBusy("powder");
+    setRefineKind(guided ? "guided" : "refine");
     try {
       const result = await client.current.refinePowder({
         structure, pattern, parameters: guided ? guidedPowderParams(powderParams) : powderParams, bindings: pBindings, ...profileReq(),
@@ -353,6 +334,7 @@ export function App(): JSX.Element {
       setMessage(`Powder refinement failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(null);
+      setRefineKind(null);
     }
   }
 
@@ -502,227 +484,127 @@ export function App(): JSX.Element {
     return (100 * num / Math.max(den, 1e-9)).toFixed(1);
   })();
 
+  function exportCsv(): void {
+    downloadText(`${pattern.id}.csv`, powderPatternCsv(curves), "text/csv");
+  }
+
+  // Summary-card content (Structure / Data / Instrument).
+  const cell = structure.cell;
+  const hexish = Math.abs(cell.a - cell.b) < 1e-4 && cell.gamma === 120;
+  const cellStr = hexish
+    ? `a ${cell.a.toFixed(5)} · c ${cell.c.toFixed(5)} Å`
+    : `a ${cell.a.toFixed(4)} · b ${cell.b.toFixed(4)} · c ${cell.c.toFixed(4)} Å`;
+  const isSynthetic = powderSource === SYNTHETIC_SOURCE;
+  const instMeta =
+    instrument.kind === "tof"
+      ? `difC ${instrument.difC.toFixed(1)}${instrument.difA ? ` · difA ${instrument.difA}` : ""}${instrument.difB ? ` · difB ${instrument.difB}` : ""} · Zero ${(instrument.zero ?? 0).toFixed(2)} µs`
+      : `λ ${instrument.wavelength} Å${instrument.zero ? ` · Zero ${instrument.zero}°` : ""}`;
+  const summaryCards: SummaryCardData[] = [
+    {
+      label: "Structure", loadLabel: "Load CIF…", accept: ".cif,text/plain", onFile: onLoadCif,
+      chip: "✓ parsed",
+      title: `${structure.name}${structure.spaceGroup.hermannMauguin ? ` · ${structure.spaceGroup.hermannMauguin}` : ""}`,
+      meta: `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
+    },
+    {
+      label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.csv,text/plain", onFile: onLoadData,
+      chip: isSynthetic ? "⚠ synthetic" : "✓ loaded",
+      title: isSynthetic ? "Synthetic demo pattern" : powderSource,
+      meta: `${pattern.points.length} points · ${UNIT_LABEL[pattern.xUnit]} ${patternExtent.min.toFixed(0)}–${patternExtent.max.toFixed(0)}`,
+    },
+    {
+      label: "Instrument", loadLabel: "Load instrument…", accept: ".instprm,.prm,text/plain", onFile: onLoadInstrument,
+      chip: instrumentLoaded ? "✓ loaded" : "default",
+      title: instrument.kind === "tof" ? "POWGEN .instprm · TOF" : "Constant wavelength",
+      meta: instMeta,
+    },
+  ];
+
   return (
-    <div style={page}>
-      <header>
-        <h1 style={{ margin: "0 0 4px" }}>{APP_NAME}</h1>
-        <p style={{ margin: 0, color: "#555" }}>
-          v{APP_VERSION} · atomic/nuclear refinement · powder
-        </p>
-        <p style={disclaimer}>
-          Early browser-native refinement workbench. Results for publication must be validated against
-          established tools.
-        </p>
-      </header>
-
-      <div style={{ ...bar }}>
-        <label style={btn}>
-          Load CIF…
-          <input
-            type="file"
-            accept=".cif,text/plain"
-            style={{ display: "none" }}
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) onLoadCif(f); }}
-          />
-        </label>
-        <button style={btn} onClick={() => { userTookOver.current = true; setSession(newSession(exampleStructure(), instrument)); }}>Reset to example</button>
-        <button style={btn} onClick={exportProject}>Export project JSON</button>
-        <span style={{ color: "#1f4e79", marginLeft: 8 }}>{message}</span>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <WorkbenchHeader
+        steps={STEPS}
+        active={step}
+        onStep={setStep}
+        version={`v${APP_VERSION}`}
+        onExportCsv={exportCsv}
+        onExportProject={exportProject}
+      />
+      <StatusBar message={message} />
+      <main style={{ flex: 1, maxWidth: 1480, width: "100%", margin: "0 auto", padding: "16px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+        {renderStep()}
+      </main>
+      <div style={disclaimerBar}>
+        Early browser-native refinement workbench — results for publication must be validated against established tools.
       </div>
-
-      <nav style={stepNav}>
-        {STEPS.map((label, i) => (
-          <button
-            key={label}
-            onClick={() => setStep(i)}
-            style={{ ...stepChip, ...(i === step ? stepChipActive : {}) }}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
-
-      <section style={card}>{renderStep()}</section>
-
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-        <button style={btn} disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>← Back</button>
-        <button style={btnPrimary} disabled={step === STEPS.length - 1} onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}>Next →</button>
-      </div>
-
-      <footer style={{ color: "#888", fontSize: 12, marginTop: 24 }}>
-        Guided workflow mirrors the practical refinement procedure. Bundled example structures from
-        GSAS-II validation data. See docs/REFINEMENT_PROCEDURE.md and docs/VALIDATION.md.
-      </footer>
+      <footer style={copyrightBar}>© 2026 Tsung-Han Yang. All rights reserved.</footer>
     </div>
   );
 
   function renderStep(): JSX.Element {
     const magSiteLabels = mag.ex.magnetic.moments.map((m) => m.siteLabel);
     switch (step) {
-      case 0:
+      case 0: // Setup & refinement: summary cards + plot + parameter panel.
         return (
-          <div>
-            <h2 style={h2}>Step 1 — Structure ({structure.name})</h2>
-            <p style={stepHelp}>Load a structural CIF (nuclear model). Use “Load CIF…” above.</p>
-            <table style={{ fontSize: 13 }}>
-              <tbody>
-                <tr><td style={kcell}>Space group</td><td>{structure.spaceGroup.hermannMauguin ?? "(from ops)"} · {structure.spaceGroup.operations.length} ops</td></tr>
-                <tr><td style={kcell}>Cell</td><td>a={structure.cell.a.toFixed(4)} b={structure.cell.b.toFixed(4)} c={structure.cell.c.toFixed(4)} Å · α={structure.cell.alpha} β={structure.cell.beta} γ={structure.cell.gamma}°</td></tr>
-                <tr><td style={kcell}>Volume</td><td>{cellVolume(structure.cell).toFixed(3)} Å³</td></tr>
-                <tr><td style={kcell}>Sites</td><td>{structure.sites.map((s) => `${s.label}(${s.element}) occ ${s.occupancy.toFixed(3)}`).join(", ")}</td></tr>
-              </tbody>
-            </table>
-          </div>
-        );
-      case 1:
-        return (
-          <div>
-            <h2 style={h2}>Step 2 — Experimental data &amp; instrument</h2>
-            <p style={stepHelp}>
-              Load your <strong>observed powder data</strong> — the reader auto-detects the x-axis
-              unit (2θ / Q / d / TOF) from the file header, the loaded instrument, or the data range.
-              Powder is <code>x&nbsp;y&nbsp;[σ]</code>. Load an instrument file for the authoritative
-              calibration. Until you load data the workbench uses a synthetic demo pattern.
-            </p>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={btn}>
-                Load data…
-                <input type="file" accept=".xye,.xy,.dat,.txt,.gr,.hkl,.csv,text/plain" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) onLoadData(f); }} />
-              </label>
-              <label style={btn}>
-                Load instrument…
-                <input type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) onLoadInstrument(f); }} />
-              </label>
-              <span style={{ fontSize: 13, color: "#444" }}>
-                {instrument.kind === "tof"
-                  ? `TOF · difC=${instrument.difC.toFixed(1)} · Zero=${(instrument.zero ?? 0).toFixed(3)}`
-                  : `Constant wavelength · λ=${instrument.wavelength} Å`}
-              </span>
-            </div>
-            <table style={{ fontSize: 12, marginBottom: 10 }}>
-              <tbody>
-                <tr><td style={kcell}>Powder source</td><td><SourceTag source={powderSource} synthetic={SYNTHETIC_SOURCE} /> · {pattern.points.length} points · unit={UNIT_LABEL[pattern.xUnit]}</td></tr>
-              </tbody>
-            </table>
-            <div style={{ overflowX: "auto" }}>
-              <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
-              <PatternPlot
-                curves={displayCurves}
-                xLabel={displayXLabel}
-                fitRange={displayFitRange}
-                phases={phaseTicks}
-                {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
-              />
-              <p style={{ fontSize: 12, color: "#666" }}>
-                {tofViewOnly
-                  ? session.powderOverlay
-                    ? "Observed (points) with GSAS-II fit overlay"
-                    : "Observed TOF pattern (view-only — no calc overlay)"
-                  : `Observed${powderIsTof ? " TOF" : ""} data with calculated profile`} ({pattern.points.length} points).
-                {!tofViewOnly && " Drag the blue handles to set the fit range."}
-              </p>
-            </div>
-          </div>
-        );
-      case 2:
-        return (
-          <div>
-            <h2 style={h2}>Step 3 — Structural refinement (with constraints)</h2>
-            <p style={stepHelp}>
-              The full <strong>symmetry-allowed</strong> parameter set is listed: scale, Chebyshev
-              background, symmetry-reduced cell, instrument profile (Caglioti U/V/W + zero), per-site
-              ADP, and symmetry-adapted atomic positions. Structural rows start fixed — free them per
-              row and click <strong>Refine selected</strong>, or click <strong>Guided (staged)</strong>
-              to unlock them in the expert order automatically.
-            </p>
-            <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-              <div style={{ overflowX: "auto" }}>
-                <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
-                <PatternPlot
+          <>
+            <SummaryCards cards={summaryCards} />
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, alignItems: "stretch" }}>
+              <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                  <span style={themeLabel}>Powder pattern — observed vs calculated</span>
+                  <div style={{ marginLeft: "auto" }}>
+                    <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
+                  </div>
+                </div>
+                <WorkbenchPlot
                   curves={displayCurves}
                   xLabel={displayXLabel}
+                  wRpct={wRpct}
                   fitRange={displayFitRange}
                   phases={phaseTicks}
                   {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                 />
-                <p style={{ fontSize: 12, color: "#666" }}>
+                <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
                   {tofViewOnly
                     ? session.powderOverlay
-                      ? `Powder (TOF) · GSAS-II fit residual ≈ ${wRpct}%`
-                      : "Powder (TOF) · view-only (no TOF calibration loaded)"
-                    : `Powder${powderIsTof ? " (TOF)" : ""} · profile R ≈ ${wRpct}% (live)`}
-                  {fitRangeActive && ` · fit range ${displayFitRange.min.toFixed(2)}–${displayFitRange.max.toFixed(2)} ${axisShortLabel(effectiveUnit)}`}.
-                  {!tofViewOnly && (
-                    <>
-                      {" "}Drag the blue handles to set the fit range.
-                      {fitRangeActive && (
-                        <button style={{ ...btn, padding: "1px 8px", marginLeft: 6, fontSize: 11 }} onClick={() => setFitRange(null)}>
-                          Reset range
-                        </button>
-                      )}
-                    </>
+                      ? "Observed (points) with GSAS-II fit overlay."
+                      : "Observed TOF pattern — view-only (load a TOF instrument with difC to refine)."
+                    : `Powder${powderIsTof ? " (TOF) · back-to-back-exponential profile" : ""}`}
+                  {fitRangeActive && ` · fit range ${displayFitRange.min.toFixed(2)}–${displayFitRange.max.toFixed(2)} ${axisShortLabel(effectiveUnit)}`}
+                  {!tofViewOnly && " · drag across the plot to zoom, blue handles to set the fit range."}
+                  {fitRangeActive && (
+                    <button style={smallBtn} onClick={() => setFitRange(null)}>Reset range</button>
                   )}
                 </p>
               </div>
-              <div style={{ minWidth: 320, flex: 1 }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <strong style={{ fontSize: 13 }}>Powder parameters</strong>
-                  <SourceTag source={powderSource} synthetic={SYNTHETIC_SOURCE} />
-                </div>
-                <ParameterTable parameters={powderParams} esd={powderResult?.esd} onChange={patchPowder} />
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <button style={btnPrimary} disabled={busy !== null || tofViewOnly} onClick={() => runPowder(false)}>{busy === "powder" ? "Refining…" : "Refine selected"}</button>
-                  <button style={btn} disabled={busy !== null || tofViewOnly} onClick={() => runPowder(true)} title="Staged: scale → background → cell → profile → ADP → positions">Guided (staged)</button>
-                  <label style={controlLabel}>
-                    Background terms
-                    <input
-                      type="number"
-                      min={0}
-                      max={20}
-                      step={1}
-                      value={session.backgroundTerms}
-                      disabled={busy !== null || tofViewOnly}
-                      onChange={(e) => setBackgroundTerms(Number(e.target.value))}
-                      style={numberInput}
-                    />
-                  </label>
-                  <label style={{ fontSize: 12, color: "#444", display: "flex", gap: 4, alignItems: "center" }}>
-                    <input type="checkbox" checked={session.powderProfile.lorentz !== false} onChange={(e) => setSession((s) => ({ ...s, powderProfile: { ...s.powderProfile, lorentz: e.target.checked } }))} /> Lorentz
-                  </label>
-                  <button style={btn} onClick={() => downloadText(`${pattern.id}.csv`, powderPatternCsv(curves), "text/csv")}>Export CSV</button>
-                </div>
-                {powderIsTof && !tofViewOnly && (
-                  <p style={{ fontSize: 12, color: "#1f5e1f", marginTop: 6, maxWidth: 360 }}>
-                    TOF pattern — refined with a <strong>back-to-back-exponential</strong> profile
-                    (α rise, β tail, σ Gaussian) placed by difC/difA/difB. The α/β/σ coefficients
-                    refine in the profile stage; difC is held at the instrument calibration.
-                  </p>
-                )}
-                {tofViewOnly && (
-                  <p style={{ fontSize: 12, color: "#8a1f1f", marginTop: 6, maxWidth: 340 }}>
-                    TOF pattern — <strong>view-only</strong>. {session.powderOverlay
-                      ? "A GSAS-II CSV was loaded, so its own calc/background is shown as a reference."
-                      : "Load a TOF instrument file (.instprm with difC) to place peaks and enable refinement."}
-                  </p>
-                )}
-                {powderResult && <Agreement result={powderResult} />}
-              </div>
+              <ParameterPanel
+                params={powderParams}
+                esd={powderResult?.esd}
+                onChange={patchPowder}
+                onRefine={() => runPowder(false)}
+                onGuided={() => runPowder(true)}
+                onReset={resetPowderParams}
+                busy={busy !== null}
+                busyKind={busy === "powder" ? refineKind : null}
+                result={powderResult}
+                disabled={tofViewOnly}
+              />
             </div>
-          </div>
+          </>
         );
-      case 3:
-        return <QualityPanel structure={structure} powderResult={powderResult} />;
-      case 4:
+      case 1:
+        return <div style={{ ...themeCard, padding: 16 }}><QualityPanel structure={structure} powderResult={powderResult} /></div>;
+      case 2:
         return (
-          <div>
-            <h2 style={h2}>Step 5 — Allowed magnetic space groups ({mag.ex.structure.name})</h2>
+          <div style={{ ...themeCard, padding: 16 }}>
+            <h2 style={h2}>Allowed magnetic space groups ({mag.ex.structure.name})</h2>
             <CandidateComparison structure={mag.ex.structure} dataset={mag.dataset} magneticSiteLabels={magSiteLabels} mode="generate" />
           </div>
         );
-      case 5:
+      case 3:
         return (
-          <div>
-            <h2 style={h2}>Step 6 — Magnetic refinement ({mag.ex.structure.name})</h2>
+          <div style={{ ...themeCard, padding: 16 }}>
+            <h2 style={h2}>Magnetic refinement ({mag.ex.structure.name})</h2>
             <p style={stepHelp}>Refine moment components (μB, crystal axes) with proper constraints; nuclear and magnetic intensities kept separate.</p>
             <MagneticPanel
               structure={mag.ex.structure}
@@ -737,10 +619,10 @@ export function App(): JSX.Element {
             />
           </div>
         );
-      case 6:
+      case 4:
         return (
-          <div>
-            <h2 style={h2}>Step 7 — Compare magnetic space groups</h2>
+          <div style={{ ...themeCard, padding: 16 }}>
+            <h2 style={h2}>Compare magnetic space groups</h2>
             <CandidateComparison structure={mag.ex.structure} dataset={mag.dataset} magneticSiteLabels={magSiteLabels} mode="compare" />
           </div>
         );
@@ -796,14 +678,23 @@ function AxisUnitToggle({
 }): JSX.Element | null {
   if (units.length <= 1) return null;
   return (
-    <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 6 }}>
-      <span style={{ fontSize: 12, color: "#666", marginRight: 2 }}>x-axis:</span>
+    <div style={{ display: "inline-flex", gap: 2, background: theme.chipBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: 2 }}>
       {units.map((u) => (
         <button
           key={u}
           onClick={() => onChange(u)}
-          style={{ ...unitChip, ...(u === value ? unitChipActive : {}) }}
           title={axisLabel(u)}
+          style={{
+            border: "none",
+            borderRadius: 6,
+            padding: "3px 11px",
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: themeMono,
+            background: u === value ? theme.primary : "transparent",
+            color: u === value ? "#fff" : theme.secondary,
+          }}
         >
           {axisShortLabel(u)}
         </button>
@@ -812,89 +703,9 @@ function AxisUnitToggle({
   );
 }
 
-function SourceTag({ source, synthetic }: { source: string; synthetic: string }): JSX.Element {
-  const isSynthetic = source === synthetic;
-  return (
-    <span style={{
-      fontSize: 12,
-      padding: "1px 8px",
-      borderRadius: 10,
-      background: isSynthetic ? "#fff4f4" : "#eaf4ea",
-      border: `1px solid ${isSynthetic ? "#f0c0c0" : "#bcdcbc"}`,
-      color: isSynthetic ? "#8a1f1f" : "#1f5e1f",
-    }}>
-      {isSynthetic ? "⚠ synthetic demo" : `✓ loaded: ${source}`}
-    </span>
-  );
-}
-
-function Agreement({ result }: { result: RefinementResult }): JSX.Element {
-  const a = result.agreement;
-  const d = result.diagnostics;
-  const hasDiagnostics =
-    d !== undefined && (d.svdZeroCount > 0 || d.highCorrelations.length > 0 || d.atBounds.length > 0);
-  return (
-    <div style={{ marginTop: 12, fontSize: 13 }}>
-      <strong>Result:</strong> {result.status} · R = {(100 * a.rFactor).toFixed(2)}%
-      {a.rWeighted !== undefined && <> · wR = {(100 * a.rWeighted).toFixed(2)}%</>}
-      {a.goodnessOfFit !== undefined && <> · GoF = {a.goodnessOfFit.toFixed(2)}</>}
-      {d && hasDiagnostics && (
-        <div style={diagnosticsBox}>
-          {d.svdZeroCount > 0 && (
-            <div>
-              SVD dropped {d.svdZeroCount} near-null direction{d.svdZeroCount === 1 ? "" : "s"}
-              {d.singularParameterIds.length > 0 ? `: ${d.singularParameterIds.join(", ")}` : ""}.
-            </div>
-          )}
-          {d.highCorrelations.length > 0 && (
-            <div>
-              High correlation: {d.highCorrelations.slice(0, 4).map((c) =>
-                `${c.parameterIdA}/${c.parameterIdB} ${c.coefficient.toFixed(3)}`,
-              ).join("; ")}
-            </div>
-          )}
-          {d.atBounds.length > 0 && (
-            <div>
-              At bound (not converged — value/esd unreliable): {d.atBounds.map((b) =>
-                `${b.parameterId} (${b.bound})`,
-              ).join(", ")}.
-            </div>
-          )}
-        </div>
-      )}
-      <details style={{ marginTop: 6 }}>
-        <summary>Refinement history ({result.history.length} cycles)</summary>
-        <table style={{ fontSize: 12, marginTop: 4 }}>
-          <thead><tr><th style={kcell}>cycle</th><th style={kcell}>χ²</th><th style={kcell}>wR %</th></tr></thead>
-          <tbody>
-            {result.history.map((h) => (
-              <tr key={h.iteration}>
-                <td style={kcell}>{h.iteration}</td>
-                <td style={kcell}>{h.chiSquared.toPrecision(5)}</td>
-                <td style={kcell}>{(100 * (h.agreement.rWeighted ?? 0)).toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
-    </div>
-  );
-}
-
-const page: React.CSSProperties = { fontFamily: "system-ui, sans-serif", maxWidth: 1120, margin: "0 auto", padding: "24px 20px", color: "#222" };
-const disclaimer: React.CSSProperties = { background: "#fff4f4", border: "1px solid #f0c0c0", color: "#8a1f1f", padding: "6px 10px", borderRadius: 6, fontSize: 12, marginTop: 8 };
-const bar: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "16px 0" };
-const card: React.CSSProperties = { border: "1px solid #e3e3e3", borderRadius: 10, padding: 16, marginBottom: 16, background: "#fafafa" };
-const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 17 };
-const kcell: React.CSSProperties = { padding: "2px 10px 2px 0", color: "#444", verticalAlign: "top" };
-const diagnosticsBox: React.CSSProperties = { marginTop: 6, padding: "6px 8px", background: "#fff8e7", border: "1px solid #ead49b", borderRadius: 6, color: "#5a4100", lineHeight: 1.4 };
-const controlLabel: React.CSSProperties = { fontSize: 12, color: "#444", display: "flex", gap: 6, alignItems: "center" };
-const numberInput: React.CSSProperties = { width: 54, padding: "4px 6px", border: "1px solid #bbb", borderRadius: 6, fontSize: 12 };
-const btn: React.CSSProperties = { border: "1px solid #bbb", background: "#fff", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 13 };
-const btnPrimary: React.CSSProperties = { ...btn, background: "#1f4e79", color: "#fff", border: "1px solid #1f4e79" };
-const stepNav: React.CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0 12px" };
-const stepChip: React.CSSProperties = { border: "1px solid #ccc", background: "#fff", borderRadius: 16, padding: "4px 12px", cursor: "pointer", fontSize: 12, color: "#555" };
-const stepChipActive: React.CSSProperties = { background: "#1f4e79", color: "#fff", border: "1px solid #1f4e79", fontWeight: 600 };
-const stepHelp: React.CSSProperties = { fontSize: 13, color: "#555", marginTop: 0 };
-const unitChip: React.CSSProperties = { border: "1px solid #ccc", background: "#fff", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 12, color: "#555", minWidth: 30 };
-const unitChipActive: React.CSSProperties = { background: "#1f4e79", color: "#fff", border: "1px solid #1f4e79", fontWeight: 600 };
+const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 700, color: theme.ink };
+const kcell: React.CSSProperties = { padding: "2px 10px 2px 0", color: theme.secondary, verticalAlign: "top" };
+const stepHelp: React.CSSProperties = { fontSize: 13, color: theme.secondary, marginTop: 0 };
+const smallBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "1px 9px", fontSize: 11, cursor: "pointer", marginLeft: 6 };
+const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderTop: `1px solid ${theme.warnBorder}`, color: theme.warnInk };
+const copyrightBar: React.CSSProperties = { padding: "10px 24px", fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised, textAlign: "center" };
