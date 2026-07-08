@@ -179,7 +179,11 @@ export function App(): JSX.Element {
       const loaded = await loadPowgenDefault();
       if (cancelled || userTookOver.current) return;
       if (!loaded) {
-        setMessage("High-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ (P2/c) — bundled structure (POWGEN pattern not found in data/).");
+        setMessage(
+          import.meta.env.DEV
+            ? "High-entropy (Co,Cu,Fe,Mn,Ni,Zn)WO₄ (P2/c) — bundled structure (POWGEN pattern not found in data/)."
+            : "Synthetic demo pattern — load your own CIF, powder data, and instrument to refine.",
+        );
         return;
       }
       const { structure: st, pattern: pt, instrument: inst } = loaded;

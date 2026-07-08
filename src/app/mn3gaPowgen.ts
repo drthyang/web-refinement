@@ -62,6 +62,10 @@ function parseStructure(cifText: string | null): StructureModel {
  * reachable (production, or a checkout without the local `data/` folder).
  */
 export async function loadMn3GaPowgen(): Promise<LoadedMn3Ga | null> {
+  // Real experimental data is local-only (git-ignored, served by a dev plugin).
+  // Never fetch it from a production build — the deployed site uses the bundled
+  // synthetic demo instead.
+  if (!import.meta.env.DEV) return null;
   const root = `${import.meta.env.BASE_URL}${DIR}`;
   const [datText, cifText] = await Promise.all([fetchText(`${root}/${DAT}`), fetchText(`${root}/${CIF}`)]);
   if (datText === null) return null;

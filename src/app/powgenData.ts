@@ -52,6 +52,8 @@ async function fetchText(url: string): Promise<string | null> {
  * reachable (production, or a checkout without the local `data/` folder).
  */
 export async function loadPowgenDefault(): Promise<LoadedPowgen | null> {
+  // Local-only real data (see loadMn3GaPowgen) — never fetched from a build.
+  if (!import.meta.env.DEV) return null;
   const root = `${import.meta.env.BASE_URL}${DIR}`;
   const [cifText, instText, datText] = await Promise.all([
     fetchText(`${root}/${CIF}`),
