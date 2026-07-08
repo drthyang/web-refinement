@@ -20,6 +20,8 @@ import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { searchPropagationVector, kLabel, type KCandidate } from "@/core/magnetic/kSearch";
 import { generateMagneticCandidatesForK, littleGroup } from "@/core/magnetic/magneticGroups";
 import { magneticRepresentationDimension } from "@/core/magnetic/magneticRepresentation";
+import { decomposeMagneticRepresentation, projectIrrepModes } from "@/core/magnetic/irreps";
+import { describeMomentMode } from "@/core/magnetic/momentModel";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import type { MagneticModel } from "@/core/magnetic/types";
@@ -91,6 +93,19 @@ export function KSearchPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structure, k[0], k[1], k[2]]);
   const repDim = useMemo(() => magneticRepresentationDimension(structure, [...selected]), [structure, selected]);
+
+  // Representation-analysis (irrep) route: decompose Γ_mag over G(k) into the
+  // irreps of its (abelian) little co-group and project the basis modes each one
+  // carries on the reference site.
+  const irrepAnalysis = useMemo(() => {
+    const ops = structure.spaceGroup.operations;
+    if (ops.length === 0 || selected.size === 0) return null;
+    const lg = littleGroup(ops, k);
+    const dec = decomposeMagneticRepresentation(structure, k, [...selected], lg);
+    const modes = dec.abelian ? dec.terms.map((t) => projectIrrepModes(structure, k, [...selected], lg, t.irrep)) : [];
+    return { dec, modes };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [structure, k[0], k[1], k[2], selected]);
 
   // Selected magnetic subgroup → symmetry-allowed moment model over the real
   // structure, with editable moment-mode amplitudes and a 3D preview.
@@ -298,12 +313,55 @@ export function KSearchPanel({
         <p style={{ ...help, marginTop: 8 }}>
           Click a subgroup to preview the moments and edit their components — this is the
           <strong> magnetic space group (coordinate/basis-vector) route</strong>. The complementary
-          <strong> representation (irrep) route</strong> is being built: the magnetic representation
-          here is <strong>{repDim}-dimensional</strong> over G(k); its character + decomposition are
-          implemented, with the full irrep tables and BNS/OG labels still to come (see
-          docs/MAGNETIC_SYMMETRY.md). Confirm any candidate with a magnetic refinement.
+          <strong> representation (irrep) route</strong> is shown below. Confirm any candidate with a
+          magnetic refinement.
         </p>
       </section>
+
+      {/* 4. Representation analysis (irrep decomposition) */}
+      {irrepAnalysis && (
+        <section>
+          <div style={themeLabel}>Representation analysis — Γ_mag over G(k)</div>
+          {!irrepAnalysis.dec.abelian ? (
+            <p style={help}>
+              The little co-group is <strong>non-abelian</strong>; its irrep character tables (and the
+              projective small representations for non-symmorphic BZ-boundary k) are the remaining piece
+              — see docs/MAGNETIC_SYMMETRY.md. The magnetic space-group route above still applies.
+            </p>
+          ) : (
+            <>
+              <p style={help}>
+                Γ<sub>mag</sub> ({repDim}-dimensional) decomposes into the irreps of the abelian little
+                group as{" "}
+                <span style={{ fontFamily: themeMono, color: theme.ink }}>
+                  {irrepAnalysis.dec.terms.map((t) => `${t.multiplicity}${t.irrep.label}`).join(" ⊕ ") || "—"}
+                </span>
+                . Each irrep's basis modes are the refinable moment directions on the reference site.
+              </p>
+              <div style={{ margin: "6px 0 0", display: "grid", gap: 3 }}>
+                {irrepAnalysis.dec.terms.map((t, i) => {
+                  const modes = irrepAnalysis.modes[i] ?? [];
+                  const modeText = modes.length ? modes.map((m) => describeMomentMode(m)).join(", ") : "—";
+                  return (
+                    <div key={t.irrep.label} style={{ fontSize: 12, padding: "4px 9px", borderRadius: 7, border: `1px solid ${theme.border}`, background: "#fff", display: "flex", gap: 8 }}>
+                      <span style={{ fontFamily: themeMono, color: theme.primary, minWidth: 56 }}>{t.multiplicity} × {t.irrep.label}</span>
+                      <span style={{ color: theme.secondary }}>
+                        {t.irrep.real ? "real" : "complex"} · modes: <span style={{ color: theme.ink }}>{modeText}</span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              {!irrepAnalysis.dec.integerConsistent && (
+                <p style={{ ...help, marginTop: 6, color: theme.noteInk }}>
+                  Non-integer multiplicities: this non-symmorphic BZ-boundary k needs the projective
+                  <em> small</em> representations (ordinary irreps shown as an approximation).
+                </p>
+              )}
+            </>
+          )}
+        </section>
+      )}
 
       {/* 4. Selected subgroup: editable moments + 3D preview */}
       {magBuild && (

@@ -214,9 +214,14 @@ agent tool it exposes.**
   (GF(2)) magnetic subgroups** for any commensurate k
   ([`magneticGroups.ts`](../src/core/magnetic/magneticGroups.ts): `littleGroup`,
   `generateMagneticCandidatesForK`), reducing to the k = 0 set at Γ. Reference:
-  Bradley & Cracknell (1972) §3.7.
-- **Needed:** a **representation-analysis** route (irreps of G_k →
-  basis vectors), the BasIreps/SARAh capability; standard **BNS/OG labels**
+  Bradley & Cracknell (1972) §3.7. **Now also the representation-analysis (irrep)
+  route** for abelian little co-groups: a by-construction irrep generator +
+  Γ_mag decomposition + basis-mode projection, shown in the Magnetic panel
+  ([`irreps.ts`](../src/core/magnetic/irreps.ts)) — the BasIreps/SARAh capability
+  for triclinic/monoclinic/orthorhombic, cyclic, and general-k cases.
+- **Needed:** irrep tables for **non-abelian** little co-groups and the
+  **projective small representations** for non-symmorphic BZ-boundary k (the
+  decomposition already flags when these are required); standard **BNS/OG labels**
   via a lookup table so a candidate reads "P2₁'/m'" rather than a primed-operation
   list; and the **star of k** (multi-arm domains).
 - **Validation gate:** little group + allowed moments match Bilbao/ISODISTORT for

@@ -36,7 +36,7 @@ simple-AFM recovery ([`magneticSimpleAfm.test.ts`](../src/core/workflow/magnetic
 
 ---
 
-## Route B — representation analysis (irreps) 🚧 foundation done
+## Route B — representation analysis (irreps) 🚧 abelian route working
 
 The magnetic representation `Γ_mag = Γ_perm(k) ⊗ Γ_axial` on the magnetic atoms
 decomposes into the irreps of `G_k`; each irrep that appears carries a set of
@@ -52,17 +52,33 @@ amplitudes of one (or a few) irreps. This is the Jana2020 / BasIreps route.
   decomposition. Verified against hand-computed cases: P1 → 3× trivial (3 DOF),
   C2 → A + 2B (Mz = A, Mx,My = B), inversion → 3 Ag (0 Au).
 
-**Remaining (the "irrep tables"):**
-1. **Irrep character tables of `G_k`.** For k = 0 and symmorphic little groups the
-   irreps are the point-group irreps of the little co-group. General point-group
-   tables (32 groups) plus, for non-symmorphic groups at BZ-boundary k, the
-   **projective small representations** (phase factors `e^{-2πi k·τ}`) are needed
-   — Bradley & Cracknell Ch. 3–4. Abelian little groups (triclinic/monoclinic/
-   orthorhombic, and any general-k) have 1-D irreps generable directly; the
-   non-abelian ones need tabulated characters.
-2. **Basis-vector projection** per irrep (projection operators) to list the modes
-   for refinement, and the **image** (magnetic space group) each irrep maps to —
-   the bridge back to Route A.
+**Now implemented + tested** ([`irreps.ts`](../src/core/magnetic/irreps.ts)):
+- **Abelian little-group irrep generator** — `abelianIrreps(G_k)` builds the 1-D
+  irreps of any abelian little co-group *by construction* (no tabulated data):
+  it verifies the group is abelian, decomposes it as a direct product of cyclic
+  groups ⟨g₁⟩ × … × ⟨gₘ⟩ (greedy independent generators of maximal order), and
+  enumerates χ_{p₁…pₘ}(g₁^{a₁}…gₘ^{aₘ}) = ∏ exp(2πi·pₖ·aₖ/nₖ). Covers
+  triclinic/monoclinic/orthorhombic, the cyclic trigonal/tetragonal/hexagonal
+  rotation groups, and any general-position little group, at any k including Γ.
+- **Decomposition** — `decomposeMagneticRepresentation` gives which irreps carry
+  the order and their multiplicities (Γ_mag = Σ nᵢ Γᵢ), and flags when the
+  multiplicities come out non-integral (the signal that a non-symmorphic
+  BZ-boundary k needs the projective small reps rather than the ordinary irreps).
+- **Basis-vector projection** — `projectIrrepModes` applies the axial projection
+  operator restricted to the reference site, Σ_{g fixes r₀} χ_Γ(g)*·e^{2πik·L}·
+  det(R_g)R_g, giving the refinable moment directions each irrep allows. Verified:
+  P1 → 3×trivial, C2 → A(Mz) + 2B(Mx,My), inversion → 3 Ag, D2 → three non-trivial
+  irreps, C4 → the ±i pair; the UI shows the decomposition in the Magnetic panel.
+
+**Remaining:**
+1. **Non-abelian little co-groups** (3m, 4mm, 432, …): tabulated (cited, verified)
+   point-group character tables. `abelianIrreps` returns null for these today.
+2. **Projective small representations** for non-symmorphic groups at BZ-boundary
+   k (phase factors `e^{-2πi k·τ}`) — Bradley & Cracknell Ch. 3–4. The
+   integer-multiplicity check already detects when they are needed.
+3. The **image** (magnetic space group) each irrep maps to — the bridge back to
+   Route A — and the inter-atom phases distinguishing irreps with identical
+   reference-site modes.
 
 ---
 
@@ -85,12 +101,14 @@ BNS symbol for each generated magnetic subgroup. **Do not hand-transcribe labels
 
 ## Continuation plan (ordered)
 
-1. Abelian-`G_k` irrep generator (correct by construction) → irrep decomposition
-   in the UI for triclinic/monoclinic/orthorhombic and general-k cases.
+1. ✅ Abelian-`G_k` irrep generator (correct by construction) + basis-vector
+   projection → irrep decomposition shown in the UI for triclinic/monoclinic/
+   orthorhombic, cyclic trigonal/tetragonal/hexagonal, and general-k cases
+   ([`irreps.ts`](../src/core/magnetic/irreps.ts)).
 2. Non-abelian point-group character tables (verified, cited) for the remaining
-   crystal classes; projective small reps for non-symmorphic BZ-boundary k.
-3. Basis-vector projection per irrep + irrep→magnetic-space-group image (link the
-   two routes).
+   crystal classes; projective small reps for non-symmorphic BZ-boundary k (the
+   non-integer-multiplicity check already flags when these are needed).
+3. Irrep→magnetic-space-group image (link the two routes) and inter-atom phases.
 4. BNS/OG label lookup from a bundled standard table.
 
 ## References

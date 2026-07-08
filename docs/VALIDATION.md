@@ -53,6 +53,8 @@ comparison recorded here.
 | Candidate comparison ranks correct group best | integration (30 K) | ✅ `core/workflow/magneticCompare.test.ts` |
 | k-search recovers k=(½,0,0) (AWO₄ P2/c cell) | unit | ✅ `core/magnetic/kSearch.test.ts` |
 | k-search recovers k=(½,0,0) from **real** AWO₄ 6 K neutron data | integration (real POWGEN) | ✅ `core/workflow/realAwo4Magnetic.test.ts` |
+| Antiferromagnetic \|F_M\|² ≠ 0 (magnetic-op orbit expansion, k≠0) | golden (Mn₃Ga 6h) | ✅ `core/magnetic/afmStructureFactor.test.ts` |
+| Abelian little-group irreps + Γ_mag decomposition + mode projection | golden (P1/C2/Ci/D2/C4) | ✅ `core/magnetic/irreps.test.ts` |
 | Moment-size restraint → physical magnitudes | integration | ✅ `core/workflow/magneticCompare.test.ts` |
 | TOF ↔ d conversion (POWGEN calibration) | golden (GSAS `.lst`) | ✅ `core/diffraction/instrument.test.ts` |
 | Instrument-file parsing | unit | ✅ `core/diffraction/instrument.test.ts` |
