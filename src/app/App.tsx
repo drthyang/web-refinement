@@ -790,7 +790,7 @@ function ViewModeToggle({
   onChange: (m: "curves" | "structure") => void;
 }): JSX.Element {
   const opts: readonly { id: "curves" | "structure"; label: string }[] = [
-    { id: "curves", label: "Curves" },
+    { id: "curves", label: "Refinement" },
     { id: "structure", label: "3D" },
   ];
   return (
