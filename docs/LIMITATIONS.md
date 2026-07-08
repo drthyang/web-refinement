@@ -12,7 +12,7 @@ This statement appears in the app UI and the README, not only here.
 ## Current scope
 
 A working static app performs **atomic/nuclear structure refinement** for both
-single-crystal and powder data (241 passing tests), with the scientific
+single-crystal and powder data (246 passing tests), with the scientific
 foundations for magnetic refinement in place. The Levenberg–Marquardt engine,
 symmetry-adapted constrained parameters, Chebyshev / cosine / power-series
 backgrounds, Caglioti profile, Le Bail extraction, multi-phase powder, and
@@ -35,11 +35,12 @@ accidental gap — each is tracked as a roadmap item.
   complete as the supplied operation list. (Roadmap F2.)
 - **Structure factors** use compact, replaceable scattering tables centralized in
   [`scattering/`](../src/core/scattering/) — tabulated neutron lengths
-  (52 elements), Cromer–Mann X-ray (14 elements), and magnetic ⟨j0⟩ (8 ions).
-  Coverage is intentionally partial; loading an element/ion outside the table is a
-  known gap, not a silent error. The ⟨j2⟩ / dipole-approximation API is scaffolded
-  but **unpopulated**, so magnetic form factors are currently **spin-only**
-  (`g = 2`). See [SCATTERING_TABLES.md](./SCATTERING_TABLES.md). (Roadmap M4.)
+  (52 elements) and Cromer–Mann X-ray (14 elements), both intentionally partial
+  (loading an element outside the table is a known gap, not a silent error), plus
+  the **full ITC-C magnetic form-factor table** (⟨j0⟩ for 97 ions, ⟨j2⟩ for 95),
+  so both spin-only and dipole (`g ≠ 2`) magnetic form factors are available. Not
+  yet included: the 5d W–Ir ions (Kobayashi 2011), and an end-to-end GSAS-II
+  |F_mag|² cross-check. See [SCATTERING_TABLES.md](./SCATTERING_TABLES.md). (Roadmap M4.)
 - **Backgrounds.** Chebyshev polynomial, cosine (Fourier) series, and power
   series, selectable per pattern with an adjustable term count. Not modelled:
   fixed-point/manual background, debye/real-space, or automatic peak-stripping.

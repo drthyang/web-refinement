@@ -15,7 +15,7 @@ WebAssembly/WebGPU are future accelerators.
 **Working app — atomic/nuclear refinement (single-crystal + powder) plus
 magnetic k = 0.** The scientific core, Levenberg–Marquardt refinement engine,
 symmetry-adapted constrained parameters, CIF parsing, plots, and Web Worker
-compute are implemented and tested (**241 tests**). Crystallographic and
+compute are implemented and tested (**246 tests**). Crystallographic and
 scattering foundations are validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
 Magnetic single-crystal + powder refinement and k = 0 space-group candidate

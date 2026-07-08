@@ -43,7 +43,7 @@ only symmetry-allowed parameters, use global search only for starting models.
 
 ## 2. Current state (honest baseline)
 
-What genuinely works today (241 passing tests; real-data validated):
+What genuinely works today (246 passing tests; real-data validated):
 
 - **Refinement engine** — Levenberg–Marquardt with diagonal preconditioning,
   SVD-truncated pseudo-inverse, per-cycle shift limiting, bound projection,
@@ -63,9 +63,10 @@ What genuinely works today (241 passing tests; real-data validated):
   March–Dollase preferred orientation, Debye–Scherrer absorption, TOF↔d +
   `.instprm` parsing.
 - **Scattering tables** — neutron `b` (52 elements), Cromer–Mann X-ray
-  (14 elements), and magnetic ⟨j0⟩ (8 ions) centralized in
-  [`scattering/`](../src/core/scattering/) behind replaceable interfaces, with the
-  ⟨j2⟩ / dipole-approximation API scaffolded for M4. See
+  (14 elements), and the **full ITC-C magnetic form-factor table** (⟨j0⟩ for
+  97 ions, ⟨j2⟩ for 95, generated from the public-domain CrysFML data) centralized
+  in [`scattering/`](../src/core/scattering/) behind replaceable interfaces, so
+  spin-only *and* dipole (`g ≠ 2`) magnetic form factors are ready for M4. See
   [`SCATTERING_TABLES.md`](./SCATTERING_TABLES.md).
 - **Magnetic (k = 0)** — moment projection, magnetic structure factor, magnetic
   powder + single-crystal refinement, and honest **k = 0 magnetic space-group
