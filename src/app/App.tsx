@@ -734,7 +734,14 @@ export function App(): JSX.Element {
             <div style={{ ...themeCard, padding: 16 }}>
               <h2 style={h2}>Propagation vector &amp; magnetic subgroups ({structure.name})</h2>
               <p style={stepHelp}>Commensurate single-k first pass: pick the magnetic ion(s), find or enter k, and read the allowed magnetic subgroups of its little group.</p>
-              <KSearchPanel structure={structure} autoPeaks={magneticPeakD} />
+              <KSearchPanel
+                structure={structure}
+                autoPeaks={magneticPeakD}
+                pattern={pattern}
+                nuclearParams={powderParams}
+                nuclearBindings={pBindings}
+                profile={session.powderProfile}
+              />
             </div>
             <div style={{ ...themeCard, padding: 16 }}>
               <h2 style={h2}>Allowed magnetic space groups — k = 0 demo ({mag.ex.structure.name})</h2>

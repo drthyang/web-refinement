@@ -14,11 +14,16 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { StructureModel } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
+import type { PowderPattern } from "@/core/diffraction/types";
+import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { searchPropagationVector, kLabel, type KCandidate } from "@/core/magnetic/kSearch";
 import { generateMagneticCandidatesForK, littleGroup } from "@/core/magnetic/magneticGroups";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
+import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
+import { refine } from "@/core/refinement/engine";
+import type { PowderProfile } from "@/core/workflow/powder";
 import { color as theme, mono as themeMono, uppercaseLabel as themeLabel } from "@/app/theme";
 
 // Lazy so three.js stays in its own chunk (only loaded when a group is previewed).
@@ -34,10 +39,19 @@ function parsePeaks(text: string): number[] {
 export function KSearchPanel({
   structure,
   autoPeaks = [],
+  pattern,
+  nuclearParams,
+  nuclearBindings,
+  profile,
 }: {
   structure: StructureModel;
   /** d-spacings of candidate magnetic peaks auto-detected from the pattern residual. */
   autoPeaks?: readonly number[];
+  /** The observed pattern + refined nuclear model, for running a moment refinement. */
+  pattern?: PowderPattern;
+  nuclearParams?: readonly RefinementParameter[];
+  nuclearBindings?: readonly ParameterBinding[];
+  profile?: PowderProfile;
 }): JSX.Element {
   const ions = useMemo(() => magneticIonCandidates(structure), [structure]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(ions.map((i) => i.siteLabel)));
@@ -80,6 +94,37 @@ export function KSearchPanel({
     for (const m of applied.moments) map.set(m.siteLabel, [...m.components] as Vec3);
     return map;
   }, [magBuild, amps]);
+
+  // Optional moment refinement against the loaded pattern: nuclear model held
+  // fixed (the handoff convention), moment-mode amplitudes freed, shared scale.
+  const [refining, setRefining] = useState(false);
+  const [refineWR, setRefineWR] = useState<number | null>(null);
+  const canRefine = !!(magBuild && magBuild.params.length > 0 && pattern && nuclearParams && nuclearBindings && profile);
+
+  function runRefine(): void {
+    if (!canRefine || !magBuild) return;
+    setRefining(true);
+    setRefineWR(null);
+    // Defer so the busy state paints before the (main-thread) solve.
+    setTimeout(() => {
+      try {
+        const nuclearFixed = nuclearParams!.map((p) => ({ ...p, fixed: true }));
+        const moments = magBuild.params.map((p) => ({ ...p, value: amps[p.id] ?? p.value, initialValue: amps[p.id] ?? p.value, fixed: false }));
+        const bindings = [...nuclearBindings!, ...magBuild.bindings];
+        const problem = buildMagneticPowderProblem(structure, magBuild.magnetic, pattern!, [...nuclearFixed, ...moments], bindings, {
+          shape: profile!.shape,
+          ...(profile!.eta !== undefined ? { eta: profile!.eta } : {}),
+        });
+        const result = refine(problem, { maxIterations: 20 });
+        const next: Record<string, number> = { ...amps };
+        for (const p of magBuild.params) next[p.id] = result.parameters[p.id] ?? next[p.id]!;
+        setAmps(next);
+        setRefineWR(result.agreement.rWeighted ?? null);
+      } finally {
+        setRefining(false);
+      }
+    }, 30);
+  }
 
   function runSearch(peaks?: readonly number[]): void {
     const list = peaks ?? parsePeaks(peaksText);
@@ -234,6 +279,15 @@ export function KSearchPanel({
                     />
                   </label>
                 ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button style={{ ...btn, marginTop: 0, opacity: canRefine && !refining ? 1 : 0.5 }} onClick={runRefine} disabled={!canRefine || refining}>
+                  {refining ? "Refining…" : "Refine moments"}
+                </button>
+                {refineWR != null && (
+                  <span style={{ fontSize: 12.5, color: theme.secondary, fontFamily: themeMono }}>wR = {(100 * refineWR).toFixed(1)}%</span>
+                )}
+                <span style={help}>Nuclear model fixed; moment amplitudes refined against the loaded pattern (shared scale).</span>
               </div>
               <Suspense fallback={<div style={{ height: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D preview…</div>}>
                 <StructureView structure={structure} {...(momentsMap ? { moments: momentsMap } : {})} />
