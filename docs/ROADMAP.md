@@ -43,7 +43,7 @@ only symmetry-allowed parameters, use global search only for starting models.
 
 ## 2. Current state (honest baseline)
 
-What genuinely works today (246 passing tests; real-data validated):
+What genuinely works today (269 passing tests; real-data validated):
 
 - **Refinement engine** — Levenberg–Marquardt with diagonal preconditioning,
   SVD-truncated pseudo-inverse, per-cycle shift limiting, bound projection,
@@ -183,32 +183,37 @@ agent tool it exposes.**
 - **Tool exposed:** `refine_structure(model, data, options) → refined model +
   agreement factors + diagnostics`.
 
-### M2 — Magnetic k-vector search ⬜ (does not exist yet)
+### M2 — Magnetic k-vector search 🚧
 
 - **Goal:** given a nuclear structure and observed magnetic reflections (extra
   peaks not indexed by the nuclear cell), find the propagation vector(s) **k**.
-- **Exists:** nothing — this is a genuine gap. `MagneticModel` carries a single
-  k, but there is no search.
-- **Needed:** a magnetic-satellite reflection generator for arbitrary k
-  (peaks at G ± k); a **k-scan** over high-symmetry Brillouin-zone points and a
-  commensurate rational grid, then a general grid; scoring by magnetic-peak
-  position match (and optional Le Bail magnetic-intensity fit); ranked output
-  with a commensurate/incommensurate flag.
-- **Validation gate:** recover k for a known test case (simple AFM at a
-  zone-boundary point; a k = 0 case must return k = 0).
+- **Exists:** a **commensurate single-k search** ([`magnetic/kSearch.ts`](../src/core/magnetic/kSearch.ts))
+  — scans a rational grid + high-symmetry BZ points, predicts satellites at
+  G ± k, and ranks candidates by matched-peak count → position RMSD → simplicity.
+  Recovers a known k and distinguishes (½,0,0) from (0,0,½) in a non-cubic cell
+  ([`kSearch.test.ts`](../src/core/magnetic/kSearch.test.ts)); wired into the
+  Candidates step. Standard powder k-search (FullProf `k_search`; Bertaut 1968).
+- **Needed:** scoring by magnetic *intensity* (Le Bail), not just position;
+  incommensurate / multi-k handling; a commensurate/incommensurate flag.
+- **Validation gate:** ✅ recovers k for a known AFM at a zone boundary; Γ returns
+  no match for genuinely magnetic peaks. Intensity-scored gate still open.
 - **Tool exposed:** `search_propagation_vector(nuclear, magnetic_peaks) →
   ranked k candidates`.
 
-### M3 — Magnetic space-group / symmetry analysis ⬜
+### M3 — Magnetic space-group / symmetry analysis 🚧
 
 - **Goal:** given the parent group and k, enumerate the allowed magnetic symmetry
   and the **allowed moment basis** (the parameters M4 will refine).
-- **Exists:** k = 0 candidate generation + null-space allowed-moment directions.
-- **Needed:** the **little group of k** (G_k); maximal magnetic subgroup
-  enumeration for k ≠ 0; a **representation-analysis** route (irreps of G_k →
-  basis vectors), the BasIreps/SARAh capability; and standard **BNS/OG labels**
+- **Exists:** k = 0 candidate generation + null-space allowed-moment directions;
+  and now the **little group of k** G_k (Rᵀ·k ≡ k mod 1) with its **time-reversal
+  (GF(2)) magnetic subgroups** for any commensurate k
+  ([`magneticGroups.ts`](../src/core/magnetic/magneticGroups.ts): `littleGroup`,
+  `generateMagneticCandidatesForK`), reducing to the k = 0 set at Γ. Reference:
+  Bradley & Cracknell (1972) §3.7.
+- **Needed:** a **representation-analysis** route (irreps of G_k →
+  basis vectors), the BasIreps/SARAh capability; standard **BNS/OG labels**
   via a lookup table so a candidate reads "P2₁'/m'" rather than a primed-operation
-  list.
+  list; and the **star of k** (multi-arm domains).
 - **Validation gate:** little group + allowed moments match Bilbao/ISODISTORT for
   known cases; k = 0 path reproduces today's candidate set.
 - **Tool exposed:** `enumerate_magnetic_symmetry(parent, k) → candidate groups +

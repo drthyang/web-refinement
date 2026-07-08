@@ -12,7 +12,7 @@ This statement appears in the app UI and the README, not only here.
 ## Current scope
 
 A working static app performs **atomic/nuclear structure refinement** for both
-single-crystal and powder data (246 passing tests), with the scientific
+single-crystal and powder data (269 passing tests), with the scientific
 foundations for magnetic refinement in place. The Levenberg–Marquardt engine,
 symmetry-adapted constrained parameters, Chebyshev / cosine / power-series
 backgrounds, Caglioti profile, Le Bail extraction, multi-phase powder, and
@@ -52,15 +52,24 @@ accidental gap — each is tracked as a roadmap item.
   The TOF **α/β/σ coefficients refine** in the profile stage; difC is held at the
   instrument calibration. Not yet modelled: the Ikeda–Carpenter moderator shape
   and TOF absorption/extinction.
-- **Magnetic model.** Single propagation vector, **commensurate k = 0 only**;
-  simplified ⟨j₀⟩ magnetic form factor and dipole structure factor. mCIF (BNS)
-  parsing, axial-vector moment transformation, and single-crystal + powder moment
-  refinement are implemented and validated against GSAS-II magnitudes. In-app
-  candidate generation covers k = 0 (parent + index-2 subgroups); it does **not**
-  attach standard BNS labels, handle non-zero/incommensurate k, or offer a
-  representation-analysis route, and there is **no propagation-vector search**.
+- **Magnetic model.** Moment **refinement** is **commensurate k = 0** (single-
+  crystal + powder, validated against GSAS-II magnitudes); mCIF (BNS) parsing and
+  axial-vector moment transformation are implemented. Beyond k = 0, two symmetry
+  tools now exist: a **commensurate single-k search** that ranks candidate
+  propagation vectors from magnetic-peak *positions* (G ± k scoring — position
+  only, not intensities), and enumeration of the **little group of k** with its
+  **time-reversal (GF(2)) magnetic subgroups** for any commensurate k. Still
+  **not** done: magnetic *refinement* at k ≠ 0, standard **BNS/OG labels**, the
+  **star of k** (multi-arm domains), and **representation (irrep) analysis** — so
+  a k ≠ 0 candidate is a symmetry *starting point*, not yet a refinable model.
   (Roadmap M2–M4.) Moment components in a non-orthogonal cell use the normalized
   crystal-axis convention (reproduces the GSAS-II magnitude for monoclinic Mn₃Ga).
+- **Disorder.** Atoms sharing one crystallographic site (mixed/disordered
+  occupancy, e.g. the six 3d cations of the high-entropy tungstate) refine with
+  **tied position and ADP** and an automatic **Σ(occupancy) restraint** per site,
+  so the mixing ratio refines while the total site occupancy is held. Not
+  modelled: split/positional disorder, anti-site swaps across *different* sites,
+  or occupancy–ADP correlation beyond the single-site tie.
 - **Corrections modelled:** March–Dollase preferred orientation, Debye–Scherrer
   cylinder absorption. **Not modelled:** extinction, spherical-harmonic texture,
   flat-plate/other absorption geometries, anomalous dispersion, microabsorption.
