@@ -12,12 +12,12 @@ This statement appears in the app UI and the README, not only here.
 ## Current scope
 
 A working static app performs **atomic/nuclear structure refinement** for both
-single-crystal and powder data (181 passing tests), with the scientific
+single-crystal and powder data (241 passing tests), with the scientific
 foundations for magnetic refinement in place. The Levenberg–Marquardt engine,
-symmetry-adapted constrained parameters, Chebyshev background, Caglioti profile,
-Le Bail extraction, multi-phase powder, and **k = 0** magnetic refinement +
-space-group candidate generation are implemented and tested. The remaining work
-and its ordering are in [ROADMAP.md](./ROADMAP.md).
+symmetry-adapted constrained parameters, Chebyshev / cosine / power-series
+backgrounds, Caglioti profile, Le Bail extraction, multi-phase powder, and
+**k = 0** magnetic refinement + space-group candidate generation are implemented
+and tested. The remaining work and its ordering are in [ROADMAP.md](./ROADMAP.md).
 
 Everything below is a **deliberate, still-standing simplification**, not an
 accidental gap — each is tracked as a roadmap item.
@@ -33,11 +33,19 @@ accidental gap — each is tracked as a roadmap item.
   CIF** — no built-in 230-group tables, Wyckoff lookup, or automatic
   systematic-absence generation. Symmetry constraints are therefore only as
   complete as the supplied operation list. (Roadmap F2.)
-- **Structure factors** use a compact, replaceable scattering-length /
-  form-factor table (Cromer–Mann X-ray, tabulated neutron lengths).
+- **Structure factors** use compact, replaceable scattering tables centralized in
+  [`scattering/`](../src/core/scattering/) — tabulated neutron lengths
+  (52 elements), Cromer–Mann X-ray (14 elements), and magnetic ⟨j0⟩ (8 ions).
+  Coverage is intentionally partial; loading an element/ion outside the table is a
+  known gap, not a silent error. The ⟨j2⟩ / dipole-approximation API is scaffolded
+  but **unpopulated**, so magnetic form factors are currently **spin-only**
+  (`g = 2`). See [SCATTERING_TABLES.md](./SCATTERING_TABLES.md). (Roadmap M4.)
+- **Backgrounds.** Chebyshev polynomial, cosine (Fourier) series, and power
+  series, selectable per pattern with an adjustable term count. Not modelled:
+  fixed-point/manual background, debye/real-space, or automatic peak-stripping.
 - **Powder profiles.** Constant-wavelength: Gaussian / pseudo-Voigt with Caglioti
-  U/V/W width, a Thompson–Cox–Hastings Lorentzian size–strain term, Finger–Cox–
-  Jephcoat axial asymmetry, and Chebyshev background. Time-of-flight: a back-to-
+  U/V/W width, a Thompson–Cox–Hastings Lorentzian size–strain term, and Finger–
+  Cox–Jephcoat axial asymmetry. Time-of-flight: a back-to-
   back-exponential ⊗ Gaussian peak shape with d-dependent α/β/σ, placed by the
   difC/difA/difB constants (GSAS-II convention) and the d⁴ TOF Lorentz factor.
   The TOF **α/β/σ coefficients refine** in the profile stage; difC is held at the

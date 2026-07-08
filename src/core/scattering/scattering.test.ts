@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { neutronScatteringLength } from "@/core/scattering/neutron";
 import { xrayFormFactor } from "@/core/scattering/xray";
-import { magneticFormFactorJ0 } from "@/core/scattering/magnetic";
+import { magneticFormFactorJ0, magneticFormFactorDipole, magneticTable } from "@/core/scattering/magnetic";
 
 describe("neutron scattering lengths (match GSAS-II .lst)", () => {
   it("Mn, O, Ga match GSAS-II printed values (fm)", () => {
@@ -33,5 +33,19 @@ describe("magnetic form factor ⟨j0⟩", () => {
   });
   it("decreases with increasing s", () => {
     expect(magneticFormFactorJ0("Mn2", 0.5)).toBeLessThan(magneticFormFactorJ0("Mn2", 0));
+  });
+});
+
+describe("magnetic form factor — dipole approximation", () => {
+  it("reduces to spin-only ⟨j0⟩ for g = 2", () => {
+    for (const s of [0, 0.25, 0.5]) {
+      expect(magneticFormFactorDipole("Mn2", s, 2)).toBeCloseTo(magneticFormFactorJ0("Mn2", s), 10);
+    }
+  });
+  it("falls back to ⟨j0⟩ when the ion has no tabulated ⟨j2⟩ (any g)", () => {
+    // ⟨j2⟩ is not yet populated, so even g ≠ 2 returns spin-only for now.
+    expect(magneticFormFactorDipole("Fe3", 0.4, 1.8)).toBeCloseTo(magneticFormFactorJ0("Fe3", 0.4), 10);
+    expect(magneticTable.hasJ2?.("Fe3")).toBe(false);
+    expect(magneticTable.has("Fe3")).toBe(true);
   });
 });

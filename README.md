@@ -15,12 +15,16 @@ WebAssembly/WebGPU are future accelerators.
 **Working app — atomic/nuclear refinement (single-crystal + powder) plus
 magnetic k = 0.** The scientific core, Levenberg–Marquardt refinement engine,
 symmetry-adapted constrained parameters, CIF parsing, plots, and Web Worker
-compute are implemented and tested (**181 tests**). Crystallographic and
+compute are implemented and tested (**241 tests**). Crystallographic and
 scattering foundations are validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
 Magnetic single-crystal + powder refinement and k = 0 space-group candidate
 generation work; the magnetic k-vector search, non-zero-k analysis, and refined-
 structure export are the next milestones. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+Two forward-looking directions are documented and being built toward: an
+**LLM AI-guided refinement** loop and exposing the app's pure core as
+**agent tools and skills** — see [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md).
 
 ## Commands
 
@@ -61,9 +65,11 @@ calculations run in Web Workers. Full detail in
 ## Documentation
 
 - [docs/ROADMAP.md](docs/ROADMAP.md) — **the single authoritative roadmap** (vision, foundations, milestones, agent layer)
+- [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) — agent tools, skills, and the LLM-guided refinement plan
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layers, source tree, conventions
 - [docs/DATA_MODEL.md](docs/DATA_MODEL.md) — data types and their reasoning
 - [docs/REFINEMENT_ENGINE.md](docs/REFINEMENT_ENGINE.md) — the least-squares design
+- [docs/SCATTERING_TABLES.md](docs/SCATTERING_TABLES.md) — neutron / X-ray / magnetic form-factor tables
 - [docs/VALIDATION.md](docs/VALIDATION.md) — testing & external comparison strategy
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — scope and known simplifications
 - [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project JSON format

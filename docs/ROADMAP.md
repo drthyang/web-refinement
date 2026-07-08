@@ -43,7 +43,7 @@ only symmetry-allowed parameters, use global search only for starting models.
 
 ## 2. Current state (honest baseline)
 
-What genuinely works today (181 passing tests; real-data validated):
+What genuinely works today (241 passing tests; real-data validated):
 
 - **Refinement engine** — Levenberg–Marquardt with diagonal preconditioning,
   SVD-truncated pseudo-inverse, per-cycle shift limiting, bound projection,
@@ -58,9 +58,15 @@ What genuinely works today (181 passing tests; real-data validated):
   modes for positions, anisotropic ADPs, magnetic moments, and the cell metric
   from the parsed operation list
   ([`crystal/siteConstraints.ts`](../src/core/crystal/siteConstraints.ts) and siblings).
-- **Powder physics** — Chebyshev background, Caglioti U/V/W width, zero-shift,
-  pseudo-Voigt, Le Bail extraction, multi-phase, March–Dollase preferred
-  orientation, Debye–Scherrer absorption, TOF↔d + `.instprm` parsing.
+- **Powder physics** — Chebyshev / cosine (Fourier) / power-series backgrounds,
+  Caglioti U/V/W width, zero-shift, pseudo-Voigt, Le Bail extraction, multi-phase,
+  March–Dollase preferred orientation, Debye–Scherrer absorption, TOF↔d +
+  `.instprm` parsing.
+- **Scattering tables** — neutron `b` (52 elements), Cromer–Mann X-ray
+  (14 elements), and magnetic ⟨j0⟩ (8 ions) centralized in
+  [`scattering/`](../src/core/scattering/) behind replaceable interfaces, with the
+  ⟨j2⟩ / dipole-approximation API scaffolded for M4. See
+  [`SCATTERING_TABLES.md`](./SCATTERING_TABLES.md).
 - **Magnetic (k = 0)** — moment projection, magnetic structure factor, magnetic
   powder + single-crystal refinement, and honest **k = 0 magnetic space-group
   candidate generation** (GF(2) homomorphism enumeration) with candidate
@@ -239,22 +245,33 @@ agent tool it exposes.**
 
 ---
 
-## 5. Agent-tools & skills layer (cross-cutting)
+## 5. Agent-tools, skills & LLM-guided refinement (cross-cutting)
 
 The reason the core is kept pure and JSON-serializable: **each workflow function
 becomes a callable tool, and the milestones define the tool surface.** This layer
 is not a separate system built at the end — it is exposed incrementally as each
-milestone stabilizes.
+milestone stabilizes. The full design lives in
+[`AGENT_TOOLS.md`](./AGENT_TOOLS.md); the summary:
 
 - **Tool surface** mirrors §4: `load_structure` / `load_data` / `build_refinement`
   / `refine_structure` (M1) · `search_propagation_vector` (M2) ·
   `enumerate_magnetic_symmetry` (M3) · `refine_magnetic` (M4) · `export_cif` /
   `generate_report` (M5) · `diagnose` (correlations, singular directions).
+  Deliverable as an **MCP server**, **Claude Agent SDK** tool definitions, or an
+  in-browser tool registry (a chat panel calling the same functions the buttons do).
 - **First agent-in-the-loop hook:** F1.5's automated next-parameter diagnostic —
   an agent can call it to decide what to unlock next, driving the staged
   controller with crystallographic judgment.
 - **Skills** chain tools with expert prompts: a *guided Rietveld* skill (M1), a
   *magnetic structure determination* skill (M2 → M3 → M4).
+- **LLM AI-guided refinement:** an observe → decide → act → check loop where the
+  LLM *plans and sequences* (which parameters to free, which stage, which
+  background) while the deterministic Levenberg–Marquardt engine does every
+  numeric solve. The engine already surfaces the signals a human refiner uses
+  (correlations, near-null directions, at-bound parameters, per-cycle χ²/wR
+  history), and symmetry constraints pre-prune the search space to the physical
+  one — so the model reasons over real diagnostics and cannot free a forbidden
+  parameter. Guardrails and the loop are detailed in [`AGENT_TOOLS.md`](./AGENT_TOOLS.md).
 - **Design rules for tools:** pure, deterministic, JSON in/out, and **every tool
   returns diagnostics** (agreement factors, correlations, singular directions) so
   an agent can reason about failure rather than trust a lone R-factor. The M5

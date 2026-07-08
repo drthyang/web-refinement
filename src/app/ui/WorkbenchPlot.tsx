@@ -81,8 +81,19 @@ export function WorkbenchPlot({
 
   const [view, setView] = useState<{ min: number; max: number } | null>(null);
   const [rubber, setRubber] = useState<{ x0: number; x1: number } | null>(null);
-  // Reset zoom when the underlying domain changes (e.g. new data or x-unit).
-  useEffect(() => setView(null), [fullMin, fullMax]);
+  // When the domain changes (new data, or an x-axis unit switch), default the
+  // zoom to the active fit range — switching units lands on the region being
+  // fitted — or to the full range when no window is set. Keyed only on the
+  // domain, so dragging the fit handles doesn't fight the user by re-zooming.
+  useEffect(() => {
+    if (fitRange && (fitRange.min > fullMin + 1e-9 || fitRange.max < fullMax - 1e-9)) {
+      const pad = (fitRange.max - fitRange.min) * 0.08;
+      setView({ min: Math.max(fullMin, fitRange.min - pad), max: Math.min(fullMax, fitRange.max + pad) });
+    } else {
+      setView(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to the domain
+  }, [fullMin, fullMax]);
 
   const vlo = view ? view.min : fullMin;
   const vhi = view ? view.max : fullMax;

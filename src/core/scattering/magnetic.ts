@@ -44,11 +44,52 @@ export function magneticFormFactorJ0(ionId: string, s: number): number {
   );
 }
 
+/**
+ * ⟨j2⟩ analytic coefficients for the dipole approximation:
+ *   ⟨j2⟩(s) = (A·e^{−a·s²} + B·e^{−b·s²} + C·e^{−c·s²} + D)·s²,   s = sinθ/λ.
+ * The s² prefactor makes ⟨j2⟩(0) = 0, so the dipole form factor is still 1 at
+ * s = 0. Populate from International Tables Vol. C (same source/ions as ⟨j0⟩) —
+ * this is what unlocks the g ≠ 2 (orbital) magnetic refinements (roadmap M4).
+ * Ions absent here fall back to the spin-only ⟨j0⟩ in {@link magneticFormFactorDipole}.
+ */
+export const J2_COEFFS: Readonly<Record<string, J0Coeffs>> = {
+  // e.g. "Mn2": { A: …, a: …, B: …, b: …, C: …, c: …, D: … },
+};
+
+/** ⟨j2⟩(s), or NaN when the ion has no tabulated ⟨j2⟩ coefficients. */
+export function magneticFormFactorJ2(ionId: string, s: number): number {
+  const k = J2_COEFFS[ionId];
+  if (!k) return NaN;
+  const s2 = s * s;
+  return (k.A * Math.exp(-k.a * s2) + k.B * Math.exp(-k.b * s2) + k.C * Math.exp(-k.c * s2) + k.D) * s2;
+}
+
+/**
+ * Dipole-approximation magnetic form factor f(s) = ⟨j0⟩ + (1 − 2/g)·⟨j2⟩ for a
+ * moment with Landé factor g. Reduces to the spin-only ⟨j0⟩ when g = 2 or when
+ * the ion has no tabulated ⟨j2⟩ — so it is always safe to call and improves
+ * automatically as {@link J2_COEFFS} is populated.
+ */
+export function magneticFormFactorDipole(ionId: string, s: number, g: number): number {
+  const j0 = magneticFormFactorJ0(ionId, s);
+  const j2 = magneticFormFactorJ2(ionId, s);
+  return Number.isNaN(j2) ? j0 : j0 + (1 - 2 / g) * j2;
+}
+
 export const magneticTable: MagneticFormFactorTable = {
   j0(ionId: string, s: number): number {
     return magneticFormFactorJ0(ionId, s);
   },
+  j2(ionId: string, s: number): number {
+    return magneticFormFactorJ2(ionId, s);
+  },
+  dipole(ionId: string, s: number, g: number): number {
+    return magneticFormFactorDipole(ionId, s, g);
+  },
   has(ionId: string): boolean {
     return ionId in J0_COEFFS;
+  },
+  hasJ2(ionId: string): boolean {
+    return ionId in J2_COEFFS;
   },
 };
