@@ -33,14 +33,17 @@ accidental gap — each is tracked as a roadmap item.
   CIF** — no built-in 230-group tables, Wyckoff lookup, or automatic
   systematic-absence generation. Symmetry constraints are therefore only as
   complete as the supplied operation list. (Roadmap F2.)
-- **Structure factors** use compact, replaceable scattering tables centralized in
-  [`scattering/`](../src/core/scattering/) — tabulated neutron lengths
-  (52 elements) and Cromer–Mann X-ray (14 elements), both intentionally partial
-  (loading an element outside the table is a known gap, not a silent error), plus
-  the **full ITC-C magnetic form-factor table** (⟨j0⟩ for 97 ions, ⟨j2⟩ for 95),
-  so both spin-only and dipole (`g ≠ 2`) magnetic form factors are available. Not
-  yet included: the 5d W–Ir ions (Kobayashi 2011), and an end-to-end GSAS-II
-  |F_mag|² cross-check. See [SCATTERING_TABLES.md](./SCATTERING_TABLES.md). (Roadmap M4.)
+- **Structure factors** use replaceable scattering tables centralized in
+  [`scattering/`](../src/core/scattering/), all now spanning the periodic table:
+  neutron bound coherent lengths (**92 entries**, Sears/ITC-C, GSAS-II values
+  pinned for the validation elements), Cromer–Mann X-ray form factors (**97
+  neutral atoms**, ITC-C Vol. C, each verified `f(0)=Z`), and the **full ITC-C
+  magnetic form-factor table** (⟨j0⟩ for 97 ions, ⟨j2⟩ for 95), so both
+  spin-only and dipole (`g ≠ 2`) magnetic form factors are available. All three
+  are generated from cited sources (`scripts/gen_*.py`). Not yet included:
+  ionic X-ray form factors (only neutral atoms), the 5d W–Ir magnetic ions
+  (Kobayashi 2011), and an end-to-end GSAS-II |F_mag|² cross-check. See
+  [SCATTERING_TABLES.md](./SCATTERING_TABLES.md). (Roadmap M4.)
 - **Backgrounds.** Chebyshev polynomial, cosine (Fourier) series, and power
   series, selectable per pattern with an adjustable term count. Not modelled:
   fixed-point/manual background, debye/real-space, or automatic peak-stripping.

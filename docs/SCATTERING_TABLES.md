@@ -12,15 +12,28 @@ The scattering variable throughout is `s = sinθ/λ = 1/(2d)` (Å⁻¹).
 
 | Table | File | Form | Coverage | Source |
 |---|---|---|---|---|
-| **Neutron** `b` | [`neutron.ts`](../src/core/scattering/neutron.ts) | Constant bound coherent length `b` (fm), s-independent | **52 elements** (H–Bi, common isotopes) | Sears (1992); cross-checked vs. GSAS-II `.lst` (Mn −3.73, O 5.80, Ga 7.29, Sn 6.23, …) |
-| **X-ray** `f(s)` | [`xray.ts`](../src/core/scattering/xray.ts) | 4-Gaussian Cromer–Mann `Σ aᵢe^{−bᵢs²} + c` | **14 elements** | International Tables Vol. C; f(0)=Z verified in tests |
+| **Neutron** `b` | [`neutronData.ts`](../src/core/scattering/neutronData.ts) | Constant bound coherent length `b` (fm), s-independent | **92 entries** (91 natural elements H–Cm + D) | Sears, ITC-C Vol. C §4.4.4; Ti/Mn/Zn/Au pinned to GSAS-II's Sears (1992) values |
+| **X-ray** `f(s)` | [`cromerMannData.ts`](../src/core/scattering/cromerMannData.ts) | 4-Gaussian Cromer–Mann `Σ aᵢe^{−bᵢs²} + c` | **97 neutral atoms** (H–Cf; Pu omitted, bad source fit) | International Tables Vol. C pp. 500–502 (DABAX `f0_InterTables`); f(0)=Z verified per row |
 | **Magnetic** ⟨j0⟩ | [`magneticFormFactorData.ts`](../src/core/scattering/magneticFormFactorData.ts) | `A e^{−a s²} + B e^{−b s²} + C e^{−c s²} + D`, normalized to 1 at s=0 | **97 ions** (3d Sc–Cu, 4d Y–Pd, rare earths Ce–Yb, actinides U–Am, all common valences) | ITC-C Vol. C §4.4.5 (Brown), via the public-domain CrysFML table in `periodictable` |
 | **Magnetic** ⟨j2⟩ | [`magneticFormFactorData.ts`](../src/core/scattering/magneticFormFactorData.ts) | `(A e^{−a s²} + … + D)·s²`, → 0 at s=0 | **95 ions** (every ⟨j0⟩ ion except O¹⁺ and Pr³⁺) | same |
 
-The magnetic tables are a **generated file** — do not hand-edit. Regenerate from
-the upstream source with [`scripts/gen_magnetic_ff.py`](../scripts/gen_magnetic_ff.py),
-which copies coefficients verbatim (no digit-altering float round-trips).
-[`magnetic.ts`](../src/core/scattering/magnetic.ts) holds only the evaluation logic.
+**All four tables are generated files** — do not hand-edit. Each `*Data.ts` is
+produced from a cited source by its generator, with the evaluation logic kept in
+the sibling module (`neutron.ts`, `xray.ts`, `magnetic.ts`):
+
+- Neutron — [`scripts/gen_neutron_b.py`](../scripts/gen_neutron_b.py). Fills the
+  full periodic table from the Sears/ITC-C table while pinning the four elements
+  (Ti, Mn, Zn, Au) where GSAS-II uses the earlier *Neutron News* (1992) values,
+  so the neutron structure factor keeps matching GSAS-II `.lst` output.
+- X-ray — [`scripts/gen_xray_ff.py`](../scripts/gen_xray_ff.py). All neutral
+  atoms from the ITC-C Cromer–Mann parametrization; every row is checked to give
+  `f(0)=Z` within 0.1 e (Pu's source row misses by 5 e and is dropped).
+- Magnetic — [`scripts/gen_magnetic_ff.py`](../scripts/gen_magnetic_ff.py),
+  copying coefficients verbatim (no digit-altering float round-trips).
+
+Only **neutral-atom** X-ray form factors are tabulated; the structure-factor
+code looks up by element symbol and does not yet use ionic X-ray species (the
+DABAX source carries them, so `gen_xray_ff.py` can be widened when needed).
 
 Neutron scattering lengths are used for **both** nuclear structure factors and,
 via ⟨j0⟩/⟨j2⟩, the magnetic form factor of an ion — so "the neutron table for
@@ -90,7 +103,13 @@ tables below). Web resources accessed **2026-07-08**.
 - **Convenient tabulation:** NIST Center for Neutron Research, "Neutron
   scattering lengths and cross sections,"
   <https://www.ncnr.nist.gov/resources/n-lengths/>
-- Cross-checked against printed values in bundled GSAS-II `.lst` files.
+- **Redistribution actually imported:** the Sears table (labelled ITC-C Vol. C
+  §4.4.4) shipped in the `Dans_Diffraction` package
+  (`data/neutron_isotope_scattering_lengths_sears.dat`), real part of the bound
+  coherent length per natural element.
+- Cross-checked against printed values in bundled GSAS-II `.lst` files; Ti, Mn,
+  Zn and Au are pinned to GSAS-II's *Neutron News* (1992) values, which differ
+  slightly from the ITC edition, so the structure factor still matches GSAS-II.
 
 ### X-ray form factors (`xray.ts`)
 
@@ -99,7 +118,11 @@ tables below). Web resources accessed **2026-07-08**.
   **A24**, 321–324.
   doi:[10.1107/S0567739468000550](https://doi.org/10.1107/S0567739468000550)
 - **Tabulated form used** (4-Gaussian coefficients): International Tables for
-  Crystallography Vol. C, Table 6.1.1.4.
+  Crystallography Vol. C, pp. 500–502 / Table 6.1.1.4.
+- **Redistribution actually imported:** the ESRF **DABAX** `f0_InterTables.dat`
+  table (public domain), as shipped in the `xrayutilities` package
+  (`materials/data/f0_InterTables.dat.xz`). The 14 originally hand-entered rows
+  match it exactly; regenerating expands to all 97 neutral atoms.
 
 ### Magnetic form factors ⟨j0⟩ / ⟨j2⟩ (`magneticFormFactorData.ts`)
 

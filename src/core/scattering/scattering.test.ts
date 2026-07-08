@@ -1,12 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { neutronScatteringLength } from "@/core/scattering/neutron";
-import { xrayFormFactor } from "@/core/scattering/xray";
+import { neutronScatteringLength, NEUTRON_B } from "@/core/scattering/neutron";
+import { xrayFormFactor, CROMER_MANN } from "@/core/scattering/xray";
 import {
   magneticFormFactorJ0,
   magneticFormFactorJ2,
   magneticFormFactorDipole,
   magneticTable,
 } from "@/core/scattering/magnetic";
+import { J0_COEFFS, J2_COEFFS } from "@/core/scattering/magneticFormFactorData";
+
+// Atomic numbers, for asserting the X-ray f(0) = Z normalization table-wide.
+const Z: Readonly<Record<string, number>> = {
+  H: 1, He: 2, Li: 3, Be: 4, B: 5, C: 6, N: 7, O: 8, F: 9, Ne: 10, Na: 11,
+  Mg: 12, Al: 13, Si: 14, P: 15, S: 16, Cl: 17, Ar: 18, K: 19, Ca: 20, Sc: 21,
+  Ti: 22, V: 23, Cr: 24, Mn: 25, Fe: 26, Co: 27, Ni: 28, Cu: 29, Zn: 30, Ga: 31,
+  Ge: 32, As: 33, Se: 34, Br: 35, Kr: 36, Rb: 37, Sr: 38, Y: 39, Zr: 40, Nb: 41,
+  Mo: 42, Tc: 43, Ru: 44, Rh: 45, Pd: 46, Ag: 47, Cd: 48, In: 49, Sn: 50,
+  Sb: 51, Te: 52, I: 53, Xe: 54, Cs: 55, Ba: 56, La: 57, Ce: 58, Pr: 59, Nd: 60,
+  Pm: 61, Sm: 62, Eu: 63, Gd: 64, Tb: 65, Dy: 66, Ho: 67, Er: 68, Tm: 69,
+  Yb: 70, Lu: 71, Hf: 72, Ta: 73, W: 74, Re: 75, Os: 76, Ir: 77, Pt: 78, Au: 79,
+  Hg: 80, Tl: 81, Pb: 82, Bi: 83, Po: 84, At: 85, Rn: 86, Fr: 87, Ra: 88,
+  Ac: 89, Th: 90, Pa: 91, U: 92, Np: 93, Am: 95, Cm: 96, Bk: 97, Cf: 98,
+};
 
 describe("neutron scattering lengths (match GSAS-II .lst)", () => {
   it("Mn, O, Ga match GSAS-II printed values (fm)", () => {
@@ -16,6 +31,25 @@ describe("neutron scattering lengths (match GSAS-II .lst)", () => {
   });
   it("throws for an unknown element", () => {
     expect(() => neutronScatteringLength("Xx")).toThrow();
+  });
+  it("covers the periodic table, not just a handful of elements", () => {
+    // The table used to hold ~50 curated elements; it now spans the full range.
+    expect(Object.keys(NEUTRON_B).length).toBeGreaterThanOrEqual(90);
+    // Common elements that were previously missing must resolve.
+    for (const el of ["B", "Sc", "Ag", "Cd", "In", "Sb", "I", "Gd", "Hf", "Ta", "Re", "U"]) {
+      expect(NEUTRON_B[el], el).toBeDefined();
+    }
+    // A few authoritative Sears/ITC values (fm).
+    expect(neutronScatteringLength("B")).toBeCloseTo(5.3, 1);
+    expect(neutronScatteringLength("Ag")).toBeCloseTo(5.922, 2);
+    expect(neutronScatteringLength("Gd")).toBeCloseTo(6.5, 1);
+    expect(neutronScatteringLength("U")).toBeCloseTo(8.417, 2);
+  });
+  it("keeps the GSAS-II-pinned values after regeneration", () => {
+    expect(neutronScatteringLength("Ti")).toBeCloseTo(-3.438, 3);
+    expect(neutronScatteringLength("Mn")).toBeCloseTo(-3.73, 3);
+    expect(neutronScatteringLength("Zn")).toBeCloseTo(5.68, 3);
+    expect(neutronScatteringLength("Au")).toBeCloseTo(7.9, 3);
   });
 });
 
@@ -28,6 +62,20 @@ describe("X-ray form factors (Cromer-Mann)", () => {
   });
   it("decreases with increasing s", () => {
     expect(xrayFormFactor("Mn", 0.5)).toBeLessThan(xrayFormFactor("Mn", 0));
+  });
+  it("covers the periodic table with every row normalized to Z at s = 0", () => {
+    expect(Object.keys(CROMER_MANN).length).toBeGreaterThanOrEqual(97);
+    // Previously-missing common elements must resolve now.
+    for (const el of ["H", "Ca", "Zn", "Ge", "Sr", "Zr", "Ba", "La", "Ce", "W", "Pb", "U"]) {
+      expect(CROMER_MANN[el], el).toBeDefined();
+    }
+    // Every tabulated neutral atom must give f(0) = Z (the physical
+    // constraint); the Cromer-Mann least-squares fit holds it to < 0.1 e.
+    for (const el of Object.keys(CROMER_MANN)) {
+      const z = Z[el];
+      expect(z, `Z for ${el}`).toBeDefined();
+      expect(Math.abs(xrayFormFactor(el, 0) - z!), el).toBeLessThan(0.1);
+    }
   });
 });
 
@@ -53,6 +101,18 @@ describe("magnetic form factor ⟨j0⟩ (ITC-C Vol. C §4.4.5)", () => {
       expect(magneticTable.has(ion)).toBe(true);
     }
     expect(magneticTable.has("Zz9")).toBe(false);
+  });
+  it("is the complete ITC-C ⟨j0⟩/⟨j2⟩ set, every ion normalized correctly", () => {
+    // Full table (3d/4d transition metals + lanthanides + actinides).
+    expect(Object.keys(J0_COEFFS).length).toBeGreaterThanOrEqual(97);
+    expect(Object.keys(J2_COEFFS).length).toBeGreaterThanOrEqual(95);
+    // Every ⟨j0⟩ ion is normalized to 1 at s = 0; every ⟨j2⟩ has ⟨j0⟩ too.
+    for (const ion of Object.keys(J0_COEFFS)) {
+      expect(magneticFormFactorJ0(ion, 0), ion).toBeCloseTo(1, 2);
+    }
+    for (const ion of Object.keys(J2_COEFFS)) {
+      expect(J0_COEFFS[ion], `${ion} has ⟨j2⟩ but no ⟨j0⟩`).toBeDefined();
+    }
   });
 });
 
