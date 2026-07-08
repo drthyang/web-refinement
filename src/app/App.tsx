@@ -543,8 +543,8 @@ export function App(): JSX.Element {
         return (
           <>
             <SummaryCards cards={summaryCards} />
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, alignItems: "stretch" }}>
-              <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, alignItems: "stretch" }}>
+              <div style={{ ...themeCard, gridColumn: "span 2", padding: "14px 16px", display: "flex", flexDirection: "column" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
                   <span style={themeLabel}>Powder pattern — observed vs calculated</span>
                   <div style={{ marginLeft: "auto" }}>
