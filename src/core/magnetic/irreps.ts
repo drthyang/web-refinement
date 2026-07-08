@@ -24,6 +24,7 @@
 
 import type { Complex, Mat3, Vec3 } from "@/core/math/types";
 import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
+import type { MagneticCandidate } from "@/core/magnetic/magneticGroups";
 import { mulMat, determinant, IDENTITY3 } from "@/core/math/mat3";
 import { applyOperation } from "@/core/crystal/symmetry";
 import { magneticRepresentationCharacter, irrepMultiplicity } from "@/core/magnetic/magneticRepresentation";
@@ -150,6 +151,41 @@ export function abelianIrreps(ops: readonly SymmetryOperation[]): Irrep[] | null
     enumerate(0, []);
   }
   return irreps;
+}
+
+/**
+ * The Shubnikov (magnetic space group) candidate equivalent to a **real** 1-D
+ * irrep: χ: G_k → {±1} *is* a time-reversal homomorphism, so ordering per this
+ * irrep is exactly the candidate whose θ signs equal the characters. Returns
+ * the index into `candidates` (from `generateMagneticCandidatesForK` on the
+ * same little group), or null for a complex irrep (its real structure combines
+ * the conjugate pair and has no single two-colour group) or when no candidate
+ * matches (different operation lists).
+ */
+export function shubnikovCandidateIndex(
+  irrep: Irrep,
+  littleGroupOps: readonly SymmetryOperation[],
+  candidates: readonly MagneticCandidate[],
+): number | null {
+  if (!irrep.real) return null;
+  // Desired θ per rotation coset, from the (±1) characters.
+  const want = new Map<string, number>();
+  for (let i = 0; i < littleGroupOps.length; i++) {
+    const key = matKey(littleGroupOps[i]!.rotation);
+    const theta = Math.round(irrep.characters[i]?.re ?? 1);
+    const prev = want.get(key);
+    if (prev !== undefined && prev !== theta) return null; // ordinary irrep inconsistent over cosets
+    want.set(key, theta);
+  }
+  for (let c = 0; c < candidates.length; c++) {
+    const ops = candidates[c]!.operations;
+    const matches =
+      ops.length > 0 &&
+      ops.every((op) => want.get(matKey(op.rotation)) === (op.timeReversal ?? 1)) &&
+      [...want.keys()].every((key) => ops.some((op) => matKey(op.rotation) === key));
+    if (matches) return c;
+  }
+  return null;
 }
 
 export interface IrrepTerm {

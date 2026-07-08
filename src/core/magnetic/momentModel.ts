@@ -97,7 +97,7 @@ export function buildMagneticModel(
 
   for (const group of groupByPosition(ionSites, tieSameSite)) {
     const rep = group[0]!;
-    const allowed = allowedMomentDirections(subgroupOps, rep.position);
+    const allowed = allowedMomentDirections(subgroupOps, rep.position, k);
     if (allowed.dimension === 0) continue; // moment forbidden by symmetry here
 
     // Seed: the first allowed mode at moment0, the rest at 0.

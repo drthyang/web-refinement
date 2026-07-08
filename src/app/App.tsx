@@ -679,6 +679,7 @@ export function App(): JSX.Element {
                         structure={structure}
                         {...(sessionMoments ? { moments: sessionMoments } : {})}
                         {...(session.magnetic?.propagation[0] ? { propagation: session.magnetic.propagation[0] } : {})}
+                        {...(session.magnetic?.operations ? { magneticOperations: session.magnetic.operations } : {})}
                       />
                     </Suspense>
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>

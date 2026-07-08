@@ -17,13 +17,15 @@
 import { describe, it, expect } from "vitest";
 import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
-import { parseSymmetryOperation } from "@/core/crystal/symmetry";
-import { mulMat } from "@/core/math/mat3";
+import { applyOperation, parseSymmetryOperation } from "@/core/crystal/symmetry";
+import { determinant, mulMat } from "@/core/math/mat3";
 import {
   magneticRepresentationCharacter,
   magneticRepresentationDimension,
 } from "@/core/magnetic/magneticRepresentation";
-import { abelianIrreps, decomposeMagneticRepresentation, projectIrrepModes } from "@/core/magnetic/irreps";
+import { abelianIrreps, decomposeMagneticRepresentation, projectIrrepModes, shubnikovCandidateIndex } from "@/core/magnetic/irreps";
+import { generateMagneticCandidatesForK } from "@/core/magnetic/magneticGroups";
+import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
 
 const ops = (...xyz: string[]): SymmetryOperation[] => xyz.map(parseSymmetryOperation);
 const iso = { kind: "isotropic", bIso: 0.3 } as const;
@@ -182,6 +184,109 @@ describe("Pnma 4b — the classic LaMnO₃-type textbook case", () => {
       expect(projectIrrepModes(s, K0, ["M1"], g, t.irrep)).toHaveLength(3);
     }
     expectReconstruction(s, K0, ["M1"], g);
+  });
+});
+
+/** m must be invariant under every magnetic stabilizer op: e^{2πik·L}·θ·det(R)·R·m = m. */
+function expectInvariantUnderStabilizer(ops: readonly SymmetryOperation[], pos: Vec3, k: Vec3, m: Vec3): void {
+  for (const op of ops) {
+    const p = applyOperation(op, pos);
+    const L = [p[0]! - pos[0]!, p[1]! - pos[1]!, p[2]! - pos[2]!];
+    if (L.some((v) => Math.abs(v - Math.round(v)) > 1e-3)) continue;
+    const phase = 2 * Math.PI * (k[0]! * Math.round(L[0]!) + k[1]! * Math.round(L[1]!) + k[2]! * Math.round(L[2]!));
+    expect(Math.abs(Math.sin(phase))).toBeLessThan(1e-9); // commensurate ±1 phase here
+    const w = Math.cos(phase) * determinant(op.rotation) * (op.timeReversal ?? 1);
+    const R = op.rotation;
+    for (let i = 0; i < 3; i++) {
+      const mi = w * (R[i]![0]! * m[0]! + R[i]![1]! * m[1]! + R[i]![2]! * m[2]!);
+      expect(mi).toBeCloseTo(m[i]!, 6);
+    }
+  }
+}
+
+describe("two routes, one answer — real irreps ↔ Shubnikov candidates", () => {
+  it("C2: A ↔ type-I (Mz), B ↔ primed-2z candidate (Mx, My)", () => {
+    const g = ops("x,y,z", "-x,-y,z");
+    const s = structure(g, [[0, 0, 0]]);
+    const candidates = generateMagneticCandidatesForK(g, K0);
+    const dec = decomposeMagneticRepresentation(s, K0, ["M1"], g);
+    for (const t of dec.terms) {
+      const idx = shubnikovCandidateIndex(t.irrep, g, candidates);
+      expect(idx).not.toBeNull();
+      const cand = candidates[idx!]!;
+      // The candidate's θ signs are exactly the irrep characters.
+      const isTypeI = t.irrep.characters.every((c) => c.re > 0);
+      expect(cand.isTypeI).toBe(isTypeI);
+      // Same physics: the allowed-moment space of the candidate matches the
+      // irrep's projected modes, and every mode is stabilizer-invariant.
+      const modes = projectIrrepModes(s, K0, ["M1"], g, t.irrep);
+      const allowed = allowedMomentDirections(cand.operations, [0, 0, 0], K0);
+      expect(allowed.dimension).toBe(modes.length);
+      for (const m of modes) expectInvariantUnderStabilizer(cand.operations, [0, 0, 0], K0, m);
+    }
+  });
+
+  it("Pnma 4b: every appearing (gerade) irrep maps to a candidate with 3 allowed modes", () => {
+    const g = ops(
+      "x,y,z", "-x+1/2,-y,z+1/2", "-x,y+1/2,-z", "x+1/2,-y+1/2,-z+1/2",
+      "-x,-y,-z", "x+1/2,y,-z+1/2", "x,-y+1/2,z", "-x+1/2,y+1/2,z+1/2",
+    );
+    const s = structure(g, [[0, 0, 0.5]]);
+    const candidates = generateMagneticCandidatesForK(g, K0);
+    const dec = decomposeMagneticRepresentation(s, K0, ["M1"], g);
+    expect(dec.terms).toHaveLength(4);
+    const matched = new Set<number>();
+    for (const t of dec.terms) {
+      const idx = shubnikovCandidateIndex(t.irrep, g, candidates);
+      expect(idx).not.toBeNull();
+      matched.add(idx!);
+      const modes = projectIrrepModes(s, K0, ["M1"], g, t.irrep);
+      const allowed = allowedMomentDirections(candidates[idx!]!.operations, [0, 0, 0.5], K0);
+      expect(allowed.dimension).toBe(modes.length);
+      for (const m of modes) expectInvariantUnderStabilizer(candidates[idx!]!.operations, [0, 0, 0.5], K0, m);
+    }
+    expect(matched.size).toBe(4); // four distinct irreps → four distinct groups
+  });
+
+  it("complex irreps (C4) have no single Shubnikov counterpart", () => {
+    const g = ops("x,y,z", "-y,x,z", "-x,-y,z", "y,-x,z");
+    const candidates = generateMagneticCandidatesForK(g, K0);
+    const irreps = abelianIrreps(g)!;
+    for (const irrep of irreps.filter((x) => !x.real)) {
+      expect(shubnikovCandidateIndex(irrep, g, candidates)).toBeNull();
+    }
+  });
+});
+
+describe("allowedMomentDirections — k·L phase in the stabilizer constraint", () => {
+  const g = ops("x,y,z", "-x,-y,-z");
+  const kHalf: Vec3 = [0, 0, 0.5];
+  const pos: Vec3 = [0, 0, 0.5]; // inversion fixes it via L = (0,0,−1) ⇒ phase −1
+
+  it("k = (0,0,½): unprimed inversion forbids the moment (antiphase point)", () => {
+    const typeI = generateMagneticCandidatesForK(g, kHalf).find((c) => c.isTypeI)!;
+    expect(allowedMomentDirections(typeI.operations, pos, kHalf).dimension).toBe(0);
+  });
+
+  it("k = (0,0,½): primed inversion allows all three components", () => {
+    const typeIII = generateMagneticCandidatesForK(g, kHalf).find((c) => !c.isTypeI)!;
+    expect(allowedMomentDirections(typeIII.operations, pos, kHalf).dimension).toBe(3);
+  });
+
+  it("k = 0 (or L = 0) is unchanged: unprimed inversion allows all three", () => {
+    const typeI = generateMagneticCandidatesForK(g, K0).find((c) => c.isTypeI)!;
+    expect(allowedMomentDirections(typeI.operations, pos, K0).dimension).toBe(3);
+    expect(allowedMomentDirections(typeI.operations, [0, 0, 0], kHalf).dimension).toBe(3);
+  });
+
+  it("agrees with the irrep route at k = (0,0,½)", () => {
+    const s = structure(g, [[0, 0, 0.5]]);
+    const dec = decomposeMagneticRepresentation(s, kHalf, ["M1"], g);
+    const candidates = generateMagneticCandidatesForK(g, kHalf);
+    expect(dec.terms).toHaveLength(1); // only the odd irrep carries the order
+    const idx = shubnikovCandidateIndex(dec.terms[0]!.irrep, g, candidates)!;
+    expect(candidates[idx]!.isTypeI).toBe(false);
+    expect(allowedMomentDirections(candidates[idx]!.operations, pos, kHalf).dimension).toBe(3);
   });
 });
 

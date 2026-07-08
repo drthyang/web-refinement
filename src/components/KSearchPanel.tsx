@@ -19,7 +19,7 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { searchPropagationVector, kLabel, type KCandidate } from "@/core/magnetic/kSearch";
 import { generateMagneticCandidatesForK, littleGroup } from "@/core/magnetic/magneticGroups";
-import { decomposeMagneticRepresentation, projectIrrepModes } from "@/core/magnetic/irreps";
+import { decomposeMagneticRepresentation, projectIrrepModes, shubnikovCandidateIndex } from "@/core/magnetic/irreps";
 import { describeMomentMode } from "@/core/magnetic/momentModel";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
@@ -101,9 +101,17 @@ export function KSearchPanel({
     const lg = littleGroup(ops, k);
     const dec = decomposeMagneticRepresentation(structure, k, [...selected], lg);
     const modes = dec.abelian ? dec.terms.map((t) => projectIrrepModes(structure, k, [...selected], lg, t.irrep)) : [];
-    return { dec, modes };
+    return { dec, modes, lg };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structure, k[0], k[1], k[2], selected]);
+
+  // Each *real* irrep is a time-reversal homomorphism θ = χ, i.e. exactly one of
+  // the Shubnikov candidates above — the map lets a click on an irrep drive the
+  // same moment preview as the subgroup route.
+  const irrepCandidate = useMemo(() => {
+    if (!irrepAnalysis || !irrepAnalysis.dec.abelian) return [];
+    return irrepAnalysis.dec.terms.map((t) => shubnikovCandidateIndex(t.irrep, irrepAnalysis.lg, subgroups));
+  }, [irrepAnalysis, subgroups]);
 
   // Selected magnetic subgroup → symmetry-allowed moment model over the real
   // structure, with editable moment-mode amplitudes and a 3D preview.
@@ -340,16 +348,41 @@ export function KSearchPanel({
                 {irrepAnalysis.dec.terms.map((t, i) => {
                   const modes = irrepAnalysis.modes[i] ?? [];
                   const modeText = modes.length ? modes.map((m) => describeMomentMode(m)).join(", ") : "—";
-                  return (
-                    <div key={t.irrep.label} style={{ fontSize: 12, padding: "4px 9px", borderRadius: 7, border: `1px solid ${theme.border}`, background: "#fff", display: "flex", gap: 8 }}>
+                  const cand = irrepCandidate[i] ?? null;
+                  const active = cand != null && cand === selIdx;
+                  const rowStyle: React.CSSProperties = {
+                    textAlign: "left", fontSize: 12, padding: "4px 9px", borderRadius: 7,
+                    border: `1px solid ${active ? theme.primary : theme.border}`,
+                    background: active ? theme.chipBg : "#fff",
+                    display: "flex", gap: 8, alignItems: "baseline", width: "100%",
+                  };
+                  const body = (
+                    <>
                       <span style={{ fontFamily: themeMono, color: theme.primary, minWidth: 56 }}>{t.multiplicity} × {t.irrep.label}</span>
                       <span style={{ color: theme.secondary }}>
                         {t.irrep.real ? "real" : "complex"} · modes: <span style={{ color: theme.ink }}>{modeText}</span>
                       </span>
-                    </div>
+                      <span style={{ marginLeft: "auto", fontSize: 11.5, color: cand != null ? theme.primary : theme.secondary, whiteSpace: "nowrap" }}>
+                        {cand != null
+                          ? `≙ magnetic group ${cand + 1} · ${active ? "shown below ↓" : "preview moments"}`
+                          : "conjugate pair — combine ± modes"}
+                      </span>
+                    </>
+                  );
+                  return cand != null ? (
+                    <button key={t.irrep.label} style={{ ...rowStyle, cursor: "pointer" }} onClick={() => setSelIdx(active ? null : cand)}>
+                      {body}
+                    </button>
+                  ) : (
+                    <div key={t.irrep.label} style={rowStyle}>{body}</div>
                   );
                 })}
               </div>
+              <p style={{ ...help, marginTop: 6 }}>
+                A real 1-D irrep assigns ±1 to every operation — the same data as a time-reversal
+                homomorphism — so it <em>is</em> one of the magnetic space groups above: click it to
+                preview the moment arrangement it allows (arrows honour the primed operations).
+              </p>
               {!irrepAnalysis.dec.integerConsistent && (
                 <p style={{ ...help, marginTop: 6, color: theme.noteInk }}>
                   Non-integer multiplicities: this non-symmorphic BZ-boundary k needs the projective
@@ -361,10 +394,16 @@ export function KSearchPanel({
         </section>
       )}
 
-      {/* 4. Selected subgroup: editable moments + 3D preview */}
+      {/* 5. Selected subgroup: editable moments + 3D preview */}
       {magBuild && (
         <section>
-          <div style={themeLabel}>Magnetic structure preview & moments</div>
+          <div style={themeLabel}>
+            Magnetic structure preview & moments
+            {selIdx != null && irrepAnalysis?.dec.abelian && (() => {
+              const labels = irrepAnalysis.dec.terms.filter((_, i) => irrepCandidate[i] === selIdx).map((t) => t.irrep.label);
+              return labels.length > 0 ? <span style={{ color: theme.secondary }}> — irrep {labels.join(", ")}</span> : null;
+            })()}
+          </div>
           {magBuild.params.length === 0 ? (
             <p style={help}>No symmetry-allowed moment on the selected ion(s) under this subgroup — the moment is forbidden here.</p>
           ) : (
@@ -419,7 +458,12 @@ export function KSearchPanel({
               </div>
               <span style={help}>&ldquo;Refine moments&rdquo; fits the moments here (nuclear fixed, shared scale). &ldquo;Continue&rdquo; adds the moment parameters to the main refinement to fit nuclear + magnetic together.</span>
               <Suspense fallback={<div style={{ height: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D preview…</div>}>
-                <StructureView structure={structure} propagation={k} {...(momentsMap ? { moments: momentsMap } : {})} />
+                <StructureView
+                  structure={structure}
+                  propagation={k}
+                  magneticOperations={magBuild.magnetic.operations ?? []}
+                  {...(momentsMap ? { moments: momentsMap } : {})}
+                />
               </Suspense>
               <p style={help}>
                 Red arrows are the ordered moments (axial vectors) on the magnetic sites. Absolute

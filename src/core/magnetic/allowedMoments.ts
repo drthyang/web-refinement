@@ -3,9 +3,14 @@
  *
  * A moment m (axial vector, crystal-axis components) is allowed only if it is
  * invariant under the site's magnetic stabilizer: for every operation g that
- * fixes the site, θ_g · det(R_g) · R_g · m = m. Stacking these gives a linear
- * system whose null space is the space of allowed moments. Its dimension is the
- * number of free moment parameters — the "proper constraints" for refinement.
+ * fixes the site, e^{2πi k·L_g} · θ_g · det(R_g) · R_g · m = m, where L_g is the
+ * lattice translation returning the site image to the site (the k-phase couples
+ * the moment to the propagation vector; for k = 0 or L = 0 the phase is 1).
+ * Stacking these gives a linear system whose null space is the space of allowed
+ * moments. Its dimension is the number of free moment parameters — the "proper
+ * constraints" for refinement. A complex phase (k·L not a multiple of ½)
+ * contributes its real and imaginary constraint rows separately, which is the
+ * correct condition for a *real* moment vector.
  */
 
 import type { Mat3, Vec3 } from "@/core/math/types";
@@ -13,15 +18,17 @@ import type { SymmetryOperation } from "@/core/crystal/types";
 import { determinant } from "@/core/math/mat3";
 import { applyOperation } from "@/core/crystal/symmetry";
 
-function siteIsFixed(op: SymmetryOperation, pos: Vec3, tol = 1e-3): boolean {
+/** Returning lattice translation L when `op` fixes `pos` mod lattice, else null. */
+function returningTranslation(op: SymmetryOperation, pos: Vec3, tol = 1e-3): Vec3 | null {
   const p = applyOperation(op, pos);
+  const L: [number, number, number] = [0, 0, 0];
   for (let i = 0; i < 3; i++) {
-    let d = Math.abs(p[i]! - pos[i]!);
-    d -= Math.floor(d); // wrap into [0,1) — op may shift by >1 cell (coord > 0.5)
-    d = Math.min(d, 1 - d);
-    if (d > tol) return false;
+    const raw = p[i]! - pos[i]!;
+    const n = Math.round(raw);
+    if (Math.abs(raw - n) > tol) return null;
+    L[i] = n;
   }
-  return true;
+  return L;
 }
 
 /** Real null space of a matrix (rows × 3) with tolerance; returns basis Vec3s. */
@@ -71,23 +78,34 @@ export interface AllowedMoments {
 
 /**
  * Compute the allowed moment directions for a site at `position` under the given
- * magnetic operations. Returns a basis (possibly empty) of the invariant
- * subspace.
+ * magnetic operations, for propagation vector `k` (default 0). Returns a basis
+ * (possibly empty) of the invariant subspace.
  */
 export function allowedMomentDirections(
   operations: readonly SymmetryOperation[],
   position: Vec3,
+  k: Vec3 = [0, 0, 0],
 ): AllowedMoments {
   const rows: number[][] = [];
   for (const op of operations) {
-    if (!siteIsFixed(op, position)) continue;
+    const L = returningTranslation(op, position);
+    if (!L) continue;
     const R: Mat3 = op.rotation;
     const factor = determinant(R) * (op.timeReversal ?? 1);
-    // Constraint matrix: (factor·R − I).
+    const phase = 2 * Math.PI * (k[0]! * L[0]! + k[1]! * L[1]! + k[2]! * L[2]!);
+    const c = Math.cos(phase) * factor;
+    const s = Math.sin(phase) * factor;
+    // Real part: (cos·factor·R − I)·m = 0.
     for (let i = 0; i < 3; i++) {
-      const row = [factor * R[i]![0], factor * R[i]![1], factor * R[i]![2]];
+      const row = [c * R[i]![0], c * R[i]![1], c * R[i]![2]];
       row[i]! -= 1;
       rows.push(row);
+    }
+    // Imaginary part (only when the k·L phase is complex): sin·factor·R·m = 0.
+    if (Math.abs(s) > 1e-9) {
+      for (let i = 0; i < 3; i++) {
+        rows.push([s * R[i]![0], s * R[i]![1], s * R[i]![2]]);
+      }
     }
   }
   if (rows.length === 0) {

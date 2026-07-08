@@ -15,14 +15,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { StructureModel } from "@/core/crystal/types";
+import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
 import { fractionalToCartesian } from "@/core/crystal/unitCell";
 import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
-import { determinant } from "@/core/math/mat3";
 import { color as theme, mono as themeMono } from "@/app/theme";
 import { covalentRadius, elementColor } from "@/app/ui/elementData";
-import { buildCellAtoms, magneticSupercell } from "@/app/ui/cellModel";
+import { buildCellAtoms, displayMoment, magneticSupercell } from "@/app/ui/cellModel";
 
 const MAX_BOND_LABELS = 80; // labelling every bond of a big cell is unreadable
 
@@ -52,12 +51,17 @@ export function StructureView({
   structure,
   moments,
   propagation,
+  magneticOperations,
 }: {
   structure: StructureModel;
   /** Magnetic moments to overlay as arrows: site label → crystal-axis components (µ_B). */
   moments?: ReadonlyMap<string, Vec3>;
   /** Propagation vector k — enables the magnetic-supercell view (moments modulated by cos 2π k·n). */
   propagation?: Vec3;
+  /** θ-signed Shubnikov operations of the chosen magnetic group: arrows on
+   *  symmetry-equivalent atoms honour time reversal (m′ = θ·det(R)·R·m).
+   *  Absent ⇒ nuclear operations with θ = +1 (legacy). */
+  magneticOperations?: readonly SymmetryOperation[];
 }): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [showBondLengths, setShowBondLengths] = useState(false);
@@ -73,7 +77,7 @@ export function StructureView({
   const canMagneticCell = superK[0] * superK[1] * superK[2] > 1;
   const supercell: [number, number, number] = magneticCell && canMagneticCell ? superK : [1, 1, 1];
 
-  const atoms = useMemo(() => buildCellAtoms(structure, supercell), [structure, supercell[0], supercell[1], supercell[2]]); // eslint-disable-line react-hooks/exhaustive-deps
+  const atoms = useMemo(() => buildCellAtoms(structure, supercell, magneticOperations), [structure, magneticOperations, supercell[0], supercell[1], supercell[2]]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cartesian cell corners + centre + body-diagonal span, for edges and camera.
   const { corners, center, span } = useMemo(() => {
@@ -134,9 +138,10 @@ export function StructureView({
       scene.add(mesh);
     }
 
-    // Magnetic moment arrows (axial vectors). Each atom's moment is transformed
-    // by the placing operation's rotation, m′ = det(R)·R·m, then crystal-axis
-    // components → Cartesian for the arrow direction. Length ∝ |moment|.
+    // Magnetic moment arrows (axial vectors): each atom's moment comes from
+    // displayMoment — the θ-signed axial transform of its placing operation with
+    // the commensurate k-phase (cell index + returning translation) — then
+    // crystal-axis components → Cartesian for the arrow. Length ∝ |moment|.
     if (moments && moments.size > 0) {
       let maxMom = 0;
       for (const m of moments.values()) {
@@ -147,20 +152,8 @@ export function StructureView({
       for (const at of atoms) {
         const m = arrowUnit > 0 ? moments.get(at.label) : undefined;
         if (!m) continue;
-        const R = at.rot;
-        const det = determinant(R);
-        // Commensurate k-phase: the moment in cell n is modulated by cos(2π k·n),
-        // so it flips between cells in the magnetic supercell (e.g. AFM for k=½).
-        const n = at.cellIndex;
-        const kmod = propagation
-          ? Math.cos(2 * Math.PI * (propagation[0]! * n[0]! + propagation[1]! * n[1]! + propagation[2]! * n[2]!))
-          : 1;
-        const w = kmod * det;
-        const mc: Vec3 = [
-          w * (R[0]![0]! * m[0]! + R[0]![1]! * m[1]! + R[0]![2]! * m[2]!),
-          w * (R[1]![0]! * m[0]! + R[1]![1]! * m[1]! + R[1]![2]! * m[2]!),
-          w * (R[2]![0]! * m[0]! + R[2]![1]! * m[1]! + R[2]![2]! * m[2]!),
-        ];
+        const mc = displayMoment(at, m, propagation);
+        if (!mc) continue;
         const cart = crystalComponentsToCartesian(structure.cell, mc);
         const len = Math.hypot(cart[0]!, cart[1]!, cart[2]!);
         if (len < 1e-6) continue;
