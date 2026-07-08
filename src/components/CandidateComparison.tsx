@@ -51,8 +51,8 @@ export function CandidateComparison({ structure, dataset, magneticSiteLabels, mo
       <p style={{ fontSize: 13, color: "#444" }}>
         From the parent group <strong>{structure.spaceGroup.hermannMauguin ?? "(parsed ops)"}</strong>{" "}
         with k = (0 0 0), {candidates.length} candidate magnetic space groups are allowed (type I +
-        one per index-2 subgroup). Candidate generation is done here; in practice you would also
-        cross-check with Bilbao / ISODISTORT / SARAh.
+        one per index-2 subgroup). BNS/OG symbols and numbers come from the bundled ISO-MAG standard
+        table; candidates without one are in a non-standard setting.
       </p>
 
       <table style={{ fontSize: 12, borderCollapse: "collapse", width: "100%", marginBottom: 12 }}>
@@ -65,7 +65,15 @@ export function CandidateComparison({ structure, dataset, magneticSiteLabels, mo
         <tbody>
           {candidates.map((cand) => (
             <tr key={cand.id} style={{ borderBottom: "1px solid #eee" }}>
-              <td style={c}>{cand.isTypeI ? "type I (no primed ops)" : cand.label}</td>
+              <td style={c}>
+                <strong>{cand.label}</strong>
+                {cand.standard && (
+                  <span style={{ color: "#777" }}>
+                    {" "}· {cand.isTypeI ? "type I" : "type III"} · BNS {cand.standard.bnsNumber} · OG{" "}
+                    {cand.standard.ogNumber}
+                  </span>
+                )}
+              </td>
               <td style={c}>
                 {magneticSiteLabels.map((label) => {
                   const site = structure.sites.find((s) => s.label === label);
@@ -108,7 +116,12 @@ export function CandidateComparison({ structure, dataset, magneticSiteLabels, mo
             {fits.map((f, i) => (
               <tr key={f.candidate.id} style={{ background: i === 0 ? "#eaf4ea" : undefined, borderBottom: "1px solid #eee" }}>
                 <td style={c}>{i === 0 ? "★ 1" : i + 1}</td>
-                <td style={c}>{f.candidate.isTypeI ? "type I" : f.candidate.label}</td>
+                <td style={c}>
+                  {f.candidate.label}
+                  {f.candidate.standard && (
+                    <span style={{ color: "#777" }}> · BNS {f.candidate.standard.bnsNumber}</span>
+                  )}
+                </td>
                 <td style={c}>{f.momentDof}</td>
                 <td style={c}>{f.wR.toFixed(2)}</td>
                 <td style={c}>{f.goodnessOfFit.toFixed(2)}</td>
@@ -120,7 +133,8 @@ export function CandidateComparison({ structure, dataset, magneticSiteLabels, mo
       )}
       {mode === "compare" && fits && fits[0] && (
         <p style={{ fontSize: 13, marginTop: 8 }}>
-          Best fit: <strong>{fits[0].candidate.isTypeI ? "type I" : fits[0].candidate.label}</strong>{" "}
+          Best fit: <strong>{fits[0].candidate.label}</strong>
+          {fits[0].candidate.standard && <> (BNS {fits[0].candidate.standard.bnsNumber})</>}{" "}
           (wR = {fits[0].wR.toFixed(2)}%). Lower wR ⇒ better agreement with the observed magnetic
           intensities.
         </p>

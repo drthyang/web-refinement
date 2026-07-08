@@ -25,7 +25,8 @@ search → little-group magnetic subgroups → editable moment preview → momen
 refinement** (k = 0 *and* k ≠ 0, CW and TOF, on one shared scale). Occupancy-
 disorder sites refine with tied position/ADP, a Σ(occupancy) restraint (optionally
 = 1), and an optional shared moment. Fit quality is judged with **F_obs vs F_calc
-and normal-probability plots**, not just wR. Standard BNS labels, the star of k /
+and normal-probability plots**, not just wR. Candidate magnetic groups carry
+their standard **BNS/OG labels** (bundled ISO-MAG table). The star of k /
 multi-k, representation analysis, and refined CIF/mCIF export are the next
 milestones; see [docs/ROADMAP.md](docs/ROADMAP.md) and
 [docs/LIMITATIONS.md](docs/LIMITATIONS.md).

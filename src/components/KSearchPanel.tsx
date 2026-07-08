@@ -356,6 +356,9 @@ export function KSearchPanel({
                   }}
                 >
                   <span style={{ fontFamily: themeMono, color: theme.secondary }}>{c.isTypeI ? "type I" : "type III"}</span> · {c.label}
+                  {c.standard && (
+                    <span style={{ color: theme.secondary }}> · BNS {c.standard.bnsNumber} · OG {c.standard.ogNumber}</span>
+                  )}
                 </button>
               ))}
             </div>

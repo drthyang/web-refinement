@@ -65,9 +65,10 @@ accidental gap — each is tracked as a roadmap item.
   parsing + axial-vector transformation are implemented; moment components use the
   normalized crystal-axis convention. **Not yet validated:** the absolute moment
   magnitude in the k-formalism (a convention factor pending a GSAS-II cross-check
-  — directions and relative sizes are correct). **Not done:** standard **BNS/OG
-  labels**, the **star of k** (multi-arm domains / multi-k), and **representation
-  (irrep) analysis**; satellite multiplicity is approximated by the parent nuclear
+  — directions and relative sizes are correct). Candidates carry standard
+  **BNS/OG labels** (bundled ISO-MAG table; types I/III, standard settings).
+  **Not done:** the **star of k** (multi-arm domains / multi-k) and full
+  **representation (irrep) analysis**; satellite multiplicity is approximated by the parent nuclear
   multiplicity. (Roadmap M2–M4.)
 - **Disorder.** Atoms sharing one crystallographic site (mixed/disordered
   occupancy, e.g. the six 3d cations of the high-entropy tungstate) refine with

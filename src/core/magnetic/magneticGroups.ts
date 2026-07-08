@@ -13,24 +13,38 @@
  * where θ_g = (−1)^{x_g}. The null space enumerates every valid θ.
  *
  * This is the honest, well-defined core of "get allowed magnetic space groups":
- * it yields the correct *set* of maximal magnetic subgroups for k = 0. It does
- * not attach standard BNS labels (that needs a lookup table / Bilbao); candidates
- * are labelled by which operations are primed.
+ * it yields the correct *set* of maximal magnetic subgroups for k = 0.
+ *
+ * Each candidate is additionally matched against the bundled standard table of
+ * Shubnikov groups ({@link identifyMagneticGroup}): when the parent is in its
+ * standard ITA setting, the candidate carries its BNS/OG numbers and symbols
+ * (e.g. "Pn'ma'", BNS 62.448). When no exact match exists (non-standard
+ * setting, or a little-group subset for k ≠ 0), `standard` is null and the
+ * label falls back to describing which operations are primed.
  */
 
 import type { SymmetryOperation } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
 import { composeOperations, operationKey } from "@/core/crystal/symmetry";
+import {
+  formatMagneticSymbol,
+  identifyMagneticGroup,
+  type MagneticGroupIdentity,
+} from "./bnsOg";
 
 export interface MagneticCandidate {
   readonly id: string;
-  /** Descriptive label, e.g. "type III · primed: 2₁, m". */
+  /** Display label: the BNS symbol when identified (e.g. "P2₁'/c'"), else a
+   *  descriptive one like "type III · primed: 2₁, m". */
   readonly label: string;
   /** True for the type-I (no time-reversal) group. */
   readonly isTypeI: boolean;
   /** Number of unprimed (θ = +1) operations. */
   readonly unprimedCount: number;
   readonly operations: readonly SymmetryOperation[];
+  /** Standard BNS/OG identification, or null if the operations do not match a
+   *  tabulated group in its standard BNS setting. */
+  readonly standard: MagneticGroupIdentity | null;
 }
 
 /** Deduplicate operations modulo lattice translation, identity first. */
@@ -172,12 +186,14 @@ export function generateMagneticCandidates(
     const cosetReps: SymmetryOperation[] = ops.map((op, i) => ({ ...op, timeReversal: (x[i] ? -1 : 1) as 1 | -1 }));
     const unprimedCount = cosetReps.filter((o) => (o.timeReversal ?? 1) === 1).length;
     const isTypeI = unprimedCount === m;
+    const standard = identifyMagneticGroup(candOps);
     candidates.push({
       id: `mag-cand-${signature}`,
-      label: primedLabel(cosetReps),
+      label: standard ? formatMagneticSymbol(standard.bnsSymbol) : primedLabel(cosetReps),
       isTypeI,
       unprimedCount,
       operations: candOps,
+      standard,
     });
   }
 
@@ -234,8 +250,11 @@ export function littleGroup(
  *
  * This yields the little-group magnetic subgroups — the correct symmetry
  * starting point for a commensurate single-k structure. It does **not** perform
- * representation (irrep) analysis, enumerate the full star of k, or attach
- * standard BNS/OG labels; those are the M3/M4 follow-ups (see ROADMAP).
+ * representation (irrep) analysis or enumerate the full star of k; those are
+ * the M3/M4 follow-ups (see ROADMAP). BNS/OG labels are attached when the
+ * little group happens to match a standard-setting group (always true for
+ * k = 0 with a standard-setting parent); type-IV groups (anti-translations for
+ * k ≠ 0) are not yet enumerated, so those candidates stay descriptive.
  *
  * Reference: Bertaut, *Acta Cryst.* A24 (1968) 217; Bradley & Cracknell (1972).
  */

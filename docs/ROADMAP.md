@@ -219,11 +219,14 @@ agent tool it exposes.**
   Γ_mag decomposition + basis-mode projection, shown in the Magnetic panel
   ([`irreps.ts`](../src/core/magnetic/irreps.ts)) — the BasIreps/SARAh capability
   for triclinic/monoclinic/orthorhombic, cyclic, and general-k cases.
+- **Done since:** standard **BNS/OG labels** — a candidate reads "P2₁'/m' ·
+  BNS 11.54 · OG 11.5.63" via exact operation-set matching against the bundled
+  ISO-MAG table ([`bnsOg.ts`](../src/core/magnetic/bnsOg.ts), types I/III;
+  non-standard settings fall back to the primed-operation label).
 - **Needed:** irrep tables for **non-abelian** little co-groups and the
   **projective small representations** for non-symmorphic BZ-boundary k (the
-  decomposition already flags when these are required); standard **BNS/OG labels**
-  via a lookup table so a candidate reads "P2₁'/m'" rather than a primed-operation
-  list; and the **star of k** (multi-arm domains).
+  decomposition already flags when these are required); the **star of k**
+  (multi-arm domains) with the type-IV (anti-translation) groups.
 - **Validation gate:** little group + allowed moments match Bilbao/ISODISTORT for
   known cases; k = 0 path reproduces today's candidate set.
 - **Tool exposed:** `enumerate_magnetic_symmetry(parent, k) → candidate groups +
