@@ -44,6 +44,8 @@ const CATEGORY: Record<ParameterKind, string> = {
   momentY: "Magnetic",
   momentZ: "Magnetic",
   momentMode: "Magnetic",
+  momentMagnitude: "Magnetic",
+  momentAngle: "Magnetic",
 };
 
 /** Fixed display order; only non-empty groups render, in this order. */

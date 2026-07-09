@@ -21,6 +21,7 @@ import { parseGsasCsvPattern } from "@/parsers/gsasPattern";
 import { isGsasHistogram, parseGsasHistogramPattern } from "@/parsers/gsasHistogram";
 import { detectDataFormat, type DetectedFormat } from "@/parsers/detectFormat";
 import type { ParameterBinding } from "@/core/refinement/types";
+import { isMomentParameterKind } from "@/core/refinement/types";
 import { startingPowderParams } from "@/app/loadData";
 import { ComputeClient } from "@/workers/computeClient";
 import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
@@ -319,8 +320,8 @@ export function App(): JSX.Element {
     setSession((s) => ({
       ...s,
       magnetic,
-      powderParams: [...s.powderParams.filter((p) => p.kind !== "momentMode"), ...momentParams.map((p) => ({ ...p, fixed: false }))],
-      powderBindings: [...s.powderBindings.filter((b) => b.kind !== "momentMode"), ...momentBindings],
+      powderParams: [...s.powderParams.filter((p) => !isMomentParameterKind(p.kind)), ...momentParams.map((p) => ({ ...p, fixed: false }))],
+      powderBindings: [...s.powderBindings.filter((b) => !isMomentParameterKind(b.kind)), ...momentBindings],
     }));
     setPowderResult(null);
     setStep(0);
@@ -440,7 +441,7 @@ export function App(): JSX.Element {
       // Magnetic-aware branch: when a magnetic model + moment parameters are
       // present, refine nuclear + moments together (shared scale) on the main
       // thread. (A Web Worker path is a future optimization; the solve is small.)
-      if (session.magnetic && powderParams.some((p) => p.kind === "momentMode")) {
+      if (session.magnetic && powderParams.some((p) => isMomentParameterKind(p.kind))) {
         await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
         const magParams = guided ? guidedPowderParams(powderParams) : powderParams;
         const problem = buildMagneticPowderProblem(structure, session.magnetic, pattern, magParams, pBindings, {

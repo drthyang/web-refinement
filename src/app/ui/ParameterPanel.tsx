@@ -41,6 +41,8 @@ const CATEGORY: Record<ParameterKind, string> = {
   momentY: "Magnetic",
   momentZ: "Magnetic",
   momentMode: "Magnetic",
+  momentMagnitude: "Magnetic",
+  momentAngle: "Magnetic",
 };
 
 const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "ADPs (thermal)", "Positions", "Occupancy", "Corrections", "Magnetic"];

@@ -71,6 +71,23 @@ A split orbit whose allowed dimension is 0 genuinely carries no moment (the
 viewer draws no arrow there and says why). Tested in
 [`orbitSplitting.test.ts`](../src/core/magnetic/orbitSplitting.test.ts).
 
+**Moment size across sublattices.** Every allowed mode is normalized to unit
+**Cartesian** length before parameters are built, so one unit of amplitude is
+1 µ_B along the mode whatever the cell metric (a raw null-space vector like
+(−1,1,0) is √3 µ_B long in a hexagonal cell — Mn₃Ga/Cm'cm' previously seeded
+one sublattice √3× larger than the other). On top of that, the **equal-|m|
+constraint** (`equalAmplitude`, the step-5 "same moment size" checkbox, on by
+default) replaces the per-mode amplitudes with ONE shared magnitude `|M|` per
+site — across all of its split orbits — plus per-orbit direction **angles**
+(degrees) over a metric-orthonormal frame:
+`m = |M|·(cos θ·(cos φ·ê₁ + sin φ·ê₂) + sin θ·ê₃)`. Every sublattice's moment
+has exactly the same size by construction (the physical prior for a single
+magnetic species, e.g. all six Mn of the Mn₃Ga triangular antiferromagnet),
+and the refinement fits sizes and directions instead of raw components.
+Tested in
+[`equalAmplitude.test.ts`](../src/core/magnetic/equalAmplitude.test.ts),
+including a powder refinement recovering the shared `|M|` and angle.
+
 **Tested:** k=0 candidate set (P2₁/m → P2₁'/m'), allowed-moment dimensions, the
 simple-AFM recovery ([`magneticSimpleAfm.test.ts`](../src/core/workflow/magneticSimpleAfm.test.ts)).
 

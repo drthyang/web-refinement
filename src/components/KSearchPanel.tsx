@@ -211,6 +211,10 @@ export function KSearchPanel({
   const [openIndices, setOpenIndices] = useState<ReadonlySet<number>>(new Set([2]));
   const [amps, setAmps] = useState<Record<string, number>>({});
   const [tieMoments, setTieMoments] = useState(true);
+  // Equal-|m| constraint (default on — the physical prior for one magnetic
+  // species): a single shared magnitude for every sublattice of a site, with
+  // per-orbit direction angles, instead of unconstrained per-mode amplitudes.
+  const [equalAmp, setEqualAmp] = useState(true);
 
   // The operations driving step 5, from whichever framework is active.
   const chosenOps = useMemo(() => {
@@ -256,9 +260,9 @@ export function KSearchPanel({
 
   const magBuild = useMemo(() => {
     if (!chosenOps) return null;
-    return buildMagneticModel(structure, k, [...selected], [...chosenOps], { moment: 2, tieSameSite: tieMoments });
+    return buildMagneticModel(structure, k, [...selected], [...chosenOps], { moment: 2, tieSameSite: tieMoments, equalAmplitude: equalAmp });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chosenOps, structure, k[0], k[1], k[2], selected, tieMoments]);
+  }, [chosenOps, structure, k[0], k[1], k[2], selected, tieMoments, equalAmp]);
 
   useEffect(() => {
     if (!magBuild) return;
@@ -711,7 +715,7 @@ export function KSearchPanel({
               <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
                 {magBuild.params.map((p) => (
                   <label key={p.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-                    <span style={{ color: theme.secondary }}>{p.label} (µ_B)</span>
+                    <span style={{ color: theme.secondary }}>{p.label} ({p.kind === "momentAngle" ? "°" : "µ_B"})</span>
                     <input
                       type="number"
                       step={0.1}
@@ -722,12 +726,18 @@ export function KSearchPanel({
                   </label>
                 ))}
               </div>
-              {hasSharedMagSite && (
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, color: theme.secondary }} title="Constrain co-located (disordered) magnetic ions to the same moment vector">
-                  <input type="checkbox" checked={tieMoments} onChange={(e) => setTieMoments(e.target.checked)} />
-                  Same moment on shared site
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, color: theme.secondary }} title="One shared |M| for every sublattice of a site (split orbits included) — all moments the same size by construction; per-orbit direction angles are refined instead of raw mode amplitudes">
+                  <input type="checkbox" checked={equalAmp} onChange={(e) => setEqualAmp(e.target.checked)} />
+                  Same moment size on all sites (shared |M|)
                 </label>
-              )}
+                {hasSharedMagSite && (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, color: theme.secondary }} title="Constrain co-located (disordered) magnetic ions to the same moment vector">
+                    <input type="checkbox" checked={tieMoments} onChange={(e) => setTieMoments(e.target.checked)} />
+                    Same moment on shared site
+                  </label>
+                )}
+              </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <button style={{ ...btn, marginTop: 0, opacity: canRefine && !refining ? 1 : 0.5 }} onClick={runRefine} disabled={!canRefine || refining}>
                   {refining ? "Refining…" : "Refine moments"}
