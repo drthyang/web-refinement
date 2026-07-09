@@ -50,7 +50,6 @@ import {
   MAGNETIC_COLOR,
 } from "@/visualization/reflectionTicks";
 import { WorkbenchHeader, type Step } from "@/app/ui/WorkbenchHeader";
-import { StatusBar } from "@/app/ui/StatusBar";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 // Lazy so three.js (~550 kB) only loads when the user opens the 3D view.
@@ -140,8 +139,10 @@ export function App(): JSX.Element {
   const [session, setSession] = useState<Session>(() => loadedSession(example.structure, example.pattern, example.instrument));
   const [powderResult, setPowderResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [refineKind, setRefineKind] = useState<"refine" | "guided" | null>(null);
   const [step, setStep] = useState(0);
+  // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
+  // active fit window when it changes.
+  const [focusFitToken, setFocusFitToken] = useState(0);
   // Optional refinement window; null = fit the full pattern. Reset when the
   // observed pattern changes (see effect below).
   const [fitRange, setFitRange] = useState<FitRangeSelection | null>(null);
@@ -150,9 +151,12 @@ export function App(): JSX.Element {
   const [plotMode, setPlotMode] = useState<"curves" | "structure">("curves");
   const [instrument, setInstrument] = useState<InstrumentParameters>(example.instrument);
   const [instrumentLoaded, setInstrumentLoaded] = useState(true);
-  const [message, setMessage] = useState<string>(
-    `Loaded Mn₃Ga POWGEN 600 K · ${example.pattern.points.length} pts · TOF (back-to-back-exponential profile) — free parameters and refine.`,
-  );
+  // The status bar under the header is gone (results and diagnostics live in
+  // the parameter panel / quality rail); status texts go to the console so
+  // load/refine errors are still traceable.
+  const setMessage = useCallback((text: string): void => {
+    console.info(`[status] ${text}`);
+  }, []);
   const client = useRef<ComputeClient>(new ComputeClient());
 
   // Live per-cycle refinement preview: the worker streams the calculated curve
@@ -432,7 +436,6 @@ export function App(): JSX.Element {
   /** Flat co-refinement of the currently-freed parameters. */
   async function runPowder(guided = false): Promise<void> {
     setBusy("powder");
-    setRefineKind(guided ? "guided" : "refine");
     try {
       // Magnetic-aware branch: when a magnetic model + moment parameters are
       // present, refine nuclear + moments together (shared scale) on the main
@@ -477,7 +480,6 @@ export function App(): JSX.Element {
     } finally {
       livePreview.current = null;
       setBusy(null);
-      setRefineKind(null);
     }
   }
 
@@ -560,7 +562,7 @@ export function App(): JSX.Element {
       const spec = buildPowderSpec(structure, parsed, tofInstrument, true, session.backgroundTerms, session.siteTies);
       setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
       setPowderResult(null);
-      setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag}. ${spec.params.length} parameters, back-to-back-exponential profile — click “Refine powder” or “Guided”. ${fmt.note}`);
+      setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag}. ${spec.params.length} parameters, back-to-back-exponential profile — click “Refine”. ${fmt.note}`);
       return;
     }
     const parsed = isGsasHist
@@ -580,7 +582,7 @@ export function App(): JSX.Element {
     }
     setPowderResult(null);
     const nParams = spec.params.length;
-    setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · unit=${fmt.xUnit} ${tag}. ${nParams} symmetry-allowed parameters. Scale auto-estimated — click “Refine powder” or “Guided”. ${fmt.note}`);
+    setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · unit=${fmt.xUnit} ${tag}. ${nParams} symmetry-allowed parameters. Scale auto-estimated — click “Refine”. ${fmt.note}`);
   }
 
   function onLoadInstrument(file: File): void {
@@ -702,9 +704,14 @@ export function App(): JSX.Element {
         onExportCsv={exportCsv}
         onExportProject={exportProject}
       />
-      <StatusBar message={message} />
-      <main className="wb-main" style={{ flex: 1 }}>
-        {renderStep()}
+      {/* Both step panels stay mounted; tabs only toggle visibility, so the
+          magnetic-analysis state (k, framework, group/irrep picks) survives
+          switching to the refinement page and back. */}
+      <main className="wb-main" style={{ flex: 1, display: step === 0 ? undefined : "none" }}>
+        {renderStep(0)}
+      </main>
+      <main className="wb-main" style={{ flex: 1, display: step === 1 ? undefined : "none" }}>
+        {renderStep(1)}
       </main>
       <div style={disclaimerBar}>
         Early browser-native refinement workbench — results for publication must be validated against established tools.
@@ -713,15 +720,23 @@ export function App(): JSX.Element {
     </div>
   );
 
-  function renderStep(): JSX.Element {
-    switch (step) {
+  function renderStep(which: number): JSX.Element {
+    switch (which) {
       case 0: // Setup & refinement: quality rail | plot | parameter panel.
         return (
           <>
             <SummaryCards cards={summaryCards} />
             <div className="wb-work3">
               <div className="wb-card-quality" style={{ ...themeCard, padding: "14px 16px", height: "clamp(500px, 64vh, 760px)", overflowY: "auto" }}>
-                <QualityPanel powderResult={powderResult} structure={structure} pattern={pattern} params={powderParams} bindings={pBindings} profile={session.powderProfile} />
+                <QualityPanel
+                  powderResult={powderResult}
+                  structure={structure}
+                  pattern={pattern}
+                  params={powderParams}
+                  bindings={pBindings}
+                  profile={session.powderProfile}
+                  wRpct={busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(2) : wRpct}
+                />
               </div>
               <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 64vh, 760px)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
@@ -732,17 +747,19 @@ export function App(): JSX.Element {
                     {plotMode === "curves" && (
                       <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
                     )}
+                    {plotMode === "curves" && !tofViewOnly && (
+                      <button
+                        style={{ ...toolbarBtn, ...(fitRangeActive ? {} : { opacity: 0.45, cursor: "default" }) }}
+                        disabled={!fitRangeActive}
+                        title={fitRangeActive
+                          ? "Zoom the plot onto the active fit range"
+                          : "Set a fit range first (blue handles), then this zooms the view onto it"}
+                        onClick={() => setFocusFitToken((t) => t + 1)}
+                      >
+                        ⊡ Fit range
+                      </button>
+                    )}
                     <ViewModeToggle value={plotMode} onChange={setPlotMode} />
-                    <button
-                      style={magHandoffBtn}
-                      title="Open the magnetic symmetry analysis with the current refined structure (lattice, positions, occupancies)"
-                      onClick={() => {
-                        setStep(1);
-                        setMessage("Refined structure passed to the magnetic symmetry analysis — k-search and symmetry now use the current parameter values.");
-                      }}
-                    >
-                      Magnetic analysis →
-                    </button>
                   </div>
                 </div>
                 {plotMode === "structure" ? (
@@ -766,9 +783,9 @@ export function App(): JSX.Element {
                     <WorkbenchPlot
                       curves={plotCurves}
                       xLabel={displayXLabel}
-                      wRpct={busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(2) : wRpct}
                       fitRange={displayFitRange}
                       phases={phaseTicks}
+                      focusFitToken={focusFitToken}
                       {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                     />
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
@@ -831,10 +848,12 @@ export function App(): JSX.Element {
                 esd={powderResult?.esd}
                 onChange={patchPowder}
                 onRefine={() => runPowder(false)}
-                onGuided={() => runPowder(true)}
                 onReset={resetPowderParams}
+                onMagnetic={() => {
+                  setStep(1);
+                  setMessage("Refined structure passed to the magnetic symmetry analysis — k-search and symmetry now use the current parameter values.");
+                }}
                 busy={busy !== null}
-                busyKind={busy === "powder" ? refineKind : null}
                 result={powderResult}
                 disabled={tofViewOnly}
               />
@@ -870,6 +889,22 @@ export function App(): JSX.Element {
   }
 }
 
+/**
+ * Judge a fit by wR relative to R_exp — the ratio *is* the GoF (Toby 2006,
+ * "R factors in Rietveld analysis", Powder Diffr. 21, 67: the absolute wR
+ * depends on background and counting statistics; only the comparison with
+ * R_exp is meaningful). Bands: ≈1–1.5 good (green), 1.5–2.5 mediocre (amber),
+ * > 2.5 poor (red); below 1 the σ's are overestimated or the fit is
+ * over-parameterized (amber, not green — "too good" is a warning).
+ */
+function qualityInk(gof: number | null): string {
+  if (gof === null || !Number.isFinite(gof)) return theme.secondary;
+  if (gof < 1) return theme.noteInk;
+  if (gof <= 1.5) return theme.okInk;
+  if (gof <= 2.5) return theme.noteInk;
+  return theme.warnInk;
+}
+
 function QualityPanel({
   structure,
   powderResult,
@@ -877,6 +912,7 @@ function QualityPanel({
   params,
   bindings,
   profile,
+  wRpct,
 }: {
   structure: StructureModel;
   powderResult: RefinementResult | null;
@@ -884,6 +920,8 @@ function QualityPanel({
   params: readonly RefinementParameter[];
   bindings: readonly ParameterBinding[];
   profile: PowderProfile;
+  /** The page's single live wR readout (percent, already formatted). */
+  wRpct: string;
 }): JSX.Element {
   // Validation plots (Rietveld obs/calc + normal probability) for the current fit.
   const diagnostics = useMemo(() => {
@@ -893,19 +931,34 @@ function QualityPanel({
     const npp = normalProbabilityPlot(weightedResiduals(curves.yObs, curves.yCalc, sigmas));
     return { obsCalc, npp };
   }, [structure, pattern, params, bindings, profile]);
+
+  // R_exp (a property of the data + weights) anchors the colors; the live wR
+  // over it is the live GoF. Before the first refinement there is no R_exp,
+  // so the readouts stay neutral rather than pretending to judge.
+  const rExp = powderResult?.agreement.rExpected;
+  const liveGof = rExp && rExp > 0 ? Number(wRpct) / (100 * rExp) : null;
+  const gof = powderResult ? (powderResult.agreement.goodnessOfFit ?? null) : null;
   return (
     <div>
       <span style={themeLabel}>Refinement quality</span>
       <table style={{ fontSize: fz.body, marginTop: 8 }}>
         <tbody>
-          <tr>
+          <tr title="Weighted profile R: live value for the current parameters, colored by wR/R_exp (Toby 2006)">
+            <td style={kcell}>wR</td>
+            <td style={{ fontFamily: themeMono, fontWeight: 600, color: qualityInk(liveGof) }}>{wRpct}%</td>
+          </tr>
+          <tr title="Goodness of fit = wR/R_exp at the last refinement; ≈1 means the fit is consistent with the data uncertainties">
             <td style={kcell}>GoF</td>
-            <td>{powderResult ? (powderResult.agreement.goodnessOfFit ?? 0).toFixed(2) : "not refined"}</td>
+            <td style={{ color: qualityInk(gof) }}>
+              {gof !== null ? gof.toFixed(2) : "not refined"}
+            </td>
           </tr>
         </tbody>
       </table>
       <p style={{ fontSize: fz.small, color: theme.secondary, marginTop: 6 }}>
-        GoF near 1 = fit consistent with the data uncertainties. wR is shown live on the pattern.
+        {rExp
+          ? `Judged against R_exp = ${(100 * rExp).toFixed(2)}% (Toby 2006): wR/R_exp ≈ 1–1.5 good, ≤ 2.5 mediocre, above poor; below 1 suggests overestimated σ or over-fitting.`
+          : "GoF near 1 = fit consistent with the data uncertainties; colors appear after the first refinement (they need R_exp)."}
       </p>
       <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} stacked />
       <p style={{ fontSize: fz.micro, color: theme.secondary, marginTop: 8 }}>
@@ -993,7 +1046,7 @@ const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 
 const kcell: React.CSSProperties = { padding: "2px 10px 2px 0", color: theme.secondary, verticalAlign: "top" };
 const stepHelp: React.CSSProperties = { fontSize: 13, color: theme.secondary, marginTop: 0 };
 const smallBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "1px 9px", fontSize: 11, cursor: "pointer", marginLeft: 6 };
-const magHandoffBtn: React.CSSProperties = { border: `1px solid ${theme.primary}`, background: "#fff", color: theme.primary, borderRadius: 8, padding: "3px 11px", fontSize: 11, fontWeight: 600, fontFamily: themeMono, cursor: "pointer" };
+const toolbarBtn: React.CSSProperties = { border: `1px solid ${theme.primary}`, background: "#fff", color: theme.primary, borderRadius: 8, padding: "3px 11px", fontSize: 11, fontWeight: 600, fontFamily: themeMono, cursor: "pointer" };
 const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "2px 6px", fontSize: 12, color: theme.ink, cursor: "pointer" };
 const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };
 const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderTop: `1px solid ${theme.warnBorder}`, color: theme.warnInk };

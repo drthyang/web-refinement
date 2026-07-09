@@ -36,11 +36,12 @@ build sequence.
 ## The second goal: lowering the barrier to entry
 
 Starting a Rietveld or single-crystal refinement today means choosing among
-several mature packages — GSAS-II, Jana2020, FullProf, TOPAS — and each choice
-pulls in its own ecosystem: its own data formats, its own instrument-parameter
-files, its own split between single-crystal and powder workflows, and its own
-formalism for magnetic structures (magnetic space groups in one, irreducible
-representations in another). Some closed-source options are effectively
+several mature packages — GSAS-II, Jana2020, FullProf, TOPAS on the powder
+side; SHELX and Olex2 for single crystals — and each choice pulls in its own
+ecosystem: its own data formats, its own instrument-parameter files, its own
+split between single-crystal and powder workflows, and its own formalism for
+magnetic structures (magnetic space groups in one, irreducible representations
+in another). Some closed-source options are effectively
 Windows-only, which puts them out of reach on Unix/Linux systems. None of this
 is any package's fault — each grew deep to serve its facility and its
 community, and they remain the tools of record that this project validates

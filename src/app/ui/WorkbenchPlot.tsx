@@ -19,11 +19,12 @@ export interface FitRangeSelection {
 interface Props {
   readonly curves: PowderCurves;
   readonly xLabel: string;
-  readonly wRpct: string;
   readonly fitRange?: FitRangeSelection;
   readonly onFitRangeChange?: (range: FitRangeSelection) => void;
   readonly phases?: readonly PhaseTicks[];
   readonly showBackground?: boolean;
+  /** Increment to zoom the view onto the active fit range (no-op without one). */
+  readonly focusFitToken?: number;
 }
 
 // Fixed plot geometry (SVG user units); the SVG stretches to its container.
@@ -66,11 +67,11 @@ function formatX(v: number, span: number): string {
 export function WorkbenchPlot({
   curves,
   xLabel,
-  wRpct,
   fitRange,
   onFitRangeChange,
   phases,
   showBackground = true,
+  focusFitToken = 0,
 }: Props): JSX.Element {
   const svgRef = useRef<SVGSVGElement>(null);
   const draggingGrip = useRef(false);
@@ -81,6 +82,14 @@ export function WorkbenchPlot({
 
   const [view, setView] = useState<{ min: number; max: number } | null>(null);
   const [rubber, setRubber] = useState<{ x0: number; x1: number } | null>(null);
+
+  // Click a Bragg tick to identify its reflection (like the F_obs/F_calc
+  // points). The pick is invalidated when the tick *content* changes (new
+  // structure/phase list) — not on mere prop-identity churn, and not on an
+  // x-unit switch, where the same index still means the same reflection.
+  const [pickedTick, setPickedTick] = useState<{ row: number; i: number } | null>(null);
+  const phasesSig = (phases ?? []).map((p) => `${p.id}:${p.ticks.length}`).join("|");
+  useEffect(() => setPickedTick(null), [phasesSig]);
 
   // The viewBox width tracks the rendered pixel aspect ratio so the plot fills
   // its (width-controlled, fixed-height) box with SQUARE units — no horizontal
@@ -111,6 +120,17 @@ export function WorkbenchPlot({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to the domain
   }, [fullMin, fullMax]);
+
+  // Explicit "focus the fit range" command from the toolbar: zoom onto the
+  // active fit window (small pad), same framing the unit-switch default uses.
+  useEffect(() => {
+    if (focusFitToken === 0) return;
+    if (fitRange && (fitRange.min > fullMin + 1e-9 || fitRange.max < fullMax - 1e-9)) {
+      const pad = (fitRange.max - fitRange.min) * 0.08;
+      setView({ min: Math.max(fullMin, fitRange.min - pad), max: Math.min(fullMax, fitRange.max + pad) });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on the command token only
+  }, [focusFitToken]);
 
   const vlo = view ? view.min : fullMin;
   const vhi = view ? view.max : fullMax;
@@ -183,20 +203,40 @@ export function WorkbenchPlot({
       const y2 = TICK_BOT + row * TICK_ROW;
       return (
         <g key={phase.id} stroke={phase.color}>
-          {phase.ticks.map((t, i) =>
-            t.x >= vlo && t.x <= vhi ? (
-              <g key={i} className="wb-tick">
-                <line className="wb-mark" x1={mx(t.x)} y1={y1} x2={mx(t.x)} y2={y2} strokeWidth={1} />
-                <line x1={mx(t.x)} y1={y1} x2={mx(t.x)} y2={y2} stroke="transparent" strokeWidth={7}>
+          {phase.ticks.map((t, i) => {
+            if (t.x < vlo || t.x > vhi) return null;
+            const picked = pickedTick?.row === row && pickedTick.i === i;
+            return (
+              <g
+                key={i}
+                className="wb-tick"
+                style={{ cursor: "pointer" }}
+                onClick={() => setPickedTick(picked ? null : { row, i })}
+              >
+                <line
+                  className="wb-mark"
+                  x1={mx(t.x)} y1={picked ? y1 - 3 : y1} x2={mx(t.x)} y2={picked ? y2 + 3 : y2}
+                  strokeWidth={1}
+                  {...(picked ? { style: { strokeWidth: 2.6, strokeOpacity: 1 } } : {})}
+                />
+                <line x1={mx(t.x)} y1={y1 - 4} x2={mx(t.x)} y2={y2 + 4} stroke="transparent" strokeWidth={9}>
                   <title>{`${phase.label}  (${t.hkl})  d ${t.d.toFixed(3)} Å`}</title>
                 </line>
               </g>
-            ) : null,
-          )}
+            );
+          })}
         </g>
       );
     });
-  }, [phases, vlo, vhi, vspan, XW]);
+  }, [phases, vlo, vhi, vspan, XW, pickedTick]);
+
+  // The reflection behind the picked tick, for the corner readout.
+  const pickedInfo = useMemo(() => {
+    if (!pickedTick || !phases) return null;
+    const phase = phases[pickedTick.row];
+    const t = phase?.ticks[pickedTick.i];
+    return phase && t ? { phase, t } : null;
+  }, [pickedTick, phases]);
 
   // Y / X nice ticks.
   const yStep = niceNum(yTop / 4, true);
@@ -389,11 +429,17 @@ export function WorkbenchPlot({
           <text x={X0 + 188} y={27}>hkl</text>
         </g>
       </svg>
-      {/* corner overlays: wR and zoom controls (HTML on top of the SVG) */}
-      <div style={wrOverlay}>
-        <span style={{ ...uppercase, marginRight: 6 }}>wR</span>
-        <span style={{ fontSize: 16, fontWeight: 600, color: color.primary, fontFamily: mono }}>{wRpct}%</span>
-      </div>
+      {/* corner overlays (HTML on top of the SVG). wR lives in the
+          Refinement-quality rail, judged against R_exp. */}
+      {pickedInfo && (
+        <div style={tickPickOverlay} onClick={() => setPickedTick(null)} title="Click to dismiss (or click the tick again)">
+          <span style={{ width: 9, height: 9, borderRadius: 2, background: pickedInfo.phase.color, display: "inline-block" }} />
+          <span style={{ fontFamily: mono, fontSize: 12, color: color.ink }}>
+            ({pickedInfo.t.hkl}) · d {pickedInfo.t.d.toFixed(4)} Å
+          </span>
+          <span style={{ fontSize: 11, color: color.secondary }}>{pickedInfo.phase.label}</span>
+        </div>
+      )}
       {zoomed && (
         <div style={zoomOverlay}>
           <span style={{ fontFamily: mono, fontSize: 11, color: color.secondary }}>
@@ -421,6 +467,5 @@ function SmallButton({ children, onClick }: { children: React.ReactNode; onClick
   );
 }
 
-const uppercase: CSSProperties = { fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: color.faint };
-const wrOverlay: CSSProperties = { position: "absolute", top: 6, right: 8, display: "flex", alignItems: "baseline", background: "rgba(255,253,249,0.85)", borderRadius: 8, padding: "2px 8px" };
 const zoomOverlay: CSSProperties = { position: "absolute", bottom: 6, right: 8, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,253,249,0.85)", borderRadius: 8, padding: "3px 6px" };
+const tickPickOverlay: CSSProperties = { position: "absolute", top: 6, right: 8, display: "flex", alignItems: "center", gap: 7, background: "rgba(255,253,249,0.92)", border: `1px solid ${color.border}`, borderRadius: 8, padding: "3px 9px", cursor: "pointer" };

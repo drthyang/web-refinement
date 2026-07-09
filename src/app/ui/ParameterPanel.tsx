@@ -2,7 +2,8 @@
  * Powder-parameter panel, rebuilt to the design handoff spec: collapsible
  * parameter groups (caret + free-count + per-group "all" checkbox), rows with a
  * numeric input / esd / free-fixed-calib status pill and a blue left accent when
- * free, and a footer with Refine / Guided / Reset plus a result banner and a
+ * free. Reset lives in the panel header; the footer pairs the primary Refine
+ * action with the magnetic-analysis handoff, plus a result banner and a
  * collapsible refinement-history table. Driven by the real refinement params.
  */
 
@@ -52,15 +53,15 @@ interface Props {
   readonly esd?: Readonly<Record<string, number>> | undefined;
   readonly onChange: (id: string, patch: Partial<RefinementParameter>) => void;
   readonly onRefine: () => void;
-  readonly onGuided: () => void;
   readonly onReset: () => void;
+  /** Hand the refined structure to the magnetic symmetry analysis page. */
+  readonly onMagnetic: () => void;
   readonly busy: boolean;
-  readonly busyKind: "refine" | "guided" | null;
   readonly result: RefinementResult | null;
   readonly disabled?: boolean;
 }
 
-export function ParameterPanel({ params, esd, onChange, onRefine, onGuided, onReset, busy, busyKind, result, disabled }: Props): JSX.Element {
+export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMagnetic, busy, result, disabled }: Props): JSX.Element {
   const groups = useMemo(() => {
     const byGroup = new Map<string, RefinementParameter[]>();
     for (const p of params) {
@@ -82,9 +83,17 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onGuided, onRe
 
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", overflow: "hidden", height: "100%" }}>
-      <div style={{ display: "flex", alignItems: "center", padding: "10px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
         <span style={uppercaseLabel}>Powder parameters</span>
         <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 11, color: color.faint }}>{freeCount} of {params.length} free</span>
+        <button
+          style={{ ...secondaryButton, padding: "3px 11px", fontSize: 11, ...(busy ? disabledStyle : {}) }}
+          disabled={busy}
+          onClick={onReset}
+          title="Reset all parameters to their initial values"
+        >
+          Reset
+        </button>
       </div>
       <div style={{ ...colHeader }}>
         <span>Parameter</span>
@@ -118,13 +127,17 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onGuided, onRe
       </div>
       <div style={footer}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={{ ...primaryButton, ...(busy || disabled ? disabledStyle : {}) }} disabled={busy || disabled} onClick={onRefine}>
-            {busyKind === "refine" ? "Refining…" : "Refine selected"}
+          <button style={{ ...primaryButton, ...(busy || disabled ? disabledStyle : {}) }} disabled={busy || disabled} onClick={onRefine} title="Refine the free parameters against the loaded pattern">
+            {busy ? "Refining…" : "Refine"}
           </button>
-          <button style={{ ...secondaryButton, padding: "7px 13px", ...(busy || disabled ? disabledStyle : {}) }} disabled={busy || disabled} onClick={onGuided} title="Staged: scale → background → cell → profile → ADP → positions">
-            {busyKind === "guided" ? "Running stages…" : "Guided (staged)"}
+          <button
+            style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? disabledStyle : {}) }}
+            disabled={busy}
+            onClick={onMagnetic}
+            title="Open the magnetic symmetry analysis with the current refined structure (lattice, positions, occupancies)"
+          >
+            Magnetic analysis →
           </button>
-          <button style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? disabledStyle : {}) }} disabled={busy} onClick={onReset}>Reset</button>
         </div>
         {result && <ResultBanner result={result} />}
       </div>

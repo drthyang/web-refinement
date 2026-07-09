@@ -82,8 +82,8 @@ export function StructureView({
   // The magnetic (super)cell is the default view whenever k makes one (> 1×1×1):
   // a magnetic refinement should open showing the full magnetic repeat.
   const [magneticCell, setMagneticCell] = useState(true);
-  const [lightLevel, setLightLevel] = useState(1);
-  const [finish, setFinish] = useState<Finish>("standard");
+  const [lightLevel, setLightLevel] = useState(2);
+  const [finish, setFinish] = useState<Finish>("glossy");
 
   // Keep the user's camera across scene rebuilds (overlay toggles, moment
   // edits); a fresh default framing only when the structure/cell/supercell
