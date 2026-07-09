@@ -150,6 +150,9 @@ export function App(): JSX.Element {
   // Display-only x-axis unit; null = the pattern's native unit. Reset on load.
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit | null>(null);
   const [plotMode, setPlotMode] = useState<"curves" | "structure">("curves");
+  // Reflection clicked in the F_obs/F_calc plot, spotlighted in the pattern
+  // plot; null = nothing highlighted.
+  const [highlight, setHighlight] = useState<{ hkl: string; kind: "nuclear" | "magnetic" } | null>(null);
   const [instrument, setInstrument] = useState<InstrumentParameters>(example.instrument);
   const [instrumentLoaded, setInstrumentLoaded] = useState(true);
   // The status bar under the header is gone (results and diagnostics live in
@@ -736,7 +739,9 @@ export function App(): JSX.Element {
                   params={powderParams}
                   bindings={pBindings}
                   profile={session.powderProfile}
+                  magnetic={session.magnetic ?? null}
                   wRpct={busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(2) : wRpct}
+                  onHighlight={setHighlight}
                 />
               </div>
               <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 64vh, 760px)" }}>
@@ -787,6 +792,7 @@ export function App(): JSX.Element {
                       fitRange={displayFitRange}
                       phases={phaseTicks}
                       focusFitToken={focusFitToken}
+                      highlight={highlight}
                       {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                     />
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
@@ -913,7 +919,9 @@ function QualityPanel({
   params,
   bindings,
   profile,
+  magnetic,
   wRpct,
+  onHighlight,
 }: {
   structure: StructureModel;
   powderResult: RefinementResult | null;
@@ -921,17 +929,21 @@ function QualityPanel({
   params: readonly RefinementParameter[];
   bindings: readonly ParameterBinding[];
   profile: PowderProfile;
+  /** Magnetic model, if any — adds magnetic satellites to the F_obs/F_calc plot. */
+  magnetic?: MagneticModel | null;
   /** The page's single live wR readout (percent, already formatted). */
   wRpct: string;
+  /** Spotlight a reflection (its "h k l" + kind) in the pattern plot; null clears it. */
+  onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic" } | null) => void;
 }): JSX.Element {
   // Validation plots (Rietveld obs/calc + normal probability) for the current fit.
   const diagnostics = useMemo(() => {
-    const obsCalc = powderReflectionObsCalc(structure, pattern, params, bindings, profile);
+    const obsCalc = powderReflectionObsCalc(structure, pattern, params, bindings, profile, magnetic ?? null);
     const curves = powderCurves(structure, pattern, params, bindings, profile);
     const sigmas = pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1));
     const npp = normalProbabilityPlot(weightedResiduals(curves.yObs, curves.yCalc, sigmas));
     return { obsCalc, npp };
-  }, [structure, pattern, params, bindings, profile]);
+  }, [structure, pattern, params, bindings, profile, magnetic]);
 
   // R_exp (a property of the data + weights) anchors the colors; the live wR
   // over it is the live GoF. Before the first refinement there is no R_exp,
@@ -961,7 +973,7 @@ function QualityPanel({
           ? `Judged against R_exp = ${(100 * rExp).toFixed(2)}% (Toby 2006): wR/R_exp ≈ 1–1.5 good, ≤ 2.5 mediocre, above poor; below 1 suggests overestimated σ or over-fitting.`
           : "GoF near 1 = fit consistent with the data uncertainties; colors appear after the first refinement (they need R_exp)."}
       </p>
-      <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} stacked />
+      <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} stacked {...(onHighlight ? { onHighlight } : {})} />
       <p style={{ fontSize: fz.micro, color: theme.secondary, marginTop: 8 }}>
         F_obs vs F_calc flags individual bad reflections; the normal probability plot
         (Abrahams &amp; Keve 1971) is straight with slope 1 for an ideal fit &amp; weights.

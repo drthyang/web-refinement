@@ -25,6 +25,13 @@ interface Props {
   readonly showBackground?: boolean;
   /** Increment to zoom the view onto the active fit range (no-op without one). */
   readonly focusFitToken?: number;
+  /**
+   * A reflection spotlighted from elsewhere (e.g. a point clicked in the
+   * F_obs/F_calc plot): its hkl ("h k l") and kind. Draws an arrow + guide line
+   * down to its Bragg position (on the matching phase row) and pans the view to
+   * reveal it if it is off-screen.
+   */
+  readonly highlight?: { readonly hkl: string; readonly kind: "nuclear" | "magnetic" } | null;
 }
 
 // Fixed plot geometry (SVG user units); the SVG stretches to its container.
@@ -72,6 +79,7 @@ export function WorkbenchPlot({
   phases,
   showBackground = true,
   focusFitToken = 0,
+  highlight: highlightSel = null,
 }: Props): JSX.Element {
   const svgRef = useRef<SVGSVGElement>(null);
   const draggingGrip = useRef(false);
@@ -238,6 +246,38 @@ export function WorkbenchPlot({
     return phase && t ? { phase, t } : null;
   }, [pickedTick, phases]);
 
+  // A reflection spotlighted from elsewhere (the F_obs/F_calc scatter): locate
+  // its Bragg tick so we can point an arrow at that peak in the pattern. Prefer
+  // the phase row whose *kind* matches (nuclear vs magnetic), so a magnetic
+  // satellite that shares an hkl with a nuclear peak (k = 0) lights the magnetic
+  // row; fall back to any hkl match otherwise.
+  const highlight = useMemo(() => {
+    if (!highlightSel || !phases) return null;
+    const rowsInOrder = [
+      ...phases.map((p, row) => ({ p, row })).filter(({ p }) => p.kind === highlightSel.kind),
+      ...phases.map((p, row) => ({ p, row })).filter(({ p }) => p.kind !== highlightSel.kind),
+    ];
+    for (const { p, row } of rowsInOrder) {
+      const t = p.ticks.find((tk) => tk.hkl === highlightSel.hkl);
+      if (t) return { x: t.x, hkl: t.hkl, d: t.d, color: p.color, row };
+    }
+    return null;
+  }, [highlightSel, phases]);
+
+  // Pan to reveal a freshly-spotlighted peak when it sits outside the zoom
+  // window — keyed on the pick only, so re-zooming/panning doesn't fight the user.
+  useEffect(() => {
+    if (!highlight) return;
+    if (highlight.x >= vlo && highlight.x <= vhi) return;
+    const span = vhi - vlo;
+    let min = highlight.x - span / 2;
+    let max = highlight.x + span / 2;
+    if (min < fullMin) { min = fullMin; max = fullMin + span; }
+    if (max > fullMax) { max = fullMax; min = fullMax - span; }
+    setView({ min: Math.max(min, fullMin), max: Math.min(max, fullMax) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to the pick only
+  }, [highlightSel?.hkl, highlightSel?.kind]);
+
   // Y / X nice ticks.
   const yStep = niceNum(yTop / 4, true);
   const yTicks: number[] = [];
@@ -366,6 +406,39 @@ export function WorkbenchPlot({
             wide transparent hit line so it brightens on hover (see <style>). */}
         <style>{".wb-tick .wb-mark{stroke-opacity:.7}.wb-tick:hover .wb-mark{stroke-opacity:1;stroke-width:2}"}</style>
         {braggTicks}
+
+        {/* Spotlight for a reflection picked in the F_obs/F_calc plot: an arrow
+            at the top, a dashed guide through the intensity region, and a bold
+            tick on the matching Bragg row — linking the scatter point to its
+            peak. (Off-screen picks are panned into view by the effect above.) */}
+        {highlight && highlight.x >= vlo && highlight.x <= vhi && (() => {
+          const hx = sx(highlight.x);
+          const tickY2 = TICK_BOT + highlight.row * TICK_ROW + 3;
+          const right = hx > (X0 + X1) / 2;
+          return (
+            <g pointerEvents="none">
+              {/* ink (not primary — that equals the calc/hkl blue) so the guide
+                  reads over the blue calc curve; matches the scatter's pick ring. */}
+              <line x1={hx} y1={TOP + 12} x2={hx} y2={tickY2} stroke={color.ink} strokeWidth={1.1} strokeDasharray="3 3" opacity={0.55} />
+              <path d={`M ${hx - 5} ${TOP} L ${hx + 5} ${TOP} L ${hx} ${TOP + 11} Z`} fill={color.ink} />
+              <line x1={hx} y1={TICK_TOP + highlight.row * TICK_ROW - 3} x2={hx} y2={tickY2} stroke={highlight.color} strokeWidth={2.6} />
+              <text
+                x={right ? hx - 8 : hx + 8}
+                y={TOP + 26}
+                textAnchor={right ? "end" : "start"}
+                fontSize={11}
+                fontFamily={mono}
+                fontWeight={600}
+                fill={color.ink}
+                stroke={color.raised}
+                strokeWidth={3}
+                paintOrder="stroke"
+              >
+                {highlight.hkl}
+              </text>
+            </g>
+          );
+        })()}
 
         {/* excluded-region scrims (dim data outside the fit range) */}
         {fitActive && (
