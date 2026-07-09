@@ -293,30 +293,44 @@ agent tool it exposes.**
 - **Goal:** turn the profile and intensities into the *microstructure* a
   materials study reports — quantitative crystallite size, microstrain, and
   preferred orientation / texture — not merely a lower wR.
-- **Exists:** **isotropic** size (Scherrer, Γ_L ∝ 1/cosθ, the `X` term) and
-  **isotropic** microstrain (Γ_L ∝ tanθ, the `Y` term) via the Thompson–Cox–
-  Hastings Lorentzian; single-axis **March–Dollase** preferred orientation; and
-  Debye–Scherrer cylinder absorption
-  ([`diffraction/profile.ts`](../src/core/diffraction/profile.ts),
-  [`diffraction/intensity.ts`](../src/core/diffraction/intensity.ts)).
-- **Needed:**
-  - **Anisotropic size** broadening — an ellipsoidal or spherical-harmonic
-    crystallite-shape model giving hkl-dependent Γ_L (Scherrer per direction).
-  - **Anisotropic microstrain** — the Stephens (1999) phenomenological
-    S_HKL model for direction-dependent strain broadening (the standard for
-    non-uniform strain in Rietveld).
-  - **Size–strain separation + report** — deconvolve the instrument resolution
-    (from a LaB₆/CeO₂/Si standard) and derive volume-weighted ⟨D⟩ and microstrain
-    ε (integral-breadth / Williamson–Hall).
-  - **General texture** — a spherical-harmonic ODF (arbitrary sample/crystal
-    symmetry, multiple poles) beyond the single-axis March–Dollase fibre texture.
-  - **Further corrections** — secondary **extinction**, **microabsorption**
-    (Brindley), and flat-plate / other absorption geometries.
+- **Exists:** isotropic size + microstrain (TCH Lorentzian `X`/`Y`), single-axis
+  **March–Dollase** preferred orientation, Debye–Scherrer cylinder absorption
+  ([`profile.ts`](../src/core/diffraction/profile.ts),
+  [`intensity.ts`](../src/core/diffraction/intensity.ts)); **secondary
+  extinction** (SHELXL EXTI, shared with M7). **Now also, landed:**
+  - **Size–strain extraction + instrument deconvolution**
+    ([`microstructure.ts`](../src/core/diffraction/microstructure.ts)):
+    Scherrer ⟨D⟩ = 18000·K·λ/(π·X) and Williamson–Hall ε = π·Y/72000 from the
+    refined Lorentzian terms (GSAS-II-consistent), Lorentzian-breadth instrument
+    subtraction, esd propagation, and a model-independent Williamson–Hall
+    linear-fit variant.
+  - **Anisotropic microstrain — Stephens (1999)**
+    ([`anisoStrain.ts`](../src/core/diffraction/anisoStrain.ts)): the S_HKL
+    quartic-variance model, with the symmetry-allowed terms **computed** by
+    projecting the 15 quartic monomials onto the Laue group (Reynolds projector)
+    — reproduces Stephens' counts for every class (incl. hexagonal/trigonal)
+    from the operations alone. Gaussian broadening added in quadrature.
+  - **Anisotropic size — uniaxial/spheroidal**
+    ([`anisoSize.ts`](../src/core/diffraction/anisoSize.ts)): X(hkl) = X_⊥ +
+    (X_∥−X_⊥)·cos²ψ about a unique axis (ψ from the reciprocal metric), a strict
+    generalisation of the isotropic Scherrer term.
+  - **Refinement integration**: new `stephensStrain`/`anisoSizePerp`/
+    `anisoSizePar` parameter kinds through `applyParameters` → `placePeaks`
+    (hkl-dependent, cached invariants), emitted by `buildStructureRefinement` and
+    unlocked by a new **microstructure** stage; grouped under "Microstructure" in
+    the parameter tables. Design + formulas + references in
+    [`MICROSTRUCTURE.md`](./MICROSTRUCTURE.md).
+- **Needed:** spherical-harmonic (full ellipsoidal) size; **general texture** —
+  a spherical-harmonic ODF beyond single-axis March–Dollase; **microabsorption**
+  (Brindley) and flat-plate absorption; a size–strain **report + UI** (⟨D⟩, ε
+  with esds, Williamson–Hall plot).
 - **Validation gate:** recover a known size/strain from a NIST line-profile
   standard (LaB₆ 660); March–Dollase and Stephens coefficients matched against
-  GSAS-II on the same pattern.
-- **Tool exposed:** `refine_microstructure(model, data)`,
-  `extract_size_strain(result) → {⟨D⟩, ε}`, `refine_texture(model, data)`.
+  GSAS-II on the same pattern. (Formula-level constants ✅ vs GSAS-II; real-
+  standard gate open.)
+- **Tool exposed:** `refine_microstructure(model, data)` (✅ core),
+  `extract_size_strain(result) → {⟨D⟩, ε}` (✅ core), `refine_texture(model, data)`
+  (planned).
 
 ### M7 — Single-crystal refinement 🚧
 

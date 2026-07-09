@@ -37,6 +37,9 @@ const CATEGORY: Record<ParameterKind, string> = {
   poRatio: "Corrections",
   absorption: "Corrections",
   extinction: "Corrections",
+  stephensStrain: "Microstructure",
+  anisoSizePerp: "Microstructure",
+  anisoSizePar: "Microstructure",
   magneticScale: "Magnetic",
   momentX: "Magnetic",
   momentY: "Magnetic",
@@ -46,7 +49,7 @@ const CATEGORY: Record<ParameterKind, string> = {
   momentAngle: "Magnetic",
 };
 
-const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "ADPs (thermal)", "Positions", "Occupancy", "Corrections", "Magnetic"];
+const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic"];
 
 /** difC/difA/difB come from instrument calibration — shown but not togglable. */
 const isLocked = (p: RefinementParameter): boolean => p.kind === "tofCalibration";

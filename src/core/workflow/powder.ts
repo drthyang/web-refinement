@@ -21,6 +21,8 @@ import { braggTheta } from "@/core/crystal/unitCell";
 import { dFromTof } from "@/core/diffraction/instrument";
 import { synthesizePattern, cagliotiFwhm, lorentzianFwhm, tchPseudoVoigt, fcjSubPeaks, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
 import { evaluateBackground, type BackgroundType } from "@/core/diffraction/background";
+import { quarticStrainInvariants, stephensStrainFwhmDeg, type QuarticInvariant } from "@/core/diffraction/anisoStrain";
+import { uniaxialSizeFwhmDeg } from "@/core/diffraction/anisoSize";
 
 /** Inclusive abscissa window that restricts refinement to a sub-range of the
  * pattern. Either bound may be omitted to leave that side unrestricted. */
@@ -142,10 +144,22 @@ export function buildPeaks(pattern: PowderPattern, applied: AppliedModel, applyL
  * back-to-back-exponential shape. Shared by the nuclear peaks and the magnetic
  * satellites so both get identical positioning + resolution.
  */
+/** Cache the (space-group-determined) Stephens invariants by operation list. */
+const invariantCache = new WeakMap<object, QuarticInvariant[]>();
+function strainInvariantsFor(applied: AppliedModel): QuarticInvariant[] {
+  const ops = applied.model.spaceGroup.operations;
+  let inv = invariantCache.get(ops);
+  if (!inv) {
+    inv = quarticStrainInvariants(ops);
+    invariantCache.set(ops, inv);
+  }
+  return inv;
+}
+
 export function placePeaks(
   pattern: PowderPattern,
   applied: AppliedModel,
-  intensities: readonly { d: number; intensity: number }[],
+  intensities: readonly { d: number; intensity: number; h?: number; k?: number; l?: number }[],
 ): ProfilePeak[] {
   const isTof = pattern.xUnit === "tof" && applied.tof !== undefined;
   if (isTof) return buildTofPeaks(intensities, applied);
@@ -162,17 +176,34 @@ export function placePeaks(
   // set of shifted sub-peaks with a low-angle tail (2θ patterns only).
   const useFcj = applied.axial !== undefined && pattern.xUnit === "twoTheta";
   const applyAbsorption = applied.muR > 0 && pattern.xUnit === "twoTheta";
+  // Anisotropic microstructure (2θ CW only). Stephens strain adds to the Gaussian
+  // width (variance add); uniaxial size adds to the Lorentzian (breadth add).
+  const isCW = pattern.xUnit === "twoTheta" && pattern.radiation.kind !== "neutron-tof";
+  const wavelength = pattern.radiation.kind !== "neutron-tof" ? pattern.radiation.wavelength : NaN;
+  const useStephens = isCW && applied.stephensStrain !== undefined;
+  const useUniaxial = isCW && applied.uniaxialSize !== undefined;
+  const invariants = useStephens ? strainInvariantsFor(applied) : null;
 
   const peaks: ProfilePeak[] = [];
   for (const p of intensities) {
     let center = dToX(pattern, p.d);
     if (Number.isNaN(center)) continue;
     center += applied.zeroShift;
-    const gaussianFwhm = useCaglioti ? cagliotiFwhm(center, applied.caglioti!) / 100 : constWidth;
+    let gaussianFwhm = useCaglioti ? cagliotiFwhm(center, applied.caglioti!) / 100 : constWidth;
+    const hasHkl = p.h !== undefined && p.k !== undefined && p.l !== undefined;
+    // Stephens anisotropic strain → extra Gaussian width, added in quadrature.
+    if (useStephens && hasHkl && invariants) {
+      const gStrain = stephensStrainFwhmDeg(p.h!, p.k!, p.l!, applied.model.cell, wavelength, applied.stephensStrain!, invariants);
+      if (gStrain > 0) gaussianFwhm = Math.sqrt(gaussianFwhm * gaussianFwhm + gStrain * gStrain);
+    }
+    // Uniaxial anisotropic size → extra Lorentzian breadth (added to isotropic X,Y).
+    let gammaL = useTch ? lorentzianFwhm(center, applied.lorentzian!) / 100 : 0;
+    if (useUniaxial && hasHkl) {
+      gammaL += uniaxialSizeFwhmDeg(p.h!, p.k!, p.l!, applied.model.cell, wavelength, applied.uniaxialSize!);
+    }
     let fwhm: number;
     let eta: number | undefined;
-    if (useTch) {
-      const gammaL = lorentzianFwhm(center, applied.lorentzian!) / 100;
+    if (gammaL > 0) {
       const tch = tchPseudoVoigt(gaussianFwhm, gammaL);
       fwhm = Math.max(tch.fwhm, 1e-4);
       eta = tch.eta;

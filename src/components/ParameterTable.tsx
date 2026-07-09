@@ -40,6 +40,9 @@ const CATEGORY: Record<ParameterKind, string> = {
   poRatio: "Corrections",
   absorption: "Corrections",
   extinction: "Corrections",
+  stephensStrain: "Microstructure",
+  anisoSizePerp: "Microstructure",
+  anisoSizePar: "Microstructure",
   magneticScale: "Magnetic",
   momentX: "Magnetic",
   momentY: "Magnetic",
@@ -52,7 +55,7 @@ const CATEGORY: Record<ParameterKind, string> = {
 /** Fixed display order; only non-empty groups render, in this order. */
 const ORDER = [
   "Scale", "Background", "Lattice", "Instrument / profile",
-  "ADPs (thermal)", "Positions", "Occupancy", "Corrections", "Magnetic",
+  "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic",
 ];
 
 export function ParameterTable({ parameters, esd, onChange }: Props): JSX.Element {

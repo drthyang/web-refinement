@@ -63,6 +63,17 @@ export interface AppliedModel {
   readonly muR: number;
   /** Secondary-extinction parameter (SHELXL EXTI). 0 ⇒ none. */
   readonly extinction: number;
+  /**
+   * Stephens anisotropic-microstrain S coefficients, indexed by symmetry-allowed
+   * invariant (order from `quarticStrainInvariants`). Present only when bound;
+   * the invariants themselves are recomputed from the space group where used.
+   */
+  readonly stephensStrain?: number[];
+  /**
+   * Uniaxial (spheroidal) anisotropic size: perpendicular/parallel Lorentzian
+   * coefficients about a unique reciprocal-lattice axis. Present only when bound.
+   */
+  readonly uniaxialSize?: { readonly xPerp: number; readonly xPar: number; readonly axis: [number, number, number] };
   /** Moment-magnitude scale applied to magnetic moments. */
   readonly momentScale: number;
 }
@@ -100,6 +111,10 @@ export function applyParameters(
   let muR = 0;
   let extinction = 0;
   let po: { axis: [number, number, number]; ratio: number } | undefined;
+  const stephensS = new Map<number, number>();
+  let sizePerp: number | undefined;
+  let sizePar: number | undefined;
+  let sizeAxis: [number, number, number] | undefined;
   const background: number[] = [];
   const tofCal = new Map<string, number>();
   const tofProf = new Map<string, number>();
@@ -216,6 +231,16 @@ export function applyParameters(
       case "extinction":
         extinction = v;
         break;
+      case "stephensStrain":
+        if (binding.targetKey !== undefined) stephensS.set(Number(binding.targetKey), v);
+        break;
+      case "anisoSizePerp":
+        sizePerp = v;
+        break;
+      case "anisoSizePar":
+        sizePar = v;
+        if (binding.axis) sizeAxis = [...binding.axis] as [number, number, number];
+        break;
     }
   }
 
@@ -247,6 +272,14 @@ export function applyParameters(
         sig0: tofProf.get("sig0") ?? 0, sig1: tofProf.get("sig1") ?? 0, sig2: tofProf.get("sig2") ?? 0,
       }
     : undefined;
+  const stephensStrain = stephensS.size
+    ? Array.from({ length: Math.max(...stephensS.keys()) + 1 }, (_, i) => stephensS.get(i) ?? 0)
+    : undefined;
+  const uniaxialSize =
+    sizePerp !== undefined || sizePar !== undefined
+      ? { xPerp: sizePerp ?? 0, xPar: sizePar ?? sizePerp ?? 0, axis: sizeAxis ?? ([0, 0, 1] as [number, number, number]) }
+      : undefined;
+
   return {
     model: appliedModel,
     scale,
@@ -256,6 +289,8 @@ export function applyParameters(
     zeroShift,
     muR,
     extinction,
+    ...(stephensStrain ? { stephensStrain } : {}),
+    ...(uniaxialSize ? { uniaxialSize } : {}),
     ...(caglioti ? { caglioti } : {}),
     ...(lorentzian ? { lorentzian } : {}),
     ...(axial ? { axial } : {}),

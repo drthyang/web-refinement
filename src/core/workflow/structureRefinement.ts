@@ -21,6 +21,7 @@ import { independentCellParameters } from "@/core/crystal/cellConstraints";
 import { allowedPositionShifts } from "@/core/crystal/siteConstraints";
 import { allowedAnisotropicAdpModes } from "@/core/crystal/adpConstraints";
 import { siteMultiplicity } from "@/core/crystal/symmetry";
+import { quarticStrainInvariants } from "@/core/diffraction/anisoStrain";
 
 export interface StructureRefinementOptions {
   /** Starting scale factor (seed with `optimalScale` for real data). Default 1. */
@@ -124,6 +125,20 @@ export interface StructureRefinementOptions {
   readonly absorption?: number;
   /** Refine μR. Default false (correlates strongly with scale and ADP). */
   readonly refineAbsorption?: boolean;
+  /**
+   * Emit Stephens (1999) anisotropic-microstrain S parameters — one per
+   * symmetry-allowed quartic invariant of the space group. Seeded at 0 (no
+   * anisotropic strain) and refined in the microstructure stage. Only meaningful
+   * on a 2θ CW pattern. Off by default.
+   */
+  readonly stephensStrain?: boolean;
+  /**
+   * Emit uniaxial (spheroidal) anisotropic-size parameters about a unique
+   * reciprocal-lattice axis: perpendicular/parallel Lorentzian coefficients,
+   * seeded from the isotropic size (`lorentzian.x`) so it starts isotropic. Only
+   * meaningful on a 2θ CW pattern. Off by default.
+   */
+  readonly uniaxialSize?: { readonly axis: readonly [number, number, number] };
 }
 
 /**
@@ -205,6 +220,8 @@ export function buildStructureRefinement(
     preferredOrientation,
     absorption,
     refineAbsorption = false,
+    stephensStrain = false,
+    uniaxialSize,
   } = opts;
 
   const params: RefinementParameter[] = [];
@@ -386,6 +403,26 @@ export function buildStructureRefinement(
     bindings.push({ parameterId: "absorption", kind: "absorption", targetId: pattern.id });
   }
 
+  // Anisotropic microstrain (Stephens): one S parameter per symmetry-allowed
+  // quartic invariant, seeded at 0 (isotropic) and freed in the microstructure stage.
+  if (stephensStrain) {
+    const invariants = quarticStrainInvariants(structure.spaceGroup.operations);
+    invariants.forEach((inv, i) => {
+      params.push({ id: `stephens_${i}`, label: `strain ${inv.label}`, kind: "stephensStrain", value: 0, initialValue: 0, fixed: false });
+      bindings.push({ parameterId: `stephens_${i}`, kind: "stephensStrain", targetId: pattern.id, targetKey: String(i) });
+    });
+  }
+
+  // Uniaxial anisotropic size: perpendicular + parallel Lorentzian coefficients
+  // about the given axis, seeded from the isotropic size so it starts isotropic.
+  if (uniaxialSize) {
+    const seed = lorentzian?.x ?? 1;
+    params.push({ id: "sizePerp", label: "size X⊥", kind: "anisoSizePerp", value: seed, initialValue: seed, min: 0, max: 100, fixed: false });
+    bindings.push({ parameterId: "sizePerp", kind: "anisoSizePerp", targetId: pattern.id });
+    params.push({ id: "sizePar", label: "size X∥", kind: "anisoSizePar", value: seed, initialValue: seed, min: 0, max: 100, fixed: false });
+    bindings.push({ parameterId: "sizePar", kind: "anisoSizePar", targetId: pattern.id, axis: [...uniaxialSize.axis] });
+  }
+
   return { params, bindings, restraints, stages: defaultStages() };
 }
 
@@ -545,6 +582,7 @@ export const DEFAULT_STAGE_KINDS: readonly StageKinds[] = [
   { name: "ADP", kinds: ["bIso", "uAniso"] },
   { name: "positions", kinds: ["positionShift"] },
   { name: "occupancy", kinds: ["occupancy"] },
+  { name: "microstructure", kinds: ["stephensStrain", "anisoSizePerp", "anisoSizePar"] },
   { name: "corrections", kinds: ["poRatio", "absorption"] },
 ];
 
