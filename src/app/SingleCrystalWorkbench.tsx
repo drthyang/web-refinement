@@ -1,8 +1,8 @@
 /**
- * Single-crystal F² refinement page (Roadmap M7 UI). Mirrors the powder
- * workbench's guided shape — merge report → free parameters → refine → F_obs vs
- * F_calc with SHELX R1/wR2/GooF — but against integrated Bragg intensities,
- * driven entirely by the single-crystal core (`buildSingleCrystalSpec`,
+ * Single-crystal F² refinement page (Roadmap M7 UI). Shares the powder
+ * workbench's design language — SummaryCards row, a themed quality rail, and the
+ * collapsible ParameterPanel — but drives the single-crystal core against
+ * integrated Bragg intensities (`buildSingleCrystalSpec`,
  * `buildSingleCrystalRefinementProblem`, `singleCrystalRefinementComparison`).
  *
  * Self-contained: it owns its parameter/result state and its own CIF export, so
@@ -10,11 +10,11 @@
  * whenever single-crystal data is loaded.
  */
 
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState, type CSSProperties } from "react";
 import type { StructureModel } from "@/core/crystal/types";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
-import type { RefinementResult } from "@/core/refinement/types";
+import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import { refine } from "@/core/refinement/engine";
 import { mergeEquivalents } from "@/core/diffraction/merge";
 import {
@@ -25,26 +25,27 @@ import {
 } from "@/core/workflow/singleCrystalRefinement";
 import { normalProbabilityPlot } from "@/core/refinement/diagnostics";
 import { dSpacing } from "@/core/crystal/unitCell";
-import { ParameterTable } from "@/components/ParameterTable";
-import { QualityPlots } from "@/app/ui/QualityPlots";
+import { FobsFcalc, NormalProb } from "@/app/ui/QualityPlots";
+import { ParameterPanel } from "@/app/ui/ParameterPanel";
+import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { structureToCif, type CifRefinementMeta } from "@/core/export/cif";
 import { downloadText } from "@/app/download";
-import { color, mono, sans, radius, fz } from "@/app/theme";
+import { card as themeCard, color, mono, fz, uppercaseLabel, secondaryButton } from "@/app/theme";
 
-const card: React.CSSProperties = {
-  background: color.surface,
-  border: `1px solid ${color.border}`,
-  borderRadius: radius.card,
-  padding: "16px 18px",
-};
-const kicker: React.CSSProperties = { fontSize: fz.micro, letterSpacing: "0.08em", color: color.faint, fontWeight: 650 };
-const stat = (label: string, value: string, hint?: string): JSX.Element => (
-  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-    <span style={{ fontFamily: mono, fontSize: 17, color: color.ink, fontWeight: 600 }}>{value}</span>
-    <span style={{ fontSize: fz.micro, color: color.secondary }}>{label}</span>
-    {hint ? <span style={{ fontSize: fz.micro, color: color.faint }}>{hint}</span> : null}
-  </div>
-);
+// Lazy so three.js stays out of the main bundle until the 3D view is opened.
+const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
+
+const DATA_ACCEPT = ".xye,.xy,.dat,.txt,.gr,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,text/plain";
+const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
+const noop = (): void => {};
+
+/** R1 quality bands (fraction): <8 % good · <15 % mediocre · else poor. */
+function r1Ink(r1: number): string {
+  if (!Number.isFinite(r1)) return color.ink;
+  if (r1 < 0.08) return color.okInk;
+  if (r1 < 0.15) return color.noteInk;
+  return color.warnInk;
+}
 
 export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadCif }: {
   structure: StructureModel;
@@ -59,24 +60,43 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
   const [params, setParams] = useState(spec.params);
   const [result, setResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [plotKind, setPlotKind] = useState<"fobs" | "npp">("fobs");
 
-  // Laue-equivalent merge report (data quality — R_int, redundancy).
+  // Outlier filter: reject reflections whose standardized residual |Fo²−Fc²|/σ
+  // exceeds `cutoffSigma` (SHELX-style OMIT). Off by default. The threshold is
+  // applied against the *current* model, so it stays live as the fit changes.
+  const [filterOn, setFilterOn] = useState(false);
+  const [cutoffSigma, setCutoffSigma] = useState(6);
+
+  // Comparison over the *full* dataset — the residuals that drive the filter.
+  const fullComparison = useMemo(
+    () => singleCrystalRefinementComparison(structure, dataset, params, bindings),
+    [structure, dataset, params, bindings],
+  );
+  const activeDataset = useMemo(() => {
+    if (!filterOn || cutoffSigma <= 0) return dataset;
+    const keep = dataset.reflections.filter((_, i) => Math.abs(fullComparison.rows[i]?.deltaOverSigma ?? 0) <= cutoffSigma);
+    return { ...dataset, reflections: keep };
+  }, [dataset, filterOn, cutoffSigma, fullComparison]);
+  const excluded = dataset.reflections.length - activeDataset.reflections.length;
+
+  // Laue-equivalent merge report (data quality — R_int, redundancy) on the active set.
   const merge = useMemo(
     () => mergeEquivalents(
-      dataset.reflections.map((r) => ({ h: r.h, k: r.k, l: r.l, intensity: r.iObs, sigma: r.sigma ?? 0 })),
+      activeDataset.reflections.map((r) => ({ h: r.h, k: r.k, l: r.l, intensity: r.iObs, sigma: r.sigma ?? 0 })),
       structure.spaceGroup.operations,
     ),
-    [dataset, structure],
+    [activeDataset, structure],
   );
 
   // Live obs/calc comparison + SHELX agreement for the current parameters.
   const comparison = useMemo(
-    () => singleCrystalRefinementComparison(structure, dataset, params, bindings),
-    [structure, dataset, params, bindings],
+    () => (filterOn && excluded > 0 ? singleCrystalRefinementComparison(structure, activeDataset, params, bindings) : fullComparison),
+    [structure, activeDataset, params, bindings, filterOn, excluded, fullComparison],
   );
 
-  // Reuse the powder quality plots: F_obs/F_calc scatter (√Fo² vs √Fc²) + the
-  // normal-probability plot over the standardized residuals (Fo²−Fc²)/σ.
+  // Reuse the powder quality plots: F_obs/F_calc (√Fo² vs √Fc²) + the normal-
+  // probability plot over the standardized residuals (Fo²−Fc²)/σ.
   const obsCalc: ReflectionObsCalc[] = useMemo(
     () => comparison.rows.map((r) => ({
       kind: "nuclear" as const,
@@ -87,8 +107,6 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
     [comparison, structure],
   );
   const npp = useMemo(() => normalProbabilityPlot(comparison.rows.map((r) => r.deltaOverSigma)), [comparison]);
-
-  // Largest standardized-residual outliers (bad/wrongly-measured reflections).
   const outliers = useMemo(
     () => [...comparison.rows].sort((a, b) => Math.abs(b.deltaOverSigma) - Math.abs(a.deltaOverSigma)).slice(0, 6),
     [comparison],
@@ -101,7 +119,7 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
     // Defer so the "Refining…" state paints before the synchronous solve.
     setTimeout(() => {
       const start = guided ? guidedSingleCrystalParams(params) : params;
-      const problem = buildSingleCrystalRefinementProblem(structure, dataset, start, bindings);
+      const problem = buildSingleCrystalRefinementProblem(structure, activeDataset, start, bindings);
       const res = refine(problem, { maxIterations: 25 });
       setParams(start.map((p) => ({ ...p, value: res.parameters[p.id] ?? p.value, ...(guided ? { fixed: false } : {}) })));
       setResult(res);
@@ -109,7 +127,7 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
     }, 0);
   }
 
-  function onParamChange(id: string, patch: Partial<typeof params[number]>): void {
+  function onParamChange(id: string, patch: Partial<RefinementParameter>): void {
     setParams((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
 
@@ -127,110 +145,184 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
       r1: comparison.agreement.r1,
       wr2: comparison.agreement.wr2,
       gof: comparison.agreement.goof,
-      nRef: dataset.reflections.length,
+      nRef: activeDataset.reflections.length,
       nParam: nFree,
     };
     downloadText(`${structure.id}.cif`, structureToCif(structure, { params: withEsd, bindings, refinement: meta }), "chemical/x-cif");
   }
 
   const ag = comparison.agreement;
-  const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
+  const st = merge.statistics;
+  const cell = structure.cell;
+  const probe = dataset.radiation.kind === "xray" ? "X-ray" : dataset.radiation.kind === "neutron" ? "Neutron" : "Neutron TOF";
+  const wl = "wavelength" in dataset.radiation ? ` · λ ${dataset.radiation.wavelength} Å` : "";
+
+  const summaryCards: SummaryCardData[] = [
+    {
+      label: "Structure",
+      loadLabel: "Load CIF…",
+      accept: ".cif,.mcif,text/plain",
+      onFile: onLoadCif ?? noop,
+      chip: "✓ parsed",
+      title: `${structure.name || "structure"} · ${structure.spaceGroup.hermannMauguin ?? "—"}`,
+      meta: `a ${cell.a.toFixed(4)} · b ${cell.b.toFixed(4)} · c ${cell.c.toFixed(4)} Å · ${structure.sites.length} sites`,
+    },
+    {
+      label: "Data · single crystal",
+      loadLabel: "Load data…",
+      accept: DATA_ACCEPT,
+      onFile: onLoadData ?? noop,
+      chip: "✓ loaded",
+      title: dataset.name,
+      meta: `${probe}${wl} · ${st.observations} obs → ${st.unique} unique · R_int ${pct(st.rInt)}`,
+    },
+  ];
+
+  const refineActions = (
+    <>
+      <button
+        style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? disabledStyle : {}) }}
+        disabled={busy}
+        onClick={() => runRefine(true)}
+        title="Free all symmetry-allowed structural parameters (positions, ADPs) and refine"
+      >
+        Refine structure
+      </button>
+      <button
+        style={{ ...secondaryButton, padding: "7px 13px" }}
+        onClick={exportCif}
+        title="Export the current structure as CIF (with esds + agreement factors)"
+      >
+        Export CIF
+      </button>
+    </>
+  );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "18px 20px" }}>
-      {/* Merge / data-quality report */}
-      <div style={{ ...card, display: "flex", flexWrap: "wrap", gap: 28, alignItems: "center" }}>
-        <div style={{ minWidth: 200 }}>
-          <div style={kicker}>SINGLE CRYSTAL — {structure.name}</div>
-          <div style={{ fontSize: 13, color: color.secondary, marginTop: 4 }}>
-            {dataset.radiation.kind === "neutron" ? "Neutron" : dataset.radiation.kind === "xray" ? "X-ray" : "TOF"} · {structure.spaceGroup.hermannMauguin ?? "—"} · {dataset.name}
-          </div>
-        </div>
-        {stat("observations", `${merge.statistics.observations}`)}
-        {stat("unique", `${merge.statistics.unique}`)}
-        {stat("redundancy", merge.statistics.redundancy.toFixed(2))}
-        {stat("R_int", pct(merge.statistics.rInt), "Laue-equivalent agreement")}
-        {stat("R_sigma", pct(merge.statistics.rSigma))}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {onLoadCif ? <FileButton label="Load CIF…" accept=".cif,text/plain" onFile={onLoadCif} /> : null}
-          {onLoadData ? <FileButton label="Load data…" accept=".xye,.xy,.dat,.txt,.gr,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,text/plain" onFile={onLoadData} /> : null}
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 1.1fr) minmax(300px, 1fr)", gap: 16, alignItems: "start" }}>
-        {/* Results: agreement + quality plots + outliers */}
-        <div style={{ ...card, display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-            <div style={kicker}>REFINEMENT QUALITY (F²)</div>
-            <div style={{ display: "flex", gap: 18 }}>
-              {stat("R1", pct(ag.r1), `${ag.observed}/${ag.total} obs > 2σ`)}
-              {stat("wR2", pct(ag.wr2))}
-              {stat("GooF", ag.goof.toFixed(3))}
+    <>
+      <SummaryCards cards={summaryCards} />
+      <div className="wb-sc">
+        {/* Quality rail: F² agreement + merge stats + F_obs/F_calc beside the 3D model. */}
+        <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span style={uppercaseLabel}>Refinement quality — single crystal (F²)</span>
+            <div style={{ display: "flex", gap: 20 }}>
+              <Stat value={pct(ag.r1)} label="R1" hint={`${ag.observed}/${ag.total} obs > 2σ`} ink={r1Ink(ag.r1)} />
+              <Stat value={pct(ag.wr2)} label="wR2" />
+              <Stat value={ag.goof.toFixed(2)} label="GooF" />
             </div>
           </div>
-          <QualityPlots obsCalc={obsCalc} npp={npp} />
+
+          <div style={mergeStrip}>
+            <Stat small value={`${st.observations}`} label={excluded > 0 ? "kept" : "observations"} />
+            <Stat small value={`${st.unique}`} label="unique" />
+            <Stat small value={st.redundancy.toFixed(2)} label="redundancy" />
+            <Stat small value={pct(st.rInt)} label="R_int" />
+            <Stat small value={pct(st.rSigma)} label="R_sigma" />
+          </div>
+
+          {/* Outlier (σ) reflection filter. */}
+          <label style={filterRow} title="Reject reflections whose |Fo²−Fc²|/σ exceeds the threshold against the current model (SHELX-style OMIT)">
+            <input type="checkbox" checked={filterOn} onChange={(e) => setFilterOn(e.target.checked)} style={{ accentColor: color.primary }} />
+            <span style={{ color: color.secondary }}>Reject reflections with |Δ|/σ &gt;</span>
+            <input
+              type="number" min={2} step={0.5} value={cutoffSigma}
+              disabled={!filterOn}
+              onChange={(e) => setCutoffSigma(Math.max(0, Number(e.target.value) || 0))}
+              style={{ ...numInput, ...(filterOn ? {} : { opacity: 0.5 }) }}
+            />
+            <span style={{ color: color.secondary }}>σ</span>
+            {filterOn && (
+              <span style={{ marginLeft: "auto", fontFamily: mono, color: excluded > 0 ? color.warnInk : color.faint }}>
+                {excluded} of {dataset.reflections.length} excluded
+              </span>
+            )}
+          </label>
+
+          {/* One plot at a time (F_obs/F_calc ↔ normal-probability, toggled) beside
+              the 3D structure model; stacks when the panel is narrow. */}
+          <div className="wb-sc-plots">
+            <div>
+              <div style={{ display: "flex", gap: 16, marginBottom: 6 }}>
+                {(["fobs", "npp"] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setPlotKind(k)}
+                    style={{
+                      ...uppercaseLabel, background: "none", border: "none", padding: "0 0 3px", cursor: "pointer",
+                      color: plotKind === k ? color.primary : color.faint,
+                      borderBottom: `2px solid ${plotKind === k ? color.primary : "transparent"}`,
+                    }}
+                  >
+                    {k === "fobs" ? "F_obs vs F_calc" : "Normal probability"}
+                  </button>
+                ))}
+              </div>
+              {plotKind === "fobs" ? <FobsFcalc rows={obsCalc} /> : <NormalProb npp={npp} />}
+            </div>
+            <div>
+              <div style={{ ...uppercaseLabel, marginBottom: 4 }}>Crystal structure — unit cell</div>
+              <Suspense fallback={<div style={{ minHeight: 320, display: "grid", placeItems: "center", color: color.secondary, fontSize: 13 }}>Loading 3D viewer…</div>}>
+                <div style={{ minHeight: 320 }}><StructureView structure={structure} /></div>
+              </Suspense>
+            </div>
+          </div>
+
           <div>
-            <div style={{ ...kicker, marginBottom: 6 }}>LARGEST OUTLIERS (Fo²−Fc²)/σ</div>
+            <div style={{ ...uppercaseLabel, marginBottom: 6 }}>Largest outliers · (Fo²−Fc²)/σ</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, fontFamily: mono, fontSize: fz.small }}>
-              {outliers.map((r) => (
-                <div key={`${r.h} ${r.k} ${r.l}`} style={{ display: "flex", justifyContent: "space-between", color: color.secondary }}>
+              {outliers.map((r, i) => (
+                <div key={`${i}:${r.h} ${r.k} ${r.l}`} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, color: color.secondary }}>
                   <span>({r.h} {r.k} {r.l})</span>
-                  <span>Fo² {r.foSq.toFixed(1)} · Fc² {r.fcSq.toFixed(1)}</span>
-                  <span style={{ color: Math.abs(r.deltaOverSigma) > 4 ? color.primary : color.faint }}>{r.deltaOverSigma >= 0 ? "+" : ""}{r.deltaOverSigma.toFixed(1)}σ</span>
+                  <span style={{ color: color.faint }}>Fo² {r.foSq.toFixed(1)} · Fc² {r.fcSq.toFixed(1)}</span>
+                  <span style={{ color: Math.abs(r.deltaOverSigma) > 4 ? color.warnInk : color.faint }}>
+                    {r.deltaOverSigma >= 0 ? "+" : ""}{r.deltaOverSigma.toFixed(1)}σ
+                  </span>
                 </div>
               ))}
             </div>
           </div>
         </div>
 
-        {/* Parameters + actions */}
-        <div style={{ ...card, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <div style={kicker}>PARAMETERS — {nFree} of {params.length} free</div>
-            <button onClick={reset} style={ghostBtn}>Reset</button>
-          </div>
-          <ParameterTable parameters={params} esd={result?.esd} onChange={onParamChange} />
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
-            <button onClick={() => runRefine(false)} disabled={busy} style={primaryBtn}>{busy ? "Refining…" : "Refine"}</button>
-            <button onClick={() => runRefine(true)} disabled={busy} style={ghostBtn}>Refine (free structure)</button>
-            <button onClick={exportCif} style={ghostBtn}>Export CIF</button>
-          </div>
-          {result ? (
-            <div style={{ fontSize: fz.small, color: color.secondary }}>
-              {result.status === "converged" ? "Converged" : result.status} · {result.history.length} cycles
-              {result.message ? ` · ${result.message}` : ""}
-            </div>
-          ) : null}
-        </div>
+        {/* Parameters — the shared collapsible panel, single-crystal actions. */}
+        <ParameterPanel
+          params={params}
+          esd={result?.esd}
+          onChange={onParamChange}
+          onRefine={() => runRefine(false)}
+          onReset={reset}
+          busy={busy}
+          result={result}
+          title="Single-crystal parameters"
+          extraActions={refineActions}
+        />
       </div>
+    </>
+  );
+}
+
+function Stat({ value, label, hint, ink, small }: { value: string; label: string; hint?: string; ink?: string; small?: boolean }): JSX.Element {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <span style={{ fontFamily: mono, fontSize: small ? 14 : 18, fontWeight: 600, color: ink ?? color.ink }}>{value}</span>
+      <span style={{ fontSize: fz.micro, color: color.secondary }}>{label}</span>
+      {hint ? <span style={{ fontSize: fz.micro, color: color.faint }}>{hint}</span> : null}
     </div>
   );
 }
 
-/** A compact file-input styled as a ghost button (label wraps a hidden input). */
-function FileButton({ label, accept, onFile }: { label: string; accept: string; onFile: (file: File) => void }): JSX.Element {
-  return (
-    <label style={{ ...ghostBtn, display: "inline-flex", alignItems: "center" }}>
-      {label}
-      <input
-        type="file"
-        accept={accept}
-        style={{ display: "none" }}
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onFile(f);
-          e.target.value = ""; // allow re-loading the same filename
-        }}
-      />
-    </label>
-  );
-}
-
-const primaryBtn: React.CSSProperties = {
-  background: color.primary, color: "#fff", border: `1px solid ${color.primary}`,
-  borderRadius: radius.button, padding: "8px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: sans,
+const mergeStrip: CSSProperties = {
+  display: "flex",
+  gap: 22,
+  flexWrap: "wrap",
+  padding: "10px 2px",
+  borderTop: `1px solid ${color.subtle}`,
+  borderBottom: `1px solid ${color.subtle}`,
 };
-const ghostBtn: React.CSSProperties = {
-  background: color.surface, color: color.ink, border: `1px solid ${color.control}`,
-  borderRadius: radius.button, padding: "8px 16px", fontSize: 13, fontWeight: 550, cursor: "pointer", fontFamily: sans,
+const filterRow: CSSProperties = {
+  display: "flex", alignItems: "center", gap: 8, fontSize: fz.small, cursor: "pointer",
 };
+const numInput: CSSProperties = {
+  width: 52, border: `1px solid ${color.input}`, borderRadius: 7, fontSize: 12, fontFamily: mono, padding: "2px 6px", background: "#fff",
+};
+const disabledStyle: CSSProperties = { opacity: 0.55, cursor: "not-allowed" };

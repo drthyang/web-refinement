@@ -41,6 +41,45 @@
   align-items: stretch;
 }
 
+/* Powder page: plot / validation / 3D (left, wide) | parameters (right). */
+.wb-work2 {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(340px, 1fr);
+  gap: clamp(12px, 1vw, 20px);
+  align-items: stretch;
+}
+@media (max-width: 1120px) {
+  .wb-work2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Single-crystal page: quality/results (left) | parameters (right). */
+.wb-sc {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(340px, 1fr);
+  gap: clamp(12px, 1vw, 20px);
+  align-items: stretch;
+}
+@media (max-width: 1120px) {
+  .wb-sc {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* F_obs/F_calc (auto-width square) beside the 3D model (fills the rest). */
+.wb-sc-plots {
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) minmax(280px, 1fr);
+  gap: clamp(12px, 1vw, 20px);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .wb-sc-plots {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Magnetic page: 3D model (left) | workflow controls (right). */
 .wb-mag2 {
   display: grid;

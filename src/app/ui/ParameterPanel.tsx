@@ -7,7 +7,7 @@
  * collapsible refinement-history table. Driven by the real refinement params.
  */
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { ParameterKind, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import { card, color, mono, primaryButton, secondaryButton, uppercaseLabel } from "@/app/theme";
 
@@ -60,14 +60,18 @@ interface Props {
   readonly onChange: (id: string, patch: Partial<RefinementParameter>) => void;
   readonly onRefine: () => void;
   readonly onReset: () => void;
-  /** Hand the refined structure to the magnetic symmetry analysis page. */
-  readonly onMagnetic: () => void;
+  /** Hand the refined structure to the magnetic symmetry analysis page (powder). */
+  readonly onMagnetic?: () => void;
   readonly busy: boolean;
   readonly result: RefinementResult | null;
   readonly disabled?: boolean;
+  /** Panel header label; defaults to "Powder parameters". */
+  readonly title?: string;
+  /** Extra footer buttons (e.g. single-crystal "Refine free" / "Export CIF"). */
+  readonly extraActions?: ReactNode;
 }
 
-export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMagnetic, busy, result, disabled }: Props): JSX.Element {
+export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMagnetic, busy, result, disabled, title, extraActions }: Props): JSX.Element {
   const groups = useMemo(() => {
     const byGroup = new Map<string, RefinementParameter[]>();
     for (const p of params) {
@@ -90,7 +94,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMag
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", overflow: "hidden", height: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
-        <span style={uppercaseLabel}>Powder parameters</span>
+        <span style={uppercaseLabel}>{title ?? "Powder parameters"}</span>
         <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 11, color: color.faint }}>{freeCount} of {params.length} free</span>
         <button
           style={{ ...secondaryButton, padding: "3px 11px", fontSize: 11, ...(busy ? disabledStyle : {}) }}
@@ -133,17 +137,20 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMag
       </div>
       <div style={footer}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={{ ...primaryButton, ...(busy || disabled ? disabledStyle : {}) }} disabled={busy || disabled} onClick={onRefine} title="Refine the free parameters against the loaded pattern">
+          <button style={{ ...primaryButton, ...(busy || disabled ? disabledStyle : {}) }} disabled={busy || disabled} onClick={onRefine} title="Refine the free parameters against the loaded data">
             {busy ? "Refining…" : "Refine"}
           </button>
-          <button
-            style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? disabledStyle : {}) }}
-            disabled={busy}
-            onClick={onMagnetic}
-            title="Open the magnetic symmetry analysis with the current refined structure (lattice, positions, occupancies)"
-          >
-            Magnetic analysis →
-          </button>
+          {onMagnetic && (
+            <button
+              style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? disabledStyle : {}) }}
+              disabled={busy}
+              onClick={onMagnetic}
+              title="Open the magnetic symmetry analysis with the current refined structure (lattice, positions, occupancies)"
+            >
+              Magnetic analysis →
+            </button>
+          )}
+          {extraActions}
         </div>
         {result && <ResultBanner result={result} />}
       </div>

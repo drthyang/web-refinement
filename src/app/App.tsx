@@ -19,6 +19,7 @@ import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from 
 import { parseMagneticCif } from "@/parsers/cif";
 import { parsePowderData } from "@/parsers/powderData";
 import { parseIllD1b, looksLikeIllD1b } from "@/parsers/illPowder";
+import { parseFullProfInstrm6, looksLikeInstrm6 } from "@/parsers/fullprofInstrm6";
 import { parseGsasCsvPattern } from "@/parsers/gsasPattern";
 import { isGsasHistogram, parseGsasHistogramPattern } from "@/parsers/gsasHistogram";
 import { detectDataFormat, type DetectedFormat } from "@/parsers/detectFormat";
@@ -157,7 +158,7 @@ export function App(): JSX.Element {
   const [fitRange, setFitRange] = useState<FitRangeSelection | null>(null);
   // Display-only x-axis unit; null = the pattern's native unit. Reset on load.
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit | null>(null);
-  const [plotMode, setPlotMode] = useState<"curves" | "structure">("curves");
+  const [plotMode, setPlotMode] = useState<"curves" | "structure" | "validation">("curves");
   // Reflection clicked in the F_obs/F_calc plot, spotlighted in the pattern
   // plot; null = nothing highlighted.
   const [highlight, setHighlight] = useState<{ hkl: string; kind: "nuclear" | "magnetic" } | null>(null);
@@ -522,8 +523,12 @@ export function App(): JSX.Element {
   function onLoadData(file: File): void {
     file.text().then((text) => {
       try {
-        // The ILL D1B/D20 numor format is not column data, so route it before the
-        // generic detector (which would misread its header + (flag,count) pairs).
+        // FullProf's ILL `.dat` templates share the extension but differ in
+        // header — route each to its own reader before the generic detector.
+        if (looksLikeInstrm6(text)) {
+          applyInstrm6Powder(text, file.name);
+          return;
+        }
         if (looksLikeIllD1b(text)) {
           applyIllPowder(text, file.name);
           return;
@@ -552,6 +557,29 @@ export function App(): JSX.Element {
   // loaded CW instrument (e.g. the D1B .irf → λ + Caglioti U/V/W) when present;
   // otherwise a neutron default at the D1B wavelength, and loading the .irf
   // afterwards re-seeds the widths (onLoadInstrument rebuilds the spec).
+  // FullProf INSTRM=6 (D2B/3T2/G4.2) CW neutron powder. The wavelength comes
+  // from the file header (or the loaded CW instrument, which then supplies the
+  // Caglioti widths when its .irf is loaded).
+  function applyInstrm6Powder(text: string, filename: string): void {
+    const id = `${structure.id}-powder`;
+    const cw = instrumentLoaded && instrument.kind === "constantWavelength" ? instrument : null;
+    const parsed = parseFullProfInstrm6(text, {
+      id, name: filename,
+      radiation: { kind: "neutron", wavelength: cw?.wavelength ?? 2.5 },
+      ...(cw ? { wavelength: cw.wavelength } : {}),
+    });
+    if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
+    setScDataset(null);
+    const wavelength = parsed.wavelength ?? cw?.wavelength ?? 2.5;
+    const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
+    const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
+    setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+    if (instrument.kind === "tof") { setInstrument(DEFAULT_INSTRUMENT); setInstrumentLoaded(false); }
+    setPowderResult(null);
+    const last = parsed.points[parsed.points.length - 1]!;
+    setMessage(`Loaded FullProf INSTRM=6 powder “${filename}” · ${parsed.points.length} pts · 2θ ${parsed.points[0]!.x.toFixed(2)}–${last.x.toFixed(2)}° · neutron λ=${wavelength} Å.`);
+  }
+
   function applyIllPowder(text: string, filename: string): void {
     const id = `${structure.id}-powder`;
     const cw = instrumentLoaded && instrument.kind === "constantWavelength" ? instrument : null;
@@ -706,6 +734,13 @@ export function App(): JSX.Element {
     return (100 * Math.sqrt(num / Math.max(den, 1e-12))).toFixed(2);
   })();
 
+  // wR (live during a refinement) and GoF for the plot-header readouts. GoF is
+  // the live wR over R_exp (Toby 2006); R_exp only exists after a refinement.
+  const liveWr = busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(2) : wRpct;
+  const rExp = powderResult?.agreement.rExpected;
+  const liveGof = rExp && rExp > 0 ? Number(liveWr) / (100 * rExp) : null;
+  const refinedGof = powderResult ? (powderResult.agreement.goodnessOfFit ?? null) : null;
+
   function exportCsv(): void {
     downloadText(`${pattern.id}.csv`, powderPatternCsv(curves), "text/csv");
   }
@@ -813,41 +848,40 @@ export function App(): JSX.Element {
         return (
           <>
             <SummaryCards cards={summaryCards} />
-            <div className="wb-work3">
-              <div className="wb-card-quality" style={{ ...themeCard, padding: "14px 16px", height: "clamp(500px, 64vh, 760px)", overflowY: "auto" }}>
-                <QualityPanel
-                  powderResult={powderResult}
-                  structure={structure}
-                  pattern={pattern}
-                  params={powderParams}
-                  bindings={pBindings}
-                  profile={session.powderProfile}
-                  magnetic={session.magnetic ?? null}
-                  wRpct={busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(2) : wRpct}
-                  onHighlight={setHighlight}
-                  selected={highlight}
-                  fitRange={fitRangeActive ? { min: fitRange!.min, max: fitRange!.max } : null}
-                />
-              </div>
+            <div className="wb-work2">
               <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 64vh, 760px)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
                   <span style={themeLabel}>
-                    {plotMode === "structure" ? "Crystal structure — unit cell" : "Powder pattern — observed vs calculated"}
+                    {plotMode === "structure" ? "Crystal structure — unit cell" : plotMode === "validation" ? "Validation plots" : "Powder pattern"}
                   </span>
+                  {plotMode !== "structure" && (
+                    <span style={{ display: "flex", gap: 14, fontFamily: themeMono, fontSize: 12.5 }}>
+                      <span style={{ color: theme.secondary }} title="Weighted profile R for the current parameters, coloured by wR/R_exp (Toby 2006)">
+                        wR <b style={{ color: qualityInk(liveGof) }}>{liveWr}%</b>
+                      </span>
+                      <span style={{ color: theme.secondary }} title="Goodness of fit = wR/R_exp at the last refinement; ≈1 = consistent with the data uncertainties">
+                        GoF <b style={{ color: qualityInk(refinedGof) }}>{refinedGof !== null ? refinedGof.toFixed(2) : "—"}</b>
+                      </span>
+                    </span>
+                  )}
                   <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
                     {plotMode === "curves" && (
                       <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
                     )}
                     {plotMode === "curves" && !tofViewOnly && (
                       <button
-                        style={{ ...toolbarBtn, ...(fitRangeActive ? {} : { opacity: 0.45, cursor: "default" }) }}
+                        style={{ ...toolbarBtn, display: "inline-flex", alignItems: "center", gap: 5, ...(fitRangeActive ? {} : { opacity: 0.45, cursor: "default" }) }}
                         disabled={!fitRangeActive}
                         title={fitRangeActive
                           ? "Zoom the plot onto the active fit range"
                           : "Set a fit range first (blue handles), then this zooms the view onto it"}
                         onClick={() => setFocusFitToken((t) => t + 1)}
                       >
-                        ⊡ Fit range
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                        optimize view
                       </button>
                     )}
                     <ViewModeToggle value={plotMode} onChange={setPlotMode} />
@@ -869,6 +903,20 @@ export function App(): JSX.Element {
                       {` · ${structure.sites.length} site${structure.sites.length === 1 ? "" : "s"} · drag to rotate, scroll to zoom.`}
                     </p>
                   </>
+                ) : plotMode === "validation" ? (
+                  <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                    <QualityPanel
+                      structure={structure}
+                      pattern={pattern}
+                      params={powderParams}
+                      bindings={pBindings}
+                      profile={session.powderProfile}
+                      magnetic={session.magnetic ?? null}
+                      onHighlight={setHighlight}
+                      selected={highlight}
+                      fitRange={fitRangeActive ? { min: fitRange!.min, max: fitRange!.max } : null}
+                    />
+                  </div>
                 ) : (
                   <>
                     <WorkbenchPlot
@@ -1000,27 +1048,22 @@ function qualityInk(gof: number | null): string {
 
 function QualityPanel({
   structure,
-  powderResult,
   pattern,
   params,
   bindings,
   profile,
   magnetic,
-  wRpct,
   onHighlight,
   selected,
   fitRange,
 }: {
   structure: StructureModel;
-  powderResult: RefinementResult | null;
   pattern: PowderPattern;
   params: readonly RefinementParameter[];
   bindings: readonly ParameterBinding[];
   profile: PowderProfile;
   /** Magnetic model, if any — adds magnetic satellites to the F_obs/F_calc plot. */
   magnetic?: MagneticModel | null;
-  /** The page's single live wR readout (percent, already formatted). */
-  wRpct: string;
   /** Spotlight a reflection (its "h k l" + kind) in the pattern plot; null clears it. */
   onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic" } | null) => void;
   /** The shared selection, so a Bragg-tick click highlights the matching scatter point. */
@@ -1037,35 +1080,11 @@ function QualityPanel({
     return { obsCalc, npp };
   }, [structure, pattern, params, bindings, profile, magnetic, fitRange?.min, fitRange?.max]);
 
-  // R_exp (a property of the data + weights) anchors the colors; the live wR
-  // over it is the live GoF. Before the first refinement there is no R_exp,
-  // so the readouts stay neutral rather than pretending to judge.
-  const rExp = powderResult?.agreement.rExpected;
-  const liveGof = rExp && rExp > 0 ? Number(wRpct) / (100 * rExp) : null;
-  const gof = powderResult ? (powderResult.agreement.goodnessOfFit ?? null) : null;
+  // Rendered inside the pattern-plot card's "Validation" view mode; the toggle
+  // labels it, so no heading here — just the plots side by side.
   return (
     <div>
-      <span style={themeLabel}>Refinement quality</span>
-      <table style={{ fontSize: fz.body, marginTop: 8 }}>
-        <tbody>
-          <tr title="Weighted profile R: live value for the current parameters, colored by wR/R_exp (Toby 2006)">
-            <td style={kcell}>wR</td>
-            <td style={{ fontFamily: themeMono, fontWeight: 600, color: qualityInk(liveGof) }}>{wRpct}%</td>
-          </tr>
-          <tr title="Goodness of fit = wR/R_exp at the last refinement; ≈1 means the fit is consistent with the data uncertainties">
-            <td style={kcell}>GoF</td>
-            <td style={{ color: qualityInk(gof) }}>
-              {gof !== null ? gof.toFixed(2) : "not refined"}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p style={{ fontSize: fz.small, color: theme.secondary, marginTop: 6 }}>
-        {rExp
-          ? `Judged against R_exp = ${(100 * rExp).toFixed(2)}% (Toby 2006): wR/R_exp ≈ 1–1.5 good, ≤ 2.5 mediocre, above poor; below 1 suggests overestimated σ or over-fitting.`
-          : "GoF near 1 = fit consistent with the data uncertainties; colors appear after the first refinement (they need R_exp)."}
-      </p>
-      <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} stacked selected={selected ?? null} {...(onHighlight ? { onHighlight } : {})} />
+      <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} selected={selected ?? null} {...(onHighlight ? { onHighlight } : {})} />
       <p style={{ fontSize: fz.micro, color: theme.secondary, marginTop: 8 }}>
         F_obs vs F_calc flags individual bad reflections; the normal probability plot
         (Abrahams &amp; Keve 1971) is straight with slope 1 for an ideal fit &amp; weights.
@@ -1114,12 +1133,13 @@ function ViewModeToggle({
   value,
   onChange,
 }: {
-  value: "curves" | "structure";
-  onChange: (m: "curves" | "structure") => void;
+  value: "curves" | "structure" | "validation";
+  onChange: (m: "curves" | "structure" | "validation") => void;
 }): JSX.Element {
-  const opts: readonly { id: "curves" | "structure"; label: string }[] = [
-    { id: "curves", label: "Refinement" },
-    { id: "structure", label: "3D Model" },
+  const opts: readonly { id: "curves" | "structure" | "validation"; label: string; title: string }[] = [
+    { id: "curves", label: "Refinement", title: "Observed vs calculated pattern" },
+    { id: "validation", label: "Validation", title: "F_obs vs F_calc + normal-probability plot" },
+    { id: "structure", label: "3D Model", title: "3D crystal-structure model" },
   ];
   return (
     <div style={{ display: "inline-flex", gap: 2, background: theme.chipBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: 2 }}>
@@ -1127,7 +1147,7 @@ function ViewModeToggle({
         <button
           key={o.id}
           onClick={() => onChange(o.id)}
-          title={o.id === "structure" ? "3D crystal-structure model" : "Observed vs calculated curves"}
+          title={o.title}
           style={{
             border: "none",
             borderRadius: 6,
@@ -1148,7 +1168,6 @@ function ViewModeToggle({
 }
 
 const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 700, color: theme.ink };
-const kcell: React.CSSProperties = { padding: "2px 10px 2px 0", color: theme.secondary, verticalAlign: "top" };
 const stepHelp: React.CSSProperties = { fontSize: 13, color: theme.secondary, marginTop: 0 };
 const smallBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "1px 9px", fontSize: 11, cursor: "pointer", marginLeft: 6 };
 const toolbarBtn: React.CSSProperties = { border: `1px solid ${theme.primary}`, background: "#fff", color: theme.primary, borderRadius: 8, padding: "3px 11px", fontSize: 11, fontWeight: 600, fontFamily: themeMono, cursor: "pointer" };

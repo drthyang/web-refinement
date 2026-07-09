@@ -34,6 +34,47 @@ const FINISHES = {
 } as const;
 type Finish = keyof typeof FINISHES;
 
+/**
+ * Render the legend swatches with the very same engine as the model: one lit
+ * sphere per element, sharing the scene's `MeshPhongMaterial` (element colour +
+ * the finish's shininess/specular) and its ambient + directional lights at the
+ * same intensities. The result is the model's atom shrunk to legend size — not a
+ * CSS look-alike — so it tracks the Finish and Light knobs exactly. Returns a map
+ * element → PNG data URL. `gl` is reused across calls to avoid churning WebGL
+ * contexts as the Light slider drags.
+ */
+function renderAtomSwatches(
+  elements: readonly string[],
+  finish: Finish,
+  lightLevel: number,
+  gl: { renderer: THREE.WebGLRenderer; canvas: HTMLCanvasElement },
+): Record<string, string> {
+  const { renderer, canvas } = gl;
+  const scene = new THREE.Scene();
+  scene.add(new THREE.AmbientLight(0xffffff, 0.85 * lightLevel));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.55 * lightLevel);
+  dl.position.set(1, 1.5, 1); // same key-light direction as the main scene
+  scene.add(dl);
+  // Orthographic, straight-on view of a unit sphere with a hair of margin.
+  const cam = new THREE.OrthographicCamera(-1.12, 1.12, 1.12, -1.12, -10, 10);
+  cam.position.set(0, 0, 5);
+  cam.lookAt(0, 0, 0);
+  const geo = new THREE.SphereGeometry(1, 48, 48);
+  const { shininess, specular } = FINISHES[finish];
+  const out: Record<string, string> = {};
+  for (const el of elements) {
+    const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(elementColor(el)), shininess, specular });
+    const mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+    renderer.render(scene, cam);
+    out[el] = canvas.toDataURL();
+    scene.remove(mesh);
+    mat.dispose();
+  }
+  geo.dispose();
+  return out;
+}
+
 /** Draw `text` to a canvas and wrap it in a camera-facing sprite (world-sized). */
 function makeLabelSprite(text: string, worldHeight: number, colorCss: string): THREE.Sprite {
   const pad = 8;
@@ -91,7 +132,7 @@ export function StructureView({
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [showBondLengths, setShowBondLengths] = useState(false);
   const [showAtomLabels, setShowAtomLabels] = useState(false);
-  const [perspective, setPerspective] = useState(true);
+  const [perspective, setPerspective] = useState(false);
   const [showAxes, setShowAxes] = useState(true);
   // Which unit cell to show — mutually exclusive, never two frames at once:
   //  "atomic"   the parent nuclear cell,
@@ -102,6 +143,16 @@ export function StructureView({
   const [lightLevel, setLightLevel] = useState(2);
   const [finish, setFinish] = useState<Finish>("glossy");
 
+  // Legend swatches, rendered by the same WebGL engine as the model (see
+  // renderAtomSwatches). A dedicated offscreen renderer is kept alive so the
+  // Light slider can redraw them without spawning a new context each tick.
+  const uniqueElements = useMemo(
+    () => [...new Set(structure.sites.map((s) => s.element))],
+    [structure],
+  );
+  const [atomSwatches, setAtomSwatches] = useState<Record<string, string>>({});
+  const swatchGLRef = useRef<{ renderer: THREE.WebGLRenderer; canvas: HTMLCanvasElement } | null>(null);
+
   // Keep the user's camera across scene rebuilds (overlay toggles, moment
   // edits); a fresh default framing only when the structure/cell/supercell
   // changes. Lights and materials live in refs so their knobs mutate the live
@@ -109,6 +160,36 @@ export function StructureView({
   const viewStateRef = useRef<{ key: string; pos: readonly number[]; target: readonly number[]; zoom: number } | null>(null);
   const lightsRef = useRef<{ ambient: THREE.AmbientLight; directional: THREE.DirectionalLight } | null>(null);
   const atomMatsRef = useRef<THREE.MeshPhongMaterial[]>([]);
+  // Live camera/controls, so the a/b/c preset buttons can reorient the view
+  // without a scene rebuild.
+  const sceneRef = useRef<{
+    camera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
+    controls: OrbitControls;
+    centerV: THREE.Vector3;
+    span: number;
+  } | null>(null);
+
+  // Look straight down a crystallographic axis (a, b or c): swing the camera onto
+  // that cell vector and set "up" to another axis so the projected cell sits
+  // square. Orientation only — the current target and camera distance (and, for
+  // orthographic, the zoom) are left untouched, so the view neither pans nor
+  // rescales; the user keeps whatever zoom they had.
+  const viewAlong = (axis: "a" | "b" | "c"): void => {
+    const s = sceneRef.current;
+    if (!s) return;
+    const vec = (f: readonly [number, number, number]): THREE.Vector3 => {
+      const c = fractionalToCartesian(structure.cell, f as unknown as Vec3);
+      return new THREE.Vector3(c[0], c[1], c[2]);
+    };
+    const dir = (axis === "a" ? vec([1, 0, 0]) : axis === "b" ? vec([0, 1, 0]) : vec([0, 0, 1])).normalize();
+    const up = (axis === "c" ? vec([0, 1, 0]) : vec([0, 0, 1])).normalize();
+    const target = s.controls.target;
+    const dist = s.camera.position.distanceTo(target) || s.span * 2.4;
+    s.camera.up.copy(up);
+    s.camera.position.copy(target).addScaledVector(dir, dist);
+    s.camera.lookAt(target);
+    s.controls.update();
+  };
 
   // The magnetic supercell (> the atomic cell only for a non-zero commensurate k).
   const superK = useMemo<[number, number, number]>(
@@ -383,6 +464,7 @@ export function StructureView({
       controls.target.copy(centerV);
     }
     controls.update();
+    sceneRef.current = { camera, controls, centerV, span };
 
     let raf = 0;
     const renderOnce = (): void => { controls.update(); renderer.render(scene, camera); };
@@ -410,6 +492,7 @@ export function StructureView({
     return () => {
       // Remember where the user left the camera for the next rebuild.
       viewStateRef.current = { key: viewKey, pos: camera.position.toArray(), target: controls.target.toArray(), zoom: camera.zoom };
+      sceneRef.current = null;
       lightsRef.current = null;
       atomMatsRef.current = [];
       cancelAnimationFrame(raf);
@@ -440,6 +523,32 @@ export function StructureView({
     }
   }, [finish]);
 
+  // Re-render the legend swatches whenever the elements, finish, or light change
+  // so they stay identical to the atoms on screen.
+  useEffect(() => {
+    if (uniqueElements.length === 0) return;
+    let gl = swatchGLRef.current;
+    if (!gl) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 128;
+      canvas.height = 128;
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setSize(128, 128, false);
+      gl = { renderer, canvas };
+      swatchGLRef.current = gl;
+    }
+    setAtomSwatches(renderAtomSwatches(uniqueElements, finish, lightLevel, gl));
+  }, [uniqueElements, finish, lightLevel]);
+
+  // Release the swatch renderer's WebGL context on unmount.
+  useEffect(() => () => {
+    const gl = swatchGLRef.current;
+    if (!gl) return;
+    gl.renderer.dispose();
+    try { gl.renderer.forceContextLoss(); } catch { /* free the context */ }
+    swatchGLRef.current = null;
+  }, []);
+
   const hasCell = structure.cell.a > 0 && structure.cell.b > 0 && structure.cell.c > 0;
   if (!hasCell || atoms.length === 0) {
     return (
@@ -455,8 +564,8 @@ export function StructureView({
       <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", marginBottom: 6, fontSize: 12, color: theme.secondary, fontFamily: themeMono, alignItems: "center" }}>
         <ViewerToggle label="Bond lengths" checked={showBondLengths} onChange={setShowBondLengths} />
         <ViewerToggle label="Atom labels" checked={showAtomLabels} onChange={setShowAtomLabels} />
-        <ViewerToggle label="Perspective" checked={perspective} onChange={setPerspective} />
         <ViewerToggle label="Axes" checked={showAxes} onChange={setShowAxes} />
+        <ViewerToggle label="Perspective" checked={perspective} onChange={setPerspective} />
         {cellOptions.length > 1 && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title="Show one unit cell at a time — never the atomic and magnetic cells together">
             Cell
@@ -481,32 +590,63 @@ export function StructureView({
             </span>
           </span>
         )}
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }} title="Scene light level">
-          Light
-          <input
-            type="range"
-            min={0.3}
-            max={2}
-            step={0.05}
-            value={lightLevel}
-            onChange={(e) => setLightLevel(Number(e.target.value))}
-            style={{ width: 72 }}
-          />
-        </label>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }} title="Sphere surface finish (specular highlight)">
-          Finish
-          <select
-            value={finish}
-            onChange={(e) => setFinish(e.target.value as Finish)}
-            style={{ fontSize: 11.5, fontFamily: "inherit", border: `1px solid ${theme.border}`, borderRadius: 6, padding: "1px 4px", color: theme.ink, background: "#fff" }}
-          >
-            <option value="matte">matte</option>
-            <option value="standard">standard</option>
-            <option value="glossy">glossy</option>
-          </select>
-        </label>
       </div>
       <div ref={mountRef} style={{ width: "100%", flex: 1, minHeight: 360, cursor: "grab", borderRadius: 10, overflow: "hidden" }} />
+      {/* View presets (bottom-right, above the legend): look straight down an axis. */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6, fontSize: 12, fontFamily: themeMono, color: theme.secondary }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 9px", borderRadius: 8, background: theme.chipBg }} title="Look straight down a crystallographic axis (keeps your zoom)">
+          View
+          <span style={{ display: "inline-flex", border: `1px solid ${theme.border}`, borderRadius: 6, overflow: "hidden" }}>
+            {(["a", "b", "c"] as const).map((ax) => (
+              <button
+                key={ax}
+                onClick={() => viewAlong(ax)}
+                title={`View down the ${ax} axis`}
+                style={{ border: "none", padding: "1px 8px", fontSize: 11.5, fontFamily: "inherit", fontStyle: "italic", cursor: "pointer", background: "#fff", color: theme.ink }}
+              >
+                {ax}
+              </button>
+            ))}
+          </span>
+        </span>
+      </div>
+      {/* Atom legend + appearance controls (light / finish shape the swatches too). */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginTop: 6, fontSize: 12, fontFamily: themeMono, color: theme.secondary, alignItems: "center" }}>
+        {uniqueElements.map((el) => (
+          <span key={el} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            {atomSwatches[el] ? (
+              <img
+                src={atomSwatches[el]}
+                alt=""
+                width={15}
+                height={15}
+                style={{ display: "inline-block", filter: "drop-shadow(0 1px 1.5px rgba(0,0,0,0.28))" }}
+              />
+            ) : (
+              <span style={{ width: 15, height: 15, borderRadius: "50%", background: elementColor(el), display: "inline-block" }} />
+            )}
+            {el}
+          </span>
+        ))}
+        <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 16 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }} title="Scene light level (also brightens/dims the legend)">
+            Light
+            <input type="range" min={0.3} max={2} step={0.05} value={lightLevel} onChange={(e) => setLightLevel(Number(e.target.value))} style={{ width: 72 }} />
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }} title="Sphere surface finish (specular highlight)">
+            Finish
+            <select
+              value={finish}
+              onChange={(e) => setFinish(e.target.value as Finish)}
+              style={{ fontSize: 11.5, fontFamily: "inherit", border: `1px solid ${theme.border}`, borderRadius: 6, padding: "1px 4px", color: theme.ink, background: "#fff" }}
+            >
+              <option value="matte">matte</option>
+              <option value="standard">standard</option>
+              <option value="glossy">glossy</option>
+            </select>
+          </label>
+        </span>
+      </div>
     </div>
   );
 }

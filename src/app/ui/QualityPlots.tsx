@@ -51,7 +51,7 @@ export function QualityPlots({ obsCalc, npp, stacked = false, onHighlight, selec
   );
 }
 
-function FobsFcalc({ rows, onHighlight, selected = null }: {
+export function FobsFcalc({ rows, onHighlight, selected = null }: {
   rows: readonly ReflectionObsCalc[];
   onHighlight?: (sel: { hkl: string; kind: ReflectionObsCalc["kind"] } | null) => void;
   selected?: { hkl: string; kind: ReflectionObsCalc["kind"] } | null;
@@ -128,7 +128,7 @@ function FobsFcalc({ rows, onHighlight, selected = null }: {
   );
 }
 
-function NormalProb({ npp }: { npp: NormalProbabilityPlot }): JSX.Element {
+export function NormalProb({ npp }: { npp: NormalProbabilityPlot }): JSX.Element {
   const xs = npp.points.map((p) => p.expected);
   const ys = npp.points.map((p) => p.observed);
   const lim = Math.max(1e-9, ...xs.map(Math.abs), ...ys.map(Math.abs));
