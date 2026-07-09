@@ -4,6 +4,10 @@
 refinement that runs entirely in your browser — and is built, from the core
 up, to be driven by LLM agents as well as by people.
 
+**▶ Try it in your browser: [drthyang.github.io/web-refinement](https://drthyang.github.io/web-refinement/)** — a
+fully static GitHub Pages app; nothing to install, and your data never leaves
+your machine.
+
 ## The vision: refinement an agent can reason about
 
 Structure refinement is not a black-box optimization — it is an expert loop.
@@ -51,8 +55,10 @@ consequential choices before ever seeing a first fit.
 This project aims to lower that barrier:
 
 - **Nothing to install.** A static web app that runs on any OS with a modern
-  browser — Linux included. Deployable to GitHub Pages or self-hosted; the
-  core workflow has no backend, so your data stays on your machine.
+  browser — Linux included. Live at
+  [drthyang.github.io/web-refinement](https://drthyang.github.io/web-refinement/),
+  or self-host the built `dist/`; the core workflow has no backend, so your data
+  stays on your machine.
 - **One workflow instead of four ecosystems.** Single-crystal and powder,
   X-ray and neutron (constant-wavelength and time-of-flight), nuclear and
   magnetic — one shared refinement engine, one UI.
