@@ -1,9 +1,74 @@
 # Web Refinement Workbench
 
-A browser-native refinement workbench for **atomic and magnetic structures**.
-Static web app (React + TypeScript + Vite), deployable to GitHub Pages, with no
-backend for the core workflow. Heavy computation runs in Web Workers;
-WebAssembly/WebGPU are future accelerators.
+**An AI-native refinement workbench.** Crystal and magnetic structure
+refinement that runs entirely in your browser — and is built, from the core
+up, to be driven by LLM agents as well as by people.
+
+## The vision: refinement an agent can reason about
+
+Structure refinement is not a black-box optimization — it is an expert loop.
+Never refine everything at once; watch parameter correlations; free only
+symmetry-allowed parameters; judge the residuals, not just wR. Learning that
+judgment is the hardest part of the field, and it is exactly the kind of
+reasoning a language model can drive.
+
+This workbench is designed for that from the ground up. Every scientific
+capability lives in a pure, side-effect-free TypeScript core (`src/core/**`):
+deterministic functions over plain, serializable data. The same functions that
+back the UI buttons can therefore be exposed as **agent tools** (via MCP or
+the Claude Agent SDK), and the expert procedures that compose them become
+**skills** — one validated engine, whether you click the button or the agent
+calls the tool. The engine already returns what an agent needs to think with —
+parameter correlations, SVD near-null directions, at-bound flags — **not just
+a scalar wR** — so an agent can run the same loop an expert runs by hand:
+
+```
+observe → decide → act → check
+```
+
+This agent layer is a **work in progress**: it ships incrementally as each
+scientific milestone lands — never a wholesale "agent mode" bolted on at the
+end. See
+[docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) for the tool/skill catalog and the
+LLM-guided refinement design, and [docs/ROADMAP.md](docs/ROADMAP.md) for the
+build sequence.
+
+## The second goal: lowering the barrier to entry
+
+Starting a Rietveld or single-crystal refinement today means choosing among
+several mature packages — GSAS-II, Jana2020, FullProf, TOPAS — and each choice
+pulls in its own ecosystem: its own data formats, its own instrument-parameter
+files, its own split between single-crystal and powder workflows, and its own
+formalism for magnetic structures (magnetic space groups in one, irreducible
+representations in another). Some closed-source options are effectively
+Windows-only, which puts them out of reach on Unix/Linux systems. None of this
+is any package's fault — each grew deep to serve its facility and its
+community, and they remain the tools of record that this project validates
+against. But the combined effect is a steep on-ramp: a beginner faces many
+consequential choices before ever seeing a first fit.
+
+This project aims to lower that barrier:
+
+- **Nothing to install.** A static web app that runs on any OS with a modern
+  browser — Linux included. Deployable to GitHub Pages or self-hosted; the
+  core workflow has no backend, so your data stays on your machine.
+- **One workflow instead of four ecosystems.** Single-crystal and powder,
+  X-ray and neutron (constant-wavelength and time-of-flight), nuclear and
+  magnetic — one shared refinement engine, one UI.
+- **Reads what you already have.** CIF/mCIF, hkl reflection lists,
+  plain-column powder data, GSAS-II `.instprm` instrument files — with format
+  auto-detection that reports *how* each decision was made and lets you
+  override it.
+- **Transparent by design.** A guided step-by-step procedure that starts from
+  a small, safe set of choices; fit quality judged with F_obs vs F_calc and
+  normal-probability plots, not wR alone. Every scientific function is pure,
+  tested TypeScript you can read.
+- **A bridge between magnetic formalisms.** A magnetic-space-group
+  (Shubnikov/BNS) workflow today, with representation analysis being built
+  alongside it — so both descriptions of the same physics live in one tool.
+
+This is a complement to the established packages, not a replacement — see
+[docs/COMPARISON.md](docs/COMPARISON.md) for an honest capability matrix.
 
 > This package is an early browser-native refinement workbench for transparent
 > model building, simulation, and basic constrained refinement. Results intended
@@ -31,9 +96,9 @@ multi-k, representation analysis, and refined CIF/mCIF export are the next
 milestones; see [docs/ROADMAP.md](docs/ROADMAP.md) and
 [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
-Two forward-looking directions are documented and being built toward: an
-**LLM AI-guided refinement** loop and exposing the app's pure core as
-**agent tools and skills** — see [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md).
+The agent-tools layer and the LLM-guided refinement loop (the vision above)
+are documented in [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) and ship
+incrementally with each milestone.
 
 ## Commands
 
@@ -50,13 +115,13 @@ Use `npm run test:ganb4se8` for refinement-engine changes. It requires the local
 primary real-data check because it exposes the current build's powder-refinement
 failure modes much better than synthetic examples.
 
-## What it will do
+## Scope
 
-Atomic/nuclear refinement first, magnetic later; single-crystal and powder
-workflows sharing one refinement engine:
+Single-crystal and powder workflows sharing one refinement engine, for both
+nuclear and magnetic structures:
 
 - Load CIF structures, hkl reflection tables, and powder patterns.
-- Compute nuclear (and later magnetic) structure factors and intensities.
+- Compute nuclear and magnetic structure factors and intensities.
 - Refine scale, coordinates, occupancies, displacement, lattice, background,
   peak width, and magnetic moments — with fixed/free states, bounds, and
   constraints.
@@ -65,10 +130,11 @@ workflows sharing one refinement engine:
 
 ## Architecture in one paragraph
 
-Strict layering with one-directional dependencies. `src/core/**` is **pure
-TypeScript** — no React, DOM, or workers — so every scientific function is pure
-and independently testable. UI components handle presentation only; long
-calculations run in Web Workers. Full detail in
+A static web app (React + TypeScript + Vite) with strict layering and
+one-directional dependencies. `src/core/**` is **pure TypeScript** — no React,
+DOM, or workers — so every scientific function is pure and independently
+testable. UI components handle presentation only; long calculations run in Web
+Workers, with WebAssembly/WebGPU as future accelerators. Full detail in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Documentation
