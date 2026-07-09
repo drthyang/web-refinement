@@ -18,6 +18,7 @@ import { powderCurves } from "@/core/workflow/powder";
 import { singleCrystalComparison } from "@/core/workflow/singleCrystal";
 import { parseHkl } from "@/parsers/hkl";
 import { parseReflectionList } from "@/parsers/reflectionList";
+import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
 import { dSpacing } from "@/core/crystal/unitCell";
 
 /**
@@ -104,7 +105,7 @@ export interface LoadedReflections {
   readonly kept: number;
   /** Reflections dropped (belong to another phase, e.g. an impurity). */
   readonly dropped: number;
-  readonly format: "gsas" | "shelx";
+  readonly format: "gsas" | "shelx" | "fullprof";
 }
 
 /** True when the text looks like a GSAS-II reflection list (has Fo**2 / header). */
@@ -126,6 +127,16 @@ export function loadReflectionDataset(
   datasetId: string,
   name: string,
 ): LoadedReflections {
+  if (looksLikeFullProfInt(text)) {
+    const parsed = parseFullProfInt(text);
+    const wavelength = parsed.wavelength ?? 1.0;
+    return {
+      dataset: { id: datasetId, name, radiation: { kind: "neutron", wavelength }, reflections: parsed.reflections },
+      kept: parsed.reflections.length,
+      dropped: parsed.skipped,
+      format: "fullprof",
+    };
+  }
   if (isGsasReflectionList(text)) {
     const rows = parseReflectionList(text);
     const reflections: SingleCrystalReflection[] = [];

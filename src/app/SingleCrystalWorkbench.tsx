@@ -153,7 +153,7 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
         {stat("R_sigma", pct(merge.statistics.rSigma))}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           {onLoadCif ? <FileButton label="Load CIF…" accept=".cif,text/plain" onFile={onLoadCif} /> : null}
-          {onLoadData ? <FileButton label="Load data…" accept=".xye,.xy,.dat,.txt,.gr,.hkl,.fcf,.csv,.gsa,.gss,.fxye,text/plain" onFile={onLoadData} /> : null}
+          {onLoadData ? <FileButton label="Load data…" accept=".xye,.xy,.dat,.txt,.gr,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,text/plain" onFile={onLoadData} /> : null}
         </div>
       </div>
 

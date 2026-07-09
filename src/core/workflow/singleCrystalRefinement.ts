@@ -194,6 +194,25 @@ export function buildSingleCrystalSpec(
     }
   }
 
+  // Auto-estimate the overall scale so the initial |F|² match is sensible: the
+  // least-squares optimum k = Σ(Fo²·Fc²)/Σ(Fc²)² evaluated at k = 1 (I_calc is
+  // linear in the scale, so one pass is exact). Without this, heavy-atom |F_calc|²
+  // dwarfs small integrated intensities and the starting R-factors are absurd.
+  if (opts.scale === undefined) {
+    const scaleParam = params.find((p) => p.id === "scale");
+    if (scaleParam) {
+      scaleParam.value = 1;
+      const cmp = singleCrystalRefinementComparison(structure, dataset, params, bindings);
+      let num = 0;
+      let den = 0;
+      for (const r of cmp.rows) { num += r.foSq * r.fcSq; den += r.fcSq * r.fcSq; }
+      if (den > 0 && num > 0) {
+        scaleParam.value = num / den;
+        scaleParam.initialValue = num / den;
+      }
+    }
+  }
+
   return { params, bindings };
 }
 

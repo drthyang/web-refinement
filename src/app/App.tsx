@@ -752,7 +752,7 @@ export function App(): JSX.Element {
       meta: `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
     },
     {
-      label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
+      label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
       chip: isSynthetic ? "⚠ synthetic" : "✓ loaded",
       title: isSynthetic ? "Synthetic demo pattern" : powderSource,
       meta: `${pattern.points.length} points · ${UNIT_LABEL[pattern.xUnit]} ${patternExtent.min.toFixed(0)}–${patternExtent.max.toFixed(0)}`,
