@@ -168,6 +168,9 @@ export function buildCellAtoms(
   magneticOps?: readonly SymmetryOperation[],
   momentEntries?: readonly MomentEntry[],
   standardRegion?: StandardCellRegion,
+  /** Fill only `standardRegion` (skip the parent/supercell atoms) — for a
+   *  "magnetic cell only" view where the parent cell must not also appear. */
+  regionOnly = false,
 ): CellAtom[] {
   const [nx, ny, nz] = supercell;
   const single = nx === 1 && ny === 1 && nz === 1;
@@ -266,7 +269,9 @@ export function buildCellAtoms(
         mag = placingFor(magneticOps ?? ops, anchor.pos, frac, anchor.key);
         if (mag) break;
       }
-      if (single) {
+      if (regionOnly) {
+        // Skip the parent/supercell atoms — only the standard region below.
+      } else if (single) {
         // Duplicate across each near-zero axis so faces/edges/corners are filled.
         // Each duplicate belongs to the next cell along that axis (its k-phase cell index).
         const axisImages = [0, 1, 2].map((i) => (frac[i]! < BOUNDARY_EPS ? [0, 1] : [0]));

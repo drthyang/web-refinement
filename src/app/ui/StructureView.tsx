@@ -93,10 +93,12 @@ export function StructureView({
   const [showAtomLabels, setShowAtomLabels] = useState(false);
   const [perspective, setPerspective] = useState(true);
   const [showAxes, setShowAxes] = useState(true);
-  // The magnetic (super)cell is the default view whenever k makes one (> 1×1×1):
-  // a magnetic refinement should open showing the full magnetic repeat.
-  const [magneticCell, setMagneticCell] = useState(true);
-  const [showStandardCell, setShowStandardCell] = useState(true);
+  // Which unit cell to show — mutually exclusive, never two frames at once:
+  //  "atomic"   the parent nuclear cell,
+  //  "super"    the magnetic supercell (only for a commensurate k > 1×1×1),
+  //  "standard" the selected magnetic group's standard-setting (BNS) cell.
+  // Defaults to the magnetic cell whenever one exists (see `cellView` below).
+  const [cellChoice, setCellChoice] = useState<"atomic" | "super" | "standard">("super");
   const [lightLevel, setLightLevel] = useState(2);
   const [finish, setFinish] = useState<Finish>("glossy");
 
@@ -114,18 +116,34 @@ export function StructureView({
     [propagation],
   );
   const canMagneticCell = superK[0] * superK[1] * superK[2] > 1;
-  const supercell: [number, number, number] = magneticCell && canMagneticCell ? superK : [1, 1, 1];
+  const hasStandardCell = !!standardCell;
+
+  // The cells available to show, always including the atomic cell. Exactly one
+  // is drawn at a time. The requested choice falls back to the best available
+  // magnetic cell when it isn't offered (e.g. after switching groups).
+  const cellOptions = useMemo<("atomic" | "super" | "standard")[]>(
+    () => ["atomic", ...(canMagneticCell ? ["super" as const] : []), ...(hasStandardCell ? ["standard" as const] : [])],
+    [canMagneticCell, hasStandardCell],
+  );
+  const cellView: "atomic" | "super" | "standard" = cellOptions.includes(cellChoice)
+    ? cellChoice
+    : canMagneticCell ? "super" : hasStandardCell ? "standard" : "atomic";
+
+  const supercell: [number, number, number] = cellView === "super" ? superK : [1, 1, 1];
+  const showParentCell = cellView !== "standard"; // hide the indigo box under the amber one
+  const showStandardCell = cellView === "standard";
 
   // Populate the standard-setting cell (when shown) with the same crystal:
-  // parent-lattice translates clipped to the region, exact k-phase moments.
+  // parent-lattice translates clipped to the region, exact k-phase moments. In
+  // this mode the parent-cell atoms are suppressed so only the magnetic cell shows.
   const activeRegion = useMemo(
-    () => (standardCell && showStandardCell ? { P: standardCell.P, origin: standardCell.origin } : undefined),
-    [standardCell, showStandardCell],
+    () => (showStandardCell && standardCell ? { P: standardCell.P, origin: standardCell.origin } : undefined),
+    [showStandardCell, standardCell],
   );
 
   const atoms = useMemo(
-    () => buildCellAtoms(structure, supercell, magneticOperations, moments, activeRegion),
-    [structure, magneticOperations, moments, supercell[0], supercell[1], supercell[2], activeRegion], // eslint-disable-line react-hooks/exhaustive-deps
+    () => buildCellAtoms(structure, supercell, magneticOperations, moments, activeRegion, cellView === "standard"),
+    [structure, magneticOperations, moments, supercell[0], supercell[1], supercell[2], activeRegion, cellView], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   // Cartesian cell corners + centre + span, for edges and camera framing —
@@ -284,16 +302,19 @@ export function StructureView({
       }
     }
 
-    // Unit-cell wireframe (indigo, matching the plot's accent).
+    // Unit-cell wireframe (indigo, matching the plot's accent). Hidden in the
+    // standard-cell view so the amber magnetic cell is shown on its own.
     const edges: readonly [number, number][] = [[0, 1], [0, 2], [0, 4], [1, 3], [1, 5], [2, 3], [2, 6], [3, 7], [4, 5], [4, 6], [5, 7], [6, 7]];
-    const pts: THREE.Vector3[] = [];
-    for (const [a, b] of edges) {
-      pts.push(new THREE.Vector3(...corners[a]!), new THREE.Vector3(...corners[b]!));
+    if (showParentCell) {
+      const pts: THREE.Vector3[] = [];
+      for (const [a, b] of edges) {
+        pts.push(new THREE.Vector3(...corners[a]!), new THREE.Vector3(...corners[b]!));
+      }
+      scene.add(new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({ color: 0x6366f1, transparent: true, opacity: 0.55 }),
+      ));
     }
-    scene.add(new THREE.LineSegments(
-      new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color: 0x6366f1, transparent: true, opacity: 0.55 }),
-    ));
 
     // Standard-setting cell of the selected magnetic group (amber wireframe):
     // corners = origin + i·A′ + j·B′ + k·C′ with A′,B′,C′ the columns of P in
@@ -348,7 +369,7 @@ export function StructureView({
     // reset the orientation); otherwise fit the cell, looking slightly down
     // the body diagonal.
     const { a, b, c, alpha, beta, gamma } = structure.cell;
-    const viewKey = `${structure.id}|${a},${b},${c},${alpha},${beta},${gamma}|${supercell.join("x")}`;
+    const viewKey = `${structure.id}|${a},${b},${c},${alpha},${beta},${gamma}|${supercell.join("x")}|${cellView}`;
     const saved = viewStateRef.current;
     if (saved && saved.key === viewKey) {
       camera.position.set(saved.pos[0]!, saved.pos[1]!, saved.pos[2]!);
@@ -401,7 +422,7 @@ export function StructureView({
     // lightLevel and finish are intentionally NOT dependencies: their knobs
     // mutate the live lights/materials below without rebuilding the scene.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [atoms, corners, center, span, showBondLengths, showAtomLabels, perspective, showAxes, structure, moments, propagation, standardCell, showStandardCell]);
+  }, [atoms, corners, center, span, showBondLengths, showAtomLabels, perspective, showAxes, structure, moments, propagation, standardCell, showParentCell, showStandardCell, cellView]);
 
   // Light knob → in-place intensity update (the rAF loop shows it next frame).
   useEffect(() => {
@@ -436,11 +457,29 @@ export function StructureView({
         <ViewerToggle label="Atom labels" checked={showAtomLabels} onChange={setShowAtomLabels} />
         <ViewerToggle label="Perspective" checked={perspective} onChange={setPerspective} />
         <ViewerToggle label="Axes" checked={showAxes} onChange={setShowAxes} />
-        {canMagneticCell && (
-          <ViewerToggle label={`Magnetic cell (${superK.join("×")})`} checked={magneticCell} onChange={setMagneticCell} />
-        )}
-        {standardCell && (
-          <ViewerToggle label={`Standard cell (${standardCell.label})`} checked={showStandardCell} onChange={setShowStandardCell} />
+        {cellOptions.length > 1 && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title="Show one unit cell at a time — never the atomic and magnetic cells together">
+            Cell
+            <span style={{ display: "inline-flex", border: `1px solid ${theme.border}`, borderRadius: 6, overflow: "hidden" }}>
+              {cellOptions.map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => setCellChoice(opt)}
+                  style={{
+                    border: "none",
+                    padding: "1px 7px",
+                    fontSize: 11.5,
+                    fontFamily: "inherit",
+                    cursor: "pointer",
+                    background: cellView === opt ? theme.primary : "#fff",
+                    color: cellView === opt ? "#fff" : theme.ink,
+                  }}
+                >
+                  {opt === "atomic" ? "Atomic" : opt === "super" ? `Magnetic (${superK.join("×")})` : `Magnetic (${standardCell!.label})`}
+                </button>
+              ))}
+            </span>
+          </span>
         )}
         <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }} title="Scene light level">
           Light

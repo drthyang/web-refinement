@@ -65,6 +65,29 @@ describe("buildCellAtoms — standard-setting cell fill", () => {
     expect(inRegion).toHaveLength(2);
   });
 
+  it("regionOnly drops the parent-cell atoms outside the standard region", () => {
+    // A corner atom: without a region it fills all 8 parent-cell corners. With
+    // the det-2 orthohexagonal region, corners (0,1,0)/(0,1,1) fall OUTSIDE it.
+    const corner = { label: "C1", element: "Fe", position: [0, 0, 0] as Vec3, occupancy: 1, adp: iso };
+    const both = buildCellAtoms(cubicP1([corner]), [1, 1, 1], undefined, undefined, region, false);
+    const onlyRegion = buildCellAtoms(cubicP1([corner]), [1, 1, 1], undefined, undefined, region, true);
+
+    // The out-of-region parent corner is present without regionOnly, gone with it.
+    const at = (as: ReturnType<typeof buildCellAtoms>, f: Vec3): boolean =>
+      as.some((a) => a.xyz.every((v, i) => Math.abs(v / 5 - f[i]!) < 1e-6));
+    expect(at(both, [0, 1, 0])).toBe(true);
+    expect(at(onlyRegion, [0, 1, 0])).toBe(false);
+    expect(onlyRegion.length).toBeLessThan(both.length);
+
+    // Every regionOnly atom lies inside the region (P⁻¹·x ∈ [0,1]³, ε-inclusive).
+    for (const a of onlyRegion) {
+      const [x, y, z] = a.xyz.map((v) => v / 5) as [number, number, number];
+      const c0 = x - y / 2, c1 = y / 2, c2 = z;
+      for (const c of [c0, c1, c2]) expect(c).toBeGreaterThanOrEqual(-0.03);
+      for (const c of [c0, c1, c2]) expect(c).toBeLessThanOrEqual(1.03);
+    }
+  });
+
   it("moments on region copies carry the exact k-phase: cos 2πk·t flips odd translates", () => {
     const magOps = [parseMagneticSymmetryOperation("x,y,z,+1")];
     const entries = [{ key: "A1", siteLabel: "A1", components: [0, 0, 3] as Vec3 }];
