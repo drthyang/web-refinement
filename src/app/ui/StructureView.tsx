@@ -56,11 +56,21 @@ function makeLabelSprite(text: string, worldHeight: number, colorCss: string): T
   return sprite;
 }
 
+export interface StandardCellOverlay {
+  /** Columns = standard-setting basis vectors in parent fractional coords. */
+  readonly P: readonly (readonly number[])[];
+  /** Cell origin in parent fractional coords. */
+  readonly origin: Vec3;
+  /** Short label drawn at the cell origin (e.g. the BNS symbol). */
+  readonly label: string;
+}
+
 export function StructureView({
   structure,
   moments,
   propagation,
   magneticOperations,
+  standardCell,
 }: {
   structure: StructureModel;
   /** Magnetic moment entries to overlay as arrows (one per site — or per split
@@ -73,6 +83,10 @@ export function StructureView({
    *  symmetry-equivalent atoms honour time reversal (m′ = θ·det(R)·R·m).
    *  Absent ⇒ nuclear operations with θ = +1 (legacy). */
   magneticOperations?: readonly SymmetryOperation[];
+  /** The selected magnetic group's standard-setting cell (present when its
+   *  BNS identification needed a basis transformation) — drawn as an amber
+   *  wireframe over the parent cell, toggleable. */
+  standardCell?: StandardCellOverlay;
 }): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [showBondLengths, setShowBondLengths] = useState(false);
@@ -82,6 +96,7 @@ export function StructureView({
   // The magnetic (super)cell is the default view whenever k makes one (> 1×1×1):
   // a magnetic refinement should open showing the full magnetic repeat.
   const [magneticCell, setMagneticCell] = useState(true);
+  const [showStandardCell, setShowStandardCell] = useState(true);
   const [lightLevel, setLightLevel] = useState(2);
   const [finish, setFinish] = useState<Finish>("glossy");
 
@@ -253,6 +268,36 @@ export function StructureView({
       new THREE.LineBasicMaterial({ color: 0x6366f1, transparent: true, opacity: 0.55 }),
     ));
 
+    // Standard-setting cell of the selected magnetic group (amber wireframe):
+    // corners = origin + i·A′ + j·B′ + k·C′ with A′,B′,C′ the columns of P in
+    // parent fractional coordinates, converted through the same lattice.
+    if (standardCell && showStandardCell) {
+      const col = (j: number): Vec3 => [
+        standardCell.P[0]![j]!,
+        standardCell.P[1]![j]!,
+        standardCell.P[2]![j]!,
+      ];
+      const stdCorner = (i: number, j: number, k: number): THREE.Vector3 => {
+        const frac: Vec3 = [
+          standardCell.origin[0]! + i * col(0)[0]! + j * col(1)[0]! + k * col(2)[0]!,
+          standardCell.origin[1]! + i * col(0)[1]! + j * col(1)[1]! + k * col(2)[1]!,
+          standardCell.origin[2]! + i * col(0)[2]! + j * col(1)[2]! + k * col(2)[2]!,
+        ];
+        return new THREE.Vector3(...fractionalToCartesian(structure.cell, frac));
+      };
+      const sc: THREE.Vector3[] = [];
+      for (const i of [0, 1]) for (const j of [0, 1]) for (const k of [0, 1]) sc.push(stdCorner(i, j, k));
+      const spts: THREE.Vector3[] = [];
+      for (const [a, b] of edges) spts.push(sc[a]!.clone(), sc[b]!.clone());
+      scene.add(new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints(spts),
+        new THREE.LineBasicMaterial({ color: 0xd97706, transparent: true, opacity: 0.9 }),
+      ));
+      const tag = makeLabelSprite(standardCell.label, labelH * 1.1, "#b45309");
+      tag.position.copy(sc[0]!).add(new THREE.Vector3(0, labelH * 0.8, 0));
+      scene.add(tag);
+    }
+
     // Coordinate axes: a/b/c arrows from the cell origin, coloured RGB, labelled.
     if (showAxes) {
       const origin = new THREE.Vector3(...corners[0]!); // fractional (0,0,0)
@@ -329,7 +374,7 @@ export function StructureView({
     // lightLevel and finish are intentionally NOT dependencies: their knobs
     // mutate the live lights/materials below without rebuilding the scene.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [atoms, corners, center, span, showBondLengths, showAtomLabels, perspective, showAxes, structure, moments, propagation]);
+  }, [atoms, corners, center, span, showBondLengths, showAtomLabels, perspective, showAxes, structure, moments, propagation, standardCell, showStandardCell]);
 
   // Light knob → in-place intensity update (the rAF loop shows it next frame).
   useEffect(() => {
@@ -366,6 +411,9 @@ export function StructureView({
         <ViewerToggle label="Axes" checked={showAxes} onChange={setShowAxes} />
         {canMagneticCell && (
           <ViewerToggle label={`Magnetic cell (${superK.join("×")})`} checked={magneticCell} onChange={setMagneticCell} />
+        )}
+        {standardCell && (
+          <ViewerToggle label={`Standard cell (${standardCell.label})`} checked={showStandardCell} onChange={setShowStandardCell} />
         )}
         <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }} title="Scene light level">
           Light

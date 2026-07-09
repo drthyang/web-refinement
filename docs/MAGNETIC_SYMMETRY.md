@@ -39,6 +39,18 @@ with its domain count. Verified counts: 2/m → 5 subgroups / 11 candidates,
 mmm → 16 / 51; conjugate mirror subgroups of 4mm merge into one class with 2
 domains ([`subgroupLattice.test.ts`](../src/core/magnetic/subgroupLattice.test.ts)).
 
+**Presentation.** The UI groups the candidates into collapsible index sections
+(only the maximal index-2 section starts open) because the correct workflow is
+top-down: the symmetry of the ordered phase is *usually a maximal subgroup* of
+the paramagnetic group (the Landau/k-SUBGROUPSMAG practice, ITA A1) — one
+descends the lattice only when no maximal candidate fits the data. Within a
+section, candidates whose sites can actually carry a moment sort first (the
+moment-forbidden ones stay listed, greyed, for completeness), then type I
+before type III, then by BNS number. When a candidate's identification needed
+a basis transformation, the 3D view can draw its **standard-setting cell**
+(e.g. the orthohexagonal C-centred cell of Cmcm-family subgroups) over the
+parent cell, from the transformation (P, p) reported by the setting search.
+
 For each candidate, the **symmetry-allowed moment directions** on a site are the
 null space of `{ θ_g·det(R_g)·R_g − I }` over the site stabilizer
 ([`allowedMomentDirections`](../src/core/magnetic/allowedMoments.ts)) — these are

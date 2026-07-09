@@ -206,7 +206,9 @@ export function KSearchPanel({
   // Selected magnetic subgroup → symmetry-allowed moment model over the real
   // structure, with editable moment-mode amplitudes and a 3D preview.
   const [selIdx, setSelIdx] = useState<number | null>(null);
-  const [showAllSubgroups, setShowAllSubgroups] = useState(false);
+  // Collapsible index sections: only the maximal (index-2) group starts open —
+  // the top-down workflow — the rest show counts until expanded.
+  const [openIndices, setOpenIndices] = useState<ReadonlySet<number>>(new Set([2]));
   const [amps, setAmps] = useState<Record<string, number>>({});
   const [tieMoments, setTieMoments] = useState(true);
 
@@ -214,6 +216,29 @@ export function KSearchPanel({
   const chosenOps = useMemo(() => {
     if (framework === "msg") return selIdx != null ? reps[selIdx]?.candidate.operations ?? null : null;
     return combo && !("failure" in combo) ? combo.operations : null;
+  }, [framework, selIdx, reps, combo]);
+
+  // When the chosen group's BNS identification needed a basis transformation,
+  // offer its standard-setting cell as a 3D overlay (e.g. the orthohexagonal
+  // C-centred cell of a Cm'cm'-type subgroup of a hexagonal parent).
+  const standardCell = useMemo(() => {
+    const match =
+      framework === "msg"
+        ? selIdx != null
+          ? reps[selIdx]?.settingMatch
+          : undefined
+        : combo && !("failure" in combo)
+          ? combo.settingMatch ?? undefined
+          : undefined;
+    if (!match || match.direct) return undefined;
+    const { P, originShift: p } = match;
+    // New cell origin in parent fractional coordinates: P·p.
+    const origin: Vec3 = [
+      P[0]![0]! * p[0]! + P[0]![1]! * p[1]! + P[0]![2]! * p[2]!,
+      P[1]![0]! * p[0]! + P[1]![1]! * p[1]! + P[1]![2]! * p[2]!,
+      P[2]![0]! * p[0]! + P[2]![1]! * p[1]! + P[2]![2]! * p[2]!,
+    ];
+    return { P, origin, label: formatMagneticSymbol(match.identity.bnsSymbol) };
   }, [framework, selIdx, reps, combo]);
 
   // True when ≥2 selected magnetic ions share one crystallographic site (disorder).
@@ -299,7 +324,7 @@ export function KSearchPanel({
     setAppliedK([kk[0], kk[1], kk[2]]);
     setSelIdx(null);
     setChosenIrreps(new Set());
-    setShowAllSubgroups(false);
+    setOpenIndices(new Set([2]));
   };
 
   return (
@@ -320,6 +345,7 @@ export function KSearchPanel({
             propagation={k}
             {...(magBuild ? { magneticOperations: magBuild.magnetic.operations ?? [] } : {})}
             {...(momentEntries ? { moments: momentEntries } : {})}
+            {...(standardCell ? { standardCell } : {})}
           />
         </Suspense>
         <p style={{ ...help, maxWidth: "none" }}>
@@ -458,22 +484,62 @@ export function KSearchPanel({
           <>
             <p style={help}>
               Full subgroup enumeration: {reps.length} candidate class{reps.length === 1 ? "" : "es"} (every
-              H ≤ G(k) with every θ: H → ±1), maximal groups first. Click one to preview its
-              symmetry-allowed moments in step 5; confirm any candidate with a refinement.
+              H ≤ G(k) with every θ: H → ±1), grouped by index in the grey group. Work top-down:
+              the physical symmetry is usually a <strong>maximal</strong> subgroup (index 2) — descend to
+              higher index only when no maximal candidate fits. Within a group, candidates that allow a
+              moment on your sites are listed first. Click one to preview in step 5.
             </p>
             {(() => {
-              const visible = reps
-                .map((r, i) => ({ r, i }))
-                .filter(({ r }) => showAllSubgroups || r.index <= 4);
-              const indices = [...new Set(visible.map(({ r }) => r.index))].sort((a, b) => a - b);
+              const all = reps.map((r, i) => ({ r, i }));
+              const indices = [...new Set(all.map(({ r }) => r.index))].sort((a, b) => a - b);
+              // BNS-number sort key: labeled candidates in table order, unlabeled last.
+              const bnsKey = ({ r }: { r: LatticeCandidate }): number => {
+                const num = r.candidate.standard?.bnsNumber ?? r.settingMatch?.identity.bnsNumber;
+                if (!num) return Number.MAX_SAFE_INTEGER;
+                const [a, b] = num.split(".").map(Number);
+                return (a ?? 999) * 100000 + (b ?? 0);
+              };
               return (
                 <div style={{ margin: "6px 0 0", display: "grid", gap: 3 }}>
-                  {indices.map((idx) => (
-                    <div key={idx} style={{ display: "grid", gap: 3 }}>
-                      <div style={{ fontSize: 11, color: theme.secondary, fontFamily: themeMono, marginTop: idx === indices[0] ? 0 : 6 }}>
-                        index {idx}{idx === 2 ? " — maximal" : ""}
-                      </div>
-                      {visible.filter(({ r }) => r.index === idx).map(({ r, i }) => {
+                  {indices.map((idx) => {
+                    const group = all
+                      .filter(({ r }) => r.index === idx)
+                      .sort(
+                        (A, B) =>
+                          Number((repMomentDims[B.i] ?? 0) > 0) - Number((repMomentDims[A.i] ?? 0) > 0) ||
+                          Number(B.r.candidate.isTypeI) - Number(A.r.candidate.isTypeI) ||
+                          bnsKey(A) - bnsKey(B) ||
+                          A.r.classId - B.r.classId,
+                      );
+                    const open = openIndices.has(idx);
+                    const allowing = group.filter(({ i }) => (repMomentDims[i] ?? 0) > 0).length;
+                    const holdsSelection = selIdx != null && group.some(({ i }) => i === selIdx);
+                    return (
+                      <div key={idx} style={{ display: "grid", gap: 3 }}>
+                        <button
+                          onClick={() =>
+                            setOpenIndices((s) => {
+                              const next = new Set(s);
+                              if (next.has(idx)) next.delete(idx);
+                              else next.add(idx);
+                              return next;
+                            })
+                          }
+                          style={{
+                            textAlign: "left", fontSize: 11.5, fontFamily: themeMono, cursor: "pointer",
+                            border: "none", background: "transparent", color: theme.secondary,
+                            padding: "4px 2px", marginTop: idx === indices[0] ? 0 : 4,
+                            display: "flex", alignItems: "baseline", gap: 8,
+                          }}
+                        >
+                          <span style={{ color: theme.primary }}>{open ? "▾" : "▸"}</span>
+                          <span style={{ fontWeight: 700 }}>index {idx}{idx === 2 ? " — maximal" : ""}</span>
+                          <span>
+                            {group.length} class{group.length === 1 ? "" : "es"} · {allowing} allow moments
+                          </span>
+                          {!open && holdsSelection && <span style={{ color: theme.primary }}>· selected inside</span>}
+                        </button>
+                        {open && group.map(({ r, i }) => {
                         const lbl = latticeLabel(r);
                         const dim = repMomentDims[i] ?? 0;
                         return (
@@ -504,14 +570,10 @@ export function KSearchPanel({
                             </span>
                           </button>
                         );
-                      })}
-                    </div>
-                  ))}
-                  {!showAllSubgroups && reps.some((r) => r.index > 4) && (
-                    <button style={{ ...smallBtn, justifySelf: "start", marginTop: 4 }} onClick={() => setShowAllSubgroups(true)}>
-                      Show all {reps.length} classes (index &gt; 4, down to P1-type)
-                    </button>
-                  )}
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })()}

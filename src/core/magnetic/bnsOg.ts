@@ -158,6 +158,13 @@ export interface TransformedIdentification {
   readonly transformation: string;
   /** True when the match needed no transformation (standard setting). */
   readonly direct: boolean;
+  /** Basis-change matrix: columns = standard-setting basis vectors in the
+   *  parent basis (x_old = P·x_new + P·originShift). Lets the UI draw the
+   *  transformed cell. Identity when `direct`. */
+  readonly P: Mat3;
+  /** Origin shift in the new basis; the new cell origin sits at the parent
+   *  fractional position P·originShift. Zero when `direct`. */
+  readonly originShift: Vec3;
 }
 
 /** The 24 proper (det = +1) signed permutation matrices, identity first. */
@@ -363,7 +370,15 @@ export function identifyMagneticGroupAnySetting(
   ops: readonly SymmetryOperation[],
 ): TransformedIdentification | null {
   const direct = identifyMagneticGroup(ops);
-  if (direct) return { identity: direct, transformation: "(a, b, c; 0, 0, 0)", direct: true };
+  if (direct) {
+    return {
+      identity: direct,
+      transformation: "(a, b, c; 0, 0, 0)",
+      direct: true,
+      P: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+      originShift: [0, 0, 0],
+    };
+  }
 
   for (const basis of basisOptions()) {
     // Basis change first (origin shifts reuse the transformed list).
@@ -396,7 +411,13 @@ export function identifyMagneticGroupAnySetting(
       const shifted = p[0] === 0 && p[1] === 0 && p[2] === 0 ? base : base.map((op) => shiftOrigin(op, p));
       const identity = identifyMagneticGroup(shifted);
       if (identity) {
-        return { identity, transformation: describeTransformation(basis.P, p), direct: false };
+        return {
+          identity,
+          transformation: describeTransformation(basis.P, p),
+          direct: false,
+          P: basis.P,
+          originShift: p,
+        };
       }
     }
   }
