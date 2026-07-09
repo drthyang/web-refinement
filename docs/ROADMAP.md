@@ -324,28 +324,41 @@ agent tool it exposes.**
   intensities** (F² or F) through the same engine, symmetry constraints, and
   (for magnetic) moment machinery as powder — the second half of the "Rietveld
   *and* single-crystal" vision (§1).
-- **Exists:** the computational core is already in place and tested — a
-  `SingleCrystalDataset`/`SingleCrystalReflection` model, nuclear and magnetic
-  single-crystal structure-factor + problem builders
-  ([`workflow/singleCrystal.ts`](../src/core/workflow/singleCrystal.ts),
-  `buildSingleCrystalProblem` / `buildMagneticSingleCrystalProblem`), scale and
-  symmetry-allowed moment refinement, and per-reflection nuclear/magnetic split.
-  What is missing is the data path and the workflow/UX around it.
+- **Exists:** the computational core plus the **F² refinement layer** are in
+  place and tested. Beyond the original `SingleCrystalDataset` model and
+  nuclear/magnetic structure-factor + problem builders
+  ([`workflow/singleCrystal.ts`](../src/core/workflow/singleCrystal.ts)), the M7
+  build added: **Laue-class equivalent merging** with R_int / R_sigma /
+  redundancy ([`diffraction/merge.ts`](../src/core/diffraction/merge.ts));
+  **SHELX HKLF 4 + `.fcf`/CIF reflection I/O**
+  ([`parsers/shelxHkl.ts`](../src/parsers/shelxHkl.ts)); the **single-crystal
+  Lorentz–polarization + secondary-extinction corrections** and **SHELX F²
+  weights + R1/wR2/GooF agreement**
+  ([`diffraction/singleCrystalFactors.ts`](../src/core/diffraction/singleCrystalFactors.ts));
+  and the **full F² refinement spec + problem builder + obs/calc comparison with
+  standardized-residual outlier diagnostics**, assembled from the *same*
+  symmetry-constraint layer as the powder path
+  ([`workflow/singleCrystalRefinement.ts`](../src/core/workflow/singleCrystalRefinement.ts)).
+  Validated by scale + displaced-atom recovery (wR2/R1 → ~0) and format/merge
+  golden cases. Design logic, units, and the fixed-on-load convention are in
+  [`SINGLE_CRYSTAL.md`](./SINGLE_CRYSTAL.md).
 - **Needed:**
-  - **Reflection I/O** — read SHELX **HKL/HKLF 4**, **FCF**, and CIF-embedded
-    reflection lists (h k l, F²/I, σ, batch); merge equivalents with **R_int**
-    and **completeness** reporting.
-  - **Single-crystal corrections** — **extinction** (Becker–Coppens primary/
-    secondary), **absorption** (analytical by crystal shape or empirical /
-    multi-scan), the single-crystal **Lorentz–polarization** geometry, and
-    batch-scale / **twin-fraction** handling.
   - **Workflow + UI** — a single-crystal page mirroring the powder one
-    (load hkl → assign/confirm space group → free parameters → refine →
-    F_obs vs F_calc, wR2/R1, GoF), with per-reflection outlier diagnostics.
+    (load hkl → assign/confirm space group → merge report → free parameters →
+    refine → F_obs vs F_calc, wR2/R1, GoF), with per-reflection outlier
+    diagnostics (the core comparison already returns them).
+  - **Completeness** vs a generated theoretical unique set; **twinning**
+    (batch/BASF) and **anomalous dispersion** (f′/f″, absolute structure); the
+    **iterative WGHT** a,b reweighting in the solve.
+  - **Absorption correction tool** — WinGX-class and beyond (μ from composition,
+    face-indexed Gaussian-grid analytical, spherical/cylindrical closed forms,
+    multi-scan spherical-harmonic empirical driven by R_int). Full forward plan
+    in [`SINGLE_CRYSTAL.md`](./SINGLE_CRYSTAL.md) §3.
 - **Validation gate:** reproduce a published single-crystal refinement (F²
   wR2 / R1) within tolerance; cross-check against SHELXL / GSAS-II on the same
   hkl file.
-- **Tool exposed:** `load_hkl(file)`, `refine_single_crystal(model, hkl)`.
+- **Tool exposed:** `load_hkl(file)` (✅ parser), `refine_single_crystal(model, hkl)`
+  (✅ core), `correct_absorption(reflections, options)` (planned, §3).
 
 *M6 and M7 are extensions of the atomic→magnetic spine (M1–M5), not gates on it:
 both reuse the same engine, symmetry, and scattering core, so they can be built

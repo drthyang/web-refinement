@@ -61,6 +61,8 @@ export interface AppliedModel {
   readonly po?: { readonly axis: [number, number, number]; readonly ratio: number };
   /** Absorption coefficient μR (cylinder radius × linear absorption). 0 ⇒ none. */
   readonly muR: number;
+  /** Secondary-extinction parameter (SHELXL EXTI). 0 ⇒ none. */
+  readonly extinction: number;
   /** Moment-magnitude scale applied to magnetic moments. */
   readonly momentScale: number;
 }
@@ -96,6 +98,7 @@ export function applyParameters(
   let asymSL: number | undefined;
   let asymHL: number | undefined;
   let muR = 0;
+  let extinction = 0;
   let po: { axis: [number, number, number]; ratio: number } | undefined;
   const background: number[] = [];
   const tofCal = new Map<string, number>();
@@ -210,6 +213,9 @@ export function applyParameters(
       case "absorption":
         muR = v;
         break;
+      case "extinction":
+        extinction = v;
+        break;
     }
   }
 
@@ -249,6 +255,7 @@ export function applyParameters(
     peakWidth,
     zeroShift,
     muR,
+    extinction,
     ...(caglioti ? { caglioti } : {}),
     ...(lorentzian ? { lorentzian } : {}),
     ...(axial ? { axial } : {}),

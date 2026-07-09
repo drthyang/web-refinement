@@ -37,6 +37,7 @@ export type ParameterKind =
   | "tofProfile"
   | "poRatio"
   | "absorption"
+  | "extinction"
   | "magneticScale"
   | "momentX"
   | "momentY"

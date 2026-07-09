@@ -36,6 +36,7 @@ const CATEGORY: Record<ParameterKind, string> = {
   occupancy: "Occupancy",
   poRatio: "Corrections",
   absorption: "Corrections",
+  extinction: "Corrections",
   magneticScale: "Magnetic",
   momentX: "Magnetic",
   momentY: "Magnetic",
