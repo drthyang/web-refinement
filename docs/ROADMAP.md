@@ -221,8 +221,19 @@ agent tool it exposes.**
   for triclinic/monoclinic/orthorhombic, cyclic, and general-k cases.
 - **Done since:** standard **BNS/OG labels** — a candidate reads "P2₁'/m' ·
   BNS 11.54 · OG 11.5.63" via exact operation-set matching against the bundled
-  ISO-MAG table ([`bnsOg.ts`](../src/core/magnetic/bnsOg.ts), types I/III;
-  non-standard settings fall back to the primed-operation label).
+  ISO-MAG table ([`bnsOg.ts`](../src/core/magnetic/bnsOg.ts), types I/III).
+  **The full magnetic subgroup lattice** — every subgroup H ≤ G_k with every
+  θ: H → ±1 (not only the maximal index-2 candidates), grouped by index and by
+  conjugacy class with domain counts, k-SUBGROUPSMAG-style
+  ([`subgroupLattice.ts`](../src/core/magnetic/subgroupLattice.ts)).
+  **SARAh-style irrep combinations → named isotropy subgroup** — tick one or
+  several irreps; the exact stabilizer of a generic combination is computed and
+  identified as the implied OG/BNS group, bridging the two routes
+  ([`isotropy.ts`](../src/core/magnetic/isotropy.ts)). **Setting-search
+  identification** — non-standard-setting subgroups get their correct standard
+  symbol through ITA basis transformations (24 proper axis permutations ×
+  ¼-grid origin shifts), with the transformation reported
+  (`identifyMagneticGroupAnySetting` in [`bnsOg.ts`](../src/core/magnetic/bnsOg.ts)).
 - **Needed:** irrep tables for **non-abelian** little co-groups and the
   **projective small representations** for non-symmorphic BZ-boundary k (the
   decomposition already flags when these are required); the **star of k**

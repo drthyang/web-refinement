@@ -28,6 +28,7 @@ import type { MagneticCandidate } from "@/core/magnetic/magneticGroups";
 import { mulMat, determinant, IDENTITY3 } from "@/core/math/mat3";
 import { applyOperation } from "@/core/crystal/symmetry";
 import { magneticRepresentationCharacter, irrepMultiplicity } from "@/core/magnetic/magneticRepresentation";
+import { pointGroupIrreps } from "@/core/magnetic/pointGroupIrreps";
 
 const matKey = (R: Mat3): string => R.flat().map((x) => Math.round(x)).join(",");
 const ID_KEY = matKey(IDENTITY3);
@@ -45,14 +46,16 @@ function matOrder(R: Mat3): number {
   return n;
 }
 
-/** A 1-D irreducible representation of an abelian little group. */
+/** An irreducible representation of the little group (characters per op). */
 export interface Irrep {
   /** Generic label Γ1, Γ2, … (standard Mulliken/BNS labels are a later addition). */
   readonly label: string;
   /** χ_irrep(g) for each input operation, in the same order (1-D ⇒ χ *is* the rep). */
   readonly characters: readonly Complex[];
-  /** True when every character is real (±1) — a real representation. */
+  /** True when every character is real (±1 for 1-D) — a real representation. */
   readonly real: boolean;
+  /** Dimension; absent means 1 (the abelian generator only makes 1-D irreps). */
+  readonly dim?: number;
 }
 
 /**
@@ -167,7 +170,7 @@ export function shubnikovCandidateIndex(
   littleGroupOps: readonly SymmetryOperation[],
   candidates: readonly MagneticCandidate[],
 ): number | null {
-  if (!irrep.real) return null;
+  if (!irrep.real || (irrep.dim ?? 1) !== 1) return null;
   // Desired θ per rotation coset, from the (±1) characters.
   const want = new Map<string, number>();
   for (let i = 0; i < littleGroupOps.length; i++) {
@@ -195,8 +198,18 @@ export interface IrrepTerm {
 }
 
 export interface MagneticRepDecomposition {
-  /** False when the little co-group is non-abelian (out of scope here). */
+  /** True when the little co-group is abelian (1-D irreps by construction). */
   readonly abelian: boolean;
+  /**
+   * True when a decomposition could be computed at all: abelian co-groups at
+   * any k, and **any** co-group at k = 0 (at Γ the ordinary point-group
+   * irreps are the small representations even for non-symmorphic groups —
+   * Bradley & Cracknell 1972, Ch. 3). False only for a non-abelian co-group
+   * at k ≠ 0, where the projective small reps are still missing.
+   */
+  readonly available: boolean;
+  /** How the irreps were obtained (null when unavailable). */
+  readonly method: "abelian" | "induced" | null;
   /** Total dimension 3·N of the magnetic representation (N magnetic atoms). */
   readonly dimension: number;
   /** Irreps that appear (multiplicity > 0). */
@@ -210,9 +223,11 @@ export interface MagneticRepDecomposition {
 }
 
 /**
- * Decompose the magnetic representation Γ_mag over the little group into the
- * irreps of its (abelian) co-group: which irreps carry the order and with what
- * multiplicity (the number of refinable basis modes per irrep).
+ * Decompose the magnetic representation Γ_mag over the little group: which
+ * irreps carry the order and with what multiplicity (the number of refinable
+ * basis modes per irrep). Abelian co-groups use the by-construction 1-D
+ * generator at any k; non-abelian co-groups use the induced point-group
+ * irreps ({@link pointGroupIrreps}) at k = 0, where they are exact.
  */
 export function decomposeMagneticRepresentation(
   structure: StructureModel,
@@ -223,8 +238,25 @@ export function decomposeMagneticRepresentation(
   const chi = magneticRepresentationCharacter(structure, k, siteLabels, littleGroupOps);
   const eTerm = chi.find((c) => eqMat(c.op.rotation, IDENTITY3));
   const dimension = Math.round(eTerm ? eTerm.re : 0);
-  const irreps = abelianIrreps(littleGroupOps);
-  if (!irreps) return { abelian: false, dimension, terms: [], integerConsistent: false };
+
+  let irreps: Irrep[] | null = abelianIrreps(littleGroupOps);
+  const abelian = irreps !== null;
+  let method: "abelian" | "induced" | null = abelian ? "abelian" : null;
+  const atGamma = k.every((x) => Math.abs(x) < 1e-9);
+  if (!irreps && atGamma) {
+    try {
+      irreps = pointGroupIrreps(littleGroupOps).map((g) => ({
+        label: g.label,
+        characters: g.characters,
+        real: g.real,
+        dim: g.dim,
+      }));
+      method = "induced";
+    } catch {
+      irreps = null; // construction refused to emit an unverified table
+    }
+  }
+  if (!irreps) return { abelian, available: false, method: null, dimension, terms: [], integerConsistent: false };
 
   const reducible = chi.map((c) => ({ re: c.re, im: c.im }));
   const terms: IrrepTerm[] = [];
@@ -235,7 +267,7 @@ export function decomposeMagneticRepresentation(
     if (Math.abs(nRaw - n) > 0.05) integerConsistent = false;
     if (n > 0) terms.push({ irrep, multiplicity: n });
   }
-  return { abelian: true, dimension, terms, integerConsistent };
+  return { abelian, available: true, method, dimension, terms, integerConsistent };
 }
 
 /**

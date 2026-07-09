@@ -87,6 +87,37 @@ Web resources accessed **2026-07-08**.
   **A24**, 217; Izyumov, Naish & Ozerov, *Neutron Diffraction of Magnetic
   Materials*; Bradley, C. J. & Cracknell, A. P. (1972), *The Mathematical Theory
   of Symmetry in Solids*. → [`magnetic/*`](../src/core/magnetic/).
+- **Magnetic subgroup enumeration (full lattice, index, domains)** —
+  Perez-Mato, J. M., Gallego, S. V., Tasci, E. S., Elcoro, L., de la Flor, G. &
+  Aroyo, M. I. (2015). "Symmetry-Based Computational Tools for Magnetic
+  Crystallography." *Annu. Rev. Mater. Res.* **45**, 217 (the k-SUBGROUPSMAG
+  framework); Hermann, C. (1929). *Z. Kristallogr.* **69**, 533
+  (translationengleiche/klassengleiche subgroup steps); *International Tables
+  for Crystallography* Vol. A1 (Wondratschek & Müller, eds.) — group–subgroup
+  relations; Litvin, D. B. (2013). *Magnetic Group Tables* (IUCr).
+  → [`magnetic/subgroupLattice.ts`](../src/core/magnetic/subgroupLattice.ts).
+- **Irrep combinations → isotropy subgroup (irrep ↔ MSG bridge)** —
+  Wills, A. S. (2000). "A new protocol for the determination of magnetic
+  structures using simulated annealing and representational analysis (SARAh)."
+  *Physica B* **276–278**, 680 (mixing basis vectors of one or several irreps);
+  Stokes, H. T. & Hatch, D. M. (1988). *Isotropy Subgroups of the 230
+  Crystallographic Space Groups* (World Scientific) — order parameter →
+  stabilizer (kernels/epikernels); Campbell, B. J., Stokes, H. T., Tanner, D. E.
+  & Hatch, D. M. (2006). *J. Appl. Cryst.* **39**, 607 (ISODISPLACE/ISODISTORT:
+  mode amplitudes ↔ symmetry group).
+  → [`magnetic/isotropy.ts`](../src/core/magnetic/isotropy.ts).
+- **Setting transformations for group identification** — *International Tables
+  for Crystallography* Vol. A, §1.5 (transformations of coordinate systems:
+  R′ = P⁻¹RP, t′ = P⁻¹(Rp + t − p)); orthohexagonal C-centred cells for the
+  orthorhombic/monoclinic subgroups of hexagonal parents (ITA Vol. A1).
+  → [`magnetic/bnsOg.ts`](../src/core/magnetic/bnsOg.ts)
+  (`identifyMagneticGroupAnySetting`).
+- **Non-abelian point-group irreps by construction** — Serre, J.-P. (1977).
+  *Linear Representations of Finite Groups* (Springer), §8–9 (induced
+  representations, subgroups of prime index / Clifford theory); Bradley &
+  Cracknell (1972), Ch. 3 (at Γ the ordinary point-group irreps are the small
+  representations, non-symmorphic groups included).
+  → [`magnetic/pointGroupIrreps.ts`](../src/core/magnetic/pointGroupIrreps.ts).
 
 ## Method background (informs the engine; no single source)
 

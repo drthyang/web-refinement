@@ -48,7 +48,7 @@ export interface MagneticCandidate {
 }
 
 /** Deduplicate operations modulo lattice translation, identity first. */
-function distinctCosets(ops: readonly SymmetryOperation[]): SymmetryOperation[] {
+export function distinctCosets(ops: readonly SymmetryOperation[]): SymmetryOperation[] {
   const seen = new Map<string, SymmetryOperation>();
   for (const op of ops) {
     const key = op.rotation.map((r) => r.map((v) => Math.round(v)).join(",")).join(";");
@@ -70,7 +70,7 @@ function isIdentity(op: SymmetryOperation): boolean {
 }
 
 /** Point-group key (rotation only) for composition-table indexing. */
-function rotationKey(op: SymmetryOperation): string {
+export function rotationKey(op: SymmetryOperation): string {
   return op.rotation.map((r) => r.map((v) => Math.round(v)).join(",")).join(";");
 }
 
