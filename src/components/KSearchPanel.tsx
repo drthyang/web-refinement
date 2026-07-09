@@ -37,6 +37,8 @@ import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { refine } from "@/core/refinement/engine";
 import type { PowderProfile } from "@/core/workflow/powder";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
+import { magneticReportHtml, type MagneticReportGroup } from "@/core/export/magneticReport";
+import { downloadText } from "@/app/download";
 import { card as themeCard, color as theme, mono as themeMono, uppercaseLabel as themeLabel } from "@/app/theme";
 
 // Lazy so three.js stays in its own chunk (only loaded when a group is previewed).
@@ -307,6 +309,43 @@ export function KSearchPanel({
         setRefining(false);
       }
     }, 30);
+  }
+
+  /** Download a self-contained HTML report of the current magnetic model:
+   *  the projected structure figure + parameter/sublattice/cell tables. */
+  function exportReport(): void {
+    if (!magBuild) return;
+    let group: MagneticReportGroup = { symbol: "magnetic subgroup" };
+    if (framework === "msg" && selIdx != null && reps[selIdx]) {
+      const r = reps[selIdx]!;
+      const lbl = latticeLabel(r);
+      group = {
+        symbol: lbl.symbol,
+        ...(lbl.numbers ? { numbers: lbl.numbers } : {}),
+        ...(lbl.setting ? { setting: lbl.setting } : {}),
+        index: r.index,
+      };
+    } else if (framework === "irrep" && combo && !("failure" in combo)) {
+      const identity = combo.standard ?? combo.settingMatch?.identity ?? null;
+      group = {
+        symbol: identity
+          ? formatMagneticSymbol(identity.bnsSymbol)
+          : `isotropy subgroup of ${[...chosenIrreps].sort().join(" ⊕ ")}`,
+        ...(identity ? { numbers: `BNS ${identity.bnsNumber} · OG ${identity.ogNumber}` } : {}),
+        ...(combo.settingMatch ? { setting: combo.settingMatch.transformation } : {}),
+      };
+    }
+    const html = magneticReportHtml({
+      structure,
+      magnetic: magBuild.magnetic,
+      values: amps,
+      params: magBuild.params,
+      bindings: magBuild.bindings,
+      k,
+      group,
+      ...(refineWR != null ? { note: `wR = ${(100 * refineWR).toFixed(1)}% (moments-only fit)` } : {}),
+    });
+    downloadText(`${structure.id}-magnetic-report.html`, html, "text/html");
   }
 
   /** Search candidate k-vectors from the auto-detected magnetic peaks. */
@@ -765,6 +804,13 @@ export function KSearchPanel({
                     Continue in refinement page →
                   </button>
                 )}
+                <button
+                  style={{ ...btn, marginTop: 0, background: "#fff", color: theme.primary, border: `1px solid ${theme.primary}` }}
+                  onClick={exportReport}
+                  title="Download a self-contained HTML report: projected structure figure with moment arrows + parameter, sublattice, and cell tables"
+                >
+                  Export report
+                </button>
               </div>
               <span style={help}>&ldquo;Refine moments&rdquo; fits the moments here (nuclear fixed, shared scale) — the 3D model on the left updates live. &ldquo;Continue&rdquo; adds the moment parameters to the main refinement to fit nuclear + magnetic together.</span>
             </div>

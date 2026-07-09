@@ -88,6 +88,14 @@ Tested in
 [`equalAmplitude.test.ts`](../src/core/magnetic/equalAmplitude.test.ts),
 including a powder refinement recovering the shared `|M|` and angle.
 
+**Report export.** Step 5's "Export report" button downloads a self-contained
+HTML report of the current magnetic model: a projected structure figure
+(down c*, moment arrows per sublattice, ⊙/⊗ for out-of-plane components,
+magnetic supercell for k ≠ 0) plus the moment-parameter, cell, and
+sublattice tables — built by
+[`magneticReportHtml`](../src/core/export/magneticReport.ts) from the same
+expansion that drives the 3D viewer.
+
 **Tested:** k=0 candidate set (P2₁/m → P2₁'/m'), allowed-moment dimensions, the
 simple-AFM recovery ([`magneticSimpleAfm.test.ts`](../src/core/workflow/magneticSimpleAfm.test.ts)).
 
