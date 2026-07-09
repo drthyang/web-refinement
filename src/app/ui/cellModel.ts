@@ -107,6 +107,16 @@ const BOUNDARY_EPS = 0.02;
 /** Guardrail against a pathological cell/space-group producing runaway atoms. */
 const MAX_ATOMS = 4000;
 
+/**
+ * A standard-setting cell to populate alongside the parent cell: columns of
+ * `P` are the new basis vectors in parent fractional coordinates, `origin`
+ * the new cell origin (parent fractional). See {@link buildCellAtoms}.
+ */
+export interface StandardCellRegion {
+  readonly P: readonly (readonly number[])[];
+  readonly origin: Vec3;
+}
+
 const IDENTITY: Mat3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
 
 function wrap01(v: number): number {
@@ -139,12 +149,25 @@ function coincide(a: Vec3, b: Vec3): boolean {
  * atom finds the entry whose G_M-orbit it belongs to. Without entries the site
  * position is the single anchor (legacy behaviour); an atom reachable from no
  * anchor carries no arrow (its moment is not defined by the model).
+ *
+ * `standardRegion`: additionally populate a standard-setting cell (a magnetic
+ * subgroup identified through a basis transformation). The fill is exact: the
+ * crystal is periodic under the **parent** lattice, so the region receives the
+ * parent-lattice-translated copies r + t (t ∈ ℤ³) whose new-basis coordinates
+ * P⁻¹·(r + t − origin) lie in [0, 1] (boundary-inclusive — and since P has
+ * integer columns, face/corner-equivalent copies are themselves genuine
+ * lattice translates, so they appear automatically). Each copy is tagged with
+ * cellIndex = t, so {@link displayMoment} applies the same
+ * θ·det(R)·cos(2π k·(L + t))·R·m arrow the magnetic structure factor uses —
+ * the moments in the new cell are the identical physical field, not a
+ * re-derivation. Copies coinciding with parent-cell atoms dedupe by position.
  */
 export function buildCellAtoms(
   structure: StructureModel,
   supercell: readonly [number, number, number] = [1, 1, 1],
   magneticOps?: readonly SymmetryOperation[],
   momentEntries?: readonly MomentEntry[],
+  standardRegion?: StandardCellRegion,
 ): CellAtom[] {
   const [nx, ny, nz] = supercell;
   const single = nx === 1 && ny === 1 && nz === 1;
@@ -159,6 +182,49 @@ export function buildCellAtoms(
     if (seen.has(key)) return;
     seen.add(key);
     atoms.push({ element, label, xyz: fractionalToCartesian(structure.cell, frac), rot, ...(mag ? { mag } : {}), cellIndex });
+  };
+
+  // Standard-region machinery: P⁻¹ (for the inside test) and the integer
+  // translation box that can reach the region from the wrapped [0,1) atoms.
+  const region = (() => {
+    if (!standardRegion) return null;
+    const P = standardRegion.P;
+    const det =
+      P[0]![0]! * (P[1]![1]! * P[2]![2]! - P[1]![2]! * P[2]![1]!) -
+      P[0]![1]! * (P[1]![0]! * P[2]![2]! - P[1]![2]! * P[2]![0]!) +
+      P[0]![2]! * (P[1]![0]! * P[2]![1]! - P[1]![1]! * P[2]![0]!);
+    if (Math.abs(det) < 1e-9) return null;
+    const cof = (r1: number, c1: number, r2: number, c2: number): number =>
+      P[r1]![c1]! * P[r2]![c2]! - P[r1]![c2]! * P[r2]![c1]!;
+    const Pinv: number[][] = [
+      [cof(1, 1, 2, 2) / det, -cof(0, 1, 2, 2) / det, cof(0, 1, 1, 2) / det],
+      [-cof(1, 0, 2, 2) / det, cof(0, 0, 2, 2) / det, -cof(0, 0, 1, 2) / det],
+      [cof(1, 0, 2, 1) / det, -cof(0, 0, 2, 1) / det, cof(0, 0, 1, 1) / det],
+    ];
+    // Parent-fractional extent of the region: its 8 corners.
+    const lo: number[] = [Infinity, Infinity, Infinity];
+    const hi: number[] = [-Infinity, -Infinity, -Infinity];
+    for (const i of [0, 1]) for (const j of [0, 1]) for (const kk of [0, 1]) {
+      for (let a = 0; a < 3; a++) {
+        const v = standardRegion.origin[a]! + i * P[a]![0]! + j * P[a]![1]! + kk * P[a]![2]!;
+        if (v < lo[a]!) lo[a] = v;
+        if (v > hi[a]!) hi[a] = v;
+      }
+    }
+    const tMin = lo.map((v) => Math.floor(v - BOUNDARY_EPS) - 1);
+    const tMax = hi.map((v) => Math.ceil(v + BOUNDARY_EPS));
+    return { Pinv, origin: standardRegion.origin, tMin, tMax };
+  })();
+
+  /** New-basis coordinates of a parent-fractional point. */
+  const toRegionCoords = (x: Vec3): Vec3 => {
+    const d: Vec3 = [x[0]! - region!.origin[0]!, x[1]! - region!.origin[1]!, x[2]! - region!.origin[2]!];
+    const M = region!.Pinv;
+    return [
+      M[0]![0]! * d[0]! + M[0]![1]! * d[1]! + M[0]![2]! * d[2]!,
+      M[1]![0]! * d[0]! + M[1]![1]! * d[1]! + M[1]![2]! * d[2]!,
+      M[2]![0]! * d[0]! + M[2]![1]! * d[1]! + M[2]![2]! * d[2]!,
+    ];
   };
 
   // The moment-placing op for the atom at `frac`: the (first) op in `list`
@@ -217,6 +283,26 @@ export function buildCellAtoms(
           for (let j = 0; j < ny; j++) {
             for (let k = 0; k < nz; k++) {
               push(site.element, site.label, [frac[0]! + i, frac[1]! + j, frac[2]! + k], rot, mag, [i, j, k]);
+            }
+          }
+        }
+      }
+      // Standard-setting cell fill: every parent-lattice translate of this
+      // atom whose new-basis coordinates land in [0,1] (boundary-inclusive).
+      // cellIndex = the true integer translation, so the k-phase stays exact.
+      if (region) {
+        for (let tx = region.tMin[0]!; tx <= region.tMax[0]!; tx++) {
+          for (let ty = region.tMin[1]!; ty <= region.tMax[1]!; ty++) {
+            for (let tz = region.tMin[2]!; tz <= region.tMax[2]!; tz++) {
+              const x: Vec3 = [frac[0]! + tx, frac[1]! + ty, frac[2]! + tz];
+              const c = toRegionCoords(x);
+              if (
+                c[0]! >= -BOUNDARY_EPS && c[0]! <= 1 + BOUNDARY_EPS &&
+                c[1]! >= -BOUNDARY_EPS && c[1]! <= 1 + BOUNDARY_EPS &&
+                c[2]! >= -BOUNDARY_EPS && c[2]! <= 1 + BOUNDARY_EPS
+              ) {
+                push(site.element, site.label, x, rot, mag, [tx, ty, tz]);
+              }
             }
           }
         }

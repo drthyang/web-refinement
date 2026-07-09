@@ -30,6 +30,57 @@ describe("magneticSupercell", () => {
   });
 });
 
+describe("buildCellAtoms — standard-setting cell fill", () => {
+  // Region: P columns (a, a+2b, c) — det 2, the orthohexagonal pattern.
+  const region = { P: [[1, 1, 0], [0, 2, 0], [0, 0, 1]], origin: [0, 0, 0] as Vec3 };
+  const site = { label: "A1", element: "Fe", position: [0.4, 0.1, 0.3] as Vec3, occupancy: 1, adp: iso };
+
+  it("fills the region with exactly det(P) lattice translates of a generic atom", () => {
+    const without = buildCellAtoms(cubicP1([site]));
+    expect(without).toHaveLength(1);
+    const atoms = buildCellAtoms(cubicP1([site]), [1, 1, 1], undefined, undefined, region);
+    // Hand-derived: t = (0,0,0) (shared with the parent cell — deduped) and
+    // t = (1,1,0) are the only translates with P⁻¹·x ∈ [0,1]³.
+    expect(atoms).toHaveLength(2);
+    const extra = atoms.find((a) => a.cellIndex[0] === 1)!;
+    expect(extra.cellIndex).toEqual([1, 1, 0]);
+    expect(extra.xyz[0]).toBeCloseTo((0.4 + 1) * 5, 6);
+    expect(extra.xyz[1]).toBeCloseTo((0.1 + 1) * 5, 6);
+    expect(extra.xyz[2]).toBeCloseTo(0.3 * 5, 6);
+  });
+
+  it("an origin-shifted region still holds det(P) copies (volume is invariant)", () => {
+    const shifted = { P: region.P, origin: [0.25, 0.25, 0] as Vec3 };
+    const atoms = buildCellAtoms(cubicP1([site]), [1, 1, 1], undefined, undefined, shifted);
+    // Parent-cell copy + region copies, region ∩ parent overlap deduped: the
+    // region always contains exactly det(P) = 2 translates of a generic atom.
+    const inRegion = atoms.filter((a) => {
+      const f = a.xyz.map((v) => v / 5); // back to parent fractional
+      const c0 = f[0]! - 0.25 - (f[1]! - 0.25) / 2;
+      const c1 = (f[1]! - 0.25) / 2;
+      const c2 = f[2]!;
+      const inside = (v: number): boolean => v >= -0.021 && v <= 1.021;
+      return inside(c0) && inside(c1) && inside(c2);
+    });
+    expect(inRegion).toHaveLength(2);
+  });
+
+  it("moments on region copies carry the exact k-phase: cos 2πk·t flips odd translates", () => {
+    const magOps = [parseMagneticSymmetryOperation("x,y,z,+1")];
+    const entries = [{ key: "A1", siteLabel: "A1", components: [0, 0, 3] as Vec3 }];
+    const atoms = buildCellAtoms(cubicP1([site]), [1, 1, 1], magOps, entries, region);
+    const base = atoms.find((a) => a.cellIndex[0] === 0)!;
+    const extra = atoms.find((a) => a.cellIndex[0] === 1)!; // t = (1,1,0)
+    // k = (½,0,0): cos(2π·½·1) = −1 → the translated copy's arrow flips.
+    expect(displayMoment(base, [0, 0, 3], [0.5, 0, 0])![2]).toBeCloseTo(3, 9);
+    expect(displayMoment(extra, [0, 0, 3], [0.5, 0, 0])![2]).toBeCloseTo(-3, 9);
+    // k = (0,0,½): t_z = 0 → same sign on both copies.
+    expect(displayMoment(extra, [0, 0, 3], [0, 0, 0.5])![2]).toBeCloseTo(3, 9);
+    // k = 0: identical arrows — the copies are the same physical moment.
+    expect(displayMoment(extra, [0, 0, 3], [0, 0, 0])![2]).toBeCloseTo(3, 9);
+  });
+});
+
 describe("buildCellAtoms — supercell tiling", () => {
   it("tiles the cell N times, tagging each copy with its cell index", () => {
     const atoms = buildCellAtoms(

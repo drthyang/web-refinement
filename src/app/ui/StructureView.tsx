@@ -116,22 +116,49 @@ export function StructureView({
   const canMagneticCell = superK[0] * superK[1] * superK[2] > 1;
   const supercell: [number, number, number] = magneticCell && canMagneticCell ? superK : [1, 1, 1];
 
-  const atoms = useMemo(
-    () => buildCellAtoms(structure, supercell, magneticOperations, moments),
-    [structure, magneticOperations, moments, supercell[0], supercell[1], supercell[2]], // eslint-disable-line react-hooks/exhaustive-deps
+  // Populate the standard-setting cell (when shown) with the same crystal:
+  // parent-lattice translates clipped to the region, exact k-phase moments.
+  const activeRegion = useMemo(
+    () => (standardCell && showStandardCell ? { P: standardCell.P, origin: standardCell.origin } : undefined),
+    [standardCell, showStandardCell],
   );
 
-  // Cartesian cell corners + centre + body-diagonal span, for edges and camera.
+  const atoms = useMemo(
+    () => buildCellAtoms(structure, supercell, magneticOperations, moments, activeRegion),
+    [structure, magneticOperations, moments, supercell[0], supercell[1], supercell[2], activeRegion], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Cartesian cell corners + centre + span, for edges and camera framing —
+  // the frame covers the parent cell(s) plus the standard cell when shown.
   const { corners, center, span } = useMemo(() => {
     const [nx, ny, nz] = supercell;
     const c: Vec3[] = [];
     for (const i of [0, 1]) for (const j of [0, 1]) for (const k of [0, 1]) {
       c.push(fractionalToCartesian(structure.cell, [i * nx, j * ny, k * nz]));
     }
-    const ctr = fractionalToCartesian(structure.cell, [nx / 2, ny / 2, nz / 2]);
-    const diag = fractionalToCartesian(structure.cell, [nx, ny, nz]);
-    return { corners: c, center: ctr, span: Math.hypot(diag[0], diag[1], diag[2]) || 10 };
-  }, [structure, supercell[0], supercell[1], supercell[2]]); // eslint-disable-line react-hooks/exhaustive-deps
+    const framePts: Vec3[] = [...c];
+    if (activeRegion) {
+      for (const i of [0, 1]) for (const j of [0, 1]) for (const k of [0, 1]) {
+        const frac: Vec3 = [
+          activeRegion.origin[0]! + i * activeRegion.P[0]![0]! + j * activeRegion.P[0]![1]! + k * activeRegion.P[0]![2]!,
+          activeRegion.origin[1]! + i * activeRegion.P[1]![0]! + j * activeRegion.P[1]![1]! + k * activeRegion.P[1]![2]!,
+          activeRegion.origin[2]! + i * activeRegion.P[2]![0]! + j * activeRegion.P[2]![1]! + k * activeRegion.P[2]![2]!,
+        ];
+        framePts.push(fractionalToCartesian(structure.cell, frac));
+      }
+    }
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (const p of framePts) {
+      for (let a = 0; a < 3; a++) {
+        if (p[a]! < lo[a]!) lo[a] = p[a]!;
+        if (p[a]! > hi[a]!) hi[a] = p[a]!;
+      }
+    }
+    const ctr: Vec3 = [(lo[0]! + hi[0]!) / 2, (lo[1]! + hi[1]!) / 2, (lo[2]! + hi[2]!) / 2];
+    const diag = Math.hypot(hi[0]! - lo[0]!, hi[1]! - lo[1]!, hi[2]! - lo[2]!);
+    return { corners: c, center: ctr, span: diag || 10 };
+  }, [structure, supercell[0], supercell[1], supercell[2], activeRegion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const mount = mountRef.current;
