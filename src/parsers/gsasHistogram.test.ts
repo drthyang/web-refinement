@@ -242,3 +242,48 @@ describe.skipIf(!hasReal)("real .gsa — POWGEN FeCoSn (SLOG FXYE, bank 2)", () 
     expect(withHalf).toBeLessThan(without);
   });
 });
+
+/**
+ * Mantid "Y multiplied by the bin widths" (counts-per-bin) must be undone on
+ * load — for SLOG (log-spaced) TOF the bin width grows ∝ TOF, so leaving it
+ * produces a spurious rising ("tilted") background. Dividing Y and σ by the
+ * local bin width recovers the flat intensity density the refinement expects.
+ */
+describe("GSAS SLOG: undo Mantid 'Y × bin width' (tilted-background fix)", () => {
+  // 4 SLOG channels; widths (central diff of centres): [100, 105, 115.5, 121].
+  const body = [
+    "BANK 1 4 4 SLOG 1000 1400 0.1 0 FXYE",
+    "1000 100 10",
+    "1100 110 10.5",
+    "1210 121 11",
+    "1331 133 11.5",
+  ].join("\n");
+  const marked = "Sample\n# with Y multiplied by the bin widths\n" + body;
+  const plain = "Sample\n# raw counts\n" + body;
+
+  it("divides Y (and σ) by the local bin width when the header declares it", () => {
+    const p = parseGsasHistogramPattern(marked, "g", "g");
+    // point 1: y = 110 / 105 ≈ 1.0476; σ = 10.5 / 105 = 0.1.
+    expect(p.points[1]!.yObs).toBeCloseTo(110 / 105, 4);
+    expect(p.points[1]!.sigma).toBeCloseTo(10.5 / 105, 4);
+    // Relative error is preserved by dividing both by the same width.
+    expect(p.points[1]!.sigma! / p.points[1]!.yObs).toBeCloseTo(10.5 / 110, 6);
+  });
+
+  it("leaves intensities untouched without the marker", () => {
+    const p = parseGsasHistogramPattern(plain, "g", "g");
+    expect(p.points[1]!.yObs).toBe(110);
+    expect(p.points[1]!.sigma).toBe(10.5);
+  });
+
+  it("flattens a background that rises with the bin width", () => {
+    // Flat density 2.0 stored as counts-per-bin (2·Δx) should read back ≈ 2.0
+    // at every channel despite the growing bin width.
+    const widths = [100, 105, 115.5, 121];
+    const centres = [1000, 1100, 1210, 1331];
+    const lines = centres.map((x, i) => `${x} ${2 * widths[i]!} ${Math.sqrt(2 * widths[i]!).toFixed(4)}`);
+    const text = "Sample\n# with Y multiplied by the bin widths\nBANK 1 4 4 SLOG 1000 1400 0.1 0 FXYE\n" + lines.join("\n");
+    const p = parseGsasHistogramPattern(text, "g", "g");
+    for (const pt of p.points) expect(pt.yObs).toBeCloseTo(2.0, 3);
+  });
+});

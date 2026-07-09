@@ -7,7 +7,6 @@
  *    line, and departures reveal model error *and* mis-weighted σ.
  */
 
-import { useEffect, useState } from "react";
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import type { NormalProbabilityPlot } from "@/core/refinement/diagnostics";
 import { MAGNETIC_COLOR } from "@/visualization/reflectionTicks";
@@ -26,7 +25,7 @@ function axisLine(x1: number, y1: number, x2: number, y2: number, dash = false):
   return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={theme.border} strokeWidth={1} {...(dash ? { strokeDasharray: "4 4" } : {})} />;
 }
 
-export function QualityPlots({ obsCalc, npp, stacked = false, onHighlight }: {
+export function QualityPlots({ obsCalc, npp, stacked = false, onHighlight, selected = null }: {
   obsCalc: readonly ReflectionObsCalc[];
   npp: NormalProbabilityPlot;
   /** One figure per row (for a narrow side rail) instead of reflowing columns. */
@@ -37,36 +36,42 @@ export function QualityPlots({ obsCalc, npp, stacked = false, onHighlight }: {
    * plot on the matching (nuclear/magnetic) Bragg row.
    */
   onHighlight?: (sel: { hkl: string; kind: ReflectionObsCalc["kind"] } | null) => void;
+  /**
+   * The shared selection (owned by the parent), so a Bragg-tick click in the
+   * pattern plot highlights the matching scatter point here too — one selection
+   * across both plots.
+   */
+  selected?: { hkl: string; kind: ReflectionObsCalc["kind"] } | null;
 }): JSX.Element {
   return (
     <div style={{ display: "grid", gridTemplateColumns: stacked ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))", gap: stacked ? 12 : 20, marginTop: 4 }}>
-      <FobsFcalc rows={obsCalc} {...(onHighlight ? { onHighlight } : {})} />
+      <FobsFcalc rows={obsCalc} selected={selected} {...(onHighlight ? { onHighlight } : {})} />
       <NormalProb npp={npp} />
     </div>
   );
 }
 
-function FobsFcalc({ rows, onHighlight }: { rows: readonly ReflectionObsCalc[]; onHighlight?: (sel: { hkl: string; kind: ReflectionObsCalc["kind"] } | null) => void }): JSX.Element {
-  // Click a point to identify the reflection behind it (hkl, d, F values) and
-  // spotlight the same peak in the pattern plot via onHighlight.
-  const [sel, setSel] = useState<number | null>(null);
-  const select = (i: number | null): void => {
-    setSel(i);
-    const r = i !== null ? rows[i]! : null;
-    onHighlight?.(r ? { hkl: `${r.h} ${r.k} ${r.l}`, kind: r.kind } : null);
+function FobsFcalc({ rows, onHighlight, selected = null }: {
+  rows: readonly ReflectionObsCalc[];
+  onHighlight?: (sel: { hkl: string; kind: ReflectionObsCalc["kind"] } | null) => void;
+  selected?: { hkl: string; kind: ReflectionObsCalc["kind"] } | null;
+}): JSX.Element {
+  // Fully controlled by the parent's shared selection: the highlighted point is
+  // the row matching `selected` (set by a click here OR a Bragg-tick click in the
+  // pattern plot), and clicking a point toggles that same selection.
+  const sel = selected
+    ? rows.findIndex((r) => `${r.h} ${r.k} ${r.l}` === selected.hkl && r.kind === selected.kind)
+    : -1;
+  const select = (i: number): void => {
+    const r = rows[i]!;
+    onHighlight?.(i === sel ? null : { hkl: `${r.h} ${r.k} ${r.l}`, kind: r.kind });
   };
-  useEffect(() => {
-    setSel(null);
-    onHighlight?.(null);
-    // a new reflection list invalidates the pick; reset only on rows
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows]);
   const pts = rows.map((r) => ({ fc: Math.sqrt(Math.max(r.iCalc, 0)), fo: Math.sqrt(Math.max(r.iObs, 0)) }));
   const max = Math.max(1e-9, ...pts.map((p) => Math.max(p.fc, p.fo)));
   const sx = (v: number): number => PAD + (v / max) * (SIZE - 2 * PAD);
   const sy = (v: number): number => SIZE - PAD - (v / max) * (SIZE - 2 * PAD);
-  const selRow = sel !== null ? rows[sel] : undefined;
-  const selPt = sel !== null ? pts[sel] : undefined;
+  const selRow = sel >= 0 ? rows[sel] : undefined;
+  const selPt = sel >= 0 ? pts[sel] : undefined;
   const magCount = rows.reduce((n, r) => n + (r.kind === "magnetic" ? 1 : 0), 0);
   return (
     <figure style={{ margin: 0 }}>
@@ -76,7 +81,7 @@ function FobsFcalc({ rows, onHighlight }: { rows: readonly ReflectionObsCalc[]; 
         {/* F_obs = F_calc reference line. */}
         <line x1={sx(0)} y1={sy(0)} x2={sx(max)} y2={sy(max)} stroke={theme.primary} strokeWidth={1.25} strokeDasharray="5 4" />
         {pts.map((p, i) => (
-          <g key={i} onClick={() => select(i === sel ? null : i)} style={{ cursor: "pointer" }}>
+          <g key={i} onClick={() => select(i)} style={{ cursor: "pointer" }}>
             {/* transparent halo = comfortable click target for a 2.6 px dot */}
             <circle cx={sx(p.fc)} cy={sy(p.fo)} r={7} fill="transparent" />
             <circle cx={sx(p.fc)} cy={sy(p.fo)} r={2.6} fill={kindColor(rows[i]!.kind)} fillOpacity={0.55} />

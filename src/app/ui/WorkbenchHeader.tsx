@@ -20,9 +20,12 @@ interface Props {
   readonly version: string;
   readonly onExportCsv: () => void;
   readonly onExportProject: () => void;
+  readonly onExportCif: () => void;
+  /** Label for the CIF/mCIF export button (e.g. "Export CIF" or "Export mCIF"). */
+  readonly cifLabel: string;
 }
 
-export function WorkbenchHeader({ steps, active, onStep, version, onExportCsv, onExportProject }: Props): JSX.Element {
+export function WorkbenchHeader({ steps, active, onStep, version, onExportCsv, onExportProject, onExportCif, cifLabel }: Props): JSX.Element {
   return (
     <header style={headerBar}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
@@ -54,6 +57,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, onExportCsv, o
         ))}
       </nav>
       <div style={{ marginLeft: "auto", display: "flex", gap: 9 }}>
+        <ActionButton onClick={onExportCif}>{cifLabel}</ActionButton>
         <ActionButton onClick={onExportCsv}>Export CSV</ActionButton>
         <ActionButton onClick={onExportProject}>Export project JSON</ActionButton>
       </div>

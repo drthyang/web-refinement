@@ -1,0 +1,127 @@
+import { describe, it, expect } from "vitest";
+import type { StructureModel } from "@/core/crystal/types";
+import type { MagneticModel } from "@/core/magnetic/types";
+import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
+import { parseCif, parseMagneticCif } from "@/parsers/cif";
+import { structureToCif, magneticStructureToMcif, formatWithEsd } from "@/core/export/cif";
+
+const structure: StructureModel = {
+  id: "s",
+  name: "Test Phase",
+  cell: { a: 5.4321, b: 5.4321, c: 8.1234, alpha: 90, beta: 90, gamma: 120 },
+  spaceGroup: {
+    number: 194,
+    hermannMauguin: "P 63/m m c",
+    operations: [
+      { rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], translation: [0, 0, 0], xyz: "x,y,z" },
+      { rotation: [[-1, 0, 0], [0, -1, 0], [0, 0, -1]], translation: [0, 0, 0], xyz: "-x,-y,-z" },
+    ],
+  },
+  sites: [
+    { label: "Fe1", element: "Fe", position: [0, 0, 0], occupancy: 1, adp: { kind: "isotropic", bIso: 0.5 } },
+    {
+      label: "O1", element: "O", position: [0.3333, 0.6667, 0.25], occupancy: 0.8,
+      adp: { kind: "anisotropic", uAniso: [0.01, 0.012, 0.008, 0.005, 0, 0] },
+    },
+  ],
+};
+
+describe("structureToCif — round-trips through parseCif", () => {
+  const cif = structureToCif(structure);
+  const back = parseCif(cif);
+
+  it("preserves the cell", () => {
+    expect(back.cell.a).toBeCloseTo(structure.cell.a, 4);
+    expect(back.cell.c).toBeCloseTo(structure.cell.c, 4);
+    expect(back.cell.gamma).toBeCloseTo(120, 3);
+  });
+
+  it("preserves space-group metadata and operations", () => {
+    expect(back.spaceGroup.number).toBe(194);
+    expect(back.spaceGroup.hermannMauguin).toBe("P 63/m m c");
+    expect(back.spaceGroup.operations.map((o) => o.xyz)).toEqual(["x,y,z", "-x,-y,-z"]);
+  });
+
+  it("preserves atom sites, occupancy, and B_iso (via U_iso = B/8π²)", () => {
+    const fe = back.sites.find((s) => s.label === "Fe1")!;
+    expect(fe.element).toBe("Fe");
+    expect(fe.position).toEqual([0, 0, 0]);
+    expect(fe.occupancy).toBeCloseTo(1, 4);
+    expect(fe.adp.kind).toBe("isotropic");
+    if (fe.adp.kind === "isotropic") expect(fe.adp.bIso).toBeCloseTo(0.5, 3);
+  });
+
+  it("preserves anisotropic U components", () => {
+    const o = back.sites.find((s) => s.label === "O1")!;
+    expect(o.occupancy).toBeCloseTo(0.8, 4);
+    expect(o.adp.kind).toBe("anisotropic");
+    if (o.adp.kind === "anisotropic") {
+      expect(o.adp.uAniso[0]).toBeCloseTo(0.01, 4);
+      expect(o.adp.uAniso[3]).toBeCloseTo(0.005, 4);
+    }
+  });
+});
+
+describe("structureToCif — standard uncertainties", () => {
+  it("annotates cell and position with value(su) from refined esds", () => {
+    const params: RefinementParameter[] = [
+      { id: "cell_a", label: "a", kind: "cellLength", value: 5.4321, initialValue: 5.4321, fixed: false, esd: 0.0006 },
+      { id: "pos_O1_0", label: "O1 z", kind: "positionShift", value: 0, initialValue: 0, fixed: false, esd: 0.0012 },
+    ];
+    const bindings: ParameterBinding[] = [
+      { parameterId: "cell_a", kind: "cellLength", targetId: "s", targetKey: "a" },
+      { parameterId: "pos_O1_0", kind: "positionShift", targetId: "s", targetKey: "O1", axis: [0, 0, 1] },
+    ];
+    const cif = structureToCif(structure, { params, bindings });
+    // su two sig figs sets the decimals: 0.0006 → 5 dp (60); O1 z axis=(0,0,1)
+    // → σz=0.0012 → 4 dp (12), while x/y have no su and stay at 5 dp.
+    expect(cif).toContain("_cell_length_a    5.43210(60)");
+    expect(cif).toMatch(/O1 O 0\.33330 0\.66670 0\.2500\(12\)/);
+    // Values still round-trip (parser strips the su).
+    const back = parseCif(cif);
+    expect(back.cell.a).toBeCloseTo(5.4321, 4);
+  });
+});
+
+describe("magneticStructureToMcif — round-trips through parseMagneticCif", () => {
+  const magStructure: StructureModel = {
+    ...structure,
+    spaceGroup: {
+      ...structure.spaceGroup,
+      operations: [
+        { rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], translation: [0, 0, 0], xyz: "x,y,z", timeReversal: 1 },
+        { rotation: [[-1, 0, 0], [0, -1, 0], [0, 0, -1]], translation: [0, 0, 0], xyz: "-x,-y,-z", timeReversal: -1 },
+      ],
+    },
+  };
+  const magnetic: MagneticModel = {
+    id: "m", structureId: "s", propagation: [[0, 0, 0]],
+    moments: [{ siteLabel: "Fe1", frame: "crystallographic", components: [0, 0, 3.2] }],
+  };
+  const mcif = magneticStructureToMcif(magStructure, magnetic, { magneticLabel: "P6_3/mm'c'" });
+  const back = parseMagneticCif(mcif);
+
+  it("emits a magnetic model with the moment recovered", () => {
+    expect(back.magnetic).not.toBeNull();
+    const m = back.magnetic!.moments.find((q) => q.siteLabel === "Fe1")!;
+    expect(m.components[2]).toBeCloseTo(3.2, 3);
+    expect(m.frame).toBe("crystallographic");
+  });
+
+  it("retains time-reversal on the magnetic operations", () => {
+    const ops = back.structure.spaceGroup.operations;
+    expect(ops.some((o) => o.timeReversal === -1)).toBe(true);
+  });
+});
+
+describe("formatWithEsd", () => {
+  it("renders the su to two significant figures at the value's last place", () => {
+    expect(formatWithEsd(5.4321, 0.0006, 5)).toBe("5.43210(60)");
+    expect(formatWithEsd(0.25, 0.0012, 5)).toBe("0.2500(12)");
+    expect(formatWithEsd(1.234, 0.05, 4)).toBe("1.234(50)");
+  });
+  it("falls back to fixed decimals with no su", () => {
+    expect(formatWithEsd(0.3333, undefined, 5)).toBe("0.33330");
+    expect(formatWithEsd(0.3333, 0, 5)).toBe("0.33330");
+  });
+});

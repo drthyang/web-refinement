@@ -22,6 +22,19 @@ export function parseCifNumber(raw: string): number {
   return value;
 }
 
+/**
+ * Parse an *optional* numeric CIF field, returning `fallback` for CIF null
+ * markers — `?` (unknown) and `.` (inapplicable) — and for empty/missing values.
+ * These appear legitimately, e.g. `_atom_site_U_iso_or_equiv = ?` on a purely
+ * anisotropic site (its U_iso is undefined; the real ADP is in the aniso loop).
+ */
+export function parseCifNumberOr(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const t = raw.trim();
+  if (t === "" || t === "?" || t === ".") return fallback;
+  return parseCifNumber(t);
+}
+
 /** Element symbol from a CIF type symbol, dropping oxidation/charge: "Mn2+" → "Mn". */
 function elementFromType(type: string): string {
   const m = type.match(/^[A-Z][a-z]?/);
@@ -48,16 +61,35 @@ interface ParsedCif {
   readonly loops: Loop[];
 }
 
+/**
+ * Split a (possibly multi-block) CIF into its `data_` blocks, parsing each into
+ * its own items + loops. A single-block file yields one block. Keeping blocks
+ * separate avoids cross-contamination — e.g. a file with X-ray, neutron, and
+ * refined-XRD blocks must not take its cell from one block and its atoms from
+ * another.
+ */
 function parseCifBlocks(text: string): ParsedCif {
-  const lines = text.split(/\r?\n/);
-  const items = new Map<string, string>();
-  const loops: Loop[] = [];
+  const blocks: ParsedCif[] = [];
+  let items = new Map<string, string>();
+  let loops: Loop[] = [];
+  const flush = (): void => {
+    if (items.size > 0 || loops.length > 0) blocks.push({ items, loops });
+  };
 
+  const lines = text.split(/\r?\n/);
   let i = 0;
   while (i < lines.length) {
     const raw = lines[i]!;
     const line = raw.trim();
     if (line === "" || line.startsWith("#")) {
+      i++;
+      continue;
+    }
+    if (line.toLowerCase().startsWith("data_")) {
+      // New data block — start fresh so blocks never merge.
+      flush();
+      items = new Map<string, string>();
+      loops = [];
       i++;
       continue;
     }
@@ -91,7 +123,14 @@ function parseCifBlocks(text: string): ParsedCif {
     }
     i++;
   }
-  return { items, loops };
+  flush();
+
+  if (blocks.length === 0) return { items: new Map(), loops: [] };
+  // Prefer the first block that actually carries atom sites, so a leading
+  // metadata-only (global) block or a non-structural block is skipped.
+  const hasAtoms = (b: ParsedCif): boolean =>
+    b.loops.some((l) => l.headers.some((h) => h.toLowerCase().includes("atom_site_fract")));
+  return blocks.find(hasAtoms) ?? blocks[0]!;
 }
 
 function findLoop(loops: Loop[], predicate: (headers: string[]) => boolean): Loop | undefined {
@@ -157,12 +196,12 @@ function parseAnisotropicAdps(loops: Loop[]): Map<string, DisplacementParameters
     adps.set(label, {
       kind: "anisotropic",
       uAniso: [
-        parseCifNumber(row[iU11]!),
-        parseCifNumber(row[iU22]!),
-        parseCifNumber(row[iU33]!),
-        parseCifNumber(row[iU12]!),
-        parseCifNumber(row[iU13]!),
-        parseCifNumber(row[iU23]!),
+        parseCifNumberOr(row[iU11], 0),
+        parseCifNumberOr(row[iU22], 0),
+        parseCifNumberOr(row[iU33], 0),
+        parseCifNumberOr(row[iU12], 0),
+        parseCifNumberOr(row[iU13], 0),
+        parseCifNumberOr(row[iU23], 0),
       ],
     });
   }
@@ -182,12 +221,15 @@ function parseSites(loops: Loop[]): AtomSite[] {
   const iY = col("_atom_site_fract_y");
   const iZ = col("_atom_site_fract_z");
   const iOcc = col("_atom_site_occupancy");
-  const iAdpType = col("_atom_site_adp_type");
+  // `_atom_site_thermal_displace_type` is the older/alternate name for
+  // `_atom_site_adp_type` (both hold "Uani"/"Uiso"); accept either so
+  // anisotropic sites keep their U tensor instead of collapsing to isotropic.
+  const iAdpType = col("_atom_site_adp_type") >= 0 ? col("_atom_site_adp_type") : col("_atom_site_thermal_displace_type");
   const iU = col("_atom_site_u_iso_or_equiv");
   const iMult = col("_atom_site_site_symmetry_multiplicity");
 
   return atomLoop.rows.map((row) => {
-    const uIso = iU >= 0 && row[iU] !== undefined ? parseCifNumber(row[iU]!) : 0;
+    const uIso = iU >= 0 ? parseCifNumberOr(row[iU], 0) : 0;
     const position: Vec3 = [parseCifNumber(row[iX]!), parseCifNumber(row[iY]!), parseCifNumber(row[iZ]!)];
     const element = iType >= 0 ? elementFromType(row[iType]!) : elementFromType(row[iLabel]!);
     const label = iLabel >= 0 ? row[iLabel]! : element;
@@ -199,7 +241,7 @@ function parseSites(loops: Loop[]): AtomSite[] {
       label,
       element,
       position,
-      occupancy: iOcc >= 0 && row[iOcc] !== undefined ? parseCifNumber(row[iOcc]!) : 1,
+      occupancy: iOcc >= 0 ? parseCifNumberOr(row[iOcc], 1) : 1,
       adp,
       ...(iMult >= 0 && row[iMult] !== undefined ? { multiplicity: parseInt(row[iMult]!, 10) } : {}),
     };

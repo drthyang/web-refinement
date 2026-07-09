@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { exampleStructure } from "@/examples/mn3ga";
+import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
+import { buildPowderSpec } from "@/app/powderSpec";
 import { exampleMagnetic, magneticParameters, magneticBindings } from "@/examples/mn3gaMagnetic";
 import { buildStructureRefinement } from "@/core/workflow/structureRefinement";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
@@ -45,6 +47,63 @@ describe("powderReflectionObsCalc (Rietveld decomposition)", () => {
   it("tags every reflection nuclear when no magnetic model is given", () => {
     const rows = powderReflectionObsCalc(structure, pat, spec.params, spec.bindings, profile);
     expect(rows.every((r) => r.kind === "nuclear")).toBe(true);
+  });
+
+  it("hides reflections whose peak falls outside the fit range", () => {
+    const twoThetaOf = (d: number): number => (2 * Math.asin(Math.min(1, 1.54 / (2 * d))) * 180) / Math.PI;
+    const all = powderReflectionObsCalc(structure, pat, spec.params, spec.bindings, profile);
+    const windowed = powderReflectionObsCalc(structure, pat, spec.params, spec.bindings, profile, null, { min: 40, max: 80 });
+
+    // Strictly fewer reflections, and every survivor's peak is inside the window.
+    expect(windowed.length).toBeGreaterThan(0);
+    expect(windowed.length).toBeLessThan(all.length);
+    for (const r of windowed) {
+      const tt = twoThetaOf(r.d);
+      expect(tt).toBeGreaterThanOrEqual(40 - 0.5);
+      expect(tt).toBeLessThanOrEqual(80 + 0.5);
+    }
+    // A reflection outside the window that exists in the full list is dropped.
+    const droppedOutside = all.some((r) => twoThetaOf(r.d) < 39 && !windowed.some((w) => w.h === r.h && w.k === r.k && w.l === r.l));
+    expect(droppedOutside).toBe(true);
+  });
+});
+
+/**
+ * Near-absent reflections (|F_calc|² ≈ 0 from a special-position cancellation,
+ * not a lattice absence) must not appear in the F_obs vs F_calc list: the
+ * calc-weighted apportionment pins their I_obs to ~0 regardless of the data, so
+ * they would otherwise pile up at the plot origin reading a misleading
+ * "F_obs = 0". Reproduced on the real Mn₃Ga POWGEN TOF dataset the app opens
+ * with, where h0l reflections like (6 0 1)/(6 0 3)/(6 0 5) compute as ~0.
+ */
+describe("powderReflectionObsCalc — near-absent reflections excluded", () => {
+  const { structure, pattern, instrument } = mn3gaPowgenExample();
+  const spec = buildPowderSpec(structure, pattern, instrument, true, 4, {});
+  const rows = powderReflectionObsCalc(structure, pattern, spec.params, spec.bindings, spec.profile);
+  const maxCalc = Math.max(...rows.map((r) => r.iCalc));
+
+  it("emits no reflection whose calc intensity is a negligible fraction of the strongest", () => {
+    // Every returned reflection carries meaningful calc weight, so its F_obs is a
+    // real apportioned measurement rather than a forced zero.
+    expect(rows.every((r) => r.iCalc > maxCalc * 1e-6)).toBe(true);
+  });
+
+  it("no returned reflection floors to F_obs = 0 while F_calc is also ~0", () => {
+    const bogusZero = rows.filter(
+      (r) => Math.sqrt(Math.max(r.iObs, 0)) < 0.01 && Math.sqrt(Math.max(r.iCalc, 0)) < 0.01,
+    );
+    expect(bogusZero.length).toBe(0);
+  });
+
+  it("keeps genuinely weak-but-present reflections", () => {
+    // The dataset has real weak reflections (F_calc ~ 0.4–0.8) well above the
+    // near-absence floor; the filter must not remove them.
+    const weakReal = rows.filter((r) => {
+      const fc = Math.sqrt(Math.max(r.iCalc, 0));
+      return fc > 0.2 && fc < 2;
+    });
+    expect(weakReal.length).toBeGreaterThan(0);
+    expect(weakReal.every((r) => Math.sqrt(Math.max(r.iObs, 0)) > 0)).toBe(true);
   });
 });
 

@@ -54,10 +54,21 @@ function peakValue(pk: ProfilePeak, x: number): number {
   return gaussian(x, pk.center, pk.fwhm);
 }
 
+/** Intensity-weighted centre (pattern x-unit) of a placed peak's sub-peaks. */
+function peakCenter(sub: readonly ProfilePeak[]): number | undefined {
+  if (sub.length === 0) return undefined;
+  let w = 0;
+  let c = 0;
+  for (const pk of sub) { w += pk.intensity; c += pk.intensity * pk.center; }
+  return w > 0 ? c / w : sub[0]!.center;
+}
+
 /**
  * Rietveld-decomposed observed vs calculated intensities per reflection for the
  * current parameters. Reflections whose peaks fall outside the measured abscissa
- * are dropped.
+ * are dropped. When `fitRange` (in the pattern's x-unit) is given, reflections
+ * whose peak centre lies outside that window are also dropped — the F_obs/F_calc
+ * scatter then shows only the reflections actually being fitted.
  */
 export function powderReflectionObsCalc(
   structure: StructureModel,
@@ -66,6 +77,7 @@ export function powderReflectionObsCalc(
   bindings: readonly ParameterBinding[],
   profile: PowderProfile = { shape: "gaussian" },
   magnetic: MagneticModel | null = null,
+  fitRange: { readonly min: number; readonly max: number } | null = null,
 ): ReflectionObsCalc[] {
   const values: Record<string, number> = {};
   for (const p of parameters) values[p.id] = p.value;
@@ -144,8 +156,25 @@ export function powderReflectionObsCalc(
     return arr;
   });
 
+  // A reflection the model computes as (near-)absent — |F_calc|² a negligible
+  // fraction of the strongest — cannot have its observed intensity recovered by
+  // this calc-weighted Rietveld apportionment: the apportionment weight cₖ/total
+  // is ~0 there, so iObs is pinned to ~0 regardless of the real data. Left in, it
+  // piles up at the plot origin reading a misleading "F_obs = 0" even when the
+  // pattern has a peak at that d (belonging to an overlapping allowed
+  // reflection). Omit it as *unmeasurable here*, not observed-to-be-zero — the
+  // difference curve, not this scatter, is where a genuine model absence shows.
+  // (The magnetic satellites above are already filtered this way.)
+  const maxNuclear = components.reduce((m, cmp) => (cmp.kind === "nuclear" && cmp.iCalc > m ? cmp.iCalc : m), 0);
+  const nuclearFloor = maxNuclear * 1e-6;
+
   const out: ReflectionObsCalc[] = [];
   components.forEach((cmp, ri) => {
+    if (cmp.kind === "nuclear" && cmp.iCalc <= nuclearFloor) return; // near-absent → F_obs not measurable
+    if (fitRange) {
+      const center = peakCenter(cmp.sub);
+      if (center === undefined || center < fitRange.min || center > fitRange.max) return; // outside the fit window
+    }
     const c = contrib[ri]!;
     // I_calc and I_obs are both the peak's summed calc profile: I_calc = Σᵢ cₖ(i),
     // and I_obs apportions the observed point intensity by the same weights, so

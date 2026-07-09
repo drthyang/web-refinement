@@ -14,6 +14,10 @@
 export type InstrumentParameters =
   | {
       readonly kind: "constantWavelength";
+      /** Beamline name recognised from the file header, e.g. "D1B". */
+      readonly name?: string;
+      /** Facility label for display, e.g. "ILL · ILL, France". */
+      readonly facility?: string;
       /** Radiation family from GSAS-II Type (PXC = X-ray CW, PNC = neutron CW). */
       readonly radiationKind?: "xray" | "neutron";
       readonly wavelength: number;
@@ -28,6 +32,10 @@ export type InstrumentParameters =
     }
   | {
       readonly kind: "tof";
+      /** Beamline name recognised from the file header, e.g. "POWGEN". */
+      readonly name?: string;
+      /** Facility label for display, e.g. "SNS · ORNL, USA". */
+      readonly facility?: string;
       readonly difC: number;
       readonly difA?: number;
       readonly difB?: number;

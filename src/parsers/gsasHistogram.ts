@@ -232,6 +232,52 @@ function parseBankData(
   throw new Error(`Unsupported GSAS data type "${dataType}" (supported: FXYE, FXY, STD, ESD).`);
 }
 
+/**
+ * True when a Mantid GSAS header declares the intensities were "Y multiplied by
+ * the bin widths" — i.e. stored as **counts-per-bin** (Y·Δx) rather than the
+ * intensity density. For log-spaced (SLOG) TOF data the bin width grows ∝ TOF,
+ * so a physically flat background comes out as a rising ramp ("tilted
+ * background"). The un-multiplied `.dat` export (density) and GSAS-II's display
+ * both show the flat version, so we undo the multiplication on load — see
+ * `undoBinWidthMultiply`.
+ */
+function binWidthsMultiplied(headerText: string): boolean {
+  return /multiplied by (the )?bin[- ]?width/i.test(headerText);
+}
+
+/**
+ * Local bin widths (edge-to-edge) from channel centres: the width of channel i
+ * is edge_{i+1} − edge_i ≈ (x_{i+1} − x_{i−1}) / 2 for interior channels, with
+ * one-sided differences at the ends. General over any binning (SLOG/RALF/…), so
+ * no bin-type-specific formula is needed.
+ */
+function localBinWidths(points: readonly PowderPoint[]): number[] {
+  const n = points.length;
+  const w = new Array<number>(n).fill(1);
+  for (let i = 0; i < n; i++) {
+    if (n < 2) break;
+    if (i === 0) w[i] = points[1]!.x - points[0]!.x;
+    else if (i === n - 1) w[i] = points[i]!.x - points[i - 1]!.x;
+    else w[i] = (points[i + 1]!.x - points[i - 1]!.x) / 2;
+  }
+  return w;
+}
+
+/**
+ * Divide Y and σ by the local bin width to invert Mantid's "Y × bin width",
+ * recovering the intensity density (flat background). Dividing σ by the same
+ * width preserves the statistical weight (relative error unchanged).
+ */
+function undoBinWidthMultiply(points: readonly PowderPoint[]): PowderPoint[] {
+  const w = localBinWidths(points);
+  return points.map((p, i) => {
+    const bw = w[i]! > 0 ? w[i]! : 1;
+    return p.sigma !== undefined
+      ? { ...p, yObs: p.yObs / bw, sigma: p.sigma / bw }
+      : { ...p, yObs: p.yObs / bw };
+  });
+}
+
 /** Wavelength (Å) from a header line like "… Wavelength: 1.5 A". */
 function parseWavelength(header: string): number | undefined {
   const m = header.match(/wavelength[:=\s]+([0-9]*\.?[0-9]+)\s*a\b/i);
@@ -279,7 +325,11 @@ export function parseGsasHistogram(text: string): GsasHistogram {
   const headerLines = lines.slice(0, bankLineIdx[0]);
   const title = (headerLines.find((l) => l.trim() !== "") ?? "").trim();
   const comments = headerLines.filter((l) => l.trim().startsWith("#")).map((l) => l.trim());
-  const wavelength = parseWavelength(headerLines.join("\n"));
+  const headerText = headerLines.join("\n");
+  const wavelength = parseWavelength(headerText);
+  // Mantid "Y × bin width" export ⇒ counts-per-bin; undo it to recover the
+  // intensity density the refinement expects (removes the SLOG "tilted background").
+  const undoMul = binWidthsMultiplied(headerText);
 
   const banks: GsasBank[] = [];
   for (let b = 0; b < bankLineIdx.length; b++) {
@@ -287,7 +337,8 @@ export function parseGsasHistogram(text: string): GsasHistogram {
     const end = b + 1 < bankLineIdx.length ? bankLineIdx[b + 1]! : lines.length;
     const header = parseBankLine(lines[start]!);
     const dataLines = lines.slice(start + 1, end);
-    const points = parseBankData(header.binType, header.dataType, header.coefficients, header.nchan, dataLines);
+    const rawPoints = parseBankData(header.binType, header.dataType, header.coefficients, header.nchan, dataLines);
+    const points = undoMul ? undoBinWidthMultiply(rawPoints) : rawPoints;
     banks.push({
       bankNumber: header.bankNumber,
       nchan: header.nchan,

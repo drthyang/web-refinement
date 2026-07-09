@@ -32,6 +32,13 @@ interface Props {
    * reveal it if it is off-screen.
    */
   readonly highlight?: { readonly hkl: string; readonly kind: "nuclear" | "magnetic" } | null;
+  /**
+   * Called when a Bragg tick is clicked (or the current pick is toggled off) —
+   * the *same* selection channel as the F_obs/F_calc plot, so a tick click and a
+   * scatter-point click share one spotlight and each replaces the other. Passes
+   * the tick's hkl + phase kind, or null to clear.
+   */
+  readonly onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic" } | null) => void;
 }
 
 // Fixed plot geometry (SVG user units); the SVG stretches to its container.
@@ -80,6 +87,7 @@ export function WorkbenchPlot({
   showBackground = true,
   focusFitToken = 0,
   highlight: highlightSel = null,
+  onHighlight,
 }: Props): JSX.Element {
   const svgRef = useRef<SVGSVGElement>(null);
   const draggingGrip = useRef(false);
@@ -91,13 +99,11 @@ export function WorkbenchPlot({
   const [view, setView] = useState<{ min: number; max: number } | null>(null);
   const [rubber, setRubber] = useState<{ x0: number; x1: number } | null>(null);
 
-  // Click a Bragg tick to identify its reflection (like the F_obs/F_calc
-  // points). The pick is invalidated when the tick *content* changes (new
-  // structure/phase list) — not on mere prop-identity churn, and not on an
-  // x-unit switch, where the same index still means the same reflection.
-  const [pickedTick, setPickedTick] = useState<{ row: number; i: number } | null>(null);
-  const phasesSig = (phases ?? []).map((p) => `${p.id}:${p.ticks.length}`).join("|");
-  useEffect(() => setPickedTick(null), [phasesSig]);
+  // A Bragg tick click is the *same* selection as an F_obs/F_calc point click:
+  // both flow through `onHighlight` into one shared spotlight (`highlightSel`),
+  // so clicking a tick draws the arrow+guide line and replaces any prior pick,
+  // and clicking a scatter point replaces the tick pick. There is no separate
+  // per-plot selection state — the parent owns the single selection.
 
   // The viewBox width tracks the rendered pixel aspect ratio so the plot fills
   // its (width-controlled, fixed-height) box with SQUARE units — no horizontal
@@ -202,8 +208,29 @@ export function WorkbenchPlot({
     return out;
   }, [xs, yObs, vlo, vhi, vspan, yTop, XW]);
 
+  // The single selected reflection (from a scatter-point OR a Bragg-tick click):
+  // locate its Bragg tick so we can spotlight that peak. Prefer the phase row
+  // whose *kind* matches (nuclear vs magnetic), so a magnetic satellite that
+  // shares an hkl with a nuclear peak (k = 0) lights the magnetic row; fall back
+  // to any hkl match. Both the tick emphasis and the arrow read from this, so a
+  // tick click and a scatter click resolve to exactly the same peak.
+  const highlight = useMemo(() => {
+    if (!highlightSel || !phases) return null;
+    const rowsInOrder = [
+      ...phases.map((p, row) => ({ p, row })).filter(({ p }) => p.kind === highlightSel.kind),
+      ...phases.map((p, row) => ({ p, row })).filter(({ p }) => p.kind !== highlightSel.kind),
+    ];
+    for (const { p, row } of rowsInOrder) {
+      const t = p.ticks.find((tk) => tk.hkl === highlightSel.hkl);
+      if (t) return { x: t.x, hkl: t.hkl, d: t.d, color: p.color, row, label: p.label };
+    }
+    return null;
+  }, [highlightSel, phases]);
+
   // Bragg tick rows are also static during a refinement (positions depend on the
-  // structure, not the fit) and there can be hundreds — memoize them too.
+  // structure, not the fit) and there can be hundreds — memoize them too. A tick
+  // click toggles the shared selection through `onHighlight`, exactly like an
+  // F_obs/F_calc point (the emphasised tick is the resolved `highlight`).
   const braggTicks = useMemo(() => {
     const mx = (x: number): number => X0 + ((x - vlo) / vspan) * XW;
     return (phases ?? []).map((phase, row) => {
@@ -213,14 +240,11 @@ export function WorkbenchPlot({
         <g key={phase.id} stroke={phase.color}>
           {phase.ticks.map((t, i) => {
             if (t.x < vlo || t.x > vhi) return null;
-            const picked = pickedTick?.row === row && pickedTick.i === i;
+            const picked = !!highlight && highlight.row === row && highlight.hkl === t.hkl;
+            const toggle = (): void =>
+              onHighlight?.(picked ? null : { hkl: t.hkl, kind: phase.kind });
             return (
-              <g
-                key={i}
-                className="wb-tick"
-                style={{ cursor: "pointer" }}
-                onClick={() => setPickedTick(picked ? null : { row, i })}
-              >
+              <g key={i} className="wb-tick" style={{ cursor: "pointer" }} onClick={toggle}>
                 <line
                   className="wb-mark"
                   x1={mx(t.x)} y1={picked ? y1 - 3 : y1} x2={mx(t.x)} y2={picked ? y2 + 3 : y2}
@@ -236,33 +260,7 @@ export function WorkbenchPlot({
         </g>
       );
     });
-  }, [phases, vlo, vhi, vspan, XW, pickedTick]);
-
-  // The reflection behind the picked tick, for the corner readout.
-  const pickedInfo = useMemo(() => {
-    if (!pickedTick || !phases) return null;
-    const phase = phases[pickedTick.row];
-    const t = phase?.ticks[pickedTick.i];
-    return phase && t ? { phase, t } : null;
-  }, [pickedTick, phases]);
-
-  // A reflection spotlighted from elsewhere (the F_obs/F_calc scatter): locate
-  // its Bragg tick so we can point an arrow at that peak in the pattern. Prefer
-  // the phase row whose *kind* matches (nuclear vs magnetic), so a magnetic
-  // satellite that shares an hkl with a nuclear peak (k = 0) lights the magnetic
-  // row; fall back to any hkl match otherwise.
-  const highlight = useMemo(() => {
-    if (!highlightSel || !phases) return null;
-    const rowsInOrder = [
-      ...phases.map((p, row) => ({ p, row })).filter(({ p }) => p.kind === highlightSel.kind),
-      ...phases.map((p, row) => ({ p, row })).filter(({ p }) => p.kind !== highlightSel.kind),
-    ];
-    for (const { p, row } of rowsInOrder) {
-      const t = p.ticks.find((tk) => tk.hkl === highlightSel.hkl);
-      if (t) return { x: t.x, hkl: t.hkl, d: t.d, color: p.color, row };
-    }
-    return null;
-  }, [highlightSel, phases]);
+  }, [phases, vlo, vhi, vspan, XW, highlight, onHighlight]);
 
   // Pan to reveal a freshly-spotlighted peak when it sits outside the zoom
   // window — keyed on the pick only, so re-zooming/panning doesn't fight the user.
@@ -504,13 +502,13 @@ export function WorkbenchPlot({
       </svg>
       {/* corner overlays (HTML on top of the SVG). wR lives in the
           Refinement-quality rail, judged against R_exp. */}
-      {pickedInfo && (
-        <div style={tickPickOverlay} onClick={() => setPickedTick(null)} title="Click to dismiss (or click the tick again)">
-          <span style={{ width: 9, height: 9, borderRadius: 2, background: pickedInfo.phase.color, display: "inline-block" }} />
+      {highlight && (
+        <div style={tickPickOverlay} onClick={() => onHighlight?.(null)} title="Click to dismiss (or click the tick again)">
+          <span style={{ width: 9, height: 9, borderRadius: 2, background: highlight.color, display: "inline-block" }} />
           <span style={{ fontFamily: mono, fontSize: 12, color: color.ink }}>
-            ({pickedInfo.t.hkl}) · d {pickedInfo.t.d.toFixed(4)} Å
+            ({highlight.hkl}) · d {highlight.d.toFixed(4)} Å
           </span>
-          <span style={{ fontSize: 11, color: color.secondary }}>{pickedInfo.phase.label}</span>
+          <span style={{ fontSize: 11, color: color.secondary }}>{highlight.label}</span>
         </div>
       )}
       {zoomed && (

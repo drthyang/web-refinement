@@ -15,14 +15,18 @@ import type { BackgroundType } from "@/core/diffraction/background";
 import { buildPowderSpec, guidedPowderParams, type SiteTies } from "@/app/powderSpec";
 import { DEFAULT_STAGE_KINDS, siteGroups } from "@/core/workflow/structureRefinement";
 import { powderPatternCsv, projectJson } from "@/core/export/exporters";
+import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from "@/core/export/cif";
 import { parseMagneticCif } from "@/parsers/cif";
 import { parsePowderData } from "@/parsers/powderData";
+import { parseIllD1b, looksLikeIllD1b } from "@/parsers/illPowder";
 import { parseGsasCsvPattern } from "@/parsers/gsasPattern";
 import { isGsasHistogram, parseGsasHistogramPattern } from "@/parsers/gsasHistogram";
 import { detectDataFormat, type DetectedFormat } from "@/parsers/detectFormat";
 import type { ParameterBinding } from "@/core/refinement/types";
 import { isMomentParameterKind } from "@/core/refinement/types";
-import { startingPowderParams } from "@/app/loadData";
+import { startingPowderParams, loadReflectionDataset } from "@/app/loadData";
+import { SingleCrystalWorkbench } from "@/app/SingleCrystalWorkbench";
+import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import { ComputeClient } from "@/workers/computeClient";
 import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
 import { KSearchPanel } from "@/components/KSearchPanel";
@@ -139,6 +143,10 @@ export function App(): JSX.Element {
   const example = mn3gaPowgenExample();
   const [session, setSession] = useState<Session>(() => loadedSession(example.structure, example.pattern, example.instrument));
   const [powderResult, setPowderResult] = useState<RefinementResult | null>(null);
+  // Single-crystal mode: set when hkl/fcf reflection data is loaded; the app
+  // then renders the single-crystal workbench instead of the powder panels.
+  // Cleared when powder data is loaded (auto-switch back).
+  const [scDataset, setScDataset] = useState<SingleCrystalDataset | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [step, setStep] = useState(0);
   // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
@@ -514,17 +522,53 @@ export function App(): JSX.Element {
   function onLoadData(file: File): void {
     file.text().then((text) => {
       try {
+        // The ILL D1B/D20 numor format is not column data, so route it before the
+        // generic detector (which would misread its header + (flag,count) pairs).
+        if (looksLikeIllD1b(text)) {
+          applyIllPowder(text, file.name);
+          return;
+        }
         const fmt = detectDataFormat({ text, filename: file.name, instrument: instrumentLoaded ? instrument : undefined });
         const tag = `[${fmt.source}/${fmt.confidence}]`;
         if (fmt.dataType === "single-crystal") {
-          setMessage(`“${file.name}” looks like a single-crystal reflection list ${tag}. Single-crystal refinement is disabled for now — load a powder pattern instead.`);
+          const loaded = loadReflectionDataset(text, structure, `${structure.id}-hkl`, file.name);
+          if (loaded.kept < 1) throw new Error("no usable reflections in the file");
+          setScDataset(loaded.dataset);
+          setMessage(
+            `Loaded single-crystal “${file.name}” · ${loaded.kept} reflections [${loaded.format}]` +
+            `${loaded.dropped > 0 ? ` (${loaded.dropped} dropped)` : ""}. Merge report + F² refinement ready.`,
+          );
           return;
         }
+        setScDataset(null); // powder data → leave single-crystal mode
         applyPowder(text, file.name, fmt, tag);
       } catch (e) {
         setMessage(`Data load failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     });
+  }
+
+  // ILL D1B/D20 constant-wavelength neutron powder (numor format). Uses the
+  // loaded CW instrument (e.g. the D1B .irf → λ + Caglioti U/V/W) when present;
+  // otherwise a neutron default at the D1B wavelength, and loading the .irf
+  // afterwards re-seeds the widths (onLoadInstrument rebuilds the spec).
+  function applyIllPowder(text: string, filename: string): void {
+    const id = `${structure.id}-powder`;
+    const cw = instrumentLoaded && instrument.kind === "constantWavelength" ? instrument : null;
+    const wavelength = cw?.wavelength ?? 2.52; // D1B graphite λ
+    const parsed = parseIllD1b(text, { id, name: filename, radiation: { kind: "neutron", wavelength }, wavelength });
+    if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
+    setScDataset(null);
+    const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
+    const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
+    setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+    if (instrument.kind === "tof") { setInstrument(DEFAULT_INSTRUMENT); setInstrumentLoaded(false); }
+    setPowderResult(null);
+    const last = parsed.points[parsed.points.length - 1]!;
+    setMessage(
+      `Loaded ILL powder “${filename}” · ${parsed.points.length} pts · 2θ ${parsed.points[0]!.x.toFixed(2)}–${last.x.toFixed(2)}° · neutron λ=${wavelength} Å` +
+      `${cw ? " (Caglioti widths from instrument)" : " — load the .irf for Caglioti widths"}.`,
+    );
   }
 
   function applyPowder(text: string, filename: string, fmt: DetectedFormat, tag: string): void {
@@ -666,6 +710,27 @@ export function App(): JSX.Element {
     downloadText(`${pattern.id}.csv`, powderPatternCsv(curves), "text/csv");
   }
 
+  // Refined CIF / mCIF (M5): the current structure with refined values, esds
+  // merged from the last result, and agreement recorded. mCIF when a magnetic
+  // model with moments is present, plain CIF otherwise.
+  function exportCif(): void {
+    const withEsd = powderParams.map((p) => {
+      const e = powderResult?.esd[p.id];
+      return e !== undefined ? { ...p, esd: e } : { ...p };
+    });
+    const s = powderResult?.agreement.goodnessOfFit;
+    const refinement: CifRefinementMeta | undefined = powderResult
+      ? { rwp: Number(wRpct), ...(s !== undefined ? { gof: s } : {}), nParam: withEsd.filter((p) => !p.fixed && !p.expression).length }
+      : undefined;
+    const opts = { params: withEsd, bindings: pBindings, ...(refinement ? { refinement } : {}) };
+    const mag = session.magnetic;
+    if (mag && mag.moments.length > 0) {
+      downloadText(`${structure.id}.mcif`, magneticStructureToMcif(structure, mag, opts), "chemical/x-cif");
+    } else {
+      downloadText(`${structure.id}.cif`, structureToCif(structure, opts), "chemical/x-cif");
+    }
+  }
+
   // Summary-card content (Structure / Data / Instrument).
   const cell = structure.cell;
   const hexish = Math.abs(cell.a - cell.b) < 1e-4 && cell.gamma === 120;
@@ -673,10 +738,12 @@ export function App(): JSX.Element {
     ? `a ${cell.a.toFixed(5)} · c ${cell.c.toFixed(5)} Å`
     : `a ${cell.a.toFixed(4)} · b ${cell.b.toFixed(4)} · c ${cell.c.toFixed(4)} Å`;
   const isSynthetic = powderSource === SYNTHETIC_SOURCE;
-  const instMeta =
+  const instParamMeta =
     instrument.kind === "tof"
       ? `difC ${instrument.difC.toFixed(1)}${instrument.difA ? ` · difA ${instrument.difA}` : ""}${instrument.difB ? ` · difB ${instrument.difB}` : ""} · Zero ${(instrument.zero ?? 0).toFixed(2)} µs`
       : `λ ${instrument.wavelength} Å${instrument.zero ? ` · Zero ${instrument.zero}°` : ""}`;
+  // Prefix the facility (when the file named a known beamline) before the params.
+  const instMeta = instrumentLoaded && instrument.facility ? `${instrument.facility} · ${instParamMeta}` : instParamMeta;
   const summaryCards: SummaryCardData[] = [
     {
       label: "Structure", loadLabel: "Load CIF…", accept: ".cif,text/plain", onFile: onLoadCif,
@@ -691,9 +758,13 @@ export function App(): JSX.Element {
       meta: `${pattern.points.length} points · ${UNIT_LABEL[pattern.xUnit]} ${patternExtent.min.toFixed(0)}–${patternExtent.max.toFixed(0)}`,
     },
     {
-      label: "Instrument", loadLabel: "Load instrument…", accept: ".instprm,.prm,text/plain", onFile: onLoadInstrument,
+      label: "Instrument", loadLabel: "Load instrument…", accept: ".instprm,.prm,.irf,text/plain", onFile: onLoadInstrument,
       chip: instrumentLoaded ? "✓ loaded" : "default",
-      title: instrument.kind === "tof" ? "POWGEN .instprm · TOF" : "Constant wavelength",
+      // Show the beamline name when the loaded file names a known instrument;
+      // otherwise the generic mode label.
+      title: instrumentLoaded && instrument.name
+        ? `${instrument.name} · ${instrument.kind === "tof" ? "TOF" : "CW"}`
+        : instrument.kind === "tof" ? "Time-of-flight" : "Constant wavelength",
       meta: instMeta,
     },
   ];
@@ -707,16 +778,28 @@ export function App(): JSX.Element {
         version={`v${APP_VERSION}`}
         onExportCsv={exportCsv}
         onExportProject={exportProject}
+        onExportCif={exportCif}
+        cifLabel={session.magnetic && session.magnetic.moments.length > 0 ? "Export mCIF" : "Export CIF"}
       />
-      {/* Both step panels stay mounted; tabs only toggle visibility, so the
-          magnetic-analysis state (k, framework, group/irrep picks) survives
-          switching to the refinement page and back. */}
-      <main className="wb-main" style={{ flex: 1, display: step === 0 ? undefined : "none" }}>
-        {renderStep(0)}
-      </main>
-      <main className="wb-main" style={{ flex: 1, display: step === 1 ? undefined : "none" }}>
-        {renderStep(1)}
-      </main>
+      {scDataset ? (
+        // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
+        // the dataset id so a new file remounts with a fresh parameter set.
+        <main className="wb-main" style={{ flex: 1 }}>
+          <SingleCrystalWorkbench key={scDataset.id} structure={structure} dataset={scDataset} onLoadData={onLoadData} onLoadCif={onLoadCif} />
+        </main>
+      ) : (
+        // Both powder step panels stay mounted; tabs only toggle visibility, so
+        // the magnetic-analysis state (k, framework, group/irrep picks) survives
+        // switching to the refinement page and back.
+        <>
+          <main className="wb-main" style={{ flex: 1, display: step === 0 ? undefined : "none" }}>
+            {renderStep(0)}
+          </main>
+          <main className="wb-main" style={{ flex: 1, display: step === 1 ? undefined : "none" }}>
+            {renderStep(1)}
+          </main>
+        </>
+      )}
       <div style={disclaimerBar}>
         Early browser-native refinement workbench — results for publication must be validated against established tools.
       </div>
@@ -742,6 +825,8 @@ export function App(): JSX.Element {
                   magnetic={session.magnetic ?? null}
                   wRpct={busy === "powder" && livePreview.current ? (100 * livePreview.current.rWeighted).toFixed(2) : wRpct}
                   onHighlight={setHighlight}
+                  selected={highlight}
+                  fitRange={fitRangeActive ? { min: fitRange!.min, max: fitRange!.max } : null}
                 />
               </div>
               <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 64vh, 760px)" }}>
@@ -793,6 +878,7 @@ export function App(): JSX.Element {
                       phases={phaseTicks}
                       focusFitToken={focusFitToken}
                       highlight={highlight}
+                      onHighlight={setHighlight}
                       {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                     />
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
@@ -922,6 +1008,8 @@ function QualityPanel({
   magnetic,
   wRpct,
   onHighlight,
+  selected,
+  fitRange,
 }: {
   structure: StructureModel;
   powderResult: RefinementResult | null;
@@ -935,15 +1023,19 @@ function QualityPanel({
   wRpct: string;
   /** Spotlight a reflection (its "h k l" + kind) in the pattern plot; null clears it. */
   onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic" } | null) => void;
+  /** The shared selection, so a Bragg-tick click highlights the matching scatter point. */
+  selected?: { hkl: string; kind: "nuclear" | "magnetic" } | null;
+  /** Active fit window (pattern x-unit); reflections outside it are hidden from the scatter. */
+  fitRange?: { min: number; max: number } | null;
 }): JSX.Element {
   // Validation plots (Rietveld obs/calc + normal probability) for the current fit.
   const diagnostics = useMemo(() => {
-    const obsCalc = powderReflectionObsCalc(structure, pattern, params, bindings, profile, magnetic ?? null);
+    const obsCalc = powderReflectionObsCalc(structure, pattern, params, bindings, profile, magnetic ?? null, fitRange ?? null);
     const curves = powderCurves(structure, pattern, params, bindings, profile);
     const sigmas = pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1));
     const npp = normalProbabilityPlot(weightedResiduals(curves.yObs, curves.yCalc, sigmas));
     return { obsCalc, npp };
-  }, [structure, pattern, params, bindings, profile, magnetic]);
+  }, [structure, pattern, params, bindings, profile, magnetic, fitRange?.min, fitRange?.max]);
 
   // R_exp (a property of the data + weights) anchors the colors; the live wR
   // over it is the live GoF. Before the first refinement there is no R_exp,
@@ -973,7 +1065,7 @@ function QualityPanel({
           ? `Judged against R_exp = ${(100 * rExp).toFixed(2)}% (Toby 2006): wR/R_exp ≈ 1–1.5 good, ≤ 2.5 mediocre, above poor; below 1 suggests overestimated σ or over-fitting.`
           : "GoF near 1 = fit consistent with the data uncertainties; colors appear after the first refinement (they need R_exp)."}
       </p>
-      <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} stacked {...(onHighlight ? { onHighlight } : {})} />
+      <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} stacked selected={selected ?? null} {...(onHighlight ? { onHighlight } : {})} />
       <p style={{ fontSize: fz.micro, color: theme.secondary, marginTop: 8 }}>
         F_obs vs F_calc flags individual bad reflections; the normal probability plot
         (Abrahams &amp; Keve 1971) is straight with slope 1 for an ideal fit &amp; weights.
