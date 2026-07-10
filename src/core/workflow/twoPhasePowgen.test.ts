@@ -23,22 +23,23 @@ const DIR = "Mn3Ga_POWGEN_600K";
 const has = dataExists(`${DIR}/PG3_45607.gsa`) && dataExists(`${DIR}/MnO.cif`);
 
 describe.skipIf(!has)("Mn3Ga + MnO two-phase POWGEN refinement", () => {
-  const mn3ga = parseCif(readData(`${DIR}/Mn3GaHexagonal_structure_600K_Final.cif`), "mn3ga");
-  const mno = parseCif(readData(`${DIR}/MnO.cif`), "mno");
-  const inst = parseInstrumentParameters(readData(`${DIR}/2022B_Dec_HighRes_60HzB1_CWL0p8.instprm`));
-  const pattern = parseGsasHistogramPattern(readData(`${DIR}/PG3_45607.gsa`), "pg", "Mn3Ga", { radiation: { kind: "neutron-tof" } });
-  const yObs = pattern.points.map((p) => p.yObs);
-  const weights = weightsFromSigma(pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1)));
-
-  const wRpct = (phases: PowderPhase[], params: readonly RefinementParameter[], bindings: readonly ParameterBinding[], profile: PowderProfile): number => {
-    const c = multiPhaseCurves(phases, pattern, params, bindings, profile);
-    const a = computeAgreementFactors(Float64Array.from(yObs), Float64Array.from(c.yCalc), weights, params.length);
-    return 100 * (a.rWeighted ?? 0);
-  };
   const free = (p: RefinementParameter): RefinementParameter =>
     (["scale", "background", "cellLength"].includes(p.kind) ? { ...p, fixed: false } : p);
 
   it("MnO impurity: single-phase wR is high, two-phase is a good fit at a sensible fraction", () => {
+    // Read the git-ignored data inside the test body: `describe.skipIf` still runs
+    // the describe callback at collection, so top-level readData would ENOENT in CI.
+    const mn3ga = parseCif(readData(`${DIR}/Mn3GaHexagonal_structure_600K_Final.cif`), "mn3ga");
+    const mno = parseCif(readData(`${DIR}/MnO.cif`), "mno");
+    const inst = parseInstrumentParameters(readData(`${DIR}/2022B_Dec_HighRes_60HzB1_CWL0p8.instprm`));
+    const pattern = parseGsasHistogramPattern(readData(`${DIR}/PG3_45607.gsa`), "pg", "Mn3Ga", { radiation: { kind: "neutron-tof" } });
+    const yObs = pattern.points.map((p) => p.yObs);
+    const weights = weightsFromSigma(pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1)));
+    const wRpct = (phases: PowderPhase[], params: readonly RefinementParameter[], bindings: readonly ParameterBinding[], profile: PowderProfile): number => {
+      const c = multiPhaseCurves(phases, pattern, params, bindings, profile);
+      const a = computeAgreementFactors(Float64Array.from(yObs), Float64Array.from(c.yCalc), weights, params.length);
+      return 100 * (a.rWeighted ?? 0);
+    };
     // Single-phase Mn₃Ga.
     const single = buildPowderSpec(mn3ga, pattern, inst, true, 6, {});
     const p1 = [{ structure: mn3ga, id: "mn3ga" }];
