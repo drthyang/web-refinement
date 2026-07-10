@@ -37,7 +37,7 @@ describe("TOF anisotropic microstrain (Stephens)", () => {
     const mu = iso.params.find((p) => p.kind === "mustrainIso");
     expect(mu).toBeDefined();
     expect(mu!.value).toBeCloseTo(0.0015 * 1e6, 6); // seeded from the resolution
-    expect(mu!.fixed).toBe(true); // fixed on load, freed in the microstructure stage
+    expect(mu!.fixed).toBe(true); // fixed on load; freed in the profile stage (it carries the σ₁² width term)
     // …so the redundant σ₁² tofProfile row is not emitted (avoids exact degeneracy).
     expect(iso.params.some((p) => p.id === "tof_sig1")).toBe(false);
     // Generalized keeps σ₁² (the isotropic base) + Stephens, and has no mustrainIso.

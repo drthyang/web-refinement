@@ -621,11 +621,17 @@ export const DEFAULT_STAGE_KINDS: readonly StageKinds[] = [
   { name: "scale", kinds: ["scale"] },
   { name: "background", kinds: ["background"] },
   { name: "cell", kinds: ["cellLength", "cellAngle"] },
-  { name: "profile", kinds: ["peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY", "asymSL", "asymHL", "zeroShift", "tofCalibration", "tofProfile"] },
+  // `mustrainIso` (isotropic TOF Mustrain) carries the instrument σ₁² term it
+  // replaced — a ∝d² Gaussian width — so it must co-refine with the other TOF
+  // width coefficients here, not be frozen until the microstructure stage. This
+  // mirrors the CW isotropic Mustrain (profileY), which is also a "Microstructure"
+  // parameter refined in this profile stage; only the *anisotropic* microstrain
+  // (Stephens / uniaxial Y⊥,Y∥) belongs to the later microstructure stage.
+  { name: "profile", kinds: ["peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY", "asymSL", "asymHL", "zeroShift", "tofCalibration", "tofProfile", "mustrainIso"] },
   { name: "ADP", kinds: ["bIso", "uAniso"] },
   { name: "positions", kinds: ["positionShift"] },
   { name: "occupancy", kinds: ["occupancy"] },
-  { name: "microstructure", kinds: ["stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainPerp", "mustrainPar", "mustrainIso"] },
+  { name: "microstructure", kinds: ["stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainPerp", "mustrainPar"] },
   { name: "corrections", kinds: ["poRatio", "absorption"] },
 ];
 

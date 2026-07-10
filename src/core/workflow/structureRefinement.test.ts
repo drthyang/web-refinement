@@ -3,11 +3,26 @@ import type { PowderPattern } from "@/core/diffraction/types";
 import type { StructureModel } from "@/core/crystal/types";
 import { exampleStructure } from "@/examples/mn3ga";
 import { allowedPositionShifts } from "@/core/crystal/siteConstraints";
-import { buildStructureRefinement, refinePowderStructure, describePositionMode } from "@/core/workflow/structureRefinement";
+import { buildStructureRefinement, refinePowderStructure, describePositionMode, DEFAULT_STAGE_KINDS } from "@/core/workflow/structureRefinement";
 import { powderCurves } from "@/core/workflow/powder";
 import { computeAgreementFactors } from "@/core/refinement/factors";
 
 const PROFILE = { shape: "gaussian" as const };
+
+describe("guided stage plan — isotropic Mustrain refines with the profile", () => {
+  const stageOf = (kind: string): string | undefined =>
+    DEFAULT_STAGE_KINDS.find((s) => s.kinds.includes(kind as never))?.name;
+
+  it("puts mustrainIso in the profile stage (it carries the σ₁² width term), not microstructure", () => {
+    // It is degenerate with the instrument σ₁² it replaced, so it must co-refine
+    // with the other TOF width coefficients — otherwise that ∝d² width is frozen
+    // at its seed while cell/ADP/positions move and the wR cannot reach the best.
+    expect(stageOf("mustrainIso")).toBe("profile");
+    // The genuinely anisotropic microstrain stays in the later microstructure stage.
+    expect(stageOf("stephensStrain")).toBe("microstructure");
+    expect(stageOf("mustrainPar")).toBe("microstructure");
+  });
+});
 const TRUE_SCALE = 120;
 const TRUE_WIDTH = 0.4;
 

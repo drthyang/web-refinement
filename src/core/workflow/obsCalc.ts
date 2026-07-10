@@ -100,11 +100,18 @@ export function powderReflectionObsCalc(
   // its normalized (intensity-1) sub-peaks, so its calculated profile at xᵢ is
   // Σ_sub sub.intensity·peakValue(sub, xᵢ). Nuclear and magnetic share the one
   // `total` below, so overlapping obs intensity is apportioned across both.
+  // Pass h,k,l so the apportioning sub-peak carries the *same* hkl-dependent
+  // broadening the real pattern gives this reflection (Stephens / uniaxial
+  // microstrain, uniaxial size). Omitting them placed an isotropic peak here
+  // while `buildPeaks` placed an anisotropic one, so the decomposition weights
+  // no longer summed to the observed profile and F_obs drifted off F_calc even
+  // for a perfect fit. (Matches `buildPeaks`, which places from hkl-tagged
+  // `powderPeakIntensities`.)
   const components: Component[] = reflections.map((r, i) => ({
     kind: "nuclear" as const,
     h: r.h, k: r.k, l: r.l, d: r.d,
     iCalc: intensities[i]!.intensity,
-    sub: placePeaks(pattern, applied, [{ d: r.d, intensity: 1 }]),
+    sub: placePeaks(pattern, applied, [{ d: r.d, intensity: 1, h: r.h, k: r.k, l: r.l }]),
   }));
 
   // Magnetic satellites at G ± k (single commensurate k), on the same scale as
@@ -131,6 +138,10 @@ export function powderReflectionObsCalc(
         mags.push({
           kind: "magnetic", h: mh, k: mk, l: ml, d: dSat,
           iCalc: magScale * r.multiplicity * lp * fm2,
+          // No hkl here on purpose: the real magnetic satellites in
+          // `buildCombinedPeaks` are also placed without hkl (no anisotropic
+          // strain on satellites), so the decomposition must match that to stay
+          // on the F_obs = F_calc line.
           sub: placePeaks(pattern, applied, [{ d: dSat, intensity: 1 }]),
         });
       }

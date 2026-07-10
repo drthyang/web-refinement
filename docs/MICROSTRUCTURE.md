@@ -189,8 +189,14 @@ other parameter, so they refine through the LM engine with correlations/esds:
   emits `X⊥`, `X∥` (seeded from the isotropic size); `{ uniaxialStrain: { axis } }`
   emits `Y⊥`, `Y∥` (seeded from the isotropic strain `Y`, net-zero at the seed);
   `{ mustrainIso: µstrain }` emits the isotropic **TOF** Mustrain (µstrain, ×10⁻⁶)
-  and drops the redundant `σ₁²`. All are unlocked by the **microstructure** stage
-  in the expert sequence (after occupancy, before corrections).
+  and drops the redundant `σ₁²`. The *anisotropic* kinds (`stephensStrain`,
+  `anisoSize*`, `mustrainPerp/Par`) are unlocked by the **microstructure** stage
+  (after occupancy, before corrections). `mustrainIso` is the exception: because
+  it carries the dropped instrument `σ₁²` (a ∝d² width) it is unlocked in the
+  **profile** stage with the other width terms — mirroring the CW isotropic
+  Mustrain (`Y`), which is likewise a "Microstructure" parameter refined in the
+  profile stage. Refining it later would freeze that width at its seed while the
+  cell/ADP/positions move, and the wR could not reach the previous best.
 - **Evaluation**: `placePeaks` (2θ CW) adds the Stephens Gaussian width in
   quadrature, the uniaxial-size Lorentzian breadth additively, and the
   uniaxial-strain Lorentzian breadth as a correction over the isotropic `Y`;

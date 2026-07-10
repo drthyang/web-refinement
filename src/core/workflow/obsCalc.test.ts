@@ -108,6 +108,44 @@ describe("powderReflectionObsCalc — near-absent reflections excluded", () => {
 });
 
 /**
+ * With *anisotropic* microstrain (Stephens) the apportioning sub-peaks must carry
+ * the same hkl-dependent broadening the real pattern gives each reflection — else
+ * a perfect fit reads off the F_obs = F_calc line. Build a self-consistent pattern
+ * from a model with a real anisotropic strain and require I_obs ≈ I_calc.
+ */
+describe("powderReflectionObsCalc — anisotropic microstrain stays on the F_obs=F_calc line", () => {
+  const structure = exampleStructure();
+  const grid = Array.from({ length: 1600 }, (_, i) => 10 + (i * (120 - 10)) / 1599);
+  const empty: PowderPattern = {
+    id: "pat", name: "p", xUnit: "twoTheta",
+    radiation: { kind: "neutron", wavelength: 1.54 }, wavelength: 1.54,
+    points: grid.map((x) => ({ x, yObs: 0 })),
+  };
+  const profile: PowderProfile = { shape: "pseudoVoigt", eta: 0.5 };
+  const spec = buildStructureRefinement(structure, empty, {
+    scale: 100, backgroundTerms: 2,
+    caglioti: { u: 2, v: -2, w: 4 }, lorentzian: { x: 1, y: 2 },
+    stephensStrain: true, refineAdp: false, refinePositions: false,
+  });
+  // Drive the Stephens S-parameters to a visibly anisotropic value.
+  const params = spec.params.map((p) =>
+    p.kind === "stephensStrain" ? { ...p, value: p.id.endsWith("_0") ? 8 : 3 } : p,
+  );
+  const curves = powderCurves(structure, empty, params, spec.bindings, profile);
+  const pat: PowderPattern = { ...empty, points: grid.map((x, i) => ({ x, yObs: curves.yCalc[i] ?? 0 })) };
+
+  it("recovers I_obs ≈ I_calc for a perfect anisotropic-strain fit", () => {
+    const rows = powderReflectionObsCalc(structure, pat, params, spec.bindings, profile);
+    const maxCalc = Math.max(...rows.map((r) => r.iCalc));
+    const strong = rows.filter((r) => r.iCalc > 0.02 * maxCalc);
+    expect(strong.length).toBeGreaterThan(5);
+    // Every well-measured reflection sits on the line (pre-fix these drifted ~97%).
+    const worst = strong.reduce((m, r) => Math.max(m, Math.abs(r.iObs / r.iCalc - 1)), 0);
+    expect(worst).toBeLessThan(0.05);
+  });
+});
+
+/**
  * With a magnetic model, the decomposition must also emit the magnetic
  * satellites (kind "magnetic"), on the same intensity scale as the nuclear
  * peaks — so an F_obs/F_calc plot can colour them distinctly.
