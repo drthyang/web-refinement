@@ -62,6 +62,7 @@ describe("buildSpaceGroup — known general-position multiplicities", () => {
     [1, 1],
     [2, 2],
     [14, 4],
+    [199, 24], // I2₁3: T (12) × 2 I-centring
     [216, 96], // F-4̄3m: T_d (24) × 4 F-centring
     [225, 192], // Fm-3̄m: O_h (48) × 4 F-centring
   ];

@@ -11,6 +11,7 @@ import type { AtomSite, DisplacementParameters, SpaceGroup, StructureModel, Unit
 import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import type { Vec3 } from "@/core/math/types";
 import { parseMagneticSymmetryOperation, parseSymmetryOperation } from "@/core/crystal/symmetry";
+import { completeSpaceGroup } from "@/core/crystal/spaceGroups";
 
 /** Strip the parenthetical esd and parse: "5.41317(8)" → 5.41317. */
 export function parseCifNumber(raw: string): number {
@@ -157,22 +158,33 @@ function parseSpaceGroup(items: Map<string, string>, loops: Loop[]): SpaceGroup 
   const symLoop = findLoop(loops, (h) =>
     h.some((k) => k.includes("space_group_symop_operation_xyz") || k.includes("symmetry_equiv_pos_as_xyz")),
   );
-  const operations = symLoop
+  const explicitOps = symLoop
     ? symLoop.rows.map((row) => {
         const idx = symLoop.headers.findIndex((h) =>
           h.toLowerCase().includes("xyz"),
         );
         return parseSymmetryOperation(row[idx >= 0 ? idx : row.length - 1]!);
       })
-    : [parseSymmetryOperation("x,y,z")];
+    : [];
 
-  const hm = items.get("_symmetry_space_group_name_h-m") ?? items.get("_space_group_name_h-m_alt");
-  const number = items.get("_symmetry_int_tables_number") ?? items.get("_space_group_it_number");
-  return {
-    operations,
+  const hm = (items.get("_symmetry_space_group_name_h-m") ?? items.get("_space_group_name_h-m_alt"))
+    ?.replace(/^['"]|['"]$/g, "");
+  const numRaw = items.get("_symmetry_int_tables_number") ?? items.get("_space_group_it_number");
+  const number = numRaw !== undefined ? parseInt(numRaw, 10) : undefined;
+
+  // Resolve the full operation list: close an explicit (possibly generating-
+  // subset) symop loop, or — when the CIF gives only the H-M name / IT number
+  // (common for standard settings) — build it from the built-in table. Falls
+  // back to P1 only when the group is genuinely unresolvable, so a symbol-only
+  // header no longer silently collapses to identity (which broke |F|²).
+  const completed = completeSpaceGroup({
+    operations: explicitOps,
     ...(hm !== undefined ? { hermannMauguin: hm } : {}),
-    ...(number !== undefined ? { number: parseInt(number, 10) } : {}),
-  };
+    ...(number !== undefined ? { number } : {}),
+  });
+  return completed.operations.length > 0
+    ? completed
+    : { ...completed, operations: [parseSymmetryOperation("x,y,z")] };
 }
 
 function parseAnisotropicAdps(loops: Loop[]): Map<string, DisplacementParameters> {

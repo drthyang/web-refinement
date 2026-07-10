@@ -59,6 +59,54 @@ loop_
   });
 });
 
+describe("parseCif — space group from H-M name only (no symop loop)", () => {
+  // A CIF that names the group but lists no symmetry operations (e.g. the 11-BM
+  // NAC file) must resolve the full group from the built-in table, not silently
+  // fall back to P1 — that collapse gave wrong |F|² and an unfittable pattern.
+  it("resolves 'I 21 3' (#199) to all 24 operations", () => {
+    const model = parseCif(`data_nac
+_cell_length_a  10.2514
+_cell_length_b  10.2514
+_cell_length_c  10.2514
+_cell_angle_alpha  90
+_cell_angle_beta   90
+_cell_angle_gamma  90
+_symmetry_space_group_name_H-M  "I 21 3"
+loop_
+  _atom_site_type_symbol
+  _atom_site_label
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+  _atom_site_occupancy
+  Al Al1 0.24768 0.24768 0.24768 1.0
+`);
+    expect(model.spaceGroup.number).toBe(199);
+    expect(model.spaceGroup.operations).toHaveLength(24);
+  });
+
+  it("still falls back to P1 for an unknown symbol", () => {
+    const model = parseCif(`data_x
+_cell_length_a  10
+_cell_length_b  10
+_cell_length_c  10
+_cell_angle_alpha  90
+_cell_angle_beta   90
+_cell_angle_gamma  90
+_symmetry_space_group_name_H-M  "Zz 99 9"
+loop_
+  _atom_site_type_symbol
+  _atom_site_label
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+  _atom_site_occupancy
+  Al Al1 0 0 0 1.0
+`);
+    expect(model.spaceGroup.operations).toHaveLength(1);
+  });
+});
+
 // Read only when present; the `as StructureModel` is safe because the tests in
 // this suite are skipped (never dereference `model`) when the file is absent.
 describe.skipIf(!has600)("parseCif — GSAS-II Mn₃Ga hexagonal (600 K)", () => {

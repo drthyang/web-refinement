@@ -41,7 +41,7 @@ export const INSTRUMENTS: readonly FacilityInstrument[] = [
   { name: "HB-2A (POWDER)", facility: "HFIR", lab: "ORNL", country: "USA", probe: "neutron", mode: "cw", aliases: ["HB-2A", "HB2A"] },
   { name: "WAND² (HB-2C)", facility: "HFIR", lab: "ORNL", country: "USA", probe: "neutron", mode: "cw", aliases: ["HB-2C", "HB2C", "WAND"] },
   { name: "DEMAND (HB-3A)", facility: "HFIR", lab: "ORNL", country: "USA", probe: "neutron", mode: "cw", aliases: ["HB-3A", "HB3A", "DEMAND"] },
-  { name: "11-BM", facility: "APS", lab: "ANL", country: "USA", probe: "xray", mode: "cw", aliases: ["11-BM", "11BM"] },
+  { name: "11-BM", facility: "APS", lab: "ANL", country: "USA", probe: "xray", mode: "cw", aliases: ["11-BM", "11BM", "APS11BM"] },
   { name: "28-ID", facility: "NSLS-II", lab: "BNL", country: "USA", probe: "xray", mode: "cw", aliases: ["28-ID", "28ID", "XPD"] },
 
   // ── United Kingdom (ISIS, RAL) ─────────────────────────────────────────────

@@ -22,9 +22,10 @@ describe("parseInstrumentParameters", () => {
     expect(p.radiationKind).toBe("xray");
     expect(p.wavelength).toBeCloseTo(0.1665, 6);
     expect(p.zero).toBe(0);
-    expect(p.u).toBeCloseTo(-46.054, 3);
+    // GSAS-II U,V,W are variance (σ²) coefficients; the app stores FWHM² = 8 ln2·σ².
+    expect(p.u).toBeCloseTo(-46.054 * 8 * Math.log(2), 1); // ≈ -255.4
     expect(p.v).toBe(0);
-    expect(p.w).toBeCloseTo(1.2088, 4);
+    expect(p.w).toBeCloseTo(1.2088 * 8 * Math.log(2), 2); // ≈ 6.703
     expect(p.polarization).toBeCloseTo(0.8442, 4);
   });
 
@@ -54,6 +55,52 @@ describe("parseInstrumentParameters", () => {
     expect(p.u).toBeCloseTo(16142.1, 1);
     expect(p.v).toBeCloseTo(-10773.8, 1);
     expect(p.w).toBeCloseTo(3634.5, 1);
+  });
+
+  it("reads a classic GSAS .prm (INS/ICONS/PRCF) CW X-ray file — APS 11-BM", () => {
+    // Verbatim 11-BM (APS) GSAS instrument file: PXCR = powder X-ray CW.
+    const prm = [
+      "            123456789012345678901234567890123456789012345678901234567890        ",
+      "INS   BANK      1",
+      "INS   HTYPE   PXCR",
+      "INS  1 ICONS 0.4139090    0.0000    0.0000               0.990    0     0.500   ",
+      "INS  1 IRAD     0",
+      "INS  1I HEAD  11-BM profile SRM 660a (LaB6) fit (Feb 2009)",
+      "INS  1INAME   APS11BM",
+      "INS  1PRCF1     3   19   0.00100",
+      "INS  1PRCF11       1.163000      -0.126000       0.063000   0.000000E+00",
+      "INS  1PRCF12       0.173000       0.000000       0.001100       0.001100",
+      "INS  1PRCF13   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00",
+    ].join("\n");
+    const p = parseInstrumentParameters(prm);
+    expect(p.kind).toBe("constantWavelength");
+    if (p.kind !== "constantWavelength") throw new Error("wrong kind");
+    expect(p.radiationKind).toBe("xray");
+    expect(p.wavelength).toBeCloseTo(0.413909, 6);
+    // GSAS GU,GV,GW are variance (σ²) coefficients → FWHM² = 8 ln2·σ².
+    expect(p.u).toBeCloseTo(1.163 * 8 * Math.log(2), 2); // ≈ 6.449
+    expect(p.v).toBeCloseTo(-0.126 * 8 * Math.log(2), 2); // ≈ -0.699
+    expect(p.w).toBeCloseTo(0.063 * 8 * Math.log(2), 2); // ≈ 0.349
+    // POLA is fixed-column field 5 (0.990) — the synchrotron polarization, not
+    // the blank field-4 that whitespace-splitting would otherwise land on.
+    expect(p.polarization).toBeCloseTo(0.99, 3);
+    // Recognised from the header/INAME → 11-BM at the APS.
+    expect(p.name).toBe("11-BM");
+    expect(p.facility).toContain("APS");
+  });
+
+  it("reads a classic GSAS .prm TOF file (HTYPE PNT, ICONS difC/difA/Zero)", () => {
+    const prm = [
+      "INS   BANK      1",
+      "INS   HTYPE   PNTR",
+      "INS  1 ICONS   22585.74      3.915      -1.200",
+    ].join("\n");
+    const p = parseInstrumentParameters(prm);
+    expect(p.kind).toBe("tof");
+    if (p.kind !== "tof") throw new Error("wrong kind");
+    expect(p.difC).toBeCloseTo(22585.74, 2);
+    expect(p.difA).toBeCloseTo(3.915, 3);
+    expect(p.zero).toBeCloseTo(-1.2, 3);
   });
 
   it("reads a FullProf TOF .irf (D2TOF) as a difC/difA/difB/Zero calibration", () => {

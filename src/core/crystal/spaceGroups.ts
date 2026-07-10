@@ -114,6 +114,16 @@ const ENTRIES: readonly SpaceGroupEntry[] = [
     aliases: ["P21/c", "P 21/c"],
   },
   {
+    number: 199,
+    hermannMauguin: "I 21 3",
+    generators: [
+      "-x+1/2,-y,z+1/2", // 2₁[001]
+      "z,x,y", // 3[111]
+      "x+1/2,y+1/2,z+1/2", // I-centring
+    ],
+    aliases: ["I213", "I2_13"],
+  },
+  {
     number: 216,
     hermannMauguin: "F -4 3 m",
     generators: [
