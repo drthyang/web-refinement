@@ -102,6 +102,25 @@ const ISOTROPY_FAILURE_TEXT: Record<IsotropyFailure, string> = {
   "primed-translation": "The stabilizer contains a primed pure translation — a type-IV magnetic group, outside the bundled type-I/III table.",
 };
 
+/**
+ * Pluggable moment-refinement backend. The symmetry workflow is structure-driven
+ * and identical for powder and single crystal; only the "refine moments" fit
+ * differs (a powder pattern vs single-crystal reflections). Single-crystal mode
+ * injects this so the same panel fits moments against F² data; powder keeps its
+ * built-in pattern path (used when this is absent).
+ */
+export interface MagneticFit {
+  /** Refine the freed moment amplitudes (nuclear model held fixed). Returns the
+   *  refined values by param id and an agreement fraction for the readout. */
+  refine: (
+    magnetic: MagneticModel,
+    momentParams: readonly RefinementParameter[],
+    momentBindings: readonly ParameterBinding[],
+  ) => Promise<{ values: Record<string, number>; agreement: number | null }>;
+  /** Agreement readout label, e.g. "wR" (powder) or "R1" (single crystal). */
+  agreementLabel: string;
+}
+
 export function KSearchPanel({
   structure,
   autoPeaks = [],
@@ -109,6 +128,7 @@ export function KSearchPanel({
   nuclearParams,
   nuclearBindings,
   profile,
+  magneticFit,
   onApply,
   onContinue,
 }: {
@@ -120,6 +140,9 @@ export function KSearchPanel({
   nuclearParams?: readonly RefinementParameter[];
   nuclearBindings?: readonly ParameterBinding[];
   profile?: PowderProfile;
+  /** Single-crystal moment-fit backend; when present it drives "Refine moments"
+   *  instead of the built-in powder-pattern path. */
+  magneticFit?: MagneticFit;
   /** Push the current magnetic model onto the session so the refinement plot
    *  shows the magnetic pattern + satellite ticks (null clears it). */
   onApply?: (magnetic: MagneticModel | null) => void;
@@ -284,31 +307,43 @@ export function KSearchPanel({
   // fixed (the handoff convention), moment-mode amplitudes freed, shared scale.
   const [refining, setRefining] = useState(false);
   const [refineWR, setRefineWR] = useState<number | null>(null);
-  const canRefine = !!(magBuild && magBuild.params.length > 0 && pattern && nuclearParams && nuclearBindings && profile);
+  const canPowderRefine = !!(pattern && nuclearParams && nuclearBindings && profile);
+  const canRefine = !!(magBuild && magBuild.params.length > 0 && (magneticFit || canPowderRefine));
+  const agreementLabel = magneticFit?.agreementLabel ?? "wR";
 
-  function runRefine(): void {
+  async function runRefine(): Promise<void> {
     if (!canRefine || !magBuild) return;
     setRefining(true);
     setRefineWR(null);
-    // Defer so the busy state paints before the (main-thread) solve.
-    setTimeout(() => {
-      try {
-        const nuclearFixed = nuclearParams!.map((p) => ({ ...p, fixed: true }));
-        const moments = magBuild.params.map((p) => ({ ...p, value: amps[p.id] ?? p.value, initialValue: amps[p.id] ?? p.value, fixed: false }));
-        const bindings = [...nuclearBindings!, ...magBuild.bindings];
-        const problem = buildMagneticPowderProblem(structure, magBuild.magnetic, pattern!, [...nuclearFixed, ...moments], bindings, {
-          shape: profile!.shape,
-          ...(profile!.eta !== undefined ? { eta: profile!.eta } : {}),
-        });
-        const result = refine(problem, { maxIterations: 20 });
+    try {
+      const moments = magBuild.params.map((p) => ({ ...p, value: amps[p.id] ?? p.value, initialValue: amps[p.id] ?? p.value, fixed: false }));
+      // Single-crystal (or any injected) backend fits the moments against its own
+      // data; nuclear model held fixed is the backend's responsibility.
+      if (magneticFit) {
+        const { values, agreement } = await magneticFit.refine(magBuild.magnetic, moments, magBuild.bindings);
         const next: Record<string, number> = { ...amps };
-        for (const p of magBuild.params) next[p.id] = result.parameters[p.id] ?? next[p.id]!;
+        for (const p of magBuild.params) next[p.id] = values[p.id] ?? next[p.id]!;
         setAmps(next);
-        setRefineWR(result.agreement.rWeighted ?? null);
-      } finally {
-        setRefining(false);
+        setRefineWR(agreement);
+        return;
       }
-    }, 30);
+      // Powder path (unchanged): nuclear fixed, moment-mode amplitudes freed,
+      // shared scale — solved on the main thread. Defer so the busy state paints.
+      await new Promise((r) => setTimeout(r, 30));
+      const nuclearFixed = nuclearParams!.map((p) => ({ ...p, fixed: true }));
+      const bindings = [...nuclearBindings!, ...magBuild.bindings];
+      const problem = buildMagneticPowderProblem(structure, magBuild.magnetic, pattern!, [...nuclearFixed, ...moments], bindings, {
+        shape: profile!.shape,
+        ...(profile!.eta !== undefined ? { eta: profile!.eta } : {}),
+      });
+      const result = refine(problem, { maxIterations: 20 });
+      const next: Record<string, number> = { ...amps };
+      for (const p of magBuild.params) next[p.id] = result.parameters[p.id] ?? next[p.id]!;
+      setAmps(next);
+      setRefineWR(result.agreement.rWeighted ?? null);
+    } finally {
+      setRefining(false);
+    }
   }
 
   /** Download a self-contained HTML report of the current magnetic model:
@@ -343,7 +378,7 @@ export function KSearchPanel({
       bindings: magBuild.bindings,
       k,
       group,
-      ...(refineWR != null ? { note: `wR = ${(100 * refineWR).toFixed(1)}% (moments-only fit)` } : {}),
+      ...(refineWR != null ? { note: `${agreementLabel} = ${(100 * refineWR).toFixed(1)}% (moments-only fit)` } : {}),
     });
     downloadText(`${structure.id}-magnetic-report.html`, html, "text/html");
   }
@@ -782,7 +817,7 @@ export function KSearchPanel({
                   {refining ? "Refining…" : "Refine moments"}
                 </button>
                 {refineWR != null && (
-                  <span style={{ fontSize: 12.5, color: theme.secondary, fontFamily: themeMono }}>wR = {(100 * refineWR).toFixed(1)}%</span>
+                  <span style={{ fontSize: 12.5, color: theme.secondary, fontFamily: themeMono }}>{agreementLabel} = {(100 * refineWR).toFixed(1)}%</span>
                 )}
                 {onApply && (
                   <button

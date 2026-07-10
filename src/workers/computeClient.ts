@@ -17,7 +17,7 @@ import type {
 } from "@/workers/protocol";
 import type { RefinementResult } from "@/core/refinement/types";
 import { refine } from "@/core/refinement/engine";
-import { buildSingleCrystalProblem } from "@/core/workflow/singleCrystal";
+import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
 import { runPowderRefinement, type PowderProgress } from "@/workers/runPowder";
 
@@ -95,6 +95,6 @@ function runInline(req: ComputeRequest, onProgress?: PowderProgress): Refinement
     );
     return refine(problem, req.options ?? {});
   }
-  const problem = buildSingleCrystalProblem(req.structure, req.dataset, req.parameters, req.bindings);
+  const problem = buildSingleCrystalRefinementProblem(req.structure, req.dataset, req.parameters, req.bindings);
   return refine(problem, req.options ?? {});
 }

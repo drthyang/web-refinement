@@ -13,23 +13,28 @@ export interface Step {
   readonly label: string;
 }
 
+/** One header export button. The active mode supplies its own set, so the
+ *  header always acts on the engine actually on screen (powder vs single
+ *  crystal) rather than a fixed powder-only trio. */
+export interface ExportAction {
+  readonly label: string;
+  readonly onClick: () => void;
+}
+
 interface Props {
   readonly steps: readonly Step[];
   readonly active: number;
   readonly onStep: (i: number) => void;
   readonly version: string;
-  readonly onExportCsv: () => void;
-  readonly onExportProject: () => void;
-  readonly onExportCif: () => void;
-  /** Label for the CIF/mCIF export button (e.g. "Export CIF" or "Export mCIF"). */
-  readonly cifLabel: string;
+  /** Export buttons for the current mode, rendered left-to-right. */
+  readonly exports: readonly ExportAction[];
 }
 
-export function WorkbenchHeader({ steps, active, onStep, version, onExportCsv, onExportProject, onExportCif, cifLabel }: Props): JSX.Element {
+export function WorkbenchHeader({ steps, active, onStep, version, exports }: Props): JSX.Element {
   return (
-    <header style={headerBar}>
+    <header className="wb-header" style={headerBar}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-        <div style={brandMark}>
+        <div className="wb-header-mark" style={brandMark}>
           <svg viewBox="0 0 20 20" width={26} height={26} aria-hidden>
             <g fill="none" stroke="#fff" strokeWidth={1.3}>
               <circle cx={10} cy={10} r={8.3} opacity={0.32} />
@@ -40,26 +45,26 @@ export function WorkbenchHeader({ steps, active, onStep, version, onExportCsv, o
         </div>
         <div style={{ lineHeight: 1.2, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 21, fontWeight: 750, letterSpacing: "-0.022em", color: color.ink, whiteSpace: "nowrap" }}>
+            <span className="wb-header-title" style={{ fontSize: 21, fontWeight: 750, letterSpacing: "-0.022em", color: color.ink, whiteSpace: "nowrap" }}>
               Web Refinement Workbench
             </span>
-            <span style={versionChip}>{version}</span>
+            <span className="wb-version-chip" style={versionChip}>{version}</span>
           </div>
-          <div style={{ fontSize: 12, color: color.faint, letterSpacing: "0.04em", marginTop: 2 }}>
+          <div className="wb-header-kicker" style={{ fontSize: 12, color: color.faint, letterSpacing: "0.04em", marginTop: 2 }}>
             Diffraction · Rietveld · Magnetic Symmetry
           </div>
         </div>
       </div>
-      <div style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
+      <div className="wb-header-divider" style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
       <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {steps.map((s, i) => (
           <StepPill key={s.label} step={s} active={i === active} onClick={() => onStep(i)} />
         ))}
       </nav>
-      <div style={{ marginLeft: "auto", display: "flex", gap: 9 }}>
-        <ActionButton onClick={onExportCif}>{cifLabel}</ActionButton>
-        <ActionButton onClick={onExportCsv}>Export CSV</ActionButton>
-        <ActionButton onClick={onExportProject}>Export project JSON</ActionButton>
+      <div className="wb-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
+        {exports.map((e) => (
+          <ActionButton key={e.label} onClick={e.onClick}>{e.label}</ActionButton>
+        ))}
       </div>
     </header>
   );
@@ -102,7 +107,7 @@ function StepPill({ step, active, onClick }: { step: Step; active: boolean; onCl
     border: active ? "1px solid rgba(255,255,255,0.28)" : `1px solid ${color.border}`,
   };
   return (
-    <button style={style} onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+    <button className="wb-header-step" style={style} onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
       <span style={badge}>{step.num}</span>
       {step.label}
     </button>
@@ -113,6 +118,7 @@ function ActionButton({ children, onClick }: { children: React.ReactNode; onClic
   const [hover, setHover] = useState(false);
   return (
     <button
+      className="wb-header-action"
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}

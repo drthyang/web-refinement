@@ -7,7 +7,7 @@
 
 import type { ComputeRequest, ComputeResponse } from "@/workers/protocol";
 import { refine } from "@/core/refinement/engine";
-import { buildSingleCrystalProblem } from "@/core/workflow/singleCrystal";
+import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
 import { runPowderRefinement } from "@/workers/runPowder";
 
@@ -30,7 +30,7 @@ function handle(req: ComputeRequest): ComputeResponse {
       const result = refine(problem, req.options ?? {});
       return { requestId: req.requestId, ok: true, result };
     }
-    const problem = buildSingleCrystalProblem(req.structure, req.dataset, req.parameters, req.bindings);
+    const problem = buildSingleCrystalRefinementProblem(req.structure, req.dataset, req.parameters, req.bindings);
     const result = refine(problem, req.options ?? {});
     return { requestId: req.requestId, ok: true, result };
   } catch (err) {

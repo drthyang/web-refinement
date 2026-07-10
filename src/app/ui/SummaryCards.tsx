@@ -3,7 +3,7 @@
  * button, an OK status chip, a title line, and a mono meta line.
  */
 
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { card, color, mono, radius, uppercaseLabel, fz } from "@/app/theme";
 
 export interface SummaryCardData {
@@ -19,6 +19,9 @@ export interface SummaryCardData {
   /** One badge per crystallographic phase (multi-phase); removable ones show an ×. */
   readonly phaseBadges?: readonly { id: string; label: string; removable: boolean }[];
   readonly onRemovePhase?: (id: string) => void;
+  /** Optional interactive control rendered under the meta line (e.g. the
+   *  single-crystal X-ray/neutron probe toggle, which the data file can't carry). */
+  readonly control?: ReactNode;
 }
 
 export function SummaryCards({ cards }: { cards: readonly SummaryCardData[] }): JSX.Element {
@@ -57,6 +60,7 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
       </div>
       <div style={{ fontSize: fz.large, fontWeight: 700, lineHeight: 1.25 }}>{data.title}</div>
       {data.meta && <div style={{ fontSize: fz.small, color: color.secondary, fontFamily: mono }}>{data.meta}</div>}
+      {data.control && <div style={{ marginTop: 2 }}>{data.control}</div>}
     </div>
   );
 }

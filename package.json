@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:ganb4se8": "GANB4SE8_REQUIRED=1 vitest run src/core/workflow/realPowderXRD.test.ts",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "screenshots": "node scripts/device-screenshots.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -25,6 +26,7 @@
     "@types/react-dom": "^18.3.1",
     "@types/three": "^0.185.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "playwright-core": "^1.61.1",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
     "vitest": "^2.1.8"

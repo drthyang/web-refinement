@@ -10,21 +10,26 @@
  * whenever single-crystal data is loaded.
  */
 
-import { lazy, Suspense, useMemo, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from "react";
+import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { StructureModel } from "@/core/crystal/types";
-import type { SingleCrystalDataset } from "@/core/diffraction/types";
+import type { Radiation, SingleCrystalDataset } from "@/core/diffraction/types";
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
-import { refine } from "@/core/refinement/engine";
+import type { ComputeClient } from "@/workers/computeClient";
 import { mergeEquivalents } from "@/core/diffraction/merge";
 import {
   buildSingleCrystalSpec,
   guidedSingleCrystalParams,
-  buildSingleCrystalRefinementProblem,
   singleCrystalRefinementComparison,
 } from "@/core/workflow/singleCrystalRefinement";
 import { normalProbabilityPlot } from "@/core/refinement/diagnostics";
 import { dSpacing } from "@/core/crystal/unitCell";
+import { isMomentParameterKind } from "@/core/refinement/types";
+import type { ParameterBinding } from "@/core/refinement/types";
+import type { MagneticModel } from "@/core/magnetic/types";
+import { applyMagneticMoments, magneticComparison } from "@/core/workflow/magnetic";
+import { KSearchPanel, type MagneticFit } from "@/components/KSearchPanel";
 import { FobsFcalc, NormalProb } from "@/app/ui/QualityPlots";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
@@ -47,20 +52,63 @@ function r1Ink(r1: number): string {
   return color.warnInk;
 }
 
-export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadCif }: {
+/** F-plot ↔ list selection: which reflection is spotlighted (shared with the
+ *  QualityPlots' FobsFcalc so a click there highlights the matching list row). */
+type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: string };
+
+/** Probe the reflections were measured with. A bare .hkl / reflection list can't
+ *  carry this, so the user picks it (seeded from the loaded instrument). */
+type Probe = "xray" | "neutron" | "neutron-tof";
+
+export function SingleCrystalWorkbench({ structure, dataset, client, step, onStep, instrumentProbe, exportsRef, onLoadData, onLoadCif }: {
   structure: StructureModel;
   dataset: SingleCrystalDataset;
+  /** Shared compute worker — refinement runs off the main thread, as in powder. */
+  client: ComputeClient;
+  /** Active workflow step (0 = F² refinement, 1 = magnetic symmetry analysis). */
+  step: number;
+  /** Switch the app-level step (e.g. "continue to refinement" after applying a model). */
+  onStep?: (i: number) => void;
+  /** Radiation of the loaded instrument, if any — seeds the probe default so a
+   *  loaded X-ray instrument selects X-ray scattering without the user asking. */
+  instrumentProbe?: "xray" | "neutron";
+  /** Shell-owned ref this engine publishes its header exports into
+   *  (WorkbenchEngine contract) — so "Export CIF" acts on this mode's
+   *  structure/params (this workbench owns them), not the powder exporter. */
+  exportsRef?: EngineExportsRef;
   /** Load a different dataset — powder here switches the app back to powder mode. */
   onLoadData?: (file: File) => void;
   /** Load a different structure (CIF). */
   onLoadCif?: (file: File) => void;
 }): JSX.Element {
-  const spec = useMemo(() => buildSingleCrystalSpec(structure, dataset, { extinction: 0 }), [structure, dataset]);
+  // Probe selection. The reflection file is hardcoded to neutron on load (it can't
+  // report its own source), so the user can switch here — and the choice changes
+  // the physics (neutron b vs X-ray form factors f(Q) + polarization), rebuilding
+  // F_calc and the agreement factors live. Seeded from the instrument when known.
+  const baseWavelength = ("wavelength" in dataset.radiation ? dataset.radiation.wavelength : undefined) ?? 1.54;
+  const [probe, setProbe] = useState<Probe>(() => instrumentProbe ?? dataset.radiation.kind);
+  const effectiveRadiation: Radiation = useMemo(() => {
+    if (probe === "neutron-tof") return { kind: "neutron-tof" };
+    if (probe === "xray") return { kind: "xray", wavelength: baseWavelength, polarization: 0.5 };
+    return { kind: "neutron", wavelength: baseWavelength };
+  }, [probe, baseWavelength]);
+  // The dataset the physics runs against — same reflections, user-chosen radiation.
+  const probedDataset = useMemo(() => ({ ...dataset, radiation: effectiveRadiation }), [dataset, effectiveRadiation]);
+
+  const spec = useMemo(() => buildSingleCrystalSpec(structure, probedDataset, { extinction: 0 }), [structure, probedDataset]);
   const bindings = spec.bindings;
   const [params, setParams] = useState(spec.params);
   const [result, setResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [plotKind, setPlotKind] = useState<"fobs" | "npp">("fobs");
+  // Reflection spotlighted by a click in the F_obs/F_calc plot (or null).
+  const [selected, setSelected] = useState<Selection | null>(null);
+
+  // Magnetic model applied from the (shared) symmetry analysis, with its moment
+  // bindings. When present, refinement fits nuclear + moments against F² together
+  // and the F_obs/F_calc plot shows the total (nuclear + magnetic) intensity.
+  const [magnetic, setMagnetic] = useState<MagneticModel | null>(null);
+  const [momentBindings, setMomentBindings] = useState<readonly ParameterBinding[]>([]);
 
   // Outlier filter: reject reflections whose standardized residual |Fo²−Fc²|/σ
   // exceeds `cutoffSigma` (SHELX-style OMIT). Off by default. The threshold is
@@ -70,15 +118,15 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
 
   // Comparison over the *full* dataset — the residuals that drive the filter.
   const fullComparison = useMemo(
-    () => singleCrystalRefinementComparison(structure, dataset, params, bindings),
-    [structure, dataset, params, bindings],
+    () => singleCrystalRefinementComparison(structure, probedDataset, params, bindings),
+    [structure, probedDataset, params, bindings],
   );
   const activeDataset = useMemo(() => {
-    if (!filterOn || cutoffSigma <= 0) return dataset;
-    const keep = dataset.reflections.filter((_, i) => Math.abs(fullComparison.rows[i]?.deltaOverSigma ?? 0) <= cutoffSigma);
-    return { ...dataset, reflections: keep };
-  }, [dataset, filterOn, cutoffSigma, fullComparison]);
-  const excluded = dataset.reflections.length - activeDataset.reflections.length;
+    if (!filterOn || cutoffSigma <= 0) return probedDataset;
+    const keep = probedDataset.reflections.filter((_, i) => Math.abs(fullComparison.rows[i]?.deltaOverSigma ?? 0) <= cutoffSigma);
+    return { ...probedDataset, reflections: keep };
+  }, [probedDataset, filterOn, cutoffSigma, fullComparison]);
+  const excluded = probedDataset.reflections.length - activeDataset.reflections.length;
 
   // Laue-equivalent merge report (data quality — R_int, redundancy) on the active set.
   const merge = useMemo(
@@ -96,16 +144,24 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
   );
 
   // Reuse the powder quality plots: F_obs/F_calc (√Fo² vs √Fc²) + the normal-
-  // probability plot over the standardized residuals (Fo²−Fc²)/σ.
-  const obsCalc: ReflectionObsCalc[] = useMemo(
-    () => comparison.rows.map((r) => ({
+  // probability plot over the standardized residuals (Fo²−Fc²)/σ. With a magnetic
+  // model applied, the calc is the total (nuclear + magnetic) intensity.
+  const obsCalc: ReflectionObsCalc[] = useMemo(() => {
+    if (magnetic) {
+      return magneticComparison(structure, magnetic, activeDataset, params, [...bindings, ...momentBindings]).map((r) => ({
+        kind: r.iMagnetic > r.iNuclear ? ("magnetic" as const) : ("nuclear" as const),
+        h: r.h, k: r.k, l: r.l,
+        d: dSpacing(structure.cell, r.h, r.k, r.l),
+        iObs: r.iObs, iCalc: r.iTotal,
+      }));
+    }
+    return comparison.rows.map((r) => ({
       kind: "nuclear" as const,
       h: r.h, k: r.k, l: r.l,
       d: dSpacing(structure.cell, r.h, r.k, r.l),
       iObs: r.foSq, iCalc: r.fcSq,
-    })),
-    [comparison, structure],
-  );
+    }));
+  }, [magnetic, structure, activeDataset, params, bindings, momentBindings, comparison]);
   const npp = useMemo(() => normalProbabilityPlot(comparison.rows.map((r) => r.deltaOverSigma)), [comparison]);
   const outliers = useMemo(
     () => [...comparison.rows].sort((a, b) => Math.abs(b.deltaOverSigma) - Math.abs(a.deltaOverSigma)).slice(0, 6),
@@ -114,17 +170,58 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
 
   const nFree = params.filter((p) => !p.fixed && !p.expression).length;
 
-  function runRefine(guided: boolean): void {
+  async function runRefine(guided: boolean): Promise<void> {
     setBusy(true);
-    // Defer so the "Refining…" state paints before the synchronous solve.
-    setTimeout(() => {
+    try {
       const start = guided ? guidedSingleCrystalParams(params) : params;
-      const problem = buildSingleCrystalRefinementProblem(structure, activeDataset, start, bindings);
-      const res = refine(problem, { maxIterations: 25 });
+      // Solve off the main thread (shared worker) so the UI stays responsive,
+      // matching the powder path; the σ-filtered `activeDataset` is refined.
+      // With a magnetic model applied, fit nuclear + moments together (F² total).
+      const res = magnetic
+        ? await client.refineMagnetic({
+            structure, magnetic, dataset: activeDataset, parameters: start, bindings: [...bindings, ...momentBindings], options: { maxIterations: 25 },
+          })
+        : await client.refineSingleCrystal({
+            structure, dataset: activeDataset, parameters: start, bindings, options: { maxIterations: 25 },
+          });
       setParams(start.map((p) => ({ ...p, value: res.parameters[p.id] ?? p.value, ...(guided ? { fixed: false } : {}) })));
       setResult(res);
+      if (magnetic) setMagnetic(applyMagneticMoments(magnetic, momentBindings, res.parameters));
+    } catch (e) {
+      console.error(`[status] Single-crystal refinement failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
       setBusy(false);
-    }, 0);
+    }
+  }
+
+  // Moment-fit backend handed to the (shared) symmetry panel: it fits the freed
+  // moment amplitudes against this dataset's F² with the nuclear model held fixed,
+  // through the same worker. This is single-crystal magnetic refinement.
+  const magneticFit: MagneticFit = {
+    agreementLabel: "wR2",
+    refine: async (mag, momentParams, mBindings) => {
+      const nuclearFixed = params.map((p) => ({ ...p, fixed: true }));
+      const res = await client.refineMagnetic({
+        structure, magnetic: mag, dataset: activeDataset,
+        parameters: [...nuclearFixed, ...momentParams], bindings: [...bindings, ...mBindings],
+        options: { maxIterations: 20 },
+      });
+      const values: Record<string, number> = {};
+      for (const p of momentParams) values[p.id] = res.parameters[p.id] ?? p.value;
+      return { values, agreement: res.agreement.rWeighted ?? null };
+    },
+  };
+
+  // Apply a magnetic model from the symmetry step to the workbench: keep its
+  // bindings and merge the (freed) moment parameters into the F² parameter set
+  // so the refinement and parameter panel show them alongside the nuclear ones.
+  function applyMagneticModel(mag: MagneticModel | null, momentParams: readonly RefinementParameter[] = [], mBindings: readonly ParameterBinding[] = []): void {
+    setMagnetic(mag);
+    setMomentBindings(mag ? mBindings : []);
+    setParams((prev) => [
+      ...prev.filter((p) => !isMomentParameterKind(p.kind)),
+      ...(mag ? momentParams.map((p) => ({ ...p, fixed: false })) : []),
+    ]);
   }
 
   function onParamChange(id: string, patch: Partial<RefinementParameter>): void {
@@ -151,11 +248,19 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
     downloadText(`${structure.id}.cif`, structureToCif(structure, { params: withEsd, bindings, refinement: meta }), "chemical/x-cif");
   }
 
+  // Publish the current exporter so the app header can drive it; clear on unmount
+  // (switch back to powder) so the header never calls a stale single-crystal export.
+  useEffect(() => {
+    if (!exportsRef) return;
+    exportsRef.current = { cif: exportCif };
+    return () => { exportsRef.current = null; };
+  });
+
   const ag = comparison.agreement;
   const st = merge.statistics;
   const cell = structure.cell;
-  const probe = dataset.radiation.kind === "xray" ? "X-ray" : dataset.radiation.kind === "neutron" ? "Neutron" : "Neutron TOF";
-  const wl = "wavelength" in dataset.radiation ? ` · λ ${dataset.radiation.wavelength} Å` : "";
+  const probeLabel = probe === "xray" ? "X-ray" : probe === "neutron" ? "Neutron" : "Neutron TOF";
+  const wl = "wavelength" in effectiveRadiation ? ` · λ ${effectiveRadiation.wavelength} Å` : "";
 
   const summaryCards: SummaryCardData[] = [
     {
@@ -174,7 +279,8 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
       onFile: onLoadData ?? noop,
       chip: "✓ loaded",
       title: dataset.name,
-      meta: `${probe}${wl} · ${st.observations} obs → ${st.unique} unique · R_int ${pct(st.rInt)}`,
+      meta: `${probeLabel}${wl} · ${st.observations} obs → ${st.unique} unique · R_int ${pct(st.rInt)}`,
+      control: <ProbeToggle probe={probe} onChange={setProbe} />,
     },
   ];
 
@@ -201,7 +307,9 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
   return (
     <>
       <SummaryCards cards={summaryCards} />
-      <div className="wb-sc">
+      {/* Step 0 (F² refinement) and step 1 (magnetic symmetry) stay mounted; the
+          step toggles visibility so each page's state survives switching. */}
+      <div className="wb-sc" style={{ display: step === 1 ? "none" : undefined }}>
         {/* Quality rail: F² agreement + merge stats + F_obs/F_calc beside the 3D model. */}
         <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -258,7 +366,9 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
                   </button>
                 ))}
               </div>
-              {plotKind === "fobs" ? <FobsFcalc rows={obsCalc} /> : <NormalProb npp={npp} />}
+              {plotKind === "fobs"
+                ? <FobsFcalc rows={obsCalc} selected={selected} onHighlight={setSelected} />
+                : <NormalProb npp={npp} />}
             </div>
             <div>
               <div style={{ ...uppercaseLabel, marginBottom: 4 }}>Crystal structure — unit cell</div>
@@ -271,15 +381,28 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
           <div>
             <div style={{ ...uppercaseLabel, marginBottom: 6 }}>Largest outliers · (Fo²−Fc²)/σ</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, fontFamily: mono, fontSize: fz.small }}>
-              {outliers.map((r, i) => (
-                <div key={`${i}:${r.h} ${r.k} ${r.l}`} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, color: color.secondary }}>
-                  <span>({r.h} {r.k} {r.l})</span>
-                  <span style={{ color: color.faint }}>Fo² {r.foSq.toFixed(1)} · Fc² {r.fcSq.toFixed(1)}</span>
-                  <span style={{ color: Math.abs(r.deltaOverSigma) > 4 ? color.warnInk : color.faint }}>
-                    {r.deltaOverSigma >= 0 ? "+" : ""}{r.deltaOverSigma.toFixed(1)}σ
-                  </span>
-                </div>
-              ))}
+              {outliers.map((r, i) => {
+                const hkl = `${r.h} ${r.k} ${r.l}`;
+                const isSel = selected?.kind === "nuclear" && selected.hkl === hkl;
+                return (
+                  <div
+                    key={`${i}:${hkl}`}
+                    onClick={() => setSelected(isSel ? null : { hkl, kind: "nuclear" })}
+                    style={{
+                      display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, cursor: "pointer",
+                      padding: "1px 4px", borderRadius: 5,
+                      color: isSel ? color.ink : color.secondary,
+                      background: isSel ? color.primaryTintBg : "transparent",
+                    }}
+                  >
+                    <span>({hkl})</span>
+                    <span style={{ color: color.faint }}>Fo² {r.foSq.toFixed(1)} · Fc² {r.fcSq.toFixed(1)}</span>
+                    <span style={{ color: Math.abs(r.deltaOverSigma) > 4 ? color.warnInk : color.faint }}>
+                      {r.deltaOverSigma >= 0 ? "+" : ""}{r.deltaOverSigma.toFixed(1)}σ
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -297,7 +420,61 @@ export function SingleCrystalWorkbench({ structure, dataset, onLoadData, onLoadC
           extraActions={refineActions}
         />
       </div>
+
+      {/* Step 1 — magnetic symmetry analysis. The workflow itself is structure-
+          driven and identical to powder; only the moment fit (magneticFit) runs
+          against F² reflections instead of a powder pattern. */}
+      <div style={{ display: step === 1 ? "grid" : "none", gap: 14 }}>
+        <div style={{ ...themeCard, padding: "14px 16px" }}>
+          <div style={{ ...uppercaseLabel, marginBottom: 4 }}>Magnetic symmetry analysis — single crystal ({structure.name || "structure"})</div>
+          <p style={{ fontSize: 13, color: color.secondary, margin: 0, lineHeight: 1.5 }}>
+            Commensurate single-k workflow (shared with powder): magnetic ions → propagation vector k → symmetry framework → magnetic space group → refine moments.
+            &ldquo;Refine moments&rdquo; fits the moment amplitudes to the F² reflections; &ldquo;Continue&rdquo; carries the model to the F² refinement to fit nuclear + magnetic together.
+          </p>
+        </div>
+        <KSearchPanel
+          structure={structure}
+          magneticFit={magneticFit}
+          onApply={(m) => applyMagneticModel(m)}
+          onContinue={(m, mp, mb) => { applyMagneticModel(m, mp, mb); onStep?.(0); }}
+        />
+      </div>
     </>
+  );
+}
+
+/** Segmented X-ray / Neutron / TOF control for the single-crystal Data card.
+ *  A bare reflection file carries no probe, so this is the authoritative source. */
+function ProbeToggle({ probe, onChange }: { probe: Probe; onChange: (p: Probe) => void }): JSX.Element {
+  const opts: { value: Probe; label: string }[] = [
+    { value: "xray", label: "X-ray" },
+    { value: "neutron", label: "Neutron" },
+    { value: "neutron-tof", label: "TOF" },
+  ];
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span
+        style={{ fontSize: fz.micro, color: color.faint }}
+        title="The reflection file cannot report its own radiation. Pick the probe used — it selects neutron scattering lengths (b) vs X-ray form factors f(Q) + polarization, changing every F_calc."
+      >
+        probe
+      </span>
+      <span style={{ display: "inline-flex", border: `1px solid ${color.control}`, borderRadius: 6, overflow: "hidden" }}>
+        {opts.map((o) => (
+          <button
+            key={o.value}
+            onClick={() => onChange(o.value)}
+            style={{
+              border: "none", padding: "2px 9px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer",
+              background: probe === o.value ? color.primary : "transparent",
+              color: probe === o.value ? "#fff" : color.secondary,
+            }}
+          >
+            {o.label}
+          </button>
+        ))}
+      </span>
+    </div>
   );
 }
 

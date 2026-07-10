@@ -140,3 +140,61 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- Compact header for phones / small tablets --------------------------
+ * The header's base look is inline (component-owned); this layer only
+ * overrides what must respond to the viewport, hence the !important. */
+@media (max-width: 700px) {
+  .wb-header {
+    padding: 10px 14px !important;
+    gap: 10px !important;
+  }
+  .wb-header-title {
+    font-size: 16px !important;
+    white-space: normal !important;
+  }
+  .wb-header-kicker,
+  .wb-header-divider {
+    display: none !important;
+  }
+  .wb-header-mark {
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 9px !important;
+  }
+  .wb-header-step {
+    padding: 6px 12px 6px 7px !important;
+    font-size: 12.5px !important;
+  }
+  .wb-header-actions {
+    margin-left: 0 !important;
+    width: 100%;
+    gap: 7px !important;
+  }
+  .wb-header-action {
+    padding: 6px 11px !important;
+    font-size: 12px !important;
+    flex: 1 1 auto;
+  }
+}
+
+/* Ultra-narrow (phones in portrait): the version chip is noise. */
+@media (max-width: 420px) {
+  .wb-version-chip {
+    display: none !important;
+  }
+}
+
+/* ---- Touch ergonomics ----------------------------------------------------
+ * On coarse pointers (fingers), give every control a comfortable hit area.
+ * min-height composes with the components' inline padding, so no !important. */
+@media (pointer: coarse) {
+  button,
+  select {
+    min-height: 34px;
+  }
+  input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+  }
+}
