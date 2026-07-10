@@ -34,10 +34,21 @@ const INSTRUMENT_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "asymSL", "asymHL", "zeroShift", "tofCalibration", "tofProfile",
 ]);
 
-/** Everything the UI holds fixed on load (structural + instrument/profile). */
+/**
+ * Anisotropic-microstructure kinds (Stephens strain S-parameters, uniaxial size).
+ * Emitted only when the user enables microstrain; seeded at zero anisotropy, held
+ * fixed on load, and freed by the guided sequence — a strong-correlation stage
+ * that should only run after the isotropic profile + structure have converged.
+ */
+const MICROSTRUCTURE_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
+  "stephensStrain", "anisoSizePerp", "anisoSizePar",
+]);
+
+/** Everything the UI holds fixed on load (structural + instrument/profile + microstructure). */
 const FIXED_ON_LOAD_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   ...STRUCTURAL_KINDS,
   ...INSTRUMENT_KINDS,
+  ...MICROSTRUCTURE_KINDS,
 ]);
 
 /**
@@ -57,6 +68,7 @@ const FIXED_ON_LOAD_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
 const GUIDED_UNLOCK_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   ...[...STRUCTURAL_KINDS].filter((k) => k !== "occupancy"),
   ...[...INSTRUMENT_KINDS].filter((k) => k !== "profileU" && k !== "tofCalibration"),
+  ...MICROSTRUCTURE_KINDS,
 ]);
 
 export interface PowderSpec {
@@ -80,6 +92,7 @@ export function buildPowderSpec(
   lorentz = true,
   backgroundTerms = 4,
   ties: SiteTies = {},
+  microstrain = false,
 ): PowderSpec {
   const tieOpts = {
     tieSharedPositions: ties.positions ?? true,
@@ -139,7 +152,11 @@ export function buildPowderSpec(
   const curves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
   const s = optimalScale(curves.yObs.map((y) => (y > 0 ? y : 0)), curves.yCalc);
 
-  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, refineOccupancy: true, ...tieOpts });
+  // Stephens (1999) anisotropic microstrain: one S-parameter per symmetry-allowed
+  // quartic invariant, adding hkl-dependent Gaussian broadening. 2θ CW only, and
+  // fixed on load (freed via the Microstructure group / guided sequence).
+  const microOpt = microstrain && caglioti ? { stephensStrain: true } : {};
+  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, ...microOpt, refineOccupancy: true, ...tieOpts });
   const params = spec.params.map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
   return { params, bindings: spec.bindings, profile };
 }

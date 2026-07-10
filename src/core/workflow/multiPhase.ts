@@ -7,7 +7,7 @@
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
-import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
+import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
 import type { ProfilePeak, ProfileOptions, PeakShape } from "@/core/diffraction/profile";
 import { weightsFromSigma } from "@/core/refinement/factors";
@@ -22,8 +22,18 @@ export interface PowderPhase {
   readonly id: string;
 }
 
+// One instrument illuminates every phase, so the whole instrument profile —
+// background, zero, the Caglioti Gaussian + Lorentzian size/strain, asymmetry,
+// and the TOF calibration/profile — is shared across phases. Only scale, cell,
+// atoms, and *sample* microstructure (Stephens strain, uniaxial size) are
+// per-phase (routed by the phase id).
+const SHARED_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
+  "peakWidth", "background", "zeroShift",
+  "profileU", "profileV", "profileW", "profileX", "profileY",
+  "asymSL", "asymHL", "tofCalibration", "tofProfile",
+]);
 function isSharedBinding(b: ParameterBinding): boolean {
-  return b.kind === "peakWidth" || b.kind === "background" || b.kind === "zeroShift";
+  return SHARED_KINDS.has(b.kind);
 }
 
 /** Compute the combined multi-phase calculated pattern for given parameter values. */
