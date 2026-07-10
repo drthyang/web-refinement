@@ -84,9 +84,8 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMag
     return ORDER.filter((g) => byGroup.has(g)).map((g) => ({ name: g, rows: byGroup.get(g)! }));
   }, [params]);
 
-  const [open, setOpen] = useState<Record<string, boolean>>({
-    Scale: true, Background: false, Lattice: true, "Instrument / profile": false, "ADPs (thermal)": true, Positions: false, Occupancy: false, Corrections: false, Magnetic: false,
-  });
+  // All parameter groups start collapsed; the user expands the ones they need.
+  const [open, setOpen] = useState<Record<string, boolean>>({});
 
   const freeCount = params.filter((p) => !p.fixed).length;
 
