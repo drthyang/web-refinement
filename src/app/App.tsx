@@ -188,6 +188,8 @@ export function App(): JSX.Element {
   // example), the Structure card's load button becomes "Add CIF…" and appends a
   // phase instead of replacing — the multi-phase entry point.
   const [ownStructure, setOwnStructure] = useState(false);
+  // Which phase the 3D model shows (0 = primary structure, 1.. = extra phases).
+  const [viewPhaseIdx, setViewPhaseIdx] = useState(0);
   // The status bar under the header is gone (results and diagnostics live in
   // the parameter panel / quality rail); status texts go to the console so
   // load/refine errors are still traceable.
@@ -1022,23 +1024,47 @@ export function App(): JSX.Element {
                     <ViewModeToggle value={plotMode} onChange={setPlotMode} />
                   </div>
                 </div>
-                {plotMode === "structure" ? (
+                {plotMode === "structure" ? (() => {
+                  // Multi-phase: a phase picker chooses which unit cell to show.
+                  const allPhases = [structure, ...session.extraPhases];
+                  const vIdx = Math.min(viewPhaseIdx, allPhases.length - 1);
+                  const viewStructure = allPhases[vIdx]!;
+                  const isPrimary = vIdx === 0;
+                  return (
                   <>
+                    {session.extraPhases.length > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12, color: theme.secondary, fontFamily: themeMono }}>
+                        Phase
+                        <span style={{ display: "inline-flex", border: `1px solid ${theme.border}`, borderRadius: 6, overflow: "hidden" }}>
+                          {allPhases.map((ph, i) => (
+                            <button
+                              key={ph.id}
+                              onClick={() => setViewPhaseIdx(i)}
+                              style={{ border: "none", padding: "1px 9px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", background: i === vIdx ? theme.primary : "#fff", color: i === vIdx ? "#fff" : theme.ink }}
+                            >
+                              {ph.name || `phase ${i + 1}`}
+                            </button>
+                          ))}
+                        </span>
+                      </div>
+                    )}
                     <Suspense fallback={<div style={{ flex: 1, minHeight: 360, display: "grid", placeItems: "center", color: theme.secondary, fontSize: 13 }}>Loading 3D viewer…</div>}>
                       <StructureView
-                        structure={structure}
-                        {...(sessionMoments ? { moments: sessionMoments } : {})}
-                        {...(session.magnetic?.propagation[0] ? { propagation: session.magnetic.propagation[0] } : {})}
-                        {...(session.magnetic?.operations ? { magneticOperations: session.magnetic.operations } : {})}
+                        key={viewStructure.id}
+                        structure={viewStructure}
+                        {...(isPrimary && sessionMoments ? { moments: sessionMoments } : {})}
+                        {...(isPrimary && session.magnetic?.propagation[0] ? { propagation: session.magnetic.propagation[0] } : {})}
+                        {...(isPrimary && session.magnetic?.operations ? { magneticOperations: session.magnetic.operations } : {})}
                       />
                     </Suspense>
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
-                      {structure.name || "Structure"}
-                      {structure.spaceGroup.hermannMauguin ? ` · ${structure.spaceGroup.hermannMauguin}` : ""}
-                      {` · ${structure.sites.length} site${structure.sites.length === 1 ? "" : "s"} · drag to rotate, scroll to zoom.`}
+                      {viewStructure.name || "Structure"}
+                      {viewStructure.spaceGroup.hermannMauguin ? ` · ${viewStructure.spaceGroup.hermannMauguin}` : ""}
+                      {` · ${viewStructure.sites.length} site${viewStructure.sites.length === 1 ? "" : "s"} · drag to rotate, scroll to zoom.`}
                     </p>
                   </>
-                ) : plotMode === "validation" ? (
+                  );
+                })() : plotMode === "validation" ? (
                   <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
                     <QualityPanel
                       structure={structure}
@@ -1097,9 +1123,9 @@ export function App(): JSX.Element {
                           <input type="checkbox" checked={session.anisotropicAdp ?? false} onChange={(e) => setAnisotropicAdp(e.target.checked)} />
                           anisotropic
                         </label>
-                        {session.pattern.xUnit === "twoTheta" && (
+                        {(
                           <>
-                            <span style={{ ...themeLabel, marginLeft: 8, marginRight: 2 }} title="Anisotropic microstrain: hkl-dependent Gaussian peak broadening from a strain distribution">Microstrain</span>
+                            <span style={{ ...themeLabel, marginLeft: 8, marginRight: 2 }} title="Anisotropic microstrain: hkl-dependent Gaussian peak broadening from a strain distribution (CW and TOF)">Microstrain</span>
                             <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Stephens (1999) anisotropic microstrain — one S-parameter per symmetry-allowed quartic invariant, seeded at zero. Turn on after the isotropic profile has converged, then free the Microstructure rows (or run guided) to refine.">
                               <input type="checkbox" checked={session.microstrain ?? false} onChange={(e) => setMicrostrain(e.target.checked)} />
                               anisotropic

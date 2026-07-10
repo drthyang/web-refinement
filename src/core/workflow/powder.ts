@@ -21,7 +21,7 @@ import { braggTheta } from "@/core/crystal/unitCell";
 import { dFromTof } from "@/core/diffraction/instrument";
 import { synthesizePattern, cagliotiFwhm, lorentzianFwhm, tchPseudoVoigt, fcjSubPeaks, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
 import { evaluateBackground, type BackgroundType } from "@/core/diffraction/background";
-import { quarticStrainInvariants, stephensStrainFwhmDeg, type QuarticInvariant } from "@/core/diffraction/anisoStrain";
+import { quarticStrainInvariants, stephensStrainFwhmDeg, stephensStrainSigmaTof, type QuarticInvariant } from "@/core/diffraction/anisoStrain";
 import { uniaxialSizeFwhmDeg } from "@/core/diffraction/anisoSize";
 
 /** Inclusive abscissa window that restricts refinement to a sub-range of the
@@ -101,11 +101,15 @@ function tofDRange(
 /** Back-to-back-exponential TOF peaks: positions from the diffractometer
  *  constants, d-dependent α/β/σ from the profile coefficients. */
 function buildTofPeaks(
-  intensities: readonly { d: number; intensity: number }[],
+  intensities: readonly { d: number; intensity: number; h?: number; k?: number; l?: number }[],
   applied: AppliedModel,
 ): ProfilePeak[] {
   const cal = applied.tof!;
   const tp = applied.tofProfile;
+  // Stephens anisotropic microstrain adds an hkl-dependent Gaussian variance to
+  // the TOF peak (in quadrature with the instrument σ²). Cached invariants.
+  const stephens = applied.stephensStrain;
+  const invariants = stephens ? strainInvariantsFor(applied) : null;
   const peaks: ProfilePeak[] = [];
   for (const p of intensities) {
     const d = p.d;
@@ -113,7 +117,11 @@ function buildTofPeaks(
     const center = cal.difC * d + cal.difA * d * d + cal.difB / d + applied.zeroShift;
     const alpha = Math.max((tp?.alpha0 ?? 0) + (tp?.alpha1 ?? 0) / d, 1e-6);
     const beta = Math.max((tp?.beta0 ?? 0) + (tp?.beta1 ?? 0) / (d * d * d * d), 1e-6);
-    const sig2 = Math.max((tp?.sig0 ?? 0) + (tp?.sig1 ?? 0) * d * d + (tp?.sig2 ?? 0) * d * d * d * d, 1e-6);
+    let sig2 = Math.max((tp?.sig0 ?? 0) + (tp?.sig1 ?? 0) * d * d + (tp?.sig2 ?? 0) * d * d * d * d, 1e-6);
+    if (stephens && invariants && p.h !== undefined && p.k !== undefined && p.l !== undefined) {
+      const sStrain = stephensStrainSigmaTof(p.h, p.k, p.l, applied.model.cell, cal, stephens, invariants);
+      if (sStrain > 0) sig2 += sStrain * sStrain;
+    }
     const sigma = Math.sqrt(sig2);
     // Support proxy for the far-peak skip: Gaussian FWHM plus both exponential
     // decay lengths, so the long β tail is not clipped.

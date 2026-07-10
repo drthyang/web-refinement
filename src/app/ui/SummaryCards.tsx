@@ -36,27 +36,23 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
         <span style={uppercaseLabel}>{data.label}</span>
         <LoadButton label={data.loadLabel} accept={data.accept} onFile={data.onFile} />
       </div>
-      <div>
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
         <span style={okChip}>{data.chip}</span>
+        {data.removablePhases && data.onRemovePhase && data.removablePhases.map((ph) => (
+          <span key={ph.id} style={phaseChip}>
+            {ph.label}
+            <button
+              onClick={() => data.onRemovePhase!(ph.id)}
+              title={`Remove the ${ph.label} phase`}
+              style={{ border: "none", background: "none", cursor: "pointer", color: color.secondary, fontSize: fz.small, lineHeight: 1, padding: 0 }}
+            >
+              ×
+            </button>
+          </span>
+        ))}
       </div>
       <div style={{ fontSize: fz.large, fontWeight: 700, lineHeight: 1.25 }}>{data.title}</div>
       {data.meta && <div style={{ fontSize: fz.small, color: color.secondary, fontFamily: mono }}>{data.meta}</div>}
-      {data.removablePhases && data.removablePhases.length > 0 && data.onRemovePhase && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
-          {data.removablePhases.map((ph) => (
-            <span key={ph.id} style={phaseChip}>
-              {ph.label}
-              <button
-                onClick={() => data.onRemovePhase!(ph.id)}
-                title={`Remove the ${ph.label} phase`}
-                style={{ border: "none", background: "none", cursor: "pointer", color: color.secondary, fontSize: fz.small, lineHeight: 1, padding: 0 }}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

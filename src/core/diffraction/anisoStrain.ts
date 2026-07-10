@@ -206,3 +206,28 @@ export function stephensStrainFwhmDeg(
   const gammaRad = SQRT_8LN2 * d * d * Math.sqrt(w) * Math.tan(theta);
   return (gammaRad * 180) / Math.PI;
 }
+
+/**
+ * Anisotropic-strain Gaussian **σ** contribution (TOF µs) for one reflection.
+ * The strain variance σ²(M) with M = 1/d² gives σ(d) = ½·d³·√W (same as the CW
+ * case); mapping to TOF through the calibration T(d) = difC·d + difA·d² + difB/d
+ * gives σ_T = |dT/dd|·σ(d). Add its square to the TOF Gaussian variance:
+ * σ²_total = σ²_instrument + σ²_strain. Returns 0 for a non-positive variance.
+ */
+export function stephensStrainSigmaTof(
+  h: number,
+  k: number,
+  l: number,
+  cell: UnitCell,
+  cal: { readonly difC: number; readonly difA?: number; readonly difB?: number },
+  s: readonly number[],
+  invariants: readonly QuarticInvariant[],
+): number {
+  const w = strainVarianceM(h, k, l, s, invariants);
+  if (w <= 0) return 0;
+  const d = dSpacing(cell, h, k, l);
+  if (!Number.isFinite(d) || d <= 0) return 0;
+  const sigmaD = 0.5 * d * d * d * Math.sqrt(w); // std dev of d (Å)
+  const dTdd = cal.difC + 2 * (cal.difA ?? 0) * d - (cal.difB ?? 0) / (d * d);
+  return Math.abs(dTdd) * sigmaD; // std dev in TOF (µs)
+}

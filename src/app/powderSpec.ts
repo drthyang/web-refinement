@@ -123,7 +123,10 @@ export function buildPowderSpec(
     const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, tof, refineOccupancy: true, ...tieOpts });
     const seedCurves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
     const s = optimalScale(seedCurves.yObs.map((y) => (y > 0 ? y : 0)), seedCurves.yCalc);
-    const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof, refineOccupancy: true, ...tieOpts });
+    // Stephens anisotropic microstrain works for TOF too (hkl-dependent σ added in
+    // quadrature to the TOF Gaussian; see buildTofPeaks). Fixed on load like CW.
+    const microOpt = microstrain ? { stephensStrain: true } : {};
+    const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof, ...microOpt, refineOccupancy: true, ...tieOpts });
     const params = spec.params.map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
     return { params, bindings: spec.bindings, profile };
   }
