@@ -37,7 +37,7 @@ function axisLine(x1: number, y1: number, x2: number, y2: number, dash = false):
   return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={theme.border} strokeWidth={1} {...(dash ? { strokeDasharray: "4 4" } : {})} />;
 }
 
-export function QualityPlots({ obsCalc, npp, stacked = false, onHighlight, selected = null }: {
+export function QualityPlots({ obsCalc, npp, stacked = false, onHighlight, selected = null, onLocate }: {
   obsCalc: readonly ReflectionObsCalc[];
   npp: NormalProbabilityPlot;
   /** One figure per row (for a narrow side rail) instead of reflowing columns. */
@@ -54,19 +54,24 @@ export function QualityPlots({ obsCalc, npp, stacked = false, onHighlight, selec
    * across both plots.
    */
   selected?: Selection | null;
+  /** When present, the selected point shows a "Show in pattern" action that jumps
+   *  to the observed pattern, spotlighting and zooming onto this reflection. */
+  onLocate?: (row: ReflectionObsCalc) => void;
 }): JSX.Element {
   return (
     <div style={{ display: "grid", gridTemplateColumns: stacked ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))", gap: stacked ? 12 : 20, marginTop: 4 }}>
-      <FobsFcalc rows={obsCalc} selected={selected} {...(onHighlight ? { onHighlight } : {})} />
+      <FobsFcalc rows={obsCalc} selected={selected} {...(onHighlight ? { onHighlight } : {})} {...(onLocate ? { onLocate } : {})} />
       <NormalProb npp={npp} />
     </div>
   );
 }
 
-export function FobsFcalc({ rows, onHighlight, selected = null }: {
+export function FobsFcalc({ rows, onHighlight, selected = null, onLocate }: {
   rows: readonly ReflectionObsCalc[];
   onHighlight?: (sel: Selection | null) => void;
   selected?: Selection | null;
+  /** Jump to this reflection in the observed pattern (spotlight + zoom). */
+  onLocate?: (row: ReflectionObsCalc) => void;
 }): JSX.Element {
   // Fully controlled by the parent's shared selection: the highlighted point is
   // the row matching `selected` (set by a click here OR a Bragg-tick click in the
@@ -152,14 +157,25 @@ export function FobsFcalc({ rows, onHighlight, selected = null }: {
       </svg>
       <figcaption style={cap}>
         {selRow ? (
-          <span style={{ fontFamily: themeMono, color: theme.ink }}>
-            <span style={{ color: pointColor(selRow, multiPhase), fontWeight: 600 }}>
-              {selRow.kind === "magnetic" ? "mag " : multiPhase ? `${selRow.phaseLabel ?? ""} ` : ""}
+          <>
+            <span style={{ fontFamily: themeMono, color: theme.ink }}>
+              <span style={{ color: pointColor(selRow, multiPhase), fontWeight: 600 }}>
+                {selRow.kind === "magnetic" ? "mag " : multiPhase ? `${selRow.phaseLabel ?? ""} ` : ""}
+              </span>
+              ({selRow.h} {selRow.k} {selRow.l}) · d {selRow.d.toFixed(4)} Å · F_obs {Math.sqrt(Math.max(selRow.iObs, 0)).toFixed(2)} · F_calc {Math.sqrt(Math.max(selRow.iCalc, 0)).toFixed(2)}
             </span>
-            ({selRow.h} {selRow.k} {selRow.l}) · d {selRow.d.toFixed(4)} Å · F_obs {Math.sqrt(Math.max(selRow.iObs, 0)).toFixed(2)} · F_calc {Math.sqrt(Math.max(selRow.iCalc, 0)).toFixed(2)}
-          </span>
+            {onLocate && (
+              <button
+                onClick={() => onLocate(selRow)}
+                style={locateBtn}
+                title="Switch to the observed pattern and zoom in on this reflection's peak"
+              >
+                Show in pattern →
+              </button>
+            )}
+          </>
         ) : (
-          <>F_obs vs F_calc — points on the dashed line = perfect. {rows.length} reflections{magCount > 0 ? ` (${magCount} magnetic)` : ""}. Click a point for its (hkl).</>
+          <>F_obs vs F_calc — points on the dashed line = perfect. {rows.length} reflections{magCount > 0 ? ` (${magCount} magnetic)` : ""}. Click a point for its (hkl){onLocate ? ", then jump to its peak in the pattern" : ""}.</>
         )}
       </figcaption>
     </figure>
@@ -193,4 +209,5 @@ export function NormalProb({ npp }: { npp: NormalProbabilityPlot }): JSX.Element
   );
 }
 
-const cap: React.CSSProperties = { fontSize: fz.micro, color: theme.secondary, maxWidth: 360, marginTop: 5 };
+const cap: React.CSSProperties = { fontSize: fz.micro, color: theme.secondary, maxWidth: 360, marginTop: 5, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5 };
+const locateBtn: React.CSSProperties = { fontFamily: themeMono, fontSize: 11, fontWeight: 600, color: theme.primary, background: theme.primaryTintBg, border: `1px solid ${theme.primaryTintBorder}`, borderRadius: 7, padding: "3px 9px", cursor: "pointer" };

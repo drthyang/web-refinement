@@ -25,6 +25,9 @@ interface Props {
   readonly showBackground?: boolean;
   /** Increment to zoom the view onto the active fit range (no-op without one). */
   readonly focusFitToken?: number;
+  /** Increment to zoom in on the currently-highlighted reflection, centred, at a
+   *  moderate zoom (from "Show in pattern" in the F_obs/F_calc plot). */
+  readonly focusPeakToken?: number;
   /**
    * A reflection spotlighted from elsewhere (e.g. a point clicked in the
    * F_obs/F_calc plot): its hkl ("h k l") and kind. Draws an arrow + guide line
@@ -86,6 +89,7 @@ export function WorkbenchPlot({
   phases,
   showBackground = true,
   focusFitToken = 0,
+  focusPeakToken = 0,
   highlight: highlightSel = null,
   onHighlight,
 }: Props): JSX.Element {
@@ -278,6 +282,18 @@ export function WorkbenchPlot({
     setView({ min: Math.max(min, fullMin), max: Math.min(max, fullMax) });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- react to the pick only
   }, [highlightSel?.hkl, highlightSel?.kind, highlightSel?.phaseId]);
+
+  // "Show in pattern" command: zoom in on the highlighted reflection, centred, at
+  // a moderate zoom — a small fraction of the full domain to each side, so the
+  // peak has context and isn't blown up to fill the frame. Keyed on the command
+  // token only, so it fires exactly when requested (including on mount after the
+  // view switches from Validation back to the pattern).
+  useEffect(() => {
+    if (focusPeakToken === 0 || !highlight) return;
+    const hw = Math.max((fullMax - fullMin) * 0.06, 1e-9);
+    setView({ min: highlight.x - hw, max: highlight.x + hw });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on the command token only
+  }, [focusPeakToken]);
 
   // Y / X nice ticks.
   const yStep = niceNum(yTop / 4, true);

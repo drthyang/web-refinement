@@ -42,7 +42,7 @@ import { KSearchPanel } from "@/components/KSearchPanel";
 import { withAdpModel } from "@/core/crystal/adp";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
 import { detectExtraPeaks } from "@/core/magnetic/extraPeaks";
-import { powderReflectionObsCalc } from "@/core/workflow/obsCalc";
+import { powderReflectionObsCalc, type ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import { normalProbabilityPlot, weightedResiduals } from "@/core/refinement/diagnostics";
 import { QualityPlots } from "@/app/ui/QualityPlots";
 import type { MagneticModel } from "@/core/magnetic/types";
@@ -113,6 +113,9 @@ export function PowderWorkbench({
   // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
   // active fit window when it changes.
   const [focusFitToken, setFocusFitToken] = useState(0);
+  // Bumped by "Show in pattern" (F_obs/F_calc plot) to zoom the pattern onto the
+  // highlighted reflection's peak.
+  const [focusPeakToken, setFocusPeakToken] = useState(0);
   // Optional refinement window; null = fit the full pattern. Reset when the
   // observed pattern changes (see effect below).
   const [fitRange, setFitRange] = useState<FitRangeSelection | null>(null);
@@ -812,6 +815,11 @@ export function PowderWorkbench({
                       magnetic={session.magnetic ?? null}
                       onHighlight={setHighlight}
                       selected={highlight}
+                      onLocate={(row) => {
+                        setHighlight({ hkl: `${row.h} ${row.k} ${row.l}`, kind: row.kind, ...(row.phaseId !== undefined ? { phaseId: row.phaseId } : {}) });
+                        setPlotMode("curves");
+                        setFocusPeakToken((t) => t + 1);
+                      }}
                       fitRange={fitRangeActive ? { min: fitRange!.min, max: fitRange!.max } : null}
                     />
                   </div>
@@ -823,6 +831,7 @@ export function PowderWorkbench({
                       fitRange={displayFitRange}
                       phases={phaseTicks}
                       focusFitToken={focusFitToken}
+                      focusPeakToken={focusPeakToken}
                       highlight={highlight}
                       onHighlight={setHighlight}
                       {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
@@ -977,6 +986,7 @@ function QualityPanel({
   magnetic,
   onHighlight,
   selected,
+  onLocate,
   fitRange,
 }: {
   structure: StructureModel;
@@ -993,6 +1003,8 @@ function QualityPanel({
   onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null) => void;
   /** The shared selection, so a Bragg-tick click highlights the matching scatter point. */
   selected?: { hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null;
+  /** Jump to a reflection's peak in the observed pattern (from the F_obs/F_calc plot). */
+  onLocate?: (row: ReflectionObsCalc) => void;
   /** Active fit window (pattern x-unit); reflections outside it are hidden from the scatter. */
   fitRange?: { min: number; max: number } | null;
 }): JSX.Element {
@@ -1017,7 +1029,7 @@ function QualityPanel({
   // labels it, so no heading here — just the plots side by side.
   return (
     <div>
-      <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} selected={selected ?? null} {...(onHighlight ? { onHighlight } : {})} />
+      <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} selected={selected ?? null} {...(onHighlight ? { onHighlight } : {})} {...(onLocate ? { onLocate } : {})} />
       <p style={{ fontSize: fz.micro, color: theme.secondary, marginTop: 8 }}>
         F_obs vs F_calc flags individual bad reflections; the normal probability plot
         (Abrahams &amp; Keve 1971) is straight with slope 1 for an ideal fit &amp; weights.
