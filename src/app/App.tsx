@@ -12,7 +12,9 @@ import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { refine } from "@/core/refinement/engine";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
-import { buildPowderSpec, guidedPowderParams, type SiteTies } from "@/app/powderSpec";
+import { buildPowderSpec, guidedPowderParams, type SiteTies, type PowderSpec } from "@/app/powderSpec";
+import { buildMultiPhaseSpec } from "@/app/multiPhaseSpec";
+import { multiPhaseCurves } from "@/core/workflow/multiPhase";
 import { DEFAULT_STAGE_KINDS, siteGroups } from "@/core/workflow/structureRefinement";
 import { powderPatternCsv, projectJson } from "@/core/export/exporters";
 import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from "@/core/export/cif";
@@ -78,6 +80,10 @@ const DEFAULT_TIES: SiteTies = { positions: true, adp: true };
 
 interface Session {
   structure: StructureModel;
+  /** Additional crystallographic phases (multi-phase refinement). `structure` is
+   *  phase 0; each extra phase adds its own scale/cell/atoms, sharing the
+   *  instrument profile. Empty for a single-phase refinement. */
+  extraPhases: StructureModel[];
   pattern: PowderPattern;
   powderParams: RefinementParameter[];
   /** Bindings that map the powder parameters onto the model (from buildPowderSpec). */
@@ -108,6 +114,7 @@ function newSession(structure: StructureModel, instrument: InstrumentParameters 
   const spec = buildPowderSpec(structure, pattern, instrument, true, DEFAULT_BACKGROUND_TERMS, DEFAULT_TIES);
   return {
     structure,
+    extraPhases: [],
     pattern,
     powderParams: spec.params,
     powderBindings: spec.bindings,
@@ -124,10 +131,21 @@ function newSession(structure: StructureModel, instrument: InstrumentParameters 
  * exponential profile (α/β/σ) plus fixed diffractometer constants — and
  * estimates the scale from the observed counts.
  */
-function loadedSession(structure: StructureModel, pattern: PowderPattern, instrument: InstrumentParameters): Session {
-  const spec = buildPowderSpec(structure, pattern, instrument, true, DEFAULT_BACKGROUND_TERMS, DEFAULT_TIES);
+/** Build the powder spec for a session, branching to the multi-phase builder when
+ *  the session carries extra phases (so every rebuild preserves all phases). */
+function buildSpecFor(structure: StructureModel, extraPhases: readonly StructureModel[], pattern: PowderPattern, instrument: InstrumentParameters, lorentz: boolean, backgroundTerms: number, ties: SiteTies, microstrain: boolean): PowderSpec {
+  return extraPhases.length > 0
+    ? buildMultiPhaseSpec([structure, ...extraPhases], pattern, instrument, backgroundTerms, ties, microstrain)
+    : buildPowderSpec(structure, pattern, instrument, lorentz, backgroundTerms, ties, microstrain);
+}
+
+function loadedSession(structure: StructureModel, pattern: PowderPattern, instrument: InstrumentParameters, extraPhases: StructureModel[] = []): Session {
+  const spec = extraPhases.length > 0
+    ? buildMultiPhaseSpec([structure, ...extraPhases], pattern, instrument, DEFAULT_BACKGROUND_TERMS, DEFAULT_TIES)
+    : buildPowderSpec(structure, pattern, instrument, true, DEFAULT_BACKGROUND_TERMS, DEFAULT_TIES);
   return {
     structure,
+    extraPhases,
     pattern,
     powderParams: spec.params,
     powderBindings: spec.bindings,
@@ -144,7 +162,7 @@ export function App(): JSX.Element {
   // workbench opens with — embedded in the build, so it works on the deployed
   // site with no runtime fetch or local data/ folder.
   const example = mn3gaPowgenExample();
-  const [session, setSession] = useState<Session>(() => loadedSession(example.structure, example.pattern, example.instrument));
+  const [session, setSession] = useState<Session>(() => loadedSession(example.structure, example.pattern, example.instrument, example.extraPhases));
   const [powderResult, setPowderResult] = useState<RefinementResult | null>(null);
   // Single-crystal mode: set when hkl/fcf reflection data is loaded; the app
   // then renders the single-crystal workbench instead of the powder panels.
@@ -221,6 +239,11 @@ export function App(): JSX.Element {
       const yCalc = session.powderOverlay.calc;
       return { x, yObs, yCalc, yBackground: session.powderOverlay.background, diff: yObs.map((o, i) => o - (yCalc[i] ?? 0)) };
     }
+    // Multi-phase: sum every phase's contribution (shared instrument profile).
+    if (session.extraPhases.length > 0) {
+      const phases = [{ structure, id: structure.id }, ...session.extraPhases.map((s) => ({ structure: s, id: s.id }))];
+      return multiPhaseCurves(phases, pattern, powderParams, pBindings, session.powderProfile);
+    }
     const nuclear = powderCurves(structure, pattern, powderParams, pBindings, session.powderProfile);
     // When a magnetic model has been applied, add its contribution (satellites at
     // G ± k) on top of the nuclear calc so the refinement plot shows the total.
@@ -296,11 +319,15 @@ export function App(): JSX.Element {
     const phases = [
       nuclearPhaseTicks(structure, dMin, dMax, toX, { id: "nuclear", label: structure.name || "nuclear", color: PHASE_COLORS[0] }),
     ];
+    // One Bragg-tick row per additional crystallographic phase, coloured distinctly.
+    session.extraPhases.forEach((ph, i) => {
+      phases.push(nuclearPhaseTicks(ph, dMin, dMax, toX, { id: ph.id, label: ph.name || `phase ${i + 2}`, color: PHASE_COLORS[(i + 1) % PHASE_COLORS.length]! }));
+    });
     if (session.magnetic) {
       phases.push(magneticPhaseTicks(structure, session.magnetic, dMin, dMax, toX, { id: "magnetic", label: "magnetic", color: MAGNETIC_COLOR }));
     }
     return phases;
-  }, [structure, session.magnetic, patternExtent, pattern.xUnit, effectiveUnit, axisCtx]);
+  }, [structure, session.extraPhases, session.magnetic, patternExtent, pattern.xUnit, effectiveUnit, axisCtx]);
 
   // Refined moment entries (per site / split orbit) for the 3D structure view.
   const sessionMoments = useMemo(
@@ -360,7 +387,7 @@ export function App(): JSX.Element {
   function setBackgroundTerms(n: number): void {
     const count = Math.max(0, Math.min(24, Math.trunc(n)));
     setSession((s) => {
-      const spec = buildPowderSpec(s.structure, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, count, s.siteTies, s.microstrain ?? false);
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true,count, s.siteTies, s.microstrain ?? false);
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -380,7 +407,7 @@ export function App(): JSX.Element {
   function setSiteTies(update: Partial<SiteTies>): void {
     setSession((s) => {
       const ties = { ...s.siteTies, ...update };
-      const spec = buildPowderSpec(s.structure, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, ties, s.microstrain ?? false);
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true,s.backgroundTerms, ties, s.microstrain ?? false);
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -405,7 +432,7 @@ export function App(): JSX.Element {
    */
   function setMicrostrain(on: boolean): void {
     setSession((s) => {
-      const spec = buildPowderSpec(s.structure, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, on);
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true,s.backgroundTerms, s.siteTies, on);
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -443,7 +470,7 @@ export function App(): JSX.Element {
       const refinedAdp = new Map(refined.sites.map((rs) => [rs.label, rs.adp]));
       const seeded = { ...s.structure, sites: s.structure.sites.map((site) => ({ ...site, adp: refinedAdp.get(site.label) ?? site.adp })) };
       const promoted = withAdpModel(seeded, on ? "anisotropic" : "isotropic");
-      const spec = buildPowderSpec(promoted, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.microstrain ?? false);
+      const spec = buildSpecFor(promoted, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.microstrain ?? false);
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -503,6 +530,7 @@ export function App(): JSX.Element {
       }
       const result = await client.current.refinePowder({
         structure, pattern, parameters: guided ? guidedPowderParams(powderParams) : powderParams, bindings: pBindings, ...profileReq(),
+        ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
         ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),
         ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         options: { maxIterations: guided ? 15 : 20 },
@@ -603,7 +631,7 @@ export function App(): JSX.Element {
     const wavelength = parsed.wavelength ?? cw?.wavelength ?? 2.5;
     const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
     const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
-    setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+    setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
     if (instrument.kind === "tof") { setInstrument(DEFAULT_INSTRUMENT); setInstrumentLoaded(false); }
     setPowderResult(null);
     const last = parsed.points[parsed.points.length - 1]!;
@@ -619,7 +647,7 @@ export function App(): JSX.Element {
     setScDataset(null);
     const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
     const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
-    setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+    setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
     if (instrument.kind === "tof") { setInstrument(DEFAULT_INSTRUMENT); setInstrumentLoaded(false); }
     setPowderResult(null);
     const last = parsed.points[parsed.points.length - 1]!;
@@ -650,6 +678,7 @@ export function App(): JSX.Element {
         const tofBindings = powderBindings(structure, id);
         setSession((s) => ({
           ...s,
+          extraPhases: [],
           pattern: parsed,
           powderParams: startingPowderParams(structure, parsed, tofBindings),
           powderBindings: tofBindings,
@@ -666,7 +695,7 @@ export function App(): JSX.Element {
         return;
       }
       const spec = buildPowderSpec(structure, parsed, tofInstrument, true, session.backgroundTerms, session.siteTies);
-      setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+      setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
       setPowderResult(null);
       setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag}. ${spec.params.length} parameters, back-to-back-exponential profile — click “Refine”. ${fmt.note}`);
       return;
@@ -681,7 +710,7 @@ export function App(): JSX.Element {
     // workbench into the matching mode instead of staying view-only.
     const cwInstrument = instrumentLoaded && instrument.kind === "constantWavelength" ? instrument : DEFAULT_INSTRUMENT;
     const spec = buildPowderSpec(structure, parsed, cwInstrument, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
-    setSession((s) => ({ ...s, pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+    setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
     if (instrument.kind === "tof") {
       setInstrument(DEFAULT_INSTRUMENT);
       setInstrumentLoaded(false);
@@ -708,7 +737,7 @@ export function App(): JSX.Element {
             parsed.kind === "constantWavelength" && s.pattern.xUnit !== "tof"
               ? { ...s.pattern, radiation: { kind: parsed.radiationKind ?? "neutron", wavelength: parsed.wavelength }, wavelength: parsed.wavelength }
               : s.pattern;
-          const spec = buildPowderSpec(s.structure, pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.microstrain ?? false);
+          const spec = buildSpecFor(s.structure, s.extraPhases, pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.microstrain ?? false);
           return { ...s, pattern, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile };
         });
         setPowderResult(null);
@@ -823,9 +852,13 @@ export function App(): JSX.Element {
   const summaryCards: SummaryCardData[] = [
     {
       label: "Structure", loadLabel: "Load CIF…", accept: ".cif,text/plain", onFile: onLoadCif,
-      chip: "✓ parsed",
-      title: `${structure.name}${structure.spaceGroup.hermannMauguin ? ` · ${structure.spaceGroup.hermannMauguin}` : ""}`,
-      meta: `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
+      chip: session.extraPhases.length > 0 ? `✓ ${session.extraPhases.length + 1} phases` : "✓ parsed",
+      title: session.extraPhases.length > 0
+        ? `${structure.name} + ${session.extraPhases.map((p) => p.name).join(" + ")}`
+        : `${structure.name}${structure.spaceGroup.hermannMauguin ? ` · ${structure.spaceGroup.hermannMauguin}` : ""}`,
+      meta: session.extraPhases.length > 0
+        ? [structure, ...session.extraPhases].map((p) => `${p.name} ${p.spaceGroup.hermannMauguin ?? ""}`.trim()).join(" · ")
+        : `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
     },
     {
       label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,

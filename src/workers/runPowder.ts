@@ -8,6 +8,7 @@ import type { RefinePowderRequest } from "@/workers/protocol";
 import type { AgreementFactors, RefinementOptions, RefinementResult } from "@/core/refinement/types";
 import { refine } from "@/core/refinement/engine";
 import { buildPowderProblem, type PowderProfile } from "@/core/workflow/powder";
+import { buildMultiPhasePowderProblem } from "@/core/workflow/multiPhase";
 import { refineStaged } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
 
@@ -21,8 +22,13 @@ export function runPowderRefinement(req: RefinePowderRequest, onProgress?: Powde
     ...(req.lorentz !== undefined ? { lorentz: req.lorentz } : {}),
     ...(req.backgroundType !== undefined ? { backgroundType: req.backgroundType } : {}),
   };
+  const phases = req.extraPhases && req.extraPhases.length > 0
+    ? [{ structure: req.structure, id: req.structure.id }, ...req.extraPhases.map((s) => ({ structure: s, id: s.id }))]
+    : null;
   const build = (params: readonly RefinePowderRequest["parameters"][number][]) =>
-    buildPowderProblem(req.structure, req.pattern, params, req.bindings, profile, req.restraints ?? [], req.fitRange);
+    phases
+      ? buildMultiPhasePowderProblem(phases, req.pattern, params, req.bindings, profile)
+      : buildPowderProblem(req.structure, req.pattern, params, req.bindings, profile, req.restraints ?? [], req.fitRange);
 
   const patternLen = req.pattern.points.length;
   const onIteration = onProgress

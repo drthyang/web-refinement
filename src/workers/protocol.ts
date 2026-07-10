@@ -21,6 +21,9 @@ export interface RefinePowderRequest {
   readonly type: "refinePowder";
   readonly requestId: number;
   readonly structure: StructureModel;
+  /** Additional crystallographic phases; when present the pattern is refined as
+   *  a multi-phase sum (shared instrument, per-phase scale/cell/atoms). */
+  readonly extraPhases?: readonly StructureModel[];
   readonly pattern: PowderPattern;
   readonly parameters: RefinementParameter[];
   readonly bindings: ParameterBinding[];
