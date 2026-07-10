@@ -14,6 +14,9 @@ export interface SummaryCardData {
   readonly chip: string;
   readonly title: string;
   readonly meta: string;
+  /** Removable secondary phases, shown as chips with an × (multi-phase). */
+  readonly removablePhases?: readonly { id: string; label: string }[];
+  readonly onRemovePhase?: (id: string) => void;
 }
 
 export function SummaryCards({ cards }: { cards: readonly SummaryCardData[] }): JSX.Element {
@@ -38,9 +41,37 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
       </div>
       <div style={{ fontSize: fz.large, fontWeight: 700, lineHeight: 1.25 }}>{data.title}</div>
       {data.meta && <div style={{ fontSize: fz.small, color: color.secondary, fontFamily: mono }}>{data.meta}</div>}
+      {data.removablePhases && data.removablePhases.length > 0 && data.onRemovePhase && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+          {data.removablePhases.map((ph) => (
+            <span key={ph.id} style={phaseChip}>
+              {ph.label}
+              <button
+                onClick={() => data.onRemovePhase!(ph.id)}
+                title={`Remove the ${ph.label} phase`}
+                style={{ border: "none", background: "none", cursor: "pointer", color: color.secondary, fontSize: fz.small, lineHeight: 1, padding: 0 }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
+
+const phaseChip: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+  fontSize: fz.micro,
+  fontFamily: mono,
+  padding: "1px 5px 1px 8px",
+  borderRadius: radius.pill,
+  border: `1px solid ${color.border}`,
+  color: color.ink,
+};
 
 function LoadButton({ label, accept, onFile }: { label: string; accept: string; onFile: (f: File) => void }): JSX.Element {
   const [hover, setHover] = useState(false);

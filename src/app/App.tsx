@@ -18,7 +18,7 @@ import { multiPhaseCurves } from "@/core/workflow/multiPhase";
 import { DEFAULT_STAGE_KINDS, siteGroups } from "@/core/workflow/structureRefinement";
 import { powderPatternCsv, projectJson } from "@/core/export/exporters";
 import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from "@/core/export/cif";
-import { parseMagneticCif } from "@/parsers/cif";
+import { parseMagneticCif, parseCif } from "@/parsers/cif";
 import { parsePowderData } from "@/parsers/powderData";
 import { parseIllD1b, looksLikeIllD1b } from "@/parsers/illPowder";
 import { parseFullProfInstrm6, looksLikeInstrm6 } from "@/parsers/fullprofInstrm6";
@@ -184,6 +184,10 @@ export function App(): JSX.Element {
   const [highlight, setHighlight] = useState<{ hkl: string; kind: "nuclear" | "magnetic" } | null>(null);
   const [instrument, setInstrument] = useState<InstrumentParameters>(example.instrument);
   const [instrumentLoaded, setInstrumentLoaded] = useState(true);
+  // Once the user has loaded their own primary structure (replacing the bundled
+  // example), the Structure card's load button becomes "Add CIF…" and appends a
+  // phase instead of replacing — the multi-phase entry point.
+  const [ownStructure, setOwnStructure] = useState(false);
   // The status bar under the header is gone (results and diagnostics live in
   // the parameter panel / quality rail); status texts go to the console so
   // load/refine errors are still traceable.
@@ -568,12 +572,67 @@ export function App(): JSX.Element {
           return;
         }
         setSession(newSession({ ...parsed, id: "loaded" }, instrument));
+        setOwnStructure(true);
         setPowderResult(null);
-        setMessage(`Loaded CIF: ${parsed.name} (${parsed.sites.length} sites, ${parsed.spaceGroup.operations.length} symmetry ops).`);
+        setMessage(`Loaded CIF: ${parsed.name} (${parsed.sites.length} sites, ${parsed.spaceGroup.operations.length} symmetry ops). Load button is now "Add CIF…" to add impurity/secondary phases.`);
       } catch (e) {
         setMessage(`CIF parse failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     });
+  }
+
+  /** Append a CIF as an additional crystallographic phase (multi-phase refinement),
+   *  rebuilding the spec while preserving every existing parameter value/state. */
+  function onAddPhase(file: File): void {
+    file.text().then((text) => {
+      try {
+        const raw = parseCif(text, `phase-${Date.now().toString(36)}`);
+        // Fall back to a composition name (e.g. "MnO") when the CIF omits _pd_phase_name.
+        const name = raw.name && raw.name !== "structure"
+          ? raw.name
+          : [...new Set(raw.sites.map((st) => st.element))].join("") || raw.id;
+        const parsed = { ...raw, name };
+        setSession((s) => {
+          const extraPhases = [...s.extraPhases, parsed];
+          const spec = buildSpecFor(s.structure, extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.microstrain ?? false);
+          const previous = new Map(s.powderParams.map((p) => [p.id, p]));
+          return {
+            ...s,
+            extraPhases,
+            powderParams: spec.params.map((p) => {
+              const old = previous.get(p.id);
+              return old ? { ...p, value: old.value, initialValue: old.initialValue, fixed: old.fixed } : p;
+            }),
+            powderBindings: spec.bindings,
+            powderProfile: { ...spec.profile, ...(s.powderProfile.backgroundType ? { backgroundType: s.powderProfile.backgroundType } : {}) },
+          };
+        });
+        setPowderResult(null);
+        setMessage(`Added phase "${parsed.name}" (${parsed.spaceGroup.hermannMauguin ?? "?"}). Refine to fit its scale/cell.`);
+      } catch (e) {
+        setMessage(`Add phase failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    });
+  }
+
+  /** Remove an added phase (by id) and rebuild the spec back down. */
+  function onRemovePhase(id: string): void {
+    setSession((s) => {
+      const extraPhases = s.extraPhases.filter((p) => p.id !== id);
+      const spec = buildSpecFor(s.structure, extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.microstrain ?? false);
+      const previous = new Map(s.powderParams.map((p) => [p.id, p]));
+      return {
+        ...s,
+        extraPhases,
+        powderParams: spec.params.map((p) => {
+          const old = previous.get(p.id);
+          return old ? { ...p, value: old.value, initialValue: old.initialValue, fixed: old.fixed } : p;
+        }),
+        powderBindings: spec.bindings,
+        powderProfile: { ...spec.profile, ...(s.powderProfile.backgroundType ? { backgroundType: s.powderProfile.backgroundType } : {}) },
+      };
+    });
+    setPowderResult(null);
   }
 
   // Unified, auto-detecting data loader: the resolver classifies the file
@@ -851,7 +910,10 @@ export function App(): JSX.Element {
   const instMeta = instParamMeta;
   const summaryCards: SummaryCardData[] = [
     {
-      label: "Structure", loadLabel: "Load CIF…", accept: ".cif,text/plain", onFile: onLoadCif,
+      label: "Structure",
+      loadLabel: ownStructure ? "Add CIF…" : "Load CIF…",
+      accept: ".cif,text/plain",
+      onFile: ownStructure ? onAddPhase : onLoadCif,
       chip: session.extraPhases.length > 0 ? `✓ ${session.extraPhases.length + 1} phases` : "✓ parsed",
       title: session.extraPhases.length > 0
         ? `${structure.name} + ${session.extraPhases.map((p) => p.name).join(" + ")}`
@@ -859,6 +921,9 @@ export function App(): JSX.Element {
       meta: session.extraPhases.length > 0
         ? [structure, ...session.extraPhases].map((p) => `${p.name} ${p.spaceGroup.hermannMauguin ?? ""}`.trim()).join(" · ")
         : `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
+      ...(session.extraPhases.length > 0
+        ? { removablePhases: session.extraPhases.map((p) => ({ id: p.id, label: p.name || p.id })), onRemovePhase }
+        : {}),
     },
     {
       label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
