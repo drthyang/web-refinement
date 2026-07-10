@@ -135,19 +135,44 @@ Validated: the isotropic reduction (`Y_⊥ = Y_∥`), the axial/equatorial split
 about [0,0,1] ((00l) picks `Y_∥`, (hk0) picks `Y_⊥`), and the zero-clamp
 ([`anisoStrain.test.ts`](../src/core/diffraction/anisoStrain.test.ts)).
 
+### Isotropic Mustrain for TOF ✅ — `isotropicStrainSigmaTof`
+
+TOF has no Lorentzian `Y`; the strain instead enters the Gaussian peak variance.
+A constant fractional strain ε = Δd/d spreads d by σ_d = ε·d, which maps to TOF
+through the calibration T(d) = difC·d + difA·d² + difB/d:
+
+    σ_T = |dT/dd|·ε·d = |difC + 2·difA·d − difB/d²|·ε·d        [µs, added in quadrature]
+
+so the strain broadening grows **∝ d** (∝ TOF) — versus ∝ d² for size. This is
+*exactly* the isotropic limit of the Stephens TOF σ (§3): the isotropic variance
+σ²(M) = (2ε·M)² = 4ε²/d⁴ gives σ_d = ½·d³·√(σ²(M)) = ε·d, so the isotropic and
+anisotropic TOF paths agree by construction (checked to 8 digits in the tests).
+
+Like GSAS-II, the isotropic Mustrain is a **named sample parameter** in µstrain
+(×10⁻⁶), seeded from the instrument resolution and refined on top of it. It
+carries the ∝d² Gaussian term that the instrument `σ₁²·d²` also has — the same
+functional form — so when the Mustrain is emitted `σ₁²` is dropped, avoiding an
+exact refinement degeneracy. Across phases the isotropic size/strain is shared
+(one beam), matching the CW `X`/`Y` treatment.
+
+Validated: identity with the Stephens isotropic limit, the ∝d scaling, emission
+(µstrain param present, `σ₁²` dropped; generalized keeps `σ₁²`), and pattern
+broadening ([`anisoStrain.test.ts`](../src/core/diffraction/anisoStrain.test.ts),
+[`tofMicrostrain.test.ts`](../src/core/workflow/tofMicrostrain.test.ts)).
+
 ### Mustrain model selector + physical readout (UI)
 
 The workbench exposes the microstrain model as a **Mustrain** selector mirroring
 GSAS-II — `isotropic | uniaxial | generalized` (uniaxial and generalized are 2θ
 CW only; the selector hides uniaxial for TOF):
 
-- **isotropic** — the Lorentzian `Y` alone, surfaced with a **Microstructure
-  readout**: `extractSizeStrain` (§2) turns the refined `X`/`Y` into
-  `microstrain ≈ N ×10⁻⁶ (P %)` and `size ≈ D nm`, deconvoluting the instrument
-  seed. This is the interpretable microstrain a study reports — visible once the
-  profile is refined.
-- **uniaxial** — adds the `Y_⊥`/`Y_∥` rows above (net-zero seeded).
-- **generalized** — the Stephens `S_HKL` of §3.
+- **isotropic** — CW: the Lorentzian `Y`; TOF: the µstrain sample parameter above.
+  Both feed a **Microstructure readout** — CW via `extractSizeStrain` (§2) into
+  `microstrain ≈ N ×10⁻⁶ (P %)` and `size ≈ D nm`; TOF reads the µstrain directly,
+  each deconvoluting the instrument seed (Lorentzian breadths subtract for CW,
+  Gaussian variances subtract in quadrature for TOF). Visible once refined.
+- **uniaxial** — adds the `Y_⊥`/`Y_∥` rows above (net-zero seeded). CW only.
+- **generalized** — the Stephens `S_HKL` of §3 (works for CW and TOF).
 
 ---
 
@@ -157,19 +182,23 @@ Both anisotropic models are wired into the **same** refinement pipeline as every
 other parameter, so they refine through the LM engine with correlations/esds:
 
 - **Parameter kinds** `stephensStrain`, `anisoSizePerp`, `anisoSizePar`,
-  `mustrainPerp`, `mustrainPar`, surfaced on the applied model by
+  `mustrainPerp`, `mustrainPar`, `mustrainIso`, surfaced on the applied model by
   `applyParameters` and grouped under **Microstructure** in the parameter tables.
 - **Emission**: `buildStructureRefinement({ stephensStrain: true })` emits one
   `S` per computed invariant (seeded 0 = isotropic); `{ uniaxialSize: { axis } }`
   emits `X⊥`, `X∥` (seeded from the isotropic size); `{ uniaxialStrain: { axis } }`
-  emits `Y⊥`, `Y∥` (seeded from the isotropic strain `Y`, net-zero at the seed).
-  All are unlocked by the **microstructure** stage in the expert sequence (after
-  occupancy, before corrections).
-- **Evaluation**: `placePeaks` receives each reflection's hkl and adds the
-  Stephens Gaussian width in quadrature, the uniaxial-size Lorentzian breadth
-  additively, and the uniaxial-strain Lorentzian breadth as a correction over the
-  isotropic `Y`; the invariants are cached per space-group operation list. 2θ CW
-  only (TOF has its own shape). No behaviour change when the options are off.
+  emits `Y⊥`, `Y∥` (seeded from the isotropic strain `Y`, net-zero at the seed);
+  `{ mustrainIso: µstrain }` emits the isotropic **TOF** Mustrain (µstrain, ×10⁻⁶)
+  and drops the redundant `σ₁²`. All are unlocked by the **microstructure** stage
+  in the expert sequence (after occupancy, before corrections).
+- **Evaluation**: `placePeaks` (2θ CW) adds the Stephens Gaussian width in
+  quadrature, the uniaxial-size Lorentzian breadth additively, and the
+  uniaxial-strain Lorentzian breadth as a correction over the isotropic `Y`;
+  `buildTofPeaks` adds the isotropic (`mustrainIso`) and Stephens σ in quadrature
+  to the TOF Gaussian variance. Invariants are cached per space-group operation
+  list. No behaviour change when the options are off. Across phases the isotropic
+  size/strain (incl. `mustrainIso`) is shared; anisotropic microstructure is
+  per-phase.
 
 End-to-end wiring validated (hkl-dependent broadening through the full powder
 calc, plus the uniaxial-strain net-zero-at-seed identity and directional

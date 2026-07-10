@@ -146,6 +146,14 @@ export interface StructureRefinementOptions {
    * CW only. Off by default.
    */
   readonly uniaxialStrain?: { readonly axis: readonly [number, number, number] };
+  /**
+   * Emit an isotropic microstrain (GSAS-II Mustrain) parameter for **TOF**, in
+   * µstrain (×10⁻⁶), seeded at this value. It carries the ∝d² Gaussian strain
+   * term (σ_T = |dT/dd|·ε·d), so the redundant instrument `sig1` (σ₁²·d², the
+   * same functional form) is **not** emitted when this is set — avoiding an exact
+   * refinement degeneracy. TOF only; freed in the microstructure stage.
+   */
+  readonly mustrainIso?: number;
 }
 
 /**
@@ -230,6 +238,7 @@ export function buildStructureRefinement(
     stephensStrain = false,
     uniaxialSize,
     uniaxialStrain,
+    mustrainIso,
   } = opts;
 
   const params: RefinementParameter[] = [];
@@ -294,7 +303,10 @@ export function buildStructureRefinement(
       ["beta0", "β₀", tof.beta0 ?? 0.03, 1e-4, 10],
       ["beta1", "β₁", tof.beta1 ?? 0, 0, 1e8],
       ["sig0", "σ₀²", tof.sig0 ?? 0, 0, 1e7],
-      ["sig1", "σ₁²", tof.sig1 ?? 200, 0, 1e7],
+      // σ₁²·d² is the isotropic-strain variance. When an isotropic Mustrain is
+      // emitted it carries that term (physical µstrain), so σ₁² is dropped here
+      // to keep the two from being an exactly-degenerate free pair.
+      ...(mustrainIso === undefined ? [["sig1", "σ₁²", tof.sig1 ?? 200, 0, 1e7]] as [string, string, number, number, number][] : []),
       ["sig2", "σ₂²", tof.sig2 ?? 0, 0, 1e7],
     ];
     for (const [key, label, value, min, max] of prof) {
@@ -443,6 +455,15 @@ export function buildStructureRefinement(
     bindings.push({ parameterId: "mustrainPerp", kind: "mustrainPerp", targetId: pattern.id });
     params.push({ id: "mustrainPar", label: "mustrain Y∥", kind: "mustrainPar", value: seed, initialValue: seed, min: 0, max: 200, fixed: false });
     bindings.push({ parameterId: "mustrainPar", kind: "mustrainPar", targetId: pattern.id, axis: [...uniaxialStrain.axis] });
+  }
+
+  // Isotropic microstrain (GSAS-II Mustrain) for TOF: a single µstrain (×10⁻⁶)
+  // sample parameter carrying the ∝d² Gaussian strain term. Seeded from the
+  // instrument resolution (so the initial peak widths are unchanged) and freed
+  // in the microstructure stage; the readout deconvolutes the seed.
+  if (mustrainIso !== undefined) {
+    params.push({ id: "mustrainIso", label: "mustrain (×10⁻⁶)", kind: "mustrainIso", value: mustrainIso, initialValue: mustrainIso, min: 0, max: 1e5, fixed: false });
+    bindings.push({ parameterId: "mustrainIso", kind: "mustrainIso", targetId: pattern.id });
   }
 
   return { params, bindings, restraints, stages: defaultStages() };
@@ -604,7 +625,7 @@ export const DEFAULT_STAGE_KINDS: readonly StageKinds[] = [
   { name: "ADP", kinds: ["bIso", "uAniso"] },
   { name: "positions", kinds: ["positionShift"] },
   { name: "occupancy", kinds: ["occupancy"] },
-  { name: "microstructure", kinds: ["stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainPerp", "mustrainPar"] },
+  { name: "microstructure", kinds: ["stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainPerp", "mustrainPar", "mustrainIso"] },
   { name: "corrections", kinds: ["poRatio", "absorption"] },
 ];
 

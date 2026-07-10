@@ -6,9 +6,11 @@ import {
   quarticStrainInvariants,
   strainVarianceM,
   stephensStrainFwhmDeg,
+  stephensStrainSigmaTof,
+  isotropicStrainSigmaTof,
   uniaxialStrainFwhmDeg,
 } from "@/core/diffraction/anisoStrain";
-import { reciprocalTensorA } from "@/core/crystal/unitCell";
+import { reciprocalTensorA, dSpacing } from "@/core/crystal/unitCell";
 
 /** Build an operation list from xyz strings. */
 const ops = (xyz: string[]): SymmetryOperation[] => xyz.map(parseSymmetryOperation);
@@ -96,6 +98,41 @@ describe("stephensStrainFwhmDeg — physical broadening", () => {
     const inv = quarticStrainInvariants(buildSpaceGroup(225).operations);
     expect(stephensStrainFwhmDeg(1, 1, 1, cubic, wavelength, [-1, 0], inv)).toBe(0);
     void DEG;
+  });
+});
+
+describe("isotropicStrainSigmaTof (GSAS-II isotropic TOF Mustrain)", () => {
+  const cubic: UnitCell = { a: 5, b: 5, c: 5, alpha: 90, beta: 90, gamma: 90 };
+  const cal = { difC: 22586, difA: -6.76, difB: -1.57 };
+
+  it("is the exact isotropic limit of the Stephens TOF σ (σ²(M) = (2ε·M)²)", () => {
+    // Cubic m-3m: invariant0 = Σh⁴, invariant1 = Σh²k². For isotropic strain
+    // σ²(M) = 4ε²M² = 4ε²A²(Σh⁴ + 2Σh²k²) ⇒ S = [4ε²A², 2·4ε²A²].
+    const inv = quarticStrainInvariants(buildSpaceGroup(225).operations);
+    const A = reciprocalTensorA(cubic).a11; // 1/a² for cubic
+    const eps = 8e-4;
+    const s = [4 * eps * eps * A * A, 2 * 4 * eps * eps * A * A];
+    for (const [h, k, l] of [[1, 0, 0], [1, 1, 0], [1, 1, 1], [2, 1, 0], [3, 2, 1]] as const) {
+      const d = dSpacing(cubic, h, k, l);
+      const stephens = stephensStrainSigmaTof(h, k, l, cubic, cal, s, inv);
+      const iso = isotropicStrainSigmaTof(d, cal, eps);
+      expect(iso).toBeCloseTo(stephens, 8); // identical by construction
+    }
+  });
+
+  it("broadens ∝ d (the TOF strain signature) with difA = difB = 0", () => {
+    const flat = { difC: 22586 };
+    const eps = 1e-3;
+    // σ_T = difC·ε·d ⇒ σ_T/d is a constant across reflections.
+    const ratios = [4, 2, 1].map((d) => isotropicStrainSigmaTof(d, flat, eps) / d);
+    expect(ratios[0]).toBeCloseTo(flat.difC * eps, 6);
+    expect(ratios[1]).toBeCloseTo(ratios[0]!, 9);
+    expect(ratios[2]).toBeCloseTo(ratios[0]!, 9);
+  });
+
+  it("returns 0 for a non-positive strain", () => {
+    expect(isotropicStrainSigmaTof(2, cal, 0)).toBe(0);
+    expect(isotropicStrainSigmaTof(2, cal, -1e-3)).toBe(0);
   });
 });
 

@@ -19,10 +19,12 @@ import type { PowderProfile } from "@/core/workflow/powder";
 import type { PowderPhase } from "@/core/workflow/multiPhase";
 import { buildPowderSpec, type SiteTies, type MustrainModel } from "@/app/powderSpec";
 
-/** Instrument rows shared across phases (one beam illuminates every phase). */
+/** Instrument rows shared across phases (one beam illuminates every phase). The
+ *  isotropic size/strain (profileX/Y, tofProfile, isotropic TOF Mustrain) is
+ *  shared too — matching multiPhase.ts; only anisotropic microstructure is per-phase. */
 const SHARED_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "peakWidth", "background", "zeroShift", "profileU", "profileV", "profileW",
-  "profileX", "profileY", "asymSL", "asymHL", "tofCalibration", "tofProfile",
+  "profileX", "profileY", "asymSL", "asymHL", "tofCalibration", "tofProfile", "mustrainIso",
 ]);
 
 export interface MultiPhaseSpec {

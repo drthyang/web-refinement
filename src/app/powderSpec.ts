@@ -41,7 +41,7 @@ const INSTRUMENT_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
  * that should only run after the isotropic profile + structure have converged.
  */
 const MICROSTRUCTURE_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
-  "stephensStrain", "anisoSizePerp", "anisoSizePar",
+  "stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainIso",
 ]);
 
 /** Everything the UI holds fixed on load (structural + instrument/profile + microstructure). */
@@ -118,24 +118,28 @@ export function buildPowderSpec(
   // instrument happens to be loaded (e.g. after "Reset to example").
   if (pattern.xUnit === "tof" && instrument.kind === "tof") {
     const resolution = 0.0015; // Δd/d ballpark → σ_TOF ≈ difC·d·Δd/d
+    // TOF Mustrain: generalized → Stephens σ; isotropic (also the uniaxial
+    // fallback, 2θ-CW only) → an isotropic Mustrain sample parameter in µstrain,
+    // seeded from the instrument resolution. When the isotropic Mustrain is used
+    // it carries the ∝d² strain term, so σ₁² is seeded to 0 and not emitted (the
+    // two are the same functional form — see buildStructureRefinement).
+    const useIsoMustrain = mustrain === "isotropic" || mustrain === "uniaxial";
     const tof = {
       difC: instrument.difC,
       difA: instrument.difA ?? 0,
       difB: instrument.difB ?? 0,
       alpha0: 0, alpha1: 1.5,
       beta0: 0.02, beta1: 0,
-      sig0: 0, sig1: (instrument.difC * resolution) ** 2, sig2: 0,
+      sig0: 0, sig1: useIsoMustrain ? 0 : (instrument.difC * resolution) ** 2, sig2: 0,
     };
+    const microOpt = mustrain === "generalized" ? { stephensStrain: true }
+      : useIsoMustrain ? { mustrainIso: resolution * 1e6 } // µstrain seed (×10⁻⁶)
+      : {};
     const zero = instrument.zero ?? 0;
     const profile: PowderProfile = { shape: "tof" };
-    const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, tof, refineOccupancy: true, ...tieOpts });
+    const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, tof, ...microOpt, refineOccupancy: true, ...tieOpts });
     const seedCurves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
     const s = optimalScale(seedCurves.yObs.map((y) => (y > 0 ? y : 0)), seedCurves.yCalc);
-    // Stephens anisotropic microstrain works for TOF too (hkl-dependent σ added in
-    // quadrature to the TOF Gaussian; see buildTofPeaks). Fixed on load like CW.
-    // TOF supports isotropic (Lorentzian Y ⇒ σ) and generalized (Stephens) strain;
-    // uniaxial Mustrain is 2θ-CW only, so it falls back to isotropic here.
-    const microOpt = mustrain === "generalized" ? { stephensStrain: true } : {};
     const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof, ...microOpt, refineOccupancy: true, ...tieOpts });
     const params = spec.params.map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
     return { params, bindings: spec.bindings, profile };

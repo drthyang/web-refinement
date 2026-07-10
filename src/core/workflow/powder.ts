@@ -21,7 +21,7 @@ import { braggTheta } from "@/core/crystal/unitCell";
 import { dFromTof } from "@/core/diffraction/instrument";
 import { synthesizePattern, cagliotiFwhm, lorentzianFwhm, tchPseudoVoigt, fcjSubPeaks, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
 import { evaluateBackground, type BackgroundType } from "@/core/diffraction/background";
-import { quarticStrainInvariants, stephensStrainFwhmDeg, stephensStrainSigmaTof, uniaxialStrainFwhmDeg, type QuarticInvariant } from "@/core/diffraction/anisoStrain";
+import { quarticStrainInvariants, stephensStrainFwhmDeg, stephensStrainSigmaTof, isotropicStrainSigmaTof, uniaxialStrainFwhmDeg, type QuarticInvariant } from "@/core/diffraction/anisoStrain";
 import { uniaxialSizeFwhmDeg } from "@/core/diffraction/anisoSize";
 
 /** Inclusive abscissa window that restricts refinement to a sub-range of the
@@ -118,6 +118,12 @@ function buildTofPeaks(
     const alpha = Math.max((tp?.alpha0 ?? 0) + (tp?.alpha1 ?? 0) / d, 1e-6);
     const beta = Math.max((tp?.beta0 ?? 0) + (tp?.beta1 ?? 0) / (d * d * d * d), 1e-6);
     let sig2 = Math.max((tp?.sig0 ?? 0) + (tp?.sig1 ?? 0) * d * d + (tp?.sig2 ?? 0) * d * d * d * d, 1e-6);
+    // Isotropic Mustrain (GSAS-II): a constant Δd/d broadens ∝ d in TOF; add its
+    // Gaussian variance in quadrature. σ_T = |dT/dd|·ε·d (see isotropicStrainSigmaTof).
+    if (applied.mustrainIso !== undefined && applied.mustrainIso > 0) {
+      const sIso = isotropicStrainSigmaTof(d, cal, applied.mustrainIso);
+      if (sIso > 0) sig2 += sIso * sIso;
+    }
     if (stephens && invariants && p.h !== undefined && p.k !== undefined && p.l !== undefined) {
       const sStrain = stephensStrainSigmaTof(p.h, p.k, p.l, applied.model.cell, cal, stephens, invariants);
       if (sStrain > 0) sig2 += sStrain * sStrain;

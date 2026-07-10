@@ -43,6 +43,7 @@ export type ParameterKind =
   | "anisoSizePar"
   | "mustrainPerp"
   | "mustrainPar"
+  | "mustrainIso"
   | "magneticScale"
   | "momentX"
   | "momentY"

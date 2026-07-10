@@ -77,6 +77,12 @@ export interface AppliedModel {
   /** Uniaxial anisotropic microstrain: equatorial/axial Lorentzian coefficients
    *  about a unique reciprocal-lattice axis. Present only when bound. */
   readonly uniaxialStrain?: { readonly yPerp: number; readonly yPar: number; readonly axis: [number, number, number] };
+  /**
+   * Isotropic microstrain ε = Δd/d (dimensionless) for TOF, GSAS-II Mustrain.
+   * Adds σ_T = |dT/dd|·ε·d in quadrature to the TOF Gaussian variance. Present
+   * only when bound (a `mustrainIso` parameter, stored in µstrain, ×10⁻⁶).
+   */
+  readonly mustrainIso?: number;
   /** Moment-magnitude scale applied to magnetic moments. */
   readonly momentScale: number;
 }
@@ -121,6 +127,7 @@ export function applyParameters(
   let mustrainPerp: number | undefined;
   let mustrainPar: number | undefined;
   let mustrainAxis: [number, number, number] | undefined;
+  let mustrainIsoMu: number | undefined; // isotropic microstrain, µstrain (×10⁻⁶)
   const background: number[] = [];
   const tofCal = new Map<string, number>();
   const tofProf = new Map<string, number>();
@@ -254,6 +261,9 @@ export function applyParameters(
         mustrainPar = v;
         if (binding.axis) mustrainAxis = [...binding.axis] as [number, number, number];
         break;
+      case "mustrainIso":
+        mustrainIsoMu = v;
+        break;
     }
   }
 
@@ -309,6 +319,7 @@ export function applyParameters(
     ...(stephensStrain ? { stephensStrain } : {}),
     ...(uniaxialSize ? { uniaxialSize } : {}),
     ...(uniaxialStrain ? { uniaxialStrain } : {}),
+    ...(mustrainIsoMu !== undefined ? { mustrainIso: mustrainIsoMu * 1e-6 } : {}),
     ...(caglioti ? { caglioti } : {}),
     ...(lorentzian ? { lorentzian } : {}),
     ...(axial ? { axial } : {}),

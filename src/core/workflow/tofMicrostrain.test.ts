@@ -31,6 +31,32 @@ describe("TOF anisotropic microstrain (Stephens)", () => {
     expect(on.params.filter((p) => p.kind === "stephensStrain").length).toBeGreaterThan(0);
   });
 
+  it("isotropic Mustrain emits a µstrain sample parameter and drops the degenerate σ₁²", () => {
+    const iso = buildPowderSpec(structure, pattern, inst, true, 4, {}, "isotropic");
+    // The isotropic Mustrain carries the ∝d² strain term as a physical µstrain…
+    const mu = iso.params.find((p) => p.kind === "mustrainIso");
+    expect(mu).toBeDefined();
+    expect(mu!.value).toBeCloseTo(0.0015 * 1e6, 6); // seeded from the resolution
+    expect(mu!.fixed).toBe(true); // fixed on load, freed in the microstructure stage
+    // …so the redundant σ₁² tofProfile row is not emitted (avoids exact degeneracy).
+    expect(iso.params.some((p) => p.id === "tof_sig1")).toBe(false);
+    // Generalized keeps σ₁² (the isotropic base) + Stephens, and has no mustrainIso.
+    const gen = buildPowderSpec(structure, pattern, inst, true, 4, {}, "generalized");
+    expect(gen.params.some((p) => p.id === "tof_sig1")).toBe(true);
+    expect(gen.params.some((p) => p.kind === "mustrainIso")).toBe(false);
+  });
+
+  it("raising the isotropic Mustrain above its seed broadens the TOF peaks (lower maxima)", () => {
+    const iso = buildPowderSpec(structure, pattern, inst, true, 4, {}, "isotropic");
+    const withScale = (ps: typeof iso.params) => ps.map((p) => (p.kind === "scale" ? { ...p, value: 1 } : p));
+    const base = powderCurves(structure, pattern, withScale(iso.params), iso.bindings, iso.profile);
+    const broadened = withScale(iso.params).map((p) => (p.kind === "mustrainIso" ? { ...p, value: 6000 } : p));
+    const cBroad = powderCurves(structure, pattern, broadened, iso.bindings, iso.profile);
+    expect(cBroad.yCalc.some((v) => Number.isNaN(v))).toBe(false);
+    expect(Math.max(...cBroad.yCalc)).toBeLessThan(0.95 * Math.max(...base.yCalc)); // broadened
+    expect(Math.max(...cBroad.yCalc)).toBeGreaterThan(0.05 * Math.max(...base.yCalc)); // still peaked
+  });
+
   it("S=0 is identical to no-microstrain; S>0 broadens the TOF peaks (lower maxima)", () => {
     const setScale = (ps: typeof off.params) => ps.map((p) => (p.kind === "scale" ? { ...p, value: 1 } : p));
     const off = buildPowderSpec(structure, pattern, inst, true, 4, {}, "isotropic");

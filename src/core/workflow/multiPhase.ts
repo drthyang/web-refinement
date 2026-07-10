@@ -23,14 +23,14 @@ export interface PowderPhase {
 }
 
 // One instrument illuminates every phase, so the whole instrument profile —
-// background, zero, the Caglioti Gaussian + Lorentzian size/strain, asymmetry,
-// and the TOF calibration/profile — is shared across phases. Only scale, cell,
-// atoms, and *sample* microstructure (Stephens strain, uniaxial size) are
-// per-phase (routed by the phase id).
+// background, zero, the Caglioti Gaussian + Lorentzian size/strain (incl. the
+// isotropic TOF Mustrain), asymmetry, and the TOF calibration/profile — is
+// shared across phases. Only scale, cell, atoms, and *anisotropic* sample
+// microstructure (Stephens strain, uniaxial size) are per-phase (routed by id).
 const SHARED_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "peakWidth", "background", "zeroShift",
   "profileU", "profileV", "profileW", "profileX", "profileY",
-  "asymSL", "asymHL", "tofCalibration", "tofProfile",
+  "asymSL", "asymHL", "tofCalibration", "tofProfile", "mustrainIso",
 ]);
 function isSharedBinding(b: ParameterBinding): boolean {
   return SHARED_KINDS.has(b.kind);

@@ -235,6 +235,33 @@ export function stephensStrainSigmaTof(
 }
 
 /**
+ * Isotropic microstrain **σ** contribution (TOF µs) for one reflection — the
+ * GSAS-II isotropic Mustrain for time-of-flight data. A constant fractional
+ * strain ε = Δd/d spreads d by σ_d = ε·d, which maps to TOF through the
+ * calibration T(d) = difC·d + difA·d² + difB/d as
+ *
+ *   σ_T = |dT/dd|·σ_d = |difC + 2·difA·d − difB/d²|·ε·d           [µs, Gaussian σ]
+ *
+ * Add its square to the TOF Gaussian variance (σ²_total = σ²_instr + σ²_strain).
+ * This is exactly the isotropic limit of {@link stephensStrainSigmaTof}: the
+ * isotropic strain variance σ²(M) = (2ε·M)² = 4ε²/d⁴ gives σ_d = ½·d³·√W = ε·d,
+ * so the anisotropic and isotropic paths agree by construction. Broadening grows
+ * ∝ d (∝ TOF), the TOF signature of strain — versus ∝ d² for size.
+ *
+ * `epsilon` is the dimensionless microstrain (ε = µstrain·10⁻⁶). Returns 0 for a
+ * non-positive strain or an undiffractable d.
+ */
+export function isotropicStrainSigmaTof(
+  d: number,
+  cal: { readonly difC: number; readonly difA?: number; readonly difB?: number },
+  epsilon: number,
+): number {
+  if (!(epsilon > 0) || !Number.isFinite(d) || d <= 0) return 0;
+  const dTdd = cal.difC + 2 * (cal.difA ?? 0) * d - (cal.difB ?? 0) / (d * d);
+  return Math.abs(dTdd) * epsilon * d;
+}
+
+/**
  * Uniaxial (GSAS-II "uniaxial") microstrain — a Lorentzian strain coefficient
  * that varies between an equatorial value Y_⊥ and an axial value Y_∥ about a
  * unique reciprocal axis, the direct analogue of the uniaxial *size* model:

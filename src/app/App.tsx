@@ -918,7 +918,24 @@ export function App(): JSX.Element {
   // refined Lorentzian X (size) and Y (strain), deconvoluting the instrument seed
   // (the initial X/Y from the calibration). CW (2θ) only — needs a wavelength.
   const mustrainReadout = useMemo(() => {
-    if (pattern.xUnit !== "twoTheta" || pattern.radiation.kind === "neutron-tof") return null;
+    // TOF isotropic Mustrain: the `mustrainIso` parameter is µstrain (×10⁻⁶)
+    // directly. Deconvolute the instrument seed in *quadrature* — the TOF strain
+    // is Gaussian (variances add), unlike the CW Lorentzian (breadths add).
+    if (pattern.xUnit === "tof" || pattern.radiation.kind === "neutron-tof") {
+      const pm = powderParams.find((p) => p.kind === "mustrainIso");
+      if (!pm) return null;
+      const muSample = Math.sqrt(Math.max(pm.value * pm.value - pm.initialValue * pm.initialValue, 0));
+      const esdMu = powderResult?.esd?.[pm.id];
+      const esdSample = esdMu !== undefined && muSample > 1e-9 ? esdMu * (pm.value / muSample) : undefined;
+      return {
+        sizeNm: { value: NaN }, sizeAngstrom: { value: NaN },
+        strain: { value: muSample * 1e-6 },
+        strainPpm: { value: muSample, ...(esdSample !== undefined ? { esd: esdSample } : {}) },
+        strainPercent: { value: muSample * 1e-4 },
+        sampleX: 0, sampleY: muSample, deconvoluted: true, notes: [],
+      };
+    }
+    if (pattern.xUnit !== "twoTheta") return null;
     const px = powderParams.find((p) => p.kind === "profileX");
     const py = powderParams.find((p) => p.kind === "profileY");
     if (!px && !py) return null;
