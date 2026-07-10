@@ -15,6 +15,17 @@ import { color as theme, mono as themeMono, fz } from "@/app/theme";
 /** A selection shared with the pattern plot: which reflection is spotlighted. */
 type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: string };
 
+/** Compact Miller indices: (1 0 1) → "101"; negatives take a crystallographic
+ *  overbar (3 -1 1 → "31̄1"); space-separated only when an index is multi-digit. */
+function compactHkl(h: number, k: number, l: number): string {
+  const fmt = (n: number): string => {
+    const digits = String(Math.abs(n));
+    return n < 0 ? [...digits].map((d) => `${d}̅`).join("") : digits;
+  };
+  const multi = [h, k, l].some((n) => Math.abs(n) >= 10);
+  return [fmt(h), fmt(k), fmt(l)].join(multi ? " " : "");
+}
+
 /**
  * Point colour matching the pattern plot's Bragg tick rows: magnetic satellites
  * get the magnetic colour, and each crystallographic phase its own colour. With
@@ -168,9 +179,9 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate }: {
               <button
                 onClick={() => onLocate(selRow)}
                 style={locateBtn}
-                title="Switch to the observed pattern and zoom in on this reflection's peak"
+                title="View this reflection's peak in the observed pattern"
               >
-                Show in pattern →
+                {compactHkl(selRow.h, selRow.k, selRow.l)} (view →)
               </button>
             )}
           </>
