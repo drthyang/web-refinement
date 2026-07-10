@@ -50,6 +50,22 @@ describe("buildPowderSpec", () => {
     expect(spec.profile.shape).toBe("pseudoVoigt");
   });
 
+  it("surfaces the sample Lorentzian X/Y as refinable size/mustrain rows (isotropic Mustrain)", () => {
+    // A pseudo-Voigt CW instrument (the .instprm carries U…) emits the sample
+    // Lorentzian terms: X = crystallite size, Y = isotropic microstrain. These
+    // are the refinable parameter behind "Mustrain: isotropic" — labelled and
+    // (via the parameter-panel group map) filed under Microstructure, not buried
+    // as anonymous "prof X/Y" instrument rows.
+    const inst: InstrumentParameters = { kind: "constantWavelength", wavelength: 0.1665, u: -46, v: 0, w: 1.2, x: 0, y: 0, zero: 0 };
+    const spec = buildPowderSpec(structure, pattern, inst);
+    const px = spec.params.find((p) => p.kind === "profileX");
+    const py = spec.params.find((p) => p.kind === "profileY");
+    expect(px?.label).toBe("size (Lorentzian X)");
+    expect(py?.label).toBe("mustrain (Lorentzian Y)");
+    // Present and refinable (guided frees them in the profile stage).
+    expect(guidedPowderParams(spec.params).find((p) => p.kind === "profileY")!.fixed).toBe(false);
+  });
+
   it("emits Stephens anisotropic-microstrain S-parameters only when microstrain is on, fixed on load", () => {
     const inst: InstrumentParameters = { kind: "constantWavelength", wavelength: 0.7, u: -46, v: 0, w: 1.2, x: 0.1, zero: 0 };
     const off = buildPowderSpec(structure, pattern, inst, true, 4, {}, "isotropic");

@@ -307,12 +307,16 @@ export function buildStructureRefinement(
   // tanθ) may be negative. Refined in the profile stage; combined with the
   // Gaussian per peak via the Thompson–Cox–Hastings mixing.
   if (lorentzian) {
-    const xy: [string, "profileX" | "profileY", number, number][] = [
-      ["profX", "profileX", lorentzian.x, 0],
-      ["profY", "profileY", lorentzian.y, -50],
+    // These are the *sample* Lorentzian terms: X = crystallite size (Scherrer,
+    // 1/cosθ), Y = isotropic microstrain (Mustrain, tanθ). Labelled and grouped
+    // as microstructure (like GSAS-II's Size/Mustrain sample parameters), not as
+    // instrument profile — the instrument's contribution is the U/V/W resolution.
+    const xy: [string, "profileX" | "profileY", string, number, number][] = [
+      ["profX", "profileX", "size (Lorentzian X)", lorentzian.x, 0],
+      ["profY", "profileY", "mustrain (Lorentzian Y)", lorentzian.y, -50],
     ];
-    for (const [id, kind, value, min] of xy) {
-      params.push({ id, label: id.replace("prof", "prof "), kind, value, initialValue: value, min, max: 100, fixed: false });
+    for (const [id, kind, label, value, min] of xy) {
+      params.push({ id, label, kind, value, initialValue: value, min, max: 100, fixed: false });
       bindings.push({ parameterId: id, kind, targetId: pattern.id });
     }
   }
