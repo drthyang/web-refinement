@@ -108,6 +108,27 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMag
           Reset
         </button>
       </div>
+      <div style={actionBar}>
+        <button
+          style={{ ...primaryButton, flex: "1 1 auto", minWidth: 120, textAlign: "center", padding: "11px 18px", fontSize: 14.5, fontWeight: 650, ...(busy ? refiningStyle : disabled ? disabledStyle : {}) }}
+          disabled={busy || disabled}
+          onClick={onRefine}
+          title="Refine the free parameters against the loaded data"
+        >
+          {busy ? <span className="wb-shimmer-text">Refining…</span> : "Refine"}
+        </button>
+        {onMagnetic && (
+          <button
+            style={{ ...secondaryButton, padding: "11px 15px", fontSize: 13.5, ...(busy ? disabledStyle : {}) }}
+            disabled={busy}
+            onClick={onMagnetic}
+            title="Open the magnetic symmetry analysis with the current refined structure (lattice, positions, occupancies)"
+          >
+            Magnetic analysis →
+          </button>
+        )}
+        {extraActions}
+      </div>
       <div style={{ ...colHeader }}>
         <span>Parameter</span>
         <span>Value</span>
@@ -138,25 +159,11 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMag
           );
         })}
       </div>
-      <div style={footer}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={{ ...primaryButton, width: 132, textAlign: "center", ...(busy ? refiningStyle : disabled ? disabledStyle : {}) }} disabled={busy || disabled} onClick={onRefine} title="Refine the free parameters against the loaded data">
-            {busy ? <span className="wb-shimmer-text">Refining…</span> : "Refine"}
-          </button>
-          {onMagnetic && (
-            <button
-              style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? disabledStyle : {}) }}
-              disabled={busy}
-              onClick={onMagnetic}
-              title="Open the magnetic symmetry analysis with the current refined structure (lattice, positions, occupancies)"
-            >
-              Magnetic analysis →
-            </button>
-          )}
-          {extraActions}
+      {result && (
+        <div style={footer}>
+          <ResultBanner result={result} />
         </div>
-        {result && <ResultBanner result={result} />}
-      </div>
+      )}
     </div>
   );
 }
@@ -239,6 +246,7 @@ const groupHeader: CSSProperties = { display: "flex", alignItems: "center", gap:
 const paramRow: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 104px 62px 62px", alignItems: "center", padding: "4px 14px 4px 26px", borderTop: `1px solid ${color.subtle2}` };
 const valueInput: CSSProperties = { width: 88, border: `1px solid ${color.input}`, borderRadius: 7, fontSize: 12, fontFamily: mono, padding: "2px 6px", background: "#fff" };
 const pill: CSSProperties = { fontSize: 11, padding: "1px 8px", borderRadius: 999, textAlign: "center", justifySelf: "start" };
+const actionBar: CSSProperties = { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 14px", borderBottom: `1px solid ${color.border}`, background: color.muted2 };
 const footer: CSSProperties = { borderTop: `1px solid ${color.border}`, padding: "12px 14px", background: color.muted2, display: "flex", flexDirection: "column", gap: 8 };
 const banner: CSSProperties = { borderRadius: 8, padding: "6px 10px", fontSize: 12 };
 const hcell: CSSProperties = { padding: "1px 10px 1px 0", textAlign: "left", color: color.faint };
