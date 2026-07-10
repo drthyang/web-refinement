@@ -384,7 +384,25 @@ export function App(): JSX.Element {
 
   /** Change the smooth-background basis (reinterprets the same coefficients). */
   function setBackgroundType(backgroundType: BackgroundType): void {
-    setSession((s) => ({ ...s, powderProfile: { ...s.powderProfile, backgroundType } }));
+    setSession((s) => {
+      // Interpolation coefficients are background *heights* at anchor points, so
+      // switching to/from a polynomial basis reseeds them: flatten to the current
+      // constant level for interpolation, or c0 + zeros for a polynomial.
+      const isInterp = backgroundType === "linInterpolate" || backgroundType === "logInterpolate";
+      const wasInterp = s.powderProfile.backgroundType === "linInterpolate" || s.powderProfile.backgroundType === "logInterpolate";
+      if (isInterp === wasInterp) {
+        return { ...s, powderProfile: { ...s.powderProfile, backgroundType } };
+      }
+      const level = s.powderParams.find((p) => p.kind === "background")?.value ?? 0;
+      let bIdx = 0;
+      const powderParams = s.powderParams.map((p) => {
+        if (p.kind !== "background") return p;
+        const v = isInterp ? level : bIdx === 0 ? level : 0;
+        bIdx++;
+        return { ...p, value: v, initialValue: v };
+      });
+      return { ...s, powderParams, powderProfile: { ...s.powderProfile, backgroundType } };
+    });
     setPowderResult(null);
   }
 
@@ -1121,6 +1139,8 @@ export function App(): JSX.Element {
                           <option value="chebyshev">Chebyshev</option>
                           <option value="cosine">Cosine (Fourier)</option>
                           <option value="powerSeries">Power series</option>
+                          <option value="linInterpolate">Linear interpolate</option>
+                          <option value="logInterpolate">Log interpolate</option>
                         </select>
                         <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           terms

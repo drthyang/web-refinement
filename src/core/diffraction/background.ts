@@ -20,7 +20,13 @@
  * `polynomial` is the raw-power series (c0 + c1·x + …), kept for compatibility;
  * it overflows on a wide abscissa and is not offered for refinement.
  */
-export type BackgroundType = "chebyshev" | "cosine" | "powerSeries" | "polynomial";
+export type BackgroundType =
+  | "chebyshev"
+  | "cosine"
+  | "powerSeries"
+  | "linInterpolate"
+  | "logInterpolate"
+  | "polynomial";
 
 /** Map an abscissa value onto the Chebyshev domain t ∈ [−1, 1]. */
 function toChebyshevT(x: number, xMin: number, xMax: number): number {
@@ -85,6 +91,69 @@ export function powerSeriesBackground(
   return sum;
 }
 
+/**
+ * Interpolation-background anchor positions (GSAS-II style): the N coefficients
+ * are background *values* at N points spanning [xMin, xMax], spaced evenly in x
+ * (linear) or in log(x) (log). Endpoints are pinned to xMin/xMax. Memoized on the
+ * last (n, range, log) since a whole pattern shares one set of anchors.
+ */
+let anchorCache: { key: string; pos: number[] } | null = null;
+function interpAnchors(n: number, xMin: number, xMax: number, log: boolean): number[] {
+  const useLog = log && xMin > 0 && xMax > xMin;
+  const key = `${n}|${xMin}|${xMax}|${useLog ? 1 : 0}`;
+  if (anchorCache && anchorCache.key === key) return anchorCache.pos;
+  const pos = new Array<number>(n);
+  if (n === 1) {
+    pos[0] = xMin;
+  } else if (useLog) {
+    const a = Math.log(xMin), b = Math.log(xMax);
+    for (let i = 0; i < n; i++) pos[i] = Math.exp(a + (i * (b - a)) / (n - 1));
+    pos[0] = xMin;
+    pos[n - 1] = xMax;
+  } else {
+    for (let i = 0; i < n; i++) pos[i] = xMin + (i * (xMax - xMin)) / (n - 1);
+  }
+  anchorCache = { key, pos };
+  return pos;
+}
+
+/** Piecewise-linear interpolation of `coeffs` placed at `pos`; flat past the ends. */
+function interpolateAt(x: number, pos: readonly number[], coeffs: readonly number[]): number {
+  const n = coeffs.length;
+  if (n === 1) return coeffs[0]!;
+  if (x <= pos[0]!) return coeffs[0]!;
+  if (x >= pos[n - 1]!) return coeffs[n - 1]!;
+  let j = 0;
+  while (j < n - 2 && x > pos[j + 1]!) j++;
+  const p0 = pos[j]!, p1 = pos[j + 1]!;
+  const t = p1 > p0 ? (x - p0) / (p1 - p0) : 0;
+  return coeffs[j]! + t * (coeffs[j + 1]! - coeffs[j]!);
+}
+
+/** GSAS-II "lin interpolate": N background values evenly spaced in x, linearly
+ *  interpolated between. Each coefficient is the background height at its point. */
+export function linInterpolateBackground(
+  x: number,
+  coeffs: readonly number[],
+  xMin: number,
+  xMax: number,
+): number {
+  if (coeffs.length === 0) return 0;
+  return interpolateAt(x, interpAnchors(coeffs.length, xMin, xMax, false), coeffs);
+}
+
+/** GSAS-II "log interpolate": as lin interpolate, but the points are evenly
+ *  spaced in log(x) — denser at low x, better for a wide TOF/Q abscissa. */
+export function logInterpolateBackground(
+  x: number,
+  coeffs: readonly number[],
+  xMin: number,
+  xMax: number,
+): number {
+  if (coeffs.length === 0) return 0;
+  return interpolateAt(x, interpAnchors(coeffs.length, xMin, xMax, true), coeffs);
+}
+
 /** Raw-power polynomial c0 + c1·x + c2·x² + … (kept for compatibility). */
 export function polynomialBackground(x: number, coeffs: readonly number[]): number {
   let value = 0;
@@ -112,6 +181,10 @@ export function evaluateBackground(
       return cosineBackground(x, coeffs, xMin, xMax);
     case "powerSeries":
       return powerSeriesBackground(x, coeffs, xMin, xMax);
+    case "linInterpolate":
+      return linInterpolateBackground(x, coeffs, xMin, xMax);
+    case "logInterpolate":
+      return logInterpolateBackground(x, coeffs, xMin, xMax);
     case "polynomial":
       return polynomialBackground(x, coeffs);
   }

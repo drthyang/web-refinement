@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chebyshevBackground, cosineBackground, powerSeriesBackground, polynomialBackground, evaluateBackground } from "@/core/diffraction/background";
+import { chebyshevBackground, cosineBackground, powerSeriesBackground, polynomialBackground, linInterpolateBackground, logInterpolateBackground, evaluateBackground } from "@/core/diffraction/background";
 
 describe("chebyshevBackground", () => {
   it("reduces to c0 for a single term", () => {
@@ -40,6 +40,57 @@ describe("cosineBackground (Fourier)", () => {
     const v = cosineBackground(90000, [100, 20, 5, 1], 3000, 100000);
     expect(Number.isFinite(v)).toBe(true);
     expect(Math.abs(v)).toBeLessThanOrEqual(126); // Σ|cₙ|
+  });
+});
+
+describe("linInterpolateBackground (GSAS-II lin interpolate)", () => {
+  const c = [10, 30, 20, 40]; // heights at 4 evenly-spaced points over [0, 60]
+  it("passes exactly through each coefficient at its anchor (endpoints + interior)", () => {
+    expect(linInterpolateBackground(0, c, 0, 60)).toBeCloseTo(10, 10); // anchor 0 = xMin
+    expect(linInterpolateBackground(20, c, 0, 60)).toBeCloseTo(30, 10); // anchor 1
+    expect(linInterpolateBackground(40, c, 0, 60)).toBeCloseTo(20, 10); // anchor 2
+    expect(linInterpolateBackground(60, c, 0, 60)).toBeCloseTo(40, 10); // anchor 3 = xMax
+  });
+  it("linearly interpolates between anchors and is flat past the ends", () => {
+    expect(linInterpolateBackground(10, c, 0, 60)).toBeCloseTo(20, 10); // midway 10→30
+    expect(linInterpolateBackground(30, c, 0, 60)).toBeCloseTo(25, 10); // midway 30→20
+    expect(linInterpolateBackground(-5, c, 0, 60)).toBe(10); // clamps to first
+    expect(linInterpolateBackground(100, c, 0, 60)).toBe(40); // clamps to last
+  });
+  it("reduces to the constant for one coefficient", () => {
+    expect(linInterpolateBackground(37, [7], 0, 60)).toBe(7);
+  });
+});
+
+describe("logInterpolateBackground (GSAS-II log interpolate)", () => {
+  it("hits each coefficient at its log-spaced anchor; endpoints pinned to the range", () => {
+    const c = [1, 2, 3]; // anchors at x = 1, 10, 100 (log-even over [1,100])
+    expect(logInterpolateBackground(1, c, 1, 100)).toBeCloseTo(1, 10);
+    expect(logInterpolateBackground(10, c, 1, 100)).toBeCloseTo(2, 6); // middle log anchor
+    expect(logInterpolateBackground(100, c, 1, 100)).toBeCloseTo(3, 10);
+  });
+  it("places anchors denser at low x than linear (differs mid-range)", () => {
+    const c = [0, 100];
+    // Two points → both schemes are a straight line xMin→xMax, so equal here;
+    // with 3 points the middle anchor differs.
+    const c3 = [0, 50, 100];
+    const atLin = linInterpolateBackground(10, c3, 1, 100);
+    const atLog = logInterpolateBackground(10, c3, 1, 100);
+    expect(atLin).not.toBeCloseTo(atLog, 3);
+    expect(atLog).toBeCloseTo(50, 6); // x=10 is the middle log anchor → coeff 50
+    void c;
+  });
+  it("falls back to linear spacing when xMin ≤ 0", () => {
+    const c = [0, 10, 20];
+    expect(logInterpolateBackground(15, c, -5, 25)).toBeCloseTo(linInterpolateBackground(15, c, -5, 25), 10);
+  });
+});
+
+describe("evaluateBackground dispatches the interpolation types", () => {
+  it("routes linInterpolate/logInterpolate", () => {
+    const c = [5, 15, 25];
+    expect(evaluateBackground(10, c, "linInterpolate", 0, 20)).toBeCloseTo(15, 10);
+    expect(evaluateBackground(10, c, "logInterpolate", 1, 100)).toBeCloseTo(15, 6);
   });
 });
 
