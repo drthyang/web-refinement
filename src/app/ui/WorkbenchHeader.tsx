@@ -38,12 +38,9 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports }: Pro
     <header className="wb-header" style={headerBar}>
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
         <div className="wb-header-mark" style={brandMark}>
-          {/* Materia monogram: geometric M with a small sprout in its centre notch. */}
+          {/* Materia monogram: a clean geometric M. */}
           <svg viewBox="0 0 100 100" width={28} height={28} aria-hidden>
             <path d="M18 82 L18 20 L50 58 L82 20 L82 82" fill="none" stroke="#fff" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
-            <line x1={50} y1={57} x2={50} y2={43.5} stroke="#fff" strokeWidth={3.4} strokeLinecap="round" />
-            <ellipse cx={44.6} cy={40.6} rx={4.7} ry={2.2} fill="#fff" transform="rotate(-42 44.6 40.6)" />
-            <ellipse cx={55.4} cy={40.6} rx={4.7} ry={2.2} fill="#fff" transform="rotate(42 55.4 40.6)" />
           </svg>
         </div>
         <div style={{ lineHeight: 1.05, minWidth: 0 }}>
