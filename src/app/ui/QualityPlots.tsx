@@ -15,17 +15,6 @@ import { color as theme, mono as themeMono, fz } from "@/app/theme";
 /** A selection shared with the pattern plot: which reflection is spotlighted. */
 type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: string };
 
-/** Compact Miller indices: (1 0 1) → "101"; negatives take a crystallographic
- *  overbar (3 -1 1 → "31̄1"); space-separated only when an index is multi-digit. */
-function compactHkl(h: number, k: number, l: number): string {
-  const fmt = (n: number): string => {
-    const digits = String(Math.abs(n));
-    return n < 0 ? [...digits].map((d) => `${d}̅`).join("") : digits;
-  };
-  const multi = [h, k, l].some((n) => Math.abs(n) >= 10);
-  return [fmt(h), fmt(k), fmt(l)].join(multi ? " " : "");
-}
-
 /**
  * Point colour matching the pattern plot's Bragg tick rows: magnetic satellites
  * get the magnetic colour, and each crystallographic phase its own colour. With
@@ -148,45 +137,61 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate }: {
             ))}
           </g>
         )}
-        {selPt && selRow && (
-          <g pointerEvents="none">
-            <circle cx={sx(selPt.fc)} cy={sy(selPt.fo)} r={5.5} fill="none" stroke={pointColor(selRow, multiPhase)} strokeWidth={1.6} />
-            <text
-              x={sx(selPt.fc) < SIZE / 2 ? sx(selPt.fc) + 9 : sx(selPt.fc) - 9}
-              y={Math.max(sy(selPt.fo) - 8, PAD + 10)}
-              textAnchor={sx(selPt.fc) < SIZE / 2 ? "start" : "end"}
-              fontSize={11.5}
-              fontFamily={themeMono}
-              fill={theme.ink}
-            >
-              {selRow.h} {selRow.k} {selRow.l}
-            </text>
-          </g>
-        )}
+        {selPt && selRow && (() => {
+          const px = sx(selPt.fc);
+          const py = sy(selPt.fo);
+          const label = `${selRow.h} ${selRow.k} ${selRow.l}`;
+          const ring = (
+            <circle cx={px} cy={py} r={5.5} fill="none" stroke={pointColor(selRow, multiPhase)} strokeWidth={1.6} pointerEvents="none" />
+          );
+          // No pattern to jump to (single crystal): keep the plain index label.
+          if (!onLocate) {
+            return (
+              <g pointerEvents="none">
+                {ring}
+                <text x={px < SIZE / 2 ? px + 9 : px - 9} y={Math.max(py - 8, PAD + 10)} textAnchor={px < SIZE / 2 ? "start" : "end"} fontSize={11.5} fontFamily={themeMono} fill={theme.ink}>
+                  {label}
+                </text>
+              </g>
+            );
+          }
+          // Powder: a small clickable chip beside the point — the (hkl) plus a
+          // "view" arrow that jumps to this reflection's peak in the pattern.
+          const labelW = label.length * 6.9; // monospace: fixed char width
+          const padX = 8;
+          const gap = 7;
+          const arrowW = 11;
+          const chipH = 19;
+          const chipW = padX + labelW + gap + arrowW + padX;
+          const chipX = px > SIZE / 2 ? px - 8 - chipW : px + 8;
+          const chipY = Math.min(Math.max(py - chipH / 2, PAD + 1), SIZE - PAD - chipH);
+          const midY = chipY + chipH / 2;
+          const ax = chipX + padX + labelW + gap;
+          return (
+            <g>
+              {ring}
+              <g style={{ cursor: "pointer" }} onClick={() => onLocate(selRow)}>
+                <title>View this reflection's peak in the observed pattern</title>
+                <rect x={chipX} y={chipY} width={chipW} height={chipH} rx={6} fill={theme.raised} stroke={theme.primaryTintBorder} strokeWidth={1} />
+                <text x={chipX + padX} y={midY + 4} fontSize={11.5} fontFamily={themeMono} fill={theme.ink}>{label}</text>
+                <path d={`M ${ax} ${midY} H ${ax + 8} M ${ax + 5} ${midY - 3.2} L ${ax + 8.6} ${midY} L ${ax + 5} ${midY + 3.2}`} fill="none" stroke={theme.primary} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+              </g>
+            </g>
+          );
+        })()}
         <text x={SIZE / 2} y={SIZE - 8} textAnchor="middle" fontSize={11} fill={theme.secondary}>|F_calc|</text>
         <text x={12} y={SIZE / 2} textAnchor="middle" fontSize={11} fill={theme.secondary} transform={`rotate(-90 12 ${SIZE / 2})`}>|F_obs|</text>
       </svg>
       <figcaption style={cap}>
         {selRow ? (
-          <>
-            <span style={{ fontFamily: themeMono, color: theme.ink }}>
-              <span style={{ color: pointColor(selRow, multiPhase), fontWeight: 600 }}>
-                {selRow.kind === "magnetic" ? "mag " : multiPhase ? `${selRow.phaseLabel ?? ""} ` : ""}
-              </span>
-              ({selRow.h} {selRow.k} {selRow.l}) · d {selRow.d.toFixed(4)} Å · F_obs {Math.sqrt(Math.max(selRow.iObs, 0)).toFixed(2)} · F_calc {Math.sqrt(Math.max(selRow.iCalc, 0)).toFixed(2)}
+          <span style={{ fontFamily: themeMono, color: theme.ink }}>
+            <span style={{ color: pointColor(selRow, multiPhase), fontWeight: 600 }}>
+              {selRow.kind === "magnetic" ? "mag " : multiPhase ? `${selRow.phaseLabel ?? ""} ` : ""}
             </span>
-            {onLocate && (
-              <button
-                onClick={() => onLocate(selRow)}
-                style={locateBtn}
-                title="View this reflection's peak in the observed pattern"
-              >
-                {compactHkl(selRow.h, selRow.k, selRow.l)} (view →)
-              </button>
-            )}
-          </>
+            ({selRow.h} {selRow.k} {selRow.l}) · d {selRow.d.toFixed(4)} Å · F_obs {Math.sqrt(Math.max(selRow.iObs, 0)).toFixed(2)} · F_calc {Math.sqrt(Math.max(selRow.iCalc, 0)).toFixed(2)}
+          </span>
         ) : (
-          <>F_obs vs F_calc — points on the dashed line = perfect. {rows.length} reflections{magCount > 0 ? ` (${magCount} magnetic)` : ""}. Click a point for its (hkl){onLocate ? ", then jump to its peak in the pattern" : ""}.</>
+          <>F_obs vs F_calc — points on the dashed line = perfect. {rows.length} reflections{magCount > 0 ? ` (${magCount} magnetic)` : ""}. Click a point for its (hkl){onLocate ? " — then use its ‘view →’ chip to jump to the peak" : ""}.</>
         )}
       </figcaption>
     </figure>
@@ -220,5 +225,4 @@ export function NormalProb({ npp }: { npp: NormalProbabilityPlot }): JSX.Element
   );
 }
 
-const cap: React.CSSProperties = { fontSize: fz.micro, color: theme.secondary, maxWidth: 360, marginTop: 5, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5 };
-const locateBtn: React.CSSProperties = { fontFamily: themeMono, fontSize: 11, fontWeight: 600, color: theme.primary, background: theme.primaryTintBg, border: `1px solid ${theme.primaryTintBorder}`, borderRadius: 7, padding: "3px 9px", cursor: "pointer" };
+const cap: React.CSSProperties = { fontSize: fz.micro, color: theme.secondary, maxWidth: 360, marginTop: 5 };
