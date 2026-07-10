@@ -43,17 +43,17 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports }: Pro
             <path d="M18 82 L18 20 L50 58 L82 20 L82 82" fill="none" stroke="#fff" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
           </svg>
         </div>
-        <div style={{ lineHeight: 1.05, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 9, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", minWidth: 0 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.05, minWidth: 0 }}>
             <span className="wb-header-title" style={{ fontFamily: display, fontSize: 21, fontWeight: 600, letterSpacing: "0.14em", color: color.ink, whiteSpace: "nowrap" }}>
               MATERIA
             </span>
-            <span style={betaBadge} title="Materia is in public beta — validate results against established tools before publication">beta</span>
-            <span className="wb-version-chip" style={versionChip}>{version}</span>
+            <span className="wb-header-sub" style={{ fontFamily: display, fontSize: 11, fontWeight: 500, letterSpacing: "0.36em", color: color.faint, marginTop: 3, whiteSpace: "nowrap" }}>
+              WORKBENCH
+            </span>
           </div>
-          <div className="wb-header-sub" style={{ fontFamily: display, fontSize: 11, fontWeight: 500, letterSpacing: "0.36em", color: color.faint, marginTop: 3 }}>
-            WORKBENCH
-          </div>
+          <span style={betaBadge} title="Materia is in public beta — validate results against established tools before publication">beta</span>
+          <span className="wb-version-chip" style={versionChip}>{version}</span>
         </div>
       </div>
       <div className="wb-header-divider" style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
