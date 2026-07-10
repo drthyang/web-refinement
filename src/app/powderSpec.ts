@@ -127,11 +127,13 @@ export function buildPowderSpec(
   };
 
   // For a proper CW instrument, refine a Thompson–Cox–Hastings pseudo-Voigt:
-  // the Gaussian Caglioti U/V/W plus a Lorentzian size–strain X/Y (seeded small
-  // and refined in the profile stage). On real synchrotron data this Lorentzian
-  // is the difference between a mediocre fit and a good one (e.g. GaNb4Se8
-  // wR ≈ 10% → 5.5%). Only meaningful on a 2θ pattern.
-  const profOpt = caglioti ? { caglioti, lorentzian: { x: 1, y: 0 } } : {};
+  // the Gaussian Caglioti U/V/W plus a Lorentzian size–strain X/Y. Seed the
+  // Lorentzian from the instrument's *calibrated* X/Y when the file carries them
+  // (a GSAS .prm/.instprm does) — this is the instrument resolution and is what
+  // lets sharp synchrotron peaks fit on load; refined further in the profile
+  // stage. Only fall back to X=1 when the file gives no Lorentzian at all.
+  // (Seeding 11-BM's real X≈0.17 vs the old placeholder X=1 takes wR 52%→~19%.)
+  const profOpt = caglioti ? { caglioti, lorentzian: { x: cw?.x ?? 1, y: cw?.y ?? 0 } } : {};
   // Seed the scale from the data with a unit-scale evaluation.
   const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, ...profOpt, refineOccupancy: true, ...tieOpts });
   const curves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);

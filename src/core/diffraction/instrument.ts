@@ -27,6 +27,10 @@ export type InstrumentParameters =
       readonly u?: number;
       readonly v?: number;
       readonly w?: number;
+      /** Lorentzian size/strain broadening (GSAS-II X, Y — the instrument's
+       *  calibrated Lorentzian; Γ_L = X/cosθ + Y·tanθ, centidegrees). */
+      readonly x?: number;
+      readonly y?: number;
       /** Polarization fraction (GSAS-II `Polariz.`), for the Lp correction. */
       readonly polarization?: number;
     }

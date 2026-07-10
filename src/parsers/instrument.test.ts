@@ -26,6 +26,7 @@ describe("parseInstrumentParameters", () => {
     expect(p.u).toBeCloseTo(-46.054 * 8 * Math.log(2), 1); // ≈ -255.4
     expect(p.v).toBe(0);
     expect(p.w).toBeCloseTo(1.2088 * 8 * Math.log(2), 2); // ≈ 6.703
+    expect(p.x).toBe(0); // Lorentzian X (FWHM coeff) read as-is
     expect(p.polarization).toBeCloseTo(0.8442, 4);
   });
 
@@ -81,6 +82,9 @@ describe("parseInstrumentParameters", () => {
     expect(p.u).toBeCloseTo(1.163 * 8 * Math.log(2), 2); // ≈ 6.449
     expect(p.v).toBeCloseTo(-0.126 * 8 * Math.log(2), 2); // ≈ -0.699
     expect(p.w).toBeCloseTo(0.063 * 8 * Math.log(2), 2); // ≈ 0.349
+    // Lorentzian LX/LY (PRCF12) are FWHM coefficients — taken as-is (no 8 ln2).
+    expect(p.x).toBeCloseTo(0.173, 4);
+    expect(p.y).toBe(0);
     // POLA is fixed-column field 5 (0.990) — the synchrotron polarization, not
     // the blank field-4 that whitespace-splitting would otherwise land on.
     expect(p.polarization).toBeCloseTo(0.99, 3);

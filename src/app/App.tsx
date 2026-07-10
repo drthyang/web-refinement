@@ -786,8 +786,10 @@ export function App(): JSX.Element {
   const instTitle = instIdentified
     ? [instBeamline, instFacility].filter(Boolean).join(" · ")
     : instrument.kind === "tof" ? "Time-of-flight" : "Constant wavelength";
-  // "Beamline · Facility" says it all; only show calibration when unidentified.
-  const instMeta = instIdentified ? "" : instParamMeta;
+  // Title carries the identity ("Beamline · Facility" or the mode); the meta line
+  // always shows the key calibration actually loaded — the wavelength for CW
+  // (e.g. 11-BM's λ 0.413909 Å), difC/Zero for TOF.
+  const instMeta = instParamMeta;
   const summaryCards: SummaryCardData[] = [
     {
       label: "Structure", loadLabel: "Load CIF…", accept: ".cif,text/plain", onFile: onLoadCif,

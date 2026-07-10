@@ -156,8 +156,15 @@ export function parseGsasPrm(text: string): InstrumentParameters {
   const zeroCentideg = icons[2];
   // First PRCF coefficient row (e.g. `PRCF11`): GU GV GW (GP) for CW profile
   // functions 1–4 — the first three are the Gaussian Caglioti terms.
-  const prcfRow = lines.find((l) => /PRCF11\b/.test(l));
-  const uvw = prcfRow ? nums(prcfRow.slice(prcfRow.search(/PRCF11/) + "PRCF11".length)) : [];
+  // PRCF row 1 (`PRCF11`): GU GV GW (GP) — the Gaussian Caglioti terms. PRCF row 2
+  // (`PRCF12`): LX LY (S/L H/L) — the Lorentzian broadening (GSAS X, Y; unlike the
+  // Gaussian σ² these are already FWHM coefficients, so no 8 ln2 factor). The
+  // Lorentzian is the instrument's *calibrated* resolution — seeding it (rather
+  // than an arbitrary X=1) is what lets sharp synchrotron peaks fit.
+  const prcfRow1 = lines.find((l) => /PRCF11\b/.test(l));
+  const uvw = prcfRow1 ? nums(prcfRow1.slice(prcfRow1.search(/PRCF11/) + "PRCF11".length)) : [];
+  const prcfRow2 = lines.find((l) => /PRCF12\b/.test(l));
+  const lxy = prcfRow2 ? nums(prcfRow2.slice(prcfRow2.search(/PRCF12/) + "PRCF12".length)) : [];
   // POLA (fixed-column field 5) is the X-ray polarization fraction for the Lp
   // correction; ~0.99 for a synchrotron like 11-BM, 0.5 for an unpolarized tube.
   const pola = iconsCol(4);
@@ -171,6 +178,7 @@ export function parseGsasPrm(text: string): InstrumentParameters {
       v: uvw[1]! * GSAS_SIG2_TO_FWHM2,
       w: uvw[2]! * GSAS_SIG2_TO_FWHM2,
     } : {}),
+    ...(lxy.length >= 2 ? { x: lxy[0]!, y: lxy[1]! } : {}),
     ...(radiationKind === "xray" && pola !== undefined && pola > 0 && pola <= 1 ? { polarization: pola } : {}),
   };
 }
@@ -233,6 +241,10 @@ function parseInstrumentBase(text: string): InstrumentParameters {
       ...(v.get("u") !== undefined ? { u: v.get("u")! * GSAS_SIG2_TO_FWHM2 } : {}),
       ...(v.get("v") !== undefined ? { v: v.get("v")! * GSAS_SIG2_TO_FWHM2 } : {}),
       ...(v.get("w") !== undefined ? { w: v.get("w")! * GSAS_SIG2_TO_FWHM2 } : {}),
+      // Lorentzian X, Y are already FWHM coefficients (no 8 ln2), the instrument's
+      // calibrated size/strain broadening — seed them so sharp peaks fit on load.
+      ...(v.get("x") !== undefined ? { x: v.get("x")! } : {}),
+      ...(v.get("y") !== undefined ? { y: v.get("y")! } : {}),
       ...(v.get("polariz.") !== undefined ? { polarization: v.get("polariz.")! } : {}),
     };
   }
