@@ -1,12 +1,15 @@
-# Web Refinement Workbench
+# Materia Workbench
 
 [![Live demo](https://img.shields.io/badge/demo-live-2563eb)](https://drthyang.github.io/web-refinement/)
+[![Status: beta](https://img.shields.io/badge/status-public%20beta-d97706)](docs/LIMITATIONS.md)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-3c8c3c)](LICENSE)
 [![Runs in the browser](https://img.shields.io/badge/runs-in%20your%20browser-6b6b6b)](https://drthyang.github.io/web-refinement/)
 
-**An AI-native refinement workbench.** Crystal and magnetic structure
-refinement that runs entirely in your browser — and is built, from the core
-up, to be driven by LLM agents as well as by people.
+**Materia — an AI-native foundation for materials science.** Crystal and magnetic
+structure refinement that runs entirely in your browser, and is built from the
+core up to be driven by LLM agents as well as by people. This is its web
+workbench; the same pure core is exposed to agents as tools (see
+[docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md)).
 
 **▶ Try it in your browser: [drthyang.github.io/web-refinement](https://drthyang.github.io/web-refinement/)** — a
 fully static GitHub Pages app; nothing to install, and your data never leaves
@@ -105,13 +108,24 @@ This is a complement to the established packages, not a replacement — see
 
 ## Status
 
-**Working app — atomic/nuclear refinement (single-crystal + powder) plus a
-commensurate single-k magnetic workflow.** The scientific core, Levenberg–
-Marquardt refinement engine, symmetry-adapted constrained parameters, CIF
-parsing, a 3D structure/moment viewer, plots, and Web Worker compute are
-implemented and tested (**564 tests**). Crystallographic and scattering
-foundations are validated against bundled GSAS-II refinements (see
+**Public beta.** A working app — atomic/nuclear refinement (single-crystal +
+powder) plus a commensurate single-k magnetic workflow — and a first agent-tool
+layer over the same core. The scientific core, Levenberg–Marquardt refinement
+engine, symmetry-adapted constrained parameters, CIF parsing, a 3D
+structure/moment viewer, plots, and Web Worker compute are implemented and
+tested (**585 tests**). Crystallographic and scattering foundations are
+validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
+As with any beta, results intended for publication must be validated against
+established tools ([docs/LIMITATIONS.md](docs/LIMITATIONS.md)).
+
+**Agent tools (milestone 1):** an MCP server exposes the pure core to LLM agents
+— parse → build → refine → **assess** (expert judgment: verdict, dangerous
+correlations, at-bound/unphysical parameters, unexplained residual peaks) →
+**suggest next steps** → **interpret** (materials reading). The judgment lives in
+tested pure core (`src/core/diagnostics/`), so an agent reasons about a
+refinement rather than just running it. See
+[docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md).
 
 The magnetic workflow runs end to end: **auto-detect magnetic peaks → k-vector
 search → little-group magnetic subgroups → editable moment preview → moment

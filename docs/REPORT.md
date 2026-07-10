@@ -1,6 +1,6 @@
 # Build & Validation Report
 
-**Project:** Web Refinement Workbench — a browser-native refinement workbench for
+**Project:** Materia Workbench — a browser-native refinement workbench for
 atomic and magnetic structures.
 **Date:** 2026-07-09
 **Stack:** React 18 · TypeScript 5 (strict) · Vite 5 · Vitest · Web Workers.

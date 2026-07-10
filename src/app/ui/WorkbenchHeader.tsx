@@ -8,6 +8,9 @@
 import { useState, type CSSProperties } from "react";
 import { color, mono, radius, shadow, sans } from "@/app/theme";
 
+/** Display face for the Materia wordmark — geometric, loaded in index.html. */
+const display = '"Space Grotesk", "IBM Plex Sans", system-ui, sans-serif';
+
 export interface Step {
   readonly num: string;
   readonly label: string;
@@ -33,25 +36,26 @@ interface Props {
 export function WorkbenchHeader({ steps, active, onStep, version, exports }: Props): JSX.Element {
   return (
     <header className="wb-header" style={headerBar}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
         <div className="wb-header-mark" style={brandMark}>
-          <svg viewBox="0 0 20 20" width={26} height={26} aria-hidden>
-            <g fill="none" stroke="#fff" strokeWidth={1.3}>
-              <circle cx={10} cy={10} r={8.3} opacity={0.32} />
-              <circle cx={10} cy={10} r={5.2} opacity={0.62} />
-              <circle cx={10} cy={10} r={2.2} fill="#fff" stroke="none" />
-            </g>
+          {/* Materia monogram: geometric M with a small sprout in its centre notch. */}
+          <svg viewBox="0 0 100 100" width={28} height={28} aria-hidden>
+            <path d="M18 82 L18 20 L50 58 L82 20 L82 82" fill="none" stroke="#fff" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
+            <line x1={50} y1={57} x2={50} y2={43.5} stroke="#fff" strokeWidth={3.4} strokeLinecap="round" />
+            <ellipse cx={44.6} cy={40.6} rx={4.7} ry={2.2} fill="#fff" transform="rotate(-42 44.6 40.6)" />
+            <ellipse cx={55.4} cy={40.6} rx={4.7} ry={2.2} fill="#fff" transform="rotate(42 55.4 40.6)" />
           </svg>
         </div>
-        <div style={{ lineHeight: 1.2, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <span className="wb-header-title" style={{ fontSize: 21, fontWeight: 750, letterSpacing: "-0.022em", color: color.ink, whiteSpace: "nowrap" }}>
-              Web Refinement Workbench
+        <div style={{ lineHeight: 1.05, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 9, flexWrap: "wrap" }}>
+            <span className="wb-header-title" style={{ fontFamily: display, fontSize: 21, fontWeight: 600, letterSpacing: "0.14em", color: color.ink, whiteSpace: "nowrap" }}>
+              MATERIA
             </span>
+            <span style={betaBadge} title="Materia is in public beta — validate results against established tools before publication">beta</span>
             <span className="wb-version-chip" style={versionChip}>{version}</span>
           </div>
-          <div className="wb-header-kicker" style={{ fontSize: 12, color: color.faint, letterSpacing: "0.04em", marginTop: 2 }}>
-            Diffraction · Rietveld · Magnetic Symmetry
+          <div className="wb-header-sub" style={{ fontFamily: display, fontSize: 11, fontWeight: 500, letterSpacing: "0.36em", color: color.faint, marginTop: 3 }}>
+            WORKBENCH
           </div>
         </div>
       </div>
@@ -170,4 +174,17 @@ const versionChip: CSSProperties = {
   border: `1px solid ${color.border}`,
   borderRadius: radius.chip,
   padding: "2px 8px",
+};
+
+const betaBadge: CSSProperties = {
+  fontFamily: mono,
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: "0.09em",
+  textTransform: "uppercase",
+  color: color.noteInk,
+  background: color.noteBg,
+  border: `1px solid ${color.noteBorder}`,
+  borderRadius: radius.chip,
+  padding: "2px 7px",
 };

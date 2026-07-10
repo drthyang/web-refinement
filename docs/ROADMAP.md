@@ -1,6 +1,6 @@
 # Roadmap
 
-The single, authoritative plan for the Web Refinement Workbench. It supersedes
+The single, authoritative plan for Materia Workbench. It supersedes
 the earlier `ROADMAP`, `POWDER_ROADMAP`, and `MATURITY_PLAN` docs (the last two
 are kept for their granular detail in [`archive/`](./archive/)).
 
