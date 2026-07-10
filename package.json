@@ -13,12 +13,16 @@
     "test:ganb4se8": "GANB4SE8_REQUIRED=1 vitest run src/core/workflow/realPowderXRD.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit",
-    "screenshots": "node scripts/device-screenshots.mjs"
+    "screenshots": "node scripts/device-screenshots.mjs",
+    "build:mcp": "node scripts/build-mcp.mjs",
+    "mcp": "node scripts/build-mcp.mjs && node dist/mcp-server.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

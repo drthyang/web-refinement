@@ -100,9 +100,45 @@ agent-driven result is reproducible by replaying the same tool calls, and (as
 everywhere in this project) is not "validated" until a test or external
 comparison records it.
 
+## Running the MCP server
+
+Milestone 1 ships an MCP (stdio) server over the pure core, in
+[`src/mcp/`](../src/mcp). Build the self-contained bundle and point any
+MCP-capable client at it:
+
+```bash
+npm run build:mcp          # → dist/mcp-server.mjs (esbuild inlines the core)
+node dist/mcp-server.mjs   # speaks MCP over stdio
+```
+
+Register it with a client, e.g. Claude Desktop / Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "materia": { "command": "node", "args": ["/abs/path/dist/mcp-server.mjs"] }
+  }
+}
+```
+
+**Tools shipped:** `parse_structure`, `parse_powder_data`, `parse_instrument`,
+`build_refinement`, `refine_powder`, `assess_refinement`, `suggest_next_steps`,
+`interpret_structure`. The last three are the judgement layer — the "figure out
+what matters and guide the next step" surface — and live as pure, tested core in
+[`src/core/diagnostics/`](../src/core/diagnostics) (`assessment.ts`,
+`interpret.ts`), so the same functions can back a future in-app chat panel. The
+whole expert loop runs end to end on the real GaNb4Se8 dataset (see
+`src/mcp/tools.test.ts`).
+
 ## Status
 
-Not yet implemented — this document captures the plan so the core is built to
-stay tool-callable. The prerequisite (a pure, diagnostics-rich core) exists
-today; the tool/skill layer and the guidance loop are tracked in
-[ROADMAP §7](./ROADMAP.md).
+**Milestone 1 shipped:** the MCP tool layer above, with the judgement
+(`assess_refinement` / `suggest_next_steps`) and materials-interpretation
+(`interpret_structure`) tools that let an agent *reason* about a refinement, not
+just execute it — all in tested pure core.
+
+**Next:** package the guidance loop as a *skill* (`refine-structure`,
+`diagnose-fit`); add richer per-tool JSON schemas; single-crystal + magnetic
+assessment variants (in the single-crystal convention — R1/wR2/GooF, per the
+quality-panel boundary); and an in-app tool registry so the chat panel calls the
+same functions the buttons do. Tracked in [ROADMAP §7](./ROADMAP.md).
