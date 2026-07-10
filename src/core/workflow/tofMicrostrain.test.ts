@@ -26,15 +26,15 @@ describe("TOF anisotropic microstrain (Stephens)", () => {
   });
 
   it("buildPowderSpec emits Stephens params for TOF only when microstrain is on", () => {
-    expect(buildPowderSpec(structure, pattern, inst, true, 4, {}, false).params.some((p) => p.kind === "stephensStrain")).toBe(false);
-    const on = buildPowderSpec(structure, pattern, inst, true, 4, {}, true);
+    expect(buildPowderSpec(structure, pattern, inst, true, 4, {}, "isotropic").params.some((p) => p.kind === "stephensStrain")).toBe(false);
+    const on = buildPowderSpec(structure, pattern, inst, true, 4, {}, "generalized");
     expect(on.params.filter((p) => p.kind === "stephensStrain").length).toBeGreaterThan(0);
   });
 
   it("S=0 is identical to no-microstrain; S>0 broadens the TOF peaks (lower maxima)", () => {
     const setScale = (ps: typeof off.params) => ps.map((p) => (p.kind === "scale" ? { ...p, value: 1 } : p));
-    const off = buildPowderSpec(structure, pattern, inst, true, 4, {}, false);
-    const on = buildPowderSpec(structure, pattern, inst, true, 4, {}, true);
+    const off = buildPowderSpec(structure, pattern, inst, true, 4, {}, "isotropic");
+    const on = buildPowderSpec(structure, pattern, inst, true, 4, {}, "generalized");
     const cOff = powderCurves(structure, pattern, setScale(off.params), off.bindings, off.profile);
     const cOnS0 = powderCurves(structure, pattern, setScale(on.params), on.bindings, on.profile);
     // Seeded at zero → identical calc.

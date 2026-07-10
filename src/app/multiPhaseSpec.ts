@@ -17,7 +17,7 @@ import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { PowderPhase } from "@/core/workflow/multiPhase";
-import { buildPowderSpec, type SiteTies } from "@/app/powderSpec";
+import { buildPowderSpec, type SiteTies, type MustrainModel } from "@/app/powderSpec";
 
 /** Instrument rows shared across phases (one beam illuminates every phase). */
 const SHARED_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
@@ -38,13 +38,13 @@ export function buildMultiPhaseSpec(
   instrument: InstrumentParameters,
   backgroundTerms = 6,
   ties: SiteTies = {},
-  microstrain = false,
+  mustrain: MustrainModel = "isotropic",
 ): MultiPhaseSpec {
   const params: RefinementParameter[] = [];
   const bindings: ParameterBinding[] = [];
   let profile: PowderProfile | undefined;
   structures.forEach((structure, i) => {
-    const spec = buildPowderSpec(structure, pattern, instrument, true, backgroundTerms, ties, microstrain);
+    const spec = buildPowderSpec(structure, pattern, instrument, true, backgroundTerms, ties, mustrain);
     if (i === 0) profile = spec.profile;
     for (const p of spec.params) {
       if (SHARED_KINDS.has(p.kind)) { if (i === 0) params.push(p); continue; }

@@ -85,6 +85,14 @@ export interface SiteTies {
   readonly occupancyToUnity?: boolean;
 }
 
+/**
+ * Sample microstrain (Mustrain) model, GSAS-II-style:
+ *  - `isotropic`   — the Lorentzian Y term (Γ ∝ tanθ); always present, no extra rows.
+ *  - `uniaxial`    — equatorial/axial Y about the unique axis (Y⊥, Y∥).
+ *  - `generalized` — Stephens (1999) anisotropic S-parameters.
+ */
+export type MustrainModel = "isotropic" | "uniaxial" | "generalized";
+
 export function buildPowderSpec(
   structure: StructureModel,
   pattern: PowderPattern,
@@ -92,7 +100,7 @@ export function buildPowderSpec(
   lorentz = true,
   backgroundTerms = 4,
   ties: SiteTies = {},
-  microstrain = false,
+  mustrain: MustrainModel = "isotropic",
 ): PowderSpec {
   const tieOpts = {
     tieSharedPositions: ties.positions ?? true,
@@ -125,7 +133,9 @@ export function buildPowderSpec(
     const s = optimalScale(seedCurves.yObs.map((y) => (y > 0 ? y : 0)), seedCurves.yCalc);
     // Stephens anisotropic microstrain works for TOF too (hkl-dependent σ added in
     // quadrature to the TOF Gaussian; see buildTofPeaks). Fixed on load like CW.
-    const microOpt = microstrain ? { stephensStrain: true } : {};
+    // TOF supports isotropic (Lorentzian Y ⇒ σ) and generalized (Stephens) strain;
+    // uniaxial Mustrain is 2θ-CW only, so it falls back to isotropic here.
+    const microOpt = mustrain === "generalized" ? { stephensStrain: true } : {};
     const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof, ...microOpt, refineOccupancy: true, ...tieOpts });
     const params = spec.params.map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
     return { params, bindings: spec.bindings, profile };
@@ -158,7 +168,12 @@ export function buildPowderSpec(
   // Stephens (1999) anisotropic microstrain: one S-parameter per symmetry-allowed
   // quartic invariant, adding hkl-dependent Gaussian broadening. 2θ CW only, and
   // fixed on load (freed via the Microstructure group / guided sequence).
-  const microOpt = microstrain && caglioti ? { stephensStrain: true } : {};
+  // Mustrain model: isotropic (Lorentzian Y, always present) | uniaxial (Y⊥/Y∥
+  // about the c-axis) | generalized (Stephens). Anisotropic models need a
+  // Lorentzian (caglioti) profile to attach to.
+  const microOpt = caglioti && mustrain === "generalized" ? { stephensStrain: true }
+    : caglioti && mustrain === "uniaxial" ? { uniaxialStrain: { axis: [0, 0, 1] as [number, number, number] } }
+    : {};
   const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, ...microOpt, refineOccupancy: true, ...tieOpts });
   const params = spec.params.map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
   return { params, bindings: spec.bindings, profile };

@@ -21,7 +21,7 @@ import { braggTheta } from "@/core/crystal/unitCell";
 import { dFromTof } from "@/core/diffraction/instrument";
 import { synthesizePattern, cagliotiFwhm, lorentzianFwhm, tchPseudoVoigt, fcjSubPeaks, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
 import { evaluateBackground, type BackgroundType } from "@/core/diffraction/background";
-import { quarticStrainInvariants, stephensStrainFwhmDeg, stephensStrainSigmaTof, type QuarticInvariant } from "@/core/diffraction/anisoStrain";
+import { quarticStrainInvariants, stephensStrainFwhmDeg, stephensStrainSigmaTof, uniaxialStrainFwhmDeg, type QuarticInvariant } from "@/core/diffraction/anisoStrain";
 import { uniaxialSizeFwhmDeg } from "@/core/diffraction/anisoSize";
 
 /** Inclusive abscissa window that restricts refinement to a sub-range of the
@@ -190,6 +190,7 @@ export function placePeaks(
   const wavelength = pattern.radiation.kind !== "neutron-tof" ? pattern.radiation.wavelength : NaN;
   const useStephens = isCW && applied.stephensStrain !== undefined;
   const useUniaxial = isCW && applied.uniaxialSize !== undefined;
+  const useUniaxialStrain = isCW && applied.uniaxialStrain !== undefined && applied.lorentzian !== undefined;
   const invariants = useStephens ? strainInvariantsFor(applied) : null;
 
   const peaks: ProfilePeak[] = [];
@@ -208,6 +209,12 @@ export function placePeaks(
     let gammaL = useTch ? lorentzianFwhm(center, applied.lorentzian!) / 100 : 0;
     if (useUniaxial && hasHkl) {
       gammaL += uniaxialSizeFwhmDeg(p.h!, p.k!, p.l!, applied.model.cell, wavelength, applied.uniaxialSize!);
+    }
+    // Uniaxial anisotropic microstrain → replaces the isotropic Y·tanθ Lorentzian
+    // strain with a direction-dependent one (net-zero at the isotropic seed).
+    if (useUniaxialStrain && hasHkl) {
+      const isoStrain = (applied.lorentzian!.y * Math.tan((center / 2) * (Math.PI / 180))) / 100;
+      gammaL += uniaxialStrainFwhmDeg(p.h!, p.k!, p.l!, applied.model.cell, wavelength, applied.uniaxialStrain!) - isoStrain;
     }
     let fwhm: number;
     let eta: number | undefined;

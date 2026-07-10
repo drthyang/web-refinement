@@ -41,6 +41,8 @@ export type ParameterKind =
   | "stephensStrain"
   | "anisoSizePerp"
   | "anisoSizePar"
+  | "mustrainPerp"
+  | "mustrainPar"
   | "magneticScale"
   | "momentX"
   | "momentY"

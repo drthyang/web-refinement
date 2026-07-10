@@ -74,6 +74,9 @@ export interface AppliedModel {
    * coefficients about a unique reciprocal-lattice axis. Present only when bound.
    */
   readonly uniaxialSize?: { readonly xPerp: number; readonly xPar: number; readonly axis: [number, number, number] };
+  /** Uniaxial anisotropic microstrain: equatorial/axial Lorentzian coefficients
+   *  about a unique reciprocal-lattice axis. Present only when bound. */
+  readonly uniaxialStrain?: { readonly yPerp: number; readonly yPar: number; readonly axis: [number, number, number] };
   /** Moment-magnitude scale applied to magnetic moments. */
   readonly momentScale: number;
 }
@@ -115,6 +118,9 @@ export function applyParameters(
   let sizePerp: number | undefined;
   let sizePar: number | undefined;
   let sizeAxis: [number, number, number] | undefined;
+  let mustrainPerp: number | undefined;
+  let mustrainPar: number | undefined;
+  let mustrainAxis: [number, number, number] | undefined;
   const background: number[] = [];
   const tofCal = new Map<string, number>();
   const tofProf = new Map<string, number>();
@@ -241,6 +247,13 @@ export function applyParameters(
         sizePar = v;
         if (binding.axis) sizeAxis = [...binding.axis] as [number, number, number];
         break;
+      case "mustrainPerp":
+        mustrainPerp = v;
+        break;
+      case "mustrainPar":
+        mustrainPar = v;
+        if (binding.axis) mustrainAxis = [...binding.axis] as [number, number, number];
+        break;
     }
   }
 
@@ -279,6 +292,10 @@ export function applyParameters(
     sizePerp !== undefined || sizePar !== undefined
       ? { xPerp: sizePerp ?? 0, xPar: sizePar ?? sizePerp ?? 0, axis: sizeAxis ?? ([0, 0, 1] as [number, number, number]) }
       : undefined;
+  const uniaxialStrain =
+    mustrainPerp !== undefined || mustrainPar !== undefined
+      ? { yPerp: mustrainPerp ?? 0, yPar: mustrainPar ?? mustrainPerp ?? 0, axis: mustrainAxis ?? ([0, 0, 1] as [number, number, number]) }
+      : undefined;
 
   return {
     model: appliedModel,
@@ -291,6 +308,7 @@ export function applyParameters(
     extinction,
     ...(stephensStrain ? { stephensStrain } : {}),
     ...(uniaxialSize ? { uniaxialSize } : {}),
+    ...(uniaxialStrain ? { uniaxialStrain } : {}),
     ...(caglioti ? { caglioti } : {}),
     ...(lorentzian ? { lorentzian } : {}),
     ...(axial ? { axial } : {}),

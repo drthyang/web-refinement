@@ -139,6 +139,13 @@ export interface StructureRefinementOptions {
    * meaningful on a 2θ CW pattern. Off by default.
    */
   readonly uniaxialSize?: { readonly axis: readonly [number, number, number] };
+  /**
+   * Emit uniaxial anisotropic-microstrain parameters about a unique reciprocal
+   * axis: equatorial/axial Lorentzian coefficients (GSAS-II "uniaxial" Mustrain),
+   * seeded from the isotropic strain (`lorentzian.y`) so it starts isotropic. 2θ
+   * CW only. Off by default.
+   */
+  readonly uniaxialStrain?: { readonly axis: readonly [number, number, number] };
 }
 
 /**
@@ -222,6 +229,7 @@ export function buildStructureRefinement(
     refineAbsorption = false,
     stephensStrain = false,
     uniaxialSize,
+    uniaxialStrain,
   } = opts;
 
   const params: RefinementParameter[] = [];
@@ -423,6 +431,16 @@ export function buildStructureRefinement(
     bindings.push({ parameterId: "sizePar", kind: "anisoSizePar", targetId: pattern.id, axis: [...uniaxialSize.axis] });
   }
 
+  // Uniaxial anisotropic microstrain (GSAS-II "uniaxial" Mustrain): equatorial +
+  // axial Lorentzian coefficients about the axis, seeded from the isotropic strain.
+  if (uniaxialStrain) {
+    const seed = lorentzian?.y ?? 0;
+    params.push({ id: "mustrainPerp", label: "mustrain Y⊥", kind: "mustrainPerp", value: seed, initialValue: seed, min: 0, max: 200, fixed: false });
+    bindings.push({ parameterId: "mustrainPerp", kind: "mustrainPerp", targetId: pattern.id });
+    params.push({ id: "mustrainPar", label: "mustrain Y∥", kind: "mustrainPar", value: seed, initialValue: seed, min: 0, max: 200, fixed: false });
+    bindings.push({ parameterId: "mustrainPar", kind: "mustrainPar", targetId: pattern.id, axis: [...uniaxialStrain.axis] });
+  }
+
   return { params, bindings, restraints, stages: defaultStages() };
 }
 
@@ -582,7 +600,7 @@ export const DEFAULT_STAGE_KINDS: readonly StageKinds[] = [
   { name: "ADP", kinds: ["bIso", "uAniso"] },
   { name: "positions", kinds: ["positionShift"] },
   { name: "occupancy", kinds: ["occupancy"] },
-  { name: "microstructure", kinds: ["stephensStrain", "anisoSizePerp", "anisoSizePar"] },
+  { name: "microstructure", kinds: ["stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainPerp", "mustrainPar"] },
   { name: "corrections", kinds: ["poRatio", "absorption"] },
 ];
 

@@ -95,3 +95,35 @@ describe("Uniaxial size wiring", () => {
     expect(wAxial).toBeGreaterThan(0);
   });
 });
+
+describe("Uniaxial strain (Mustrain) wiring", () => {
+  const opts = {
+    caglioti: { u: 0, v: 0, w: 2 }, lorentzian: { x: 0, y: 20 },
+    refineAdp: false, refinePositions: false,
+  } as const;
+
+  it("emits Y⊥/Y∥ seeded from the isotropic Lorentzian Y and reduces to isotropic at the seed", () => {
+    const uni = buildStructureRefinement(structure, pattern, { ...opts, uniaxialStrain: { axis: [0, 0, 1] } });
+    const perp = uni.params.find((p) => p.kind === "mustrainPerp");
+    const par = uni.params.find((p) => p.kind === "mustrainPar");
+    expect(perp?.value).toBe(20);
+    expect(par?.value).toBe(20);
+    // At the seed (Y⊥ = Y∥ = isotropic Y) the uniaxial correction is net-zero:
+    // the calc is identical to the plain isotropic-Lorentzian spec (no double-count).
+    const isoSpec = buildStructureRefinement(structure, pattern, opts);
+    const cUni = powderCurves(structure, pattern, uni.params, uni.bindings, profile);
+    const cIso = powderCurves(structure, pattern, isoSpec.params, isoSpec.bindings, profile);
+    const maxDiff = Math.max(...cUni.yCalc.map((v, i) => Math.abs(v - cIso.yCalc[i]!)));
+    expect(maxDiff).toBeLessThan(1e-6 * Math.max(...cIso.yCalc, 1));
+  });
+
+  it("broadens the pattern (lower maxima) when Y∥ is raised above Y⊥, with no NaN", () => {
+    const uni = buildStructureRefinement(structure, pattern, { ...opts, uniaxialStrain: { axis: [0, 0, 1] } });
+    const base = powderCurves(structure, pattern, uni.params, uni.bindings, profile);
+    const strained = uni.params.map((p) => (p.id === "mustrainPar" ? { ...p, value: 200 } : p));
+    const comp = powderCurves(structure, pattern, strained, uni.bindings, profile);
+    expect(comp.yCalc.some((v) => Number.isNaN(v))).toBe(false);
+    // Extra axial strain broadens the (00l)-bearing overlaps → lower peak maxima.
+    expect(Math.max(...comp.yCalc)).toBeLessThan(Math.max(...base.yCalc));
+  });
+});

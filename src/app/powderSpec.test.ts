@@ -52,10 +52,10 @@ describe("buildPowderSpec", () => {
 
   it("emits Stephens anisotropic-microstrain S-parameters only when microstrain is on, fixed on load", () => {
     const inst: InstrumentParameters = { kind: "constantWavelength", wavelength: 0.7, u: -46, v: 0, w: 1.2, x: 0.1, zero: 0 };
-    const off = buildPowderSpec(structure, pattern, inst, true, 4, {}, false);
+    const off = buildPowderSpec(structure, pattern, inst, true, 4, {}, "isotropic");
     expect(off.params.some((p) => p.kind === "stephensStrain")).toBe(false);
 
-    const on = buildPowderSpec(structure, pattern, inst, true, 4, {}, true);
+    const on = buildPowderSpec(structure, pattern, inst, true, 4, {}, "generalized");
     const strain = on.params.filter((p) => p.kind === "stephensStrain");
     expect(strain.length).toBeGreaterThan(0); // ≥1 symmetry-allowed quartic invariant
     expect(strain.every((p) => p.fixed && p.value === 0)).toBe(true); // seeded at zero, fixed on load

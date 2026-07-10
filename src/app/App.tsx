@@ -12,7 +12,8 @@ import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { refine } from "@/core/refinement/engine";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
-import { buildPowderSpec, guidedPowderParams, type SiteTies, type PowderSpec } from "@/app/powderSpec";
+import { extractSizeStrain } from "@/core/diffraction/microstructure";
+import { buildPowderSpec, guidedPowderParams, type SiteTies, type PowderSpec, type MustrainModel } from "@/app/powderSpec";
 import { buildMultiPhaseSpec } from "@/app/multiPhaseSpec";
 import { multiPhaseCurves } from "@/core/workflow/multiPhase";
 import { DEFAULT_STAGE_KINDS, siteGroups } from "@/core/workflow/structureRefinement";
@@ -96,8 +97,8 @@ interface Session {
   siteTies: SiteTies;
   /** Refine anisotropic (U tensor) rather than isotropic (B_iso) ADPs. */
   anisotropicAdp?: boolean;
-  /** Emit Stephens anisotropic-microstrain S-parameters (2θ CW only). */
-  microstrain?: boolean;
+  /** Sample microstrain (Mustrain) model: isotropic | uniaxial | generalized. */
+  mustrain?: MustrainModel;
   /** GSAS-II's own calc/background overlay for a view-only (TOF) pattern. */
   powderOverlay?: { calc: number[]; background: number[] } | null;
   /** Provenance of the observed data driving the refinement. */
@@ -133,10 +134,10 @@ function newSession(structure: StructureModel, instrument: InstrumentParameters 
  */
 /** Build the powder spec for a session, branching to the multi-phase builder when
  *  the session carries extra phases (so every rebuild preserves all phases). */
-function buildSpecFor(structure: StructureModel, extraPhases: readonly StructureModel[], pattern: PowderPattern, instrument: InstrumentParameters, lorentz: boolean, backgroundTerms: number, ties: SiteTies, microstrain: boolean): PowderSpec {
+function buildSpecFor(structure: StructureModel, extraPhases: readonly StructureModel[], pattern: PowderPattern, instrument: InstrumentParameters, lorentz: boolean, backgroundTerms: number, ties: SiteTies, mustrain: MustrainModel): PowderSpec {
   return extraPhases.length > 0
-    ? buildMultiPhaseSpec([structure, ...extraPhases], pattern, instrument, backgroundTerms, ties, microstrain)
-    : buildPowderSpec(structure, pattern, instrument, lorentz, backgroundTerms, ties, microstrain);
+    ? buildMultiPhaseSpec([structure, ...extraPhases], pattern, instrument, backgroundTerms, ties, mustrain)
+    : buildPowderSpec(structure, pattern, instrument, lorentz, backgroundTerms, ties, mustrain);
 }
 
 function loadedSession(structure: StructureModel, pattern: PowderPattern, instrument: InstrumentParameters, extraPhases: StructureModel[] = []): Session {
@@ -411,7 +412,7 @@ export function App(): JSX.Element {
   function setBackgroundTerms(n: number): void {
     const count = Math.max(0, Math.min(24, Math.trunc(n)));
     setSession((s) => {
-      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true,count, s.siteTies, s.microstrain ?? false);
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true,count, s.siteTies, s.mustrain ?? "isotropic");
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -431,7 +432,7 @@ export function App(): JSX.Element {
   function setSiteTies(update: Partial<SiteTies>): void {
     setSession((s) => {
       const ties = { ...s.siteTies, ...update };
-      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true,s.backgroundTerms, ties, s.microstrain ?? false);
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true,s.backgroundTerms, ties, s.mustrain ?? "isotropic");
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -448,19 +449,18 @@ export function App(): JSX.Element {
   }
 
   /**
-   * Toggle Stephens (1999) anisotropic microstrain. Rebuilds the spec with one
-   * S-parameter per symmetry-allowed quartic invariant (seeded at zero — an
-   * isotropic starting point) while every other parameter keeps its current
-   * value/free state. The S rows are fixed on load; free them (Microstructure
-   * group) or run guided to refine, after the isotropic profile has converged.
+   * Set the sample microstrain (Mustrain) model: isotropic (Lorentzian Y only),
+   * uniaxial (equatorial/axial Y about the c-axis), or generalized (Stephens
+   * S-parameters). Rebuilds the spec — the new rows seed at the current isotropic
+   * strain and are fixed on load (free the Microstructure group or run guided).
    */
-  function setMicrostrain(on: boolean): void {
+  function setMustrain(model: MustrainModel): void {
     setSession((s) => {
-      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true,s.backgroundTerms, s.siteTies, on);
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, model);
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
-        microstrain: on,
+        mustrain: model,
         powderParams: spec.params.map((p) => {
           const old = previous.get(p.id);
           return old ? { ...p, value: old.value, initialValue: old.initialValue, fixed: old.fixed } : p;
@@ -470,9 +470,11 @@ export function App(): JSX.Element {
       };
     });
     setPowderResult(null);
-    setMessage(on
-      ? "Anisotropic microstrain on — Stephens S-parameters added (one per symmetry-allowed quartic invariant), seeded at zero. Free the Microstructure rows or run guided to refine."
-      : "Anisotropic microstrain off.");
+    setMessage(model === "isotropic"
+      ? "Microstrain: isotropic (Lorentzian Y). Refine the profile to fit; the microstrain readout shows its value."
+      : model === "uniaxial"
+        ? "Microstrain: uniaxial — equatorial/axial Y about the c-axis added, seeded from the isotropic value. Free the Microstructure rows or run guided."
+        : "Microstrain: generalized (Stephens) — one S-parameter per symmetry-allowed quartic invariant, seeded at zero. Free the Microstructure rows or run guided.");
   }
 
   /**
@@ -494,7 +496,7 @@ export function App(): JSX.Element {
       const refinedAdp = new Map(refined.sites.map((rs) => [rs.label, rs.adp]));
       const seeded = { ...s.structure, sites: s.structure.sites.map((site) => ({ ...site, adp: refinedAdp.get(site.label) ?? site.adp })) };
       const promoted = withAdpModel(seeded, on ? "anisotropic" : "isotropic");
-      const spec = buildSpecFor(promoted, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.microstrain ?? false);
+      const spec = buildSpecFor(promoted, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic");
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -614,7 +616,7 @@ export function App(): JSX.Element {
         const parsed = { ...raw, name };
         setSession((s) => {
           const extraPhases = [...s.extraPhases, parsed];
-          const spec = buildSpecFor(s.structure, extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.microstrain ?? false);
+          const spec = buildSpecFor(s.structure, extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic");
           const previous = new Map(s.powderParams.map((p) => [p.id, p]));
           return {
             ...s,
@@ -639,7 +641,7 @@ export function App(): JSX.Element {
   function onRemovePhase(id: string): void {
     setSession((s) => {
       const extraPhases = s.extraPhases.filter((p) => p.id !== id);
-      const spec = buildSpecFor(s.structure, extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.microstrain ?? false);
+      const spec = buildSpecFor(s.structure, extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic");
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -816,7 +818,7 @@ export function App(): JSX.Element {
             parsed.kind === "constantWavelength" && s.pattern.xUnit !== "tof"
               ? { ...s.pattern, radiation: { kind: parsed.radiationKind ?? "neutron", wavelength: parsed.wavelength }, wavelength: parsed.wavelength }
               : s.pattern;
-          const spec = buildSpecFor(s.structure, s.extraPhases, pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.microstrain ?? false);
+          const spec = buildSpecFor(s.structure, s.extraPhases, pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic");
           return { ...s, pattern, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile };
         });
         setPowderResult(null);
@@ -911,6 +913,27 @@ export function App(): JSX.Element {
     ? `a ${cell.a.toFixed(5)} · c ${cell.c.toFixed(5)} Å`
     : `a ${cell.a.toFixed(4)} · b ${cell.b.toFixed(4)} · c ${cell.c.toFixed(4)} Å`;
   const isSynthetic = powderSource === SYNTHETIC_SOURCE;
+
+  // Microstructure readout (GSAS-II-style): crystallite size + microstrain from the
+  // refined Lorentzian X (size) and Y (strain), deconvoluting the instrument seed
+  // (the initial X/Y from the calibration). CW (2θ) only — needs a wavelength.
+  const mustrainReadout = useMemo(() => {
+    if (pattern.xUnit !== "twoTheta" || pattern.radiation.kind === "neutron-tof") return null;
+    const px = powderParams.find((p) => p.kind === "profileX");
+    const py = powderParams.find((p) => p.kind === "profileY");
+    if (!px && !py) return null;
+    const wavelength = pattern.radiation.wavelength;
+    const xEsd = powderResult?.esd?.[px?.id ?? ""];
+    const yEsd = powderResult?.esd?.[py?.id ?? ""];
+    return extractSizeStrain({
+      x: px?.value ?? 0,
+      y: py?.value ?? 0,
+      wavelength,
+      ...(xEsd !== undefined ? { xEsd } : {}),
+      ...(yEsd !== undefined ? { yEsd } : {}),
+      instrument: { x: px?.initialValue ?? 0, y: py?.initialValue ?? 0 },
+    });
+  }, [powderParams, pattern.xUnit, pattern.radiation, powderResult]);
   const instParamMeta =
     instrument.kind === "tof"
       ? `difC ${instrument.difC.toFixed(1)}${instrument.difA ? ` · difA ${instrument.difA}` : ""}${instrument.difB ? ` · difB ${instrument.difB}` : ""} · Zero ${(instrument.zero ?? 0).toFixed(2)} µs`
@@ -1151,14 +1174,26 @@ export function App(): JSX.Element {
                           <input type="checkbox" checked={session.anisotropicAdp ?? false} onChange={(e) => setAnisotropicAdp(e.target.checked)} />
                           anisotropic
                         </label>
-                        {(
-                          <>
-                            <span style={{ ...themeLabel, marginLeft: 8, marginRight: 2 }} title="Anisotropic microstrain: hkl-dependent Gaussian peak broadening from a strain distribution (CW and TOF)">Microstrain</span>
-                            <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Stephens (1999) anisotropic microstrain — one S-parameter per symmetry-allowed quartic invariant, seeded at zero. Turn on after the isotropic profile has converged, then free the Microstructure rows (or run guided) to refine.">
-                              <input type="checkbox" checked={session.microstrain ?? false} onChange={(e) => setMicrostrain(e.target.checked)} />
-                              anisotropic
-                            </label>
-                          </>
+                        <span style={{ ...themeLabel, marginLeft: 8, marginRight: 2 }} title="Sample microstrain (Mustrain) model, GSAS-II-style: isotropic (Lorentzian Y), uniaxial (Y about a unique axis, 2θ only), or generalized (Stephens anisotropic).">Mustrain</span>
+                        <select
+                          value={session.mustrain ?? "isotropic"}
+                          onChange={(e) => setMustrain(e.target.value as MustrainModel)}
+                          style={bgSelect}
+                          title="Isotropic uses the Lorentzian Y (always present); uniaxial and generalized add anisotropic microstrain rows — free them (Microstructure) or run guided after the isotropic profile converges."
+                        >
+                          <option value="isotropic">isotropic</option>
+                          {session.pattern.xUnit === "twoTheta" && <option value="uniaxial">uniaxial</option>}
+                          <option value="generalized">generalized</option>
+                        </select>
+                      </div>
+                    )}
+                    {!tofViewOnly && mustrainReadout && (mustrainReadout.strainPpm.value > 0 || mustrainReadout.sampleY !== 0) && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 6, fontSize: 12, color: theme.secondary, fontFamily: themeMono }} title="Derived from the refined Lorentzian X (size) and Y (microstrain), with the instrument seed deconvoluted (GSAS-II microstrain = LY·π/72000·10⁶ ppm).">
+                        <span style={themeLabel}>Microstructure</span>
+                        <span>microstrain ≈ <b style={{ color: theme.ink }}>{mustrainReadout.strainPpm.value.toFixed(0)}</b>×10⁻⁶ ({mustrainReadout.strainPercent.value.toFixed(3)}%)
+                          {mustrainReadout.strainPpm.esd !== undefined ? ` ± ${mustrainReadout.strainPpm.esd.toFixed(0)}` : ""}</span>
+                        {Number.isFinite(mustrainReadout.sizeNm.value) && mustrainReadout.sizeNm.value > 0 && (
+                          <span>size ≈ <b style={{ color: theme.ink }}>{mustrainReadout.sizeNm.value.toFixed(0)}</b> nm</span>
                         )}
                       </div>
                     )}

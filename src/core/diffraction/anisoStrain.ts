@@ -40,8 +40,10 @@
  */
 
 import type { SymmetryOperation, UnitCell } from "@/core/crystal/types";
+import type { Vec3 } from "@/core/math/types";
 import { laueRotations } from "@/core/diffraction/merge";
 import { dSpacing, braggTheta } from "@/core/crystal/unitCell";
+import { cos2Psi } from "@/core/diffraction/anisoSize";
 
 /** A degree-4 monomial hᴴ kᴷ lᴸ, keyed "H,K,L". */
 const MONOMIALS: readonly [number, number, number][] = (() => {
@@ -230,4 +232,40 @@ export function stephensStrainSigmaTof(
   const sigmaD = 0.5 * d * d * d * Math.sqrt(w); // std dev of d (Å)
   const dTdd = cal.difC + 2 * (cal.difA ?? 0) * d - (cal.difB ?? 0) / (d * d);
   return Math.abs(dTdd) * sigmaD; // std dev in TOF (µs)
+}
+
+/**
+ * Uniaxial (GSAS-II "uniaxial") microstrain — a Lorentzian strain coefficient
+ * that varies between an equatorial value Y_⊥ and an axial value Y_∥ about a
+ * unique reciprocal axis, the direct analogue of the uniaxial *size* model:
+ *
+ *   Y(hkl) = Y_⊥ + (Y_∥ − Y_⊥)·cos²ψ ,   Γ_strain(2θ) = Y(hkl)·tanθ / 100
+ *
+ * cos²ψ (angle to the axis) uses the reciprocal metric, so it is correct for any
+ * cell. Y_∥ = Y_⊥ recovers the isotropic Lorentzian microstrain. Each coefficient
+ * converts to a microstrain through the same ε = π·Y/72000 relation GSAS-II uses.
+ */
+export interface UniaxialStrain {
+  readonly yPerp: number;
+  readonly yPar: number;
+  readonly axis: Vec3;
+}
+
+/** Uniaxial Lorentzian microstrain FWHM (degrees 2θ) for one reflection. */
+export function uniaxialStrainFwhmDeg(
+  h: number,
+  k: number,
+  l: number,
+  cell: UnitCell,
+  wavelength: number,
+  strain: UniaxialStrain,
+): number {
+  const d = dSpacing(cell, h, k, l);
+  if (!Number.isFinite(d) || d <= 0) return 0;
+  const theta = braggTheta(d, wavelength);
+  if (Number.isNaN(theta)) return 0;
+  const c2 = cos2Psi(cell, h, k, l, strain.axis);
+  const y = strain.yPerp + (strain.yPar - strain.yPerp) * c2;
+  if (y <= 0) return 0;
+  return (y * Math.tan(theta)) / 100; // centidegrees → degrees, tanθ shape
 }

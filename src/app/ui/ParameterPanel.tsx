@@ -40,6 +40,8 @@ const CATEGORY: Record<ParameterKind, string> = {
   stephensStrain: "Microstructure",
   anisoSizePerp: "Microstructure",
   anisoSizePar: "Microstructure",
+  mustrainPerp: "Microstructure",
+  mustrainPar: "Microstructure",
   magneticScale: "Magnetic",
   momentX: "Magnetic",
   momentY: "Magnetic",

@@ -6,6 +6,7 @@ import {
   quarticStrainInvariants,
   strainVarianceM,
   stephensStrainFwhmDeg,
+  uniaxialStrainFwhmDeg,
 } from "@/core/diffraction/anisoStrain";
 import { reciprocalTensorA } from "@/core/crystal/unitCell";
 
@@ -95,5 +96,37 @@ describe("stephensStrainFwhmDeg — physical broadening", () => {
     const inv = quarticStrainInvariants(buildSpaceGroup(225).operations);
     expect(stephensStrainFwhmDeg(1, 1, 1, cubic, wavelength, [-1, 0], inv)).toBe(0);
     void DEG;
+  });
+});
+
+describe("uniaxialStrainFwhmDeg (GSAS-II uniaxial Mustrain)", () => {
+  // Tetragonal cell, unique c-axis → (00l) is ‖ axis (cos²ψ=1), (hk0) is ⊥ (cos²ψ=0).
+  const tet: UnitCell = { a: 5, b: 5, c: 8, alpha: 90, beta: 90, gamma: 90 };
+  const lam = 1.5;
+  const axis: [number, number, number] = [0, 0, 1];
+
+  it("reduces to the isotropic Lorentzian Y (Γ = Y·tanθ/100) when Y⊥ = Y∥", () => {
+    const y = 12;
+    const iso = uniaxialStrainFwhmDeg(1, 1, 0, tet, lam, { yPerp: y, yPar: y, axis });
+    // Direct isotropic: Γ = Y·tanθ/100.
+    const dHK0 = 5 / Math.sqrt(2); // d(110) for a=5
+    const theta = Math.asin(lam / (2 * dHK0));
+    expect(iso).toBeCloseTo((y * Math.tan(theta)) / 100, 8);
+  });
+
+  it("is direction-dependent: (00l) picks Y∥, (hk0) picks Y⊥", () => {
+    const s = { yPerp: 4, yPar: 40, axis };
+    const along = uniaxialStrainFwhmDeg(0, 0, 2, tet, lam, s); // ‖ axis → uses Y∥=40
+    const perp = uniaxialStrainFwhmDeg(2, 2, 0, tet, lam, s); // ⊥ axis → uses Y⊥=4
+    // Same tanθ family aside, the ‖ coefficient is 10× the ⊥ one, so ‖ is broader
+    // per unit tanθ. Check the effective Y each picks up.
+    const yAlong = (along * 100) / Math.tan(Math.asin(lam / (2 * (8 / 2)))); // d(002)=c/2=4
+    const yPerp = (perp * 100) / Math.tan(Math.asin(lam / (2 * (5 / (2 * Math.SQRT2))))); // d(220)=a/(2√2)
+    expect(yAlong).toBeCloseTo(40, 4);
+    expect(yPerp).toBeCloseTo(4, 4);
+  });
+
+  it("returns 0 for a non-positive coefficient", () => {
+    expect(uniaxialStrainFwhmDeg(1, 0, 0, tet, lam, { yPerp: -5, yPar: -5, axis })).toBe(0);
   });
 });
