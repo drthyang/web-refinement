@@ -12,10 +12,12 @@ export interface SummaryCardData {
   readonly accept: string;
   readonly onFile: (file: File) => void;
   readonly chip: string;
+  /** Status chip tone: "ok" (green, default) or "warn" (red, e.g. synthetic data). */
+  readonly chipTone?: "ok" | "warn";
   readonly title: string;
   readonly meta: string;
-  /** Removable secondary phases, shown as chips with an × (multi-phase). */
-  readonly removablePhases?: readonly { id: string; label: string }[];
+  /** One badge per crystallographic phase (multi-phase); removable ones show an ×. */
+  readonly phaseBadges?: readonly { id: string; label: string; removable: boolean }[];
   readonly onRemovePhase?: (id: string) => void;
 }
 
@@ -37,17 +39,19 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
         <LoadButton label={data.loadLabel} accept={data.accept} onFile={data.onFile} />
       </div>
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        <span style={okChip}>{data.chip}</span>
-        {data.removablePhases && data.onRemovePhase && data.removablePhases.map((ph) => (
+        <span style={data.chipTone === "warn" ? warnChip : okChip}>{data.chip}</span>
+        {data.phaseBadges && data.phaseBadges.map((ph) => (
           <span key={ph.id} style={phaseChip}>
             {ph.label}
-            <button
-              onClick={() => data.onRemovePhase!(ph.id)}
-              title={`Remove the ${ph.label} phase`}
-              style={{ border: "none", background: "none", cursor: "pointer", color: color.secondary, fontSize: fz.small, lineHeight: 1, padding: 0 }}
-            >
-              ×
-            </button>
+            {ph.removable && data.onRemovePhase && (
+              <button
+                onClick={() => data.onRemovePhase!(ph.id)}
+                title={`Remove the ${ph.label} phase`}
+                style={{ border: "none", background: "none", cursor: "pointer", color: color.secondary, fontSize: fz.small, lineHeight: 1, padding: 0 }}
+              >
+                ×
+              </button>
+            )}
           </span>
         ))}
       </div>
@@ -108,4 +112,12 @@ const okChip: CSSProperties = {
   background: color.okBg,
   border: `1px solid ${color.okBorder}`,
   color: color.okInk,
+};
+
+/** Warning tone (red) — e.g. the synthetic-demo-data chip. */
+const warnChip: CSSProperties = {
+  ...okChip,
+  background: color.warnBg,
+  border: `1px solid ${color.warnBorder}`,
+  color: color.warnInk,
 };

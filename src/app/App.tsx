@@ -924,12 +924,20 @@ export function App(): JSX.Element {
         ? [structure, ...session.extraPhases].map((p) => `${p.name} ${p.spaceGroup.hermannMauguin ?? ""}`.trim()).join(" · ")
         : `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
       ...(session.extraPhases.length > 0
-        ? { removablePhases: session.extraPhases.map((p) => ({ id: p.id, label: p.name || p.id })), onRemovePhase }
+        ? {
+            // Badge every phase; the primary is the base (no ×), extras are removable.
+            phaseBadges: [
+              { id: structure.id, label: structure.name || "phase 1", removable: false },
+              ...session.extraPhases.map((p) => ({ id: p.id, label: p.name || p.id, removable: true })),
+            ],
+            onRemovePhase,
+          }
         : {}),
     },
     {
       label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
       chip: isSynthetic ? "⚠ synthetic" : "✓ loaded",
+      chipTone: isSynthetic ? "warn" : "ok",
       title: isSynthetic ? "Synthetic demo pattern" : powderSource,
       meta: `${pattern.points.length} points · ${UNIT_LABEL[pattern.xUnit]} ${patternExtent.min.toFixed(0)}–${patternExtent.max.toFixed(0)}`,
     },
