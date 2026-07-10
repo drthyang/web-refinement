@@ -132,9 +132,10 @@ nuclear and magnetic structures:
 
 - Load CIF structures, hkl reflection tables, and powder patterns.
 - Compute nuclear and magnetic structure factors and intensities.
-- Refine scale, coordinates, occupancies, displacement, lattice, background,
-  peak width, and magnetic moments — with fixed/free states, bounds, and
-  constraints.
+- Refine scale, coordinates, occupancies, displacement, lattice, background
+  (Chebyshev / Fourier / lin+log interpolation), peak width, microstructure
+  (crystallite size & microstrain, isotropic / uniaxial / generalized Mustrain),
+  and magnetic moments — with fixed/free states, bounds, and constraints.
 - Compare observed vs calculated, track refinement history, and export a
   reproducible project JSON.
 
