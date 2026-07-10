@@ -46,7 +46,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, onExportCsv, o
             <span style={versionChip}>{version}</span>
           </div>
           <div style={{ fontSize: 12, color: color.faint, letterSpacing: "0.04em", marginTop: 2 }}>
-            Powder diffraction · Rietveld · magnetic symmetry
+            Diffraction · Rietveld · Magnetic Symmetry
           </div>
         </div>
       </div>

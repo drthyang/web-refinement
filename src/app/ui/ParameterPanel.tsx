@@ -137,8 +137,8 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMag
       </div>
       <div style={footer}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={{ ...primaryButton, ...(busy || disabled ? disabledStyle : {}) }} disabled={busy || disabled} onClick={onRefine} title="Refine the free parameters against the loaded data">
-            {busy ? "Refining…" : "Refine"}
+          <button style={{ ...primaryButton, width: 132, textAlign: "center", ...(busy ? refiningStyle : disabled ? disabledStyle : {}) }} disabled={busy || disabled} onClick={onRefine} title="Refine the free parameters against the loaded data">
+            {busy ? <span className="wb-shimmer-text">Refining…</span> : "Refine"}
           </button>
           {onMagnetic && (
             <button
@@ -240,3 +240,5 @@ const footer: CSSProperties = { borderTop: `1px solid ${color.border}`, padding:
 const banner: CSSProperties = { borderRadius: 8, padding: "6px 10px", fontSize: 12 };
 const hcell: CSSProperties = { padding: "1px 10px 1px 0", textAlign: "left", color: color.faint };
 const disabledStyle: CSSProperties = { opacity: 0.55, cursor: "not-allowed" };
+// While refining, keep the button vivid (so the shimmer reads) but show progress.
+const refiningStyle: CSSProperties = { cursor: "progress" };

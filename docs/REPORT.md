@@ -2,10 +2,10 @@
 
 **Project:** Web Refinement Workbench — a browser-native refinement workbench for
 atomic and magnetic structures.
-**Date:** 2026-07-06
+**Date:** 2026-07-09
 **Stack:** React 18 · TypeScript 5 (strict) · Vite 5 · Vitest · Web Workers.
-**Status:** Working static app; **181 tests passing** (11 real-data tests skip
-without local `data/`); atomic **and magnetic**
+**Status:** Working static app; **531 tests passing** (53 real-data/slow tests
+skip without local `data/`); atomic **and magnetic**
 single-crystal + powder refinement, multi-phase, Le Bail extraction, and in-app
 magnetic space-group candidate generation & comparison; validated against the
 bundled GSAS-II refinements in `data/` (30 K / 200 K / 350 K).

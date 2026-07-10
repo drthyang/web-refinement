@@ -777,8 +777,17 @@ export function App(): JSX.Element {
     instrument.kind === "tof"
       ? `difC ${instrument.difC.toFixed(1)}${instrument.difA ? ` · difA ${instrument.difA}` : ""}${instrument.difB ? ` · difB ${instrument.difB}` : ""} · Zero ${(instrument.zero ?? 0).toFixed(2)} µs`
       : `λ ${instrument.wavelength} Å${instrument.zero ? ` · Zero ${instrument.zero}°` : ""}`;
-  // Prefix the facility (when the file named a known beamline) before the params.
-  const instMeta = instrumentLoaded && instrument.facility ? `${instrument.facility} · ${instParamMeta}` : instParamMeta;
+  // Instrument identity: "Beamline · Facility" when the loaded file named a known
+  // beamline (the common case). Fall back to the generic mode label + calibration
+  // params only when no beamline/facility is recognised.
+  const instBeamline = instrumentLoaded ? instrument.name : undefined;
+  const instFacility = instrumentLoaded ? instrument.facility : undefined;
+  const instIdentified = !!(instBeamline || instFacility);
+  const instTitle = instIdentified
+    ? [instBeamline, instFacility].filter(Boolean).join(" · ")
+    : instrument.kind === "tof" ? "Time-of-flight" : "Constant wavelength";
+  // "Beamline · Facility" says it all; only show calibration when unidentified.
+  const instMeta = instIdentified ? "" : instParamMeta;
   const summaryCards: SummaryCardData[] = [
     {
       label: "Structure", loadLabel: "Load CIF…", accept: ".cif,text/plain", onFile: onLoadCif,
@@ -795,11 +804,7 @@ export function App(): JSX.Element {
     {
       label: "Instrument", loadLabel: "Load instrument…", accept: ".instprm,.prm,.irf,text/plain", onFile: onLoadInstrument,
       chip: instrumentLoaded ? "✓ loaded" : "default",
-      // Show the beamline name when the loaded file names a known instrument;
-      // otherwise the generic mode label.
-      title: instrumentLoaded && instrument.name
-        ? `${instrument.name} · ${instrument.kind === "tof" ? "TOF" : "CW"}`
-        : instrument.kind === "tof" ? "Time-of-flight" : "Constant wavelength",
+      title: instTitle,
       meta: instMeta,
     },
   ];

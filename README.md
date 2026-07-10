@@ -62,10 +62,12 @@ This project aims to lower that barrier:
 - **One workflow instead of four ecosystems.** Single-crystal and powder,
   X-ray and neutron (constant-wavelength and time-of-flight), nuclear and
   magnetic — one shared refinement engine, one UI.
-- **Reads what you already have.** CIF/mCIF, hkl reflection lists,
-  plain-column powder data, GSAS-II `.instprm` instrument files — with format
-  auto-detection that reports *how* each decision was made and lets you
-  override it.
+- **Reads what you already have.** CIF/mCIF, hkl and FullProf `.int`
+  reflection lists, plain-column / GSAS `.gsa`·FXYE / ILL powder data, and
+  instrument files from GSAS-II (`.instprm`) and FullProf (`.irf` — CW
+  Caglioti and TOF, plus the D2B/3T2/G4.2 `INSTRM=6` variant) — with format
+  auto-detection that reports *how* each decision was made, lets you override
+  it, and names the beamline · facility when the file identifies one.
 - **Transparent by design.** A guided step-by-step procedure that starts from
   a small, safe set of choices; fit quality judged with F_obs vs F_calc and
   normal-probability plots, not wR alone. Every scientific function is pure,
@@ -88,7 +90,7 @@ This is a complement to the established packages, not a replacement — see
 commensurate single-k magnetic workflow.** The scientific core, Levenberg–
 Marquardt refinement engine, symmetry-adapted constrained parameters, CIF
 parsing, a 3D structure/moment viewer, plots, and Web Worker compute are
-implemented and tested (**293 tests**). Crystallographic and scattering
+implemented and tested (**531 tests**). Crystallographic and scattering
 foundations are validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
 

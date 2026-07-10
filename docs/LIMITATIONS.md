@@ -12,7 +12,7 @@ This statement appears in the app UI and the README, not only here.
 ## Current scope
 
 A working static app performs **atomic/nuclear structure refinement** for both
-single-crystal and powder data (293 passing tests), with the scientific
+single-crystal and powder data (531 passing tests), with the scientific
 foundations for magnetic refinement in place. The Levenberg–Marquardt engine,
 symmetry-adapted constrained parameters, Chebyshev / cosine / power-series
 backgrounds, Caglioti profile, Le Bail extraction, multi-phase powder, and

@@ -37,7 +37,7 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
         <span style={okChip}>{data.chip}</span>
       </div>
       <div style={{ fontSize: fz.large, fontWeight: 700, lineHeight: 1.25 }}>{data.title}</div>
-      <div style={{ fontSize: fz.small, color: color.secondary, fontFamily: mono }}>{data.meta}</div>
+      {data.meta && <div style={{ fontSize: fz.small, color: color.secondary, fontFamily: mono }}>{data.meta}</div>}
     </div>
   );
 }

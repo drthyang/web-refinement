@@ -14,6 +14,30 @@
   --fz-title: clamp(15px, 0.55vw + 12px, 22px);
 }
 
+/* "Refining…" shimmer: a bright band sweeps across the button text while a
+ * refinement runs, echoing Claude Code's working-state shimmer. Clipped to the
+ * glyphs so it reads as a sheen over the white label, not a moving background. */
+@keyframes wb-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.wb-shimmer-text {
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.5) 35%, #ffffff 50%, rgba(255, 255, 255, 0.5) 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: wb-shimmer 1.15s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-shimmer-text {
+    animation: none;
+    -webkit-text-fill-color: #fff;
+    color: #fff;
+  }
+}
+
 /* Main content column: fills the window on wide screens, comfortable gutters. */
 .wb-main {
   width: 100%;

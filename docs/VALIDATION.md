@@ -21,7 +21,7 @@ comparison recorded here.
 > reimplement independently (no code copied), but its outputs are our correctness
 > gate and must be cited. Full bibliography in [`REFERENCES.md`](./REFERENCES.md).
 
-## Test matrix (293 tests, all passing)
+## Test matrix (531 passing, 53 real-data/slow tests skipped without local `data/`)
 
 | Area | Test kind | Status |
 | --- | --- | --- |
@@ -47,6 +47,9 @@ comparison recorded here.
 | Magnetic moment magnitudes | golden (GSAS `.lst`) | ✅ `parsers/magneticCif.test.ts` |
 | GSAS reflection-list (Fo²/Fc²) parsing | golden | ✅ `parsers/magneticCif.test.ts` |
 | GSAS `.gsa` powder histogram (BANK/SLOG/FXYE) | unit + real POWGEN files | ✅ `parsers/gsasHistogram.test.ts` |
+| FullProf `.int` single-crystal reflections (fixed-width) | unit | ✅ `parsers/fullprofInt.test.ts` |
+| FullProf `.irf` + `INSTRM=6` (D2B/3T2/G4.2) instrument files | unit | ✅ `parsers/fullprofInstrm6.test.ts` |
+| ILL powder / numor + format auto-detection | unit | ✅ `parsers/illPowder.test.ts`, `parsers/detectFormat.test.ts` |
 | Magnetic single-crystal workflow + moment refinement | integration (GSAS structure) | ✅ `core/workflow/magneticWorkflow.test.ts` |
 | Magnetic candidate generation (k=0 index-2 subgroups) | golden (P2₁/m → P2₁'/m') | ✅ `core/magnetic/magneticGroups.test.ts` |
 | Allowed moment directions per site | golden (a–c plane) | ✅ `core/magnetic/magneticGroups.test.ts` |
