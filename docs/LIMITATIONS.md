@@ -94,7 +94,10 @@ accidental gap — each is tracked as a roadmap item.
 - **Refinement diagnostics.** Beyond R/wR/GoF, the Quality tab shows an
   **F_obs vs F_calc** plot (Rietveld-decomposed per reflection) and a **normal
   probability plot** (Abrahams & Keve 1971): a straight, slope-1, intercept-0 line
-  indicates a correct model *and* correctly-estimated uncertainties.
+  indicates a correct model *and* correctly-estimated uncertainties. The F_obs/F_calc
+  decomposition is multi-phase aware — every phase's peaks share the apportionment,
+  so an impurity peak overlapping a main-phase reflection is not miscredited to it,
+  and each phase's reflections are coloured to match its Bragg-tick row.
 - **Corrections modelled:** March–Dollase preferred orientation, Debye–Scherrer
   cylinder absorption, isotropic size (Scherrer) and microstrain broadening.
   **Not modelled:** anisotropic size / microstrain (Stephens), spherical-harmonic

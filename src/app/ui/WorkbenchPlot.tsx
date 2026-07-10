@@ -31,14 +31,14 @@ interface Props {
    * down to its Bragg position (on the matching phase row) and pans the view to
    * reveal it if it is off-screen.
    */
-  readonly highlight?: { readonly hkl: string; readonly kind: "nuclear" | "magnetic" } | null;
+  readonly highlight?: { readonly hkl: string; readonly kind: "nuclear" | "magnetic"; readonly phaseId?: string } | null;
   /**
    * Called when a Bragg tick is clicked (or the current pick is toggled off) —
    * the *same* selection channel as the F_obs/F_calc plot, so a tick click and a
    * scatter-point click share one spotlight and each replaces the other. Passes
-   * the tick's hkl + phase kind, or null to clear.
+   * the tick's hkl + phase kind + phase id, or null to clear.
    */
-  readonly onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic" } | null) => void;
+  readonly onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null) => void;
 }
 
 // Fixed plot geometry (SVG user units); the SVG stretches to its container.
@@ -209,16 +209,19 @@ export function WorkbenchPlot({
   }, [xs, yObs, vlo, vhi, vspan, yTop, XW]);
 
   // The single selected reflection (from a scatter-point OR a Bragg-tick click):
-  // locate its Bragg tick so we can spotlight that peak. Prefer the phase row
-  // whose *kind* matches (nuclear vs magnetic), so a magnetic satellite that
-  // shares an hkl with a nuclear peak (k = 0) lights the magnetic row; fall back
-  // to any hkl match. Both the tick emphasis and the arrow read from this, so a
-  // tick click and a scatter click resolve to exactly the same peak.
+  // locate its Bragg tick so we can spotlight that peak. Prefer the row whose
+  // *phase id* matches (so the right phase lights up when two phases share an
+  // hkl); then the row whose *kind* matches (a k = 0 magnetic satellite sharing
+  // an hkl with a nuclear peak lights the magnetic row); then any hkl match. Both
+  // the tick emphasis and the arrow read from this, so a tick click and a scatter
+  // click resolve to exactly the same peak.
   const highlight = useMemo(() => {
     if (!highlightSel || !phases) return null;
+    const indexed = phases.map((p, row) => ({ p, row }));
     const rowsInOrder = [
-      ...phases.map((p, row) => ({ p, row })).filter(({ p }) => p.kind === highlightSel.kind),
-      ...phases.map((p, row) => ({ p, row })).filter(({ p }) => p.kind !== highlightSel.kind),
+      ...indexed.filter(({ p }) => highlightSel.phaseId !== undefined && p.id === highlightSel.phaseId),
+      ...indexed.filter(({ p }) => p.kind === highlightSel.kind),
+      ...indexed.filter(({ p }) => p.kind !== highlightSel.kind),
     ];
     for (const { p, row } of rowsInOrder) {
       const t = p.ticks.find((tk) => tk.hkl === highlightSel.hkl);
@@ -242,7 +245,7 @@ export function WorkbenchPlot({
             if (t.x < vlo || t.x > vhi) return null;
             const picked = !!highlight && highlight.row === row && highlight.hkl === t.hkl;
             const toggle = (): void =>
-              onHighlight?.(picked ? null : { hkl: t.hkl, kind: phase.kind });
+              onHighlight?.(picked ? null : { hkl: t.hkl, kind: phase.kind, phaseId: phase.id });
             return (
               <g key={i} className="wb-tick" style={{ cursor: "pointer" }} onClick={toggle}>
                 <line
@@ -274,7 +277,7 @@ export function WorkbenchPlot({
     if (max > fullMax) { max = fullMax; min = fullMax - span; }
     setView({ min: Math.max(min, fullMin), max: Math.min(max, fullMax) });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- react to the pick only
-  }, [highlightSel?.hkl, highlightSel?.kind]);
+  }, [highlightSel?.hkl, highlightSel?.kind, highlightSel?.phaseId]);
 
   // Y / X nice ticks.
   const yStep = niceNum(yTop / 4, true);

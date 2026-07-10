@@ -36,6 +36,19 @@ function isSharedBinding(b: ParameterBinding): boolean {
   return SHARED_KINDS.has(b.kind);
 }
 
+/**
+ * The bindings that act on one phase: that phase's own parameters (routed by
+ * `targetId`) plus every shared instrument/profile binding. Exported so the
+ * F_obs/F_calc decomposition (obsCalc.ts) routes bindings to each phase exactly
+ * as `computePattern` does here — the two must place identical peaks.
+ */
+export function phaseBindingsFor(
+  bindings: readonly ParameterBinding[],
+  phaseId: string,
+): ParameterBinding[] {
+  return bindings.filter((b) => b.targetId === phaseId || isSharedBinding(b));
+}
+
 /** Compute the combined multi-phase calculated pattern for given parameter values. */
 function computePattern(
   phases: readonly PowderPhase[],
@@ -48,8 +61,7 @@ function computePattern(
   const allPeaks: ProfilePeak[] = [];
   let background: number[] = [];
   for (const phase of phases) {
-    const phaseBindings = bindings.filter((b) => b.targetId === phase.id || isSharedBinding(b));
-    const applied = applyParameters(phase.structure, phaseBindings, values);
+    const applied = applyParameters(phase.structure, phaseBindingsFor(bindings, phase.id), values);
     allPeaks.push(...buildPeaks(pattern, applied));
     if (applied.background.length) background = applied.background;
   }

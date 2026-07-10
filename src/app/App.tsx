@@ -182,7 +182,7 @@ export function App(): JSX.Element {
   const [plotMode, setPlotMode] = useState<"curves" | "structure" | "validation">("curves");
   // Reflection clicked in the F_obs/F_calc plot, spotlighted in the pattern
   // plot; null = nothing highlighted.
-  const [highlight, setHighlight] = useState<{ hkl: string; kind: "nuclear" | "magnetic" } | null>(null);
+  const [highlight, setHighlight] = useState<{ hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null>(null);
   const [instrument, setInstrument] = useState<InstrumentParameters>(example.instrument);
   const [instrumentLoaded, setInstrumentLoaded] = useState(true);
   // Once the user has loaded their own primary structure (replacing the bundled
@@ -324,7 +324,10 @@ export function App(): JSX.Element {
     const dMax = Math.max(dA, dB);
     const toX = (d: number): number => convertAxisValue(d, "dSpacing", effectiveUnit, axisCtx);
     const phases = [
-      nuclearPhaseTicks(structure, dMin, dMax, toX, { id: "nuclear", label: structure.name || "nuclear", color: PHASE_COLORS[0] }),
+      // id = structure.id so it matches the F_obs/F_calc decomposition's phaseId
+      // (obsCalc tags the primary phase with structure.id), keeping the two plots'
+      // click-to-spotlight in sync per phase.
+      nuclearPhaseTicks(structure, dMin, dMax, toX, { id: structure.id, label: structure.name || "nuclear", color: PHASE_COLORS[0] }),
     ];
     // One Bragg-tick row per additional crystallographic phase, coloured distinctly.
     session.extraPhases.forEach((ph, i) => {
@@ -1134,6 +1137,7 @@ export function App(): JSX.Element {
                   <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
                     <QualityPanel
                       structure={structure}
+                      extraPhases={session.extraPhases}
                       pattern={pattern}
                       params={powderParams}
                       bindings={pBindings}
@@ -1298,6 +1302,7 @@ function qualityInk(gof: number | null): string {
 
 function QualityPanel({
   structure,
+  extraPhases,
   pattern,
   params,
   bindings,
@@ -1308,27 +1313,38 @@ function QualityPanel({
   fitRange,
 }: {
   structure: StructureModel;
+  /** Secondary crystallographic phases — decomposed alongside the primary so an
+   *  overlapping impurity peak's counts are not credited to the primary phase. */
+  extraPhases?: readonly StructureModel[];
   pattern: PowderPattern;
   params: readonly RefinementParameter[];
   bindings: readonly ParameterBinding[];
   profile: PowderProfile;
   /** Magnetic model, if any — adds magnetic satellites to the F_obs/F_calc plot. */
   magnetic?: MagneticModel | null;
-  /** Spotlight a reflection (its "h k l" + kind) in the pattern plot; null clears it. */
-  onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic" } | null) => void;
+  /** Spotlight a reflection (its "h k l" + kind + phase) in the pattern plot; null clears it. */
+  onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null) => void;
   /** The shared selection, so a Bragg-tick click highlights the matching scatter point. */
-  selected?: { hkl: string; kind: "nuclear" | "magnetic" } | null;
+  selected?: { hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null;
   /** Active fit window (pattern x-unit); reflections outside it are hidden from the scatter. */
   fitRange?: { min: number; max: number } | null;
 }): JSX.Element {
   // Validation plots (Rietveld obs/calc + normal probability) for the current fit.
+  const phasesKey = (extraPhases ?? []).map((p) => p.id).join(",");
   const diagnostics = useMemo(() => {
-    const obsCalc = powderReflectionObsCalc(structure, pattern, params, bindings, profile, magnetic ?? null, fitRange ?? null);
-    const curves = powderCurves(structure, pattern, params, bindings, profile);
+    const extras = extraPhases ?? [];
+    const obsCalc = powderReflectionObsCalc(structure, pattern, params, bindings, profile, magnetic ?? null, fitRange ?? null, extras);
+    // Residuals for the normal-probability plot use the *total* calculated
+    // pattern, so with impurity phases present it sums every phase (else the
+    // missing impurity peaks would read as large false residuals).
+    const curves = extras.length > 0
+      ? multiPhaseCurves([{ structure, id: structure.id }, ...extras.map((s) => ({ structure: s, id: s.id }))], pattern, params, bindings, profile)
+      : powderCurves(structure, pattern, params, bindings, profile);
     const sigmas = pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1));
     const npp = normalProbabilityPlot(weightedResiduals(curves.yObs, curves.yCalc, sigmas));
     return { obsCalc, npp };
-  }, [structure, pattern, params, bindings, profile, magnetic, fitRange?.min, fitRange?.max]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [structure, phasesKey, pattern, params, bindings, profile, magnetic, fitRange?.min, fitRange?.max]);
 
   // Rendered inside the pattern-plot card's "Validation" view mode; the toggle
   // labels it, so no heading here — just the plots side by side.

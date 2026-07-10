@@ -9,11 +9,23 @@
 
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import type { NormalProbabilityPlot } from "@/core/refinement/diagnostics";
-import { MAGNETIC_COLOR } from "@/visualization/reflectionTicks";
+import { MAGNETIC_COLOR, PHASE_COLORS } from "@/visualization/reflectionTicks";
 import { color as theme, mono as themeMono, fz } from "@/app/theme";
 
-/** Point colour by reflection kind — matches the plot's Bragg tick rows. */
-const kindColor = (kind: ReflectionObsCalc["kind"]): string => (kind === "magnetic" ? MAGNETIC_COLOR : theme.primary);
+/** A selection shared with the pattern plot: which reflection is spotlighted. */
+type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: string };
+
+/**
+ * Point colour matching the pattern plot's Bragg tick rows: magnetic satellites
+ * get the magnetic colour, and each crystallographic phase its own colour. With
+ * a single nuclear phase (or the single-crystal path, which carries no phase
+ * index) the nuclear points keep the primary theme colour, unchanged.
+ */
+function pointColor(row: ReflectionObsCalc, multiPhase: boolean): string {
+  if (row.kind === "magnetic") return MAGNETIC_COLOR;
+  if (!multiPhase) return theme.primary;
+  return PHASE_COLORS[(row.phaseIndex ?? 0) % PHASE_COLORS.length]!;
+}
 
 // SVG user-space size; the rendered box is fluid (viewBox + width:100%).
 const SIZE = 300;
@@ -31,17 +43,17 @@ export function QualityPlots({ obsCalc, npp, stacked = false, onHighlight, selec
   /** One figure per row (for a narrow side rail) instead of reflowing columns. */
   stacked?: boolean;
   /**
-   * Called with the reflection behind a clicked F_obs/F_calc point — its "h k l"
-   * and kind (null on deselect) — so the caller can spotlight it in the pattern
-   * plot on the matching (nuclear/magnetic) Bragg row.
+   * Called with the reflection behind a clicked F_obs/F_calc point — its "h k l",
+   * kind, and phase (null on deselect) — so the caller can spotlight it in the
+   * pattern plot on the matching phase's Bragg row.
    */
-  onHighlight?: (sel: { hkl: string; kind: ReflectionObsCalc["kind"] } | null) => void;
+  onHighlight?: (sel: Selection | null) => void;
   /**
    * The shared selection (owned by the parent), so a Bragg-tick click in the
    * pattern plot highlights the matching scatter point here too — one selection
    * across both plots.
    */
-  selected?: { hkl: string; kind: ReflectionObsCalc["kind"] } | null;
+  selected?: Selection | null;
 }): JSX.Element {
   return (
     <div style={{ display: "grid", gridTemplateColumns: stacked ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))", gap: stacked ? 12 : 20, marginTop: 4 }}>
@@ -53,18 +65,22 @@ export function QualityPlots({ obsCalc, npp, stacked = false, onHighlight, selec
 
 export function FobsFcalc({ rows, onHighlight, selected = null }: {
   rows: readonly ReflectionObsCalc[];
-  onHighlight?: (sel: { hkl: string; kind: ReflectionObsCalc["kind"] } | null) => void;
-  selected?: { hkl: string; kind: ReflectionObsCalc["kind"] } | null;
+  onHighlight?: (sel: Selection | null) => void;
+  selected?: Selection | null;
 }): JSX.Element {
   // Fully controlled by the parent's shared selection: the highlighted point is
   // the row matching `selected` (set by a click here OR a Bragg-tick click in the
-  // pattern plot), and clicking a point toggles that same selection.
+  // pattern plot), and clicking a point toggles that same selection. Match the
+  // phase too when the selection carries one, so the same hkl in two phases stays
+  // distinct.
   const sel = selected
-    ? rows.findIndex((r) => `${r.h} ${r.k} ${r.l}` === selected.hkl && r.kind === selected.kind)
+    ? rows.findIndex((r) =>
+        `${r.h} ${r.k} ${r.l}` === selected.hkl && r.kind === selected.kind &&
+        (selected.phaseId === undefined || r.phaseId === selected.phaseId))
     : -1;
   const select = (i: number): void => {
     const r = rows[i]!;
-    onHighlight?.(i === sel ? null : { hkl: `${r.h} ${r.k} ${r.l}`, kind: r.kind });
+    onHighlight?.(i === sel ? null : { hkl: `${r.h} ${r.k} ${r.l}`, kind: r.kind, ...(r.phaseId !== undefined ? { phaseId: r.phaseId } : {}) });
   };
   const pts = rows.map((r) => ({ fc: Math.sqrt(Math.max(r.iCalc, 0)), fo: Math.sqrt(Math.max(r.iObs, 0)) }));
   const max = Math.max(1e-9, ...pts.map((p) => Math.max(p.fc, p.fo)));
@@ -73,6 +89,24 @@ export function FobsFcalc({ rows, onHighlight, selected = null }: {
   const selRow = sel >= 0 ? rows[sel] : undefined;
   const selPt = sel >= 0 ? pts[sel] : undefined;
   const magCount = rows.reduce((n, r) => n + (r.kind === "magnetic" ? 1 : 0), 0);
+  // Multi-phase once any reflection carries a non-primary phase index.
+  const multiPhase = rows.some((r) => (r.phaseIndex ?? 0) > 0);
+  // Legend entries: one per nuclear phase (in phase order) plus magnetic, built
+  // from the reflections actually present. Shown only when there is more than one
+  // series to distinguish (extra phases and/or magnetic satellites).
+  const legend: { label: string; color: string }[] = [];
+  if (multiPhase) {
+    const seen = new Map<number, { label: string; color: string }>();
+    for (const r of rows) {
+      if (r.kind !== "nuclear") continue;
+      const idx = r.phaseIndex ?? 0;
+      if (!seen.has(idx)) seen.set(idx, { label: r.phaseLabel ?? `phase ${idx + 1}`, color: PHASE_COLORS[idx % PHASE_COLORS.length]! });
+    }
+    legend.push(...[...seen.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v));
+  } else if (magCount > 0) {
+    legend.push({ label: "nuclear", color: theme.primary });
+  }
+  if (magCount > 0) legend.push({ label: "magnetic", color: MAGNETIC_COLOR });
   return (
     <figure style={{ margin: 0 }}>
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} style={svgStyle} role="img" aria-label="F observed vs F calculated">
@@ -84,21 +118,23 @@ export function FobsFcalc({ rows, onHighlight, selected = null }: {
           <g key={i} onClick={() => select(i)} style={{ cursor: "pointer" }}>
             {/* transparent halo = comfortable click target for a 2.6 px dot */}
             <circle cx={sx(p.fc)} cy={sy(p.fo)} r={7} fill="transparent" />
-            <circle cx={sx(p.fc)} cy={sy(p.fo)} r={2.6} fill={kindColor(rows[i]!.kind)} fillOpacity={0.55} />
+            <circle cx={sx(p.fc)} cy={sy(p.fo)} r={2.6} fill={pointColor(rows[i]!, multiPhase)} fillOpacity={0.55} />
           </g>
         ))}
-        {/* nuclear / magnetic legend (only when magnetic satellites are present) */}
-        {magCount > 0 && (
+        {/* Per-series legend (phases + magnetic), stacked in the sparse top-left. */}
+        {legend.length > 1 && (
           <g fontSize={9.5} fontFamily={themeMono}>
-            <circle cx={PAD + 6} cy={PAD - 2} r={2.6} fill={theme.primary} fillOpacity={0.7} />
-            <text x={PAD + 12} y={PAD + 1} fill={theme.secondary}>nuclear</text>
-            <circle cx={PAD + 54} cy={PAD - 2} r={2.6} fill={MAGNETIC_COLOR} fillOpacity={0.85} />
-            <text x={PAD + 60} y={PAD + 1} fill={theme.secondary}>magnetic</text>
+            {legend.map((item, i) => (
+              <g key={item.label}>
+                <circle cx={PAD + 6} cy={PAD + 2 + i * 12} r={2.6} fill={item.color} fillOpacity={0.8} />
+                <text x={PAD + 12} y={PAD + 5 + i * 12} fill={theme.secondary}>{item.label}</text>
+              </g>
+            ))}
           </g>
         )}
         {selPt && selRow && (
           <g pointerEvents="none">
-            <circle cx={sx(selPt.fc)} cy={sy(selPt.fo)} r={5.5} fill="none" stroke={kindColor(selRow.kind)} strokeWidth={1.6} />
+            <circle cx={sx(selPt.fc)} cy={sy(selPt.fo)} r={5.5} fill="none" stroke={pointColor(selRow, multiPhase)} strokeWidth={1.6} />
             <text
               x={sx(selPt.fc) < SIZE / 2 ? sx(selPt.fc) + 9 : sx(selPt.fc) - 9}
               y={Math.max(sy(selPt.fo) - 8, PAD + 10)}
@@ -117,7 +153,9 @@ export function FobsFcalc({ rows, onHighlight, selected = null }: {
       <figcaption style={cap}>
         {selRow ? (
           <span style={{ fontFamily: themeMono, color: theme.ink }}>
-            <span style={{ color: kindColor(selRow.kind), fontWeight: 600 }}>{selRow.kind === "magnetic" ? "mag " : ""}</span>
+            <span style={{ color: pointColor(selRow, multiPhase), fontWeight: 600 }}>
+              {selRow.kind === "magnetic" ? "mag " : multiPhase ? `${selRow.phaseLabel ?? ""} ` : ""}
+            </span>
             ({selRow.h} {selRow.k} {selRow.l}) · d {selRow.d.toFixed(4)} Å · F_obs {Math.sqrt(Math.max(selRow.iObs, 0)).toFixed(2)} · F_calc {Math.sqrt(Math.max(selRow.iCalc, 0)).toFixed(2)}
           </span>
         ) : (
