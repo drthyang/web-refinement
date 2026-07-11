@@ -111,9 +111,9 @@ export function fitOrientation(pairs: readonly NormalPair[]): OrientationFit {
   return { rotation, rmsAngleDeg };
 }
 
-/** Rotation matrix from a unit quaternion [x, y, z, w] (w scalar). */
+/** Rotation matrix from a quaternion [x, y, z, w] (w scalar); normalised defensively. */
 export function quaternionToMatrix(q: readonly [number, number, number, number]): Mat3 {
-  const [x, y, z, w] = q;
+  const [x, y, z, w] = normalizeQuat(q);
   return [
     [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
     [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
