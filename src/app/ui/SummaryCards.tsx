@@ -12,9 +12,8 @@ export interface SummaryCardData {
   readonly accept: string;
   readonly onFile: (file: File) => void;
   readonly chip: string;
-  /** Status chip tone: "ok" (green, default), "warn" (red, e.g. synthetic data),
-   *  or "muted" (neutral, e.g. nothing loaded yet). */
-  readonly chipTone?: "ok" | "warn" | "muted";
+  /** Status chip tone: "ok" (green, default) or "warn" (red, e.g. synthetic data). */
+  readonly chipTone?: "ok" | "warn";
   readonly title: string;
   readonly meta: string;
   /** One badge per crystallographic phase (multi-phase); removable ones show an ×. */
@@ -23,6 +22,9 @@ export interface SummaryCardData {
   /** Optional interactive control rendered under the meta line (e.g. the
    *  single-crystal X-ray/neutron probe toggle, which the data file can't carry). */
   readonly control?: ReactNode;
+  /** Placeholder (nothing loaded): drops the status chip and renders the title
+   *  as calm, lighter text so a clean start doesn't feel over-highlighted. */
+  readonly muted?: boolean;
 }
 
 export function SummaryCards({ cards }: { cards: readonly SummaryCardData[] }): JSX.Element {
@@ -36,31 +38,38 @@ export function SummaryCards({ cards }: { cards: readonly SummaryCardData[] }): 
 }
 
 function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
+  const badges = data.phaseBadges ?? [];
+  // Nothing loaded → skip the status chip entirely; a "none" pill is just noise.
+  const showChip = !data.muted && !!data.chip;
+  const showChipRow = showChip || badges.length > 0;
+  const chipStyle = data.chipTone === "warn" ? warnChip : okChip;
   return (
-    <div style={{ ...card, padding: "14px 18px", display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ ...card, padding: "15px 18px", display: "flex", flexDirection: "column", gap: 7 }}>
       <div style={{ display: "flex", alignItems: "center" }}>
         <span style={uppercaseLabel}>{data.label}</span>
         <LoadButton label={data.loadLabel} accept={data.accept} onFile={data.onFile} />
       </div>
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        <span style={data.chipTone === "warn" ? warnChip : data.chipTone === "muted" ? mutedChip : okChip}>{data.chip}</span>
-        {data.phaseBadges && data.phaseBadges.map((ph) => (
-          <span key={ph.id} style={phaseChip}>
-            {ph.label}
-            {ph.removable && data.onRemovePhase && (
-              <button
-                onClick={() => data.onRemovePhase!(ph.id)}
-                title={`Remove the ${ph.label} phase`}
-                style={{ border: "none", background: "none", cursor: "pointer", color: color.secondary, fontSize: fz.small, lineHeight: 1, padding: 0 }}
-              >
-                ×
-              </button>
-            )}
-          </span>
-        ))}
-      </div>
-      <div style={{ fontSize: fz.large, fontWeight: 700, lineHeight: 1.25 }}>{data.title}</div>
-      {data.meta && <div style={{ fontSize: fz.small, color: color.secondary, fontFamily: mono }}>{data.meta}</div>}
+      {showChipRow && (
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+          {showChip && <span style={chipStyle}>{data.chip}</span>}
+          {badges.map((ph) => (
+            <span key={ph.id} style={phaseChip}>
+              {ph.label}
+              {ph.removable && data.onRemovePhase && (
+                <button
+                  onClick={() => data.onRemovePhase!(ph.id)}
+                  title={`Remove the ${ph.label} phase`}
+                  style={{ border: "none", background: "none", cursor: "pointer", color: color.secondary, fontSize: fz.small, lineHeight: 1, padding: 0 }}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: fz.large, fontWeight: data.muted ? 500 : 640, color: data.muted ? color.secondary : color.ink, lineHeight: 1.3, letterSpacing: data.muted ? 0 : "-0.005em" }}>{data.title}</div>
+      {data.meta && <div style={{ fontSize: fz.small, color: data.muted ? color.faint : color.secondary, fontFamily: mono }}>{data.meta}</div>}
       {data.control && <div style={{ marginTop: 2 }}>{data.control}</div>}
     </div>
   );
@@ -127,10 +136,3 @@ const warnChip: CSSProperties = {
   color: color.warnInk,
 };
 
-/** Neutral tone (grey) — nothing loaded yet. */
-const mutedChip: CSSProperties = {
-  ...okChip,
-  background: color.chipBg,
-  border: `1px solid ${color.border}`,
-  color: color.faint,
-};

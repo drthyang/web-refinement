@@ -722,8 +722,8 @@ export function PowderWorkbench({
       loadLabel: ownStructure ? "Add CIF…" : "Load CIF…",
       accept: ".cif,text/plain",
       onFile: ownStructure ? onAddPhase : onLoadCif,
-      chip: !hasContent ? "none" : session.extraPhases.length > 0 ? `✓ ${session.extraPhases.length + 1} phases` : "✓ parsed",
-      chipTone: hasContent ? "ok" : "muted",
+      muted: !hasContent,
+      chip: session.extraPhases.length > 0 ? `✓ ${session.extraPhases.length + 1} phases` : "✓ parsed",
       title: !hasContent
         ? "No structure loaded"
         : session.extraPhases.length > 0
@@ -752,8 +752,9 @@ export function PowderWorkbench({
     },
     {
       label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
-      chip: !hasContent ? "none" : isSynthetic ? "⚠ synthetic" : "✓ loaded",
-      chipTone: !hasContent ? "muted" : isSynthetic ? "warn" : "ok",
+      muted: !hasContent,
+      chip: isSynthetic ? "⚠ synthetic" : "✓ loaded",
+      chipTone: isSynthetic ? "warn" : "ok",
       title: !hasContent ? "No data loaded" : isSynthetic ? "Synthetic demo pattern" : powderSource,
       meta: !hasContent
         ? "Load a pattern (.xye / .dat / .gsa …)"
@@ -761,8 +762,8 @@ export function PowderWorkbench({
     },
     {
       label: "Instrument", loadLabel: "Load instrument…", accept: ".instprm,.prm,.irf,text/plain", onFile: onLoadInstrument,
-      chip: !hasContent && !instrumentLoaded ? "none" : instrumentLoaded ? "✓ loaded" : "default",
-      chipTone: !hasContent && !instrumentLoaded ? "muted" : "ok",
+      muted: !hasContent && !instrumentLoaded,
+      chip: instrumentLoaded ? "✓ loaded" : "default",
       title: !hasContent && !instrumentLoaded ? "No instrument loaded" : instTitle,
       meta: !hasContent && !instrumentLoaded ? "Load .instprm / .prm / .irf" : instMeta,
     },
@@ -1212,7 +1213,7 @@ function EmptyWorkbench({ onLoadDemo }: { onLoadDemo?: () => void }): JSX.Elemen
           <path d="M7 14l3-4 3 3 5-7" />
         </svg>
       </div>
-      <div style={{ fontSize: 17, fontWeight: 700, color: theme.ink }}>No data loaded yet</div>
+      <div style={{ fontSize: 16.5, fontWeight: 600, color: theme.ink, letterSpacing: "-0.005em" }}>No data loaded yet</div>
       <p style={{ margin: 0, maxWidth: 430, fontSize: 13.5, lineHeight: 1.55, color: theme.secondary }}>
         Load a structure (CIF) and diffraction data with the cards above, or explore
         the bundled Mn₃Ga POWGEN example.
