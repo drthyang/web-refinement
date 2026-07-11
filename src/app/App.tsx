@@ -361,6 +361,9 @@ export function App(): JSX.Element {
         version={`v${APP_VERSION}`}
         exports={headerExports}
       />
+      <div style={disclaimerBar}>
+        Early browser-native refinement workbench — results for publication must be validated against established tools.
+      </div>
       {/* The powder engine stays mounted in single-crystal mode (hidden) so all
           its state — fit range, plot mode, k-search picks — survives switching. */}
       <PowderWorkbench
@@ -390,9 +393,6 @@ export function App(): JSX.Element {
           <SingleCrystalWorkbench key={scDataset.id} structure={structure} dataset={scDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadCif={onLoadCif} />
         </main>
       )}
-      <div style={disclaimerBar}>
-        Early browser-native refinement workbench — results for publication must be validated against established tools.
-      </div>
       <footer style={copyrightBar}>
         © 2026 Tsung-Han Yang. All rights reserved.
         <span style={{ margin: "0 8px", color: theme.border }}>·</span>
@@ -404,6 +404,6 @@ export function App(): JSX.Element {
   );
 }
 
-const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderTop: `1px solid ${theme.warnBorder}`, color: theme.warnInk };
+const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk };
 const copyrightBar: React.CSSProperties = { padding: "10px 24px", fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised, textAlign: "center" };
 const footerLink: React.CSSProperties = { color: theme.secondary, textDecoration: "none", borderBottom: `1px solid ${theme.border}` };
