@@ -144,14 +144,14 @@ export function App(): JSX.Element {
       return;
     }
     const ex = mn3gaPowgenExample();
-    setSession(loadedSession(ex.structure, ex.pattern, ex.instrument, ex.extraPhases));
+    setSession(loadedSession(ex.structure, ex.pattern, ex.instrument, ex.extraPhases, ex.refinedParams));
     setInstrument(ex.instrument);
     setInstrumentLoaded(true);
     setOwnStructure(false);
     setScDataset(null);
     setPowderResult(null);
     setDemoActive(true);
-    setMessage("Loaded the bundled Mn₃Ga + MnO POWGEN demo (two-phase TOF).");
+    setMessage("Loaded the bundled Mn₃Ga + MnO POWGEN demo (two-phase TOF, converged fit).");
   }
 
   /** Append a CIF as an additional crystallographic phase (multi-phase refinement),

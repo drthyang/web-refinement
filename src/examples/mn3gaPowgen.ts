@@ -50,7 +50,46 @@ export interface Mn3GaPowgenExample {
   readonly extraPhases: StructureModel[];
   readonly pattern: PowderPattern;
   readonly instrument: InstrumentParameters;
+  /** Converged parameter values (id → value) from refining scale + background +
+   *  lattice over the strong-signal TOF range (wR ≈ 3.9 %). Applied on load so the
+   *  demo opens on a finished refinement rather than the raw starting model. */
+  readonly refinedParams: Record<string, number>;
 }
+
+// Snapshot of a converged two-phase refinement (SCALE + BACKGROUND + LATTICE
+// free; profile/ADP/positions/occupancy fixed). Keyed by parameter id so it is
+// applied after the spec is (deterministically) rebuilt from the model.
+const REFINED_PARAMS: Record<string, number> = {
+  p0_scale: 1.3581250516797663,
+  bkg0: 46.07211585524351,
+  bkg1: -5.6413634577977545,
+  bkg2: -3.1873300394262327,
+  bkg3: -8.947195857624507,
+  p0_cell_a: 5.419642863882049,
+  p0_cell_c: 4.373657235070733,
+  tof_difC: 22585.8,
+  tof_difA: 0,
+  tof_difB: 0,
+  tof_alpha0: 0,
+  tof_alpha1: 200,
+  tof_beta0: 0.7871359754574907,
+  tof_beta1: 0.015683176112119435,
+  tof_sig0: 0,
+  tof_sig2: 559.4307113995054,
+  zero: 0.10901248683627304,
+  p0_B_Mn1: 1.1388706447443406,
+  p0_B_Ga1: 0.9197364345553262,
+  p0_pos_Mn1_0: 0.005151140106987724,
+  p0_occ_Mn1: 0.978,
+  p0_occ_Ga1: 1.005,
+  mustrainIso: 572.7488942595868,
+  p1_scale: 0.09721247471169062,
+  p1_cell_a: 4.456140831798685,
+  p1_B_Mn1: 0.6558506545847267,
+  p1_B_O1: 1.556512316996298,
+  p1_occ_Mn1: 1,
+  p1_occ_O1: 1,
+};
 
 let cached: Mn3GaPowgenExample | null = null;
 
@@ -65,6 +104,6 @@ export function mn3gaPowgenExample(): Mn3GaPowgenExample {
     xUnit: "tof",
     radiation: { kind: "neutron-tof" },
   });
-  cached = { structure, extraPhases: [mno], pattern, instrument: { kind: "tof", difC: DIF_C } };
+  cached = { structure, extraPhases: [mno], pattern, instrument: { kind: "tof", difC: DIF_C }, refinedParams: REFINED_PARAMS };
   return cached;
 }

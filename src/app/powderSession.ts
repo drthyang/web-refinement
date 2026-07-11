@@ -119,15 +119,24 @@ export function buildSpecFor(structure: StructureModel, extraPhases: readonly St
  * exponential profile (α/β/σ) plus fixed diffractometer constants — and
  * estimates the scale from the observed counts.
  */
-export function loadedSession(structure: StructureModel, pattern: PowderPattern, instrument: InstrumentParameters, extraPhases: StructureModel[] = []): Session {
+export function loadedSession(structure: StructureModel, pattern: PowderPattern, instrument: InstrumentParameters, extraPhases: StructureModel[] = [], paramValues?: Record<string, number>): Session {
   const spec = extraPhases.length > 0
     ? buildMultiPhaseSpec([structure, ...extraPhases], pattern, instrument, DEFAULT_BACKGROUND_TERMS, DEFAULT_TIES)
     : buildPowderSpec(structure, pattern, instrument, true, DEFAULT_BACKGROUND_TERMS, DEFAULT_TIES);
+  // Optionally seed converged values (the bundled demo opens on a finished
+  // refinement). The value becomes the baseline too, so it reads as clean, not
+  // "modified", and Reset returns to it.
+  const powderParams = paramValues
+    ? spec.params.map((p) => {
+        const v = paramValues[p.id];
+        return v !== undefined ? { ...p, value: v, initialValue: v } : p;
+      })
+    : spec.params;
   return {
     structure,
     extraPhases,
     pattern,
-    powderParams: spec.params,
+    powderParams,
     powderBindings: spec.bindings,
     powderProfile: spec.profile,
     backgroundTerms: DEFAULT_BACKGROUND_TERMS,

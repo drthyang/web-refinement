@@ -26,9 +26,14 @@ async function preparePage(context) {
   const page = await context.newPage();
   await page.goto(BASE, { waitUntil: "networkidle" });
   await page.waitForSelector("header");
-  // Run the real refinement so the screenshots show a converged fit
-  // (wR ~8% two-phase Mn₃Ga + MnO) instead of the unrefined overlay.
-  await page.getByRole("button", { name: "Refine", exact: true }).click();
+  // The workbench opens clean; load the bundled demo (it opens on the converged
+  // two-phase Mn₃Ga + MnO fit).
+  await page.getByRole("button", { name: "Demo", exact: true }).click();
+  const refine = page.getByRole("button", { name: "Refine", exact: true });
+  await refine.waitFor({ timeout: 15000 });
+  // Run the refinement so the parameter table shows final values with esds
+  // (converges in ~2 cycles from the seeded fit; wR ~3.9%).
+  await refine.click();
   await page.waitForSelector("text=Result: converged", { timeout: 60000 });
   // Let the plot repaint with the final curves.
   await page.waitForTimeout(600);

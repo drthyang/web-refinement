@@ -16,7 +16,7 @@ fully static GitHub Pages app; nothing to install, and your data never leaves
 your machine.
 
 <p align="center">
-  <img src="docs/screenshots/desktop.png" alt="Two-phase Mn₃Ga + MnO Rietveld refinement of POWGEN time-of-flight data, converged at wR 8.16%: observed/calculated/difference curves, per-phase Bragg ticks, and the symmetry-allowed parameter table with esds" width="100%" />
+  <img src="docs/screenshots/desktop.png" alt="Two-phase Mn₃Ga + MnO Rietveld refinement of POWGEN time-of-flight data, converged at wR 3.86%: observed/calculated/difference curves, per-phase Bragg ticks, and the symmetry-allowed parameter table with esds" width="100%" />
 </p>
 <p align="center"><sub>
 A converged two-phase TOF Rietveld fit (Mn₃Ga + MnO impurity, POWGEN) in the
