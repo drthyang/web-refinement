@@ -834,19 +834,15 @@ export function PowderWorkbench({
                       focusPeakToken={focusPeakToken}
                       highlight={highlight}
                       onHighlight={setHighlight}
-                      {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
+                      xShort={axisShortLabel(effectiveUnit)}
+                      {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay, onResetFitRange: () => setFitRange(null) })}
                     />
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
                       {tofViewOnly
                         ? session.powderOverlay
                           ? "Observed (points) with GSAS-II fit overlay."
                           : "Observed TOF pattern — view-only (load a TOF instrument with difC to refine)."
-                        : `Powder${powderIsTof ? " (TOF) · back-to-back-exponential profile" : ""}`}
-                      {fitRangeActive && ` · fit range ${displayFitRange.min.toFixed(2)}–${displayFitRange.max.toFixed(2)} ${axisShortLabel(effectiveUnit)}`}
-                      {!tofViewOnly && " · drag across the plot to zoom, blue handles to set the fit range."}
-                      {fitRangeActive && (
-                        <button style={smallBtn} onClick={() => setFitRange(null)}>Reset range</button>
-                      )}
+                        : "Drag across the plot to zoom, blue handles to set the fit range."}
                     </p>
                     {!tofViewOnly && mustrainReadout && (mustrainReadout.strainPpm.value > 0 || mustrainReadout.sampleY !== 0) && (
                       <div style={{ display: "flex", alignItems: "center", gap: 14, rowGap: 5, marginTop: 6, fontSize: 12, color: theme.secondary, fontFamily: themeMono, flexWrap: "wrap" }} title="Derived from the refined Lorentzian X (size) and Y (microstrain), with the instrument seed deconvoluted (GSAS-II microstrain = LY·π/72000·10⁶ ppm).">
@@ -1117,7 +1113,6 @@ function ViewModeToggle({
 
 const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 700, color: theme.ink };
 const stepHelp: React.CSSProperties = { fontSize: 13, color: theme.secondary, marginTop: 0 };
-const smallBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "1px 9px", fontSize: 11, cursor: "pointer", marginLeft: 6 };
 const toolbarBtn: React.CSSProperties = { border: `1px solid ${theme.primary}`, background: "#fff", color: theme.primary, borderRadius: 8, padding: "3px 11px", fontSize: 11, fontWeight: 600, fontFamily: themeMono, cursor: "pointer" };
 const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "2px 6px", fontSize: 12, color: theme.ink, cursor: "pointer" };
 const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };

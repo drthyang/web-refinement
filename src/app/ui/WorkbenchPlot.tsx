@@ -21,6 +21,10 @@ interface Props {
   readonly xLabel: string;
   readonly fitRange?: FitRangeSelection;
   readonly onFitRangeChange?: (range: FitRangeSelection) => void;
+  /** Clears the fit range — backs the in-plot "Reset range" control. */
+  readonly onResetFitRange?: () => void;
+  /** Short x-unit (e.g. "TOF", "Å") for the in-plot fit-range readout. */
+  readonly xShort?: string;
   readonly phases?: readonly PhaseTicks[];
   readonly showBackground?: boolean;
   /** Increment to zoom the view onto the active fit range (no-op without one). */
@@ -86,6 +90,8 @@ export function WorkbenchPlot({
   xLabel,
   fitRange,
   onFitRangeChange,
+  onResetFitRange,
+  xShort,
   phases,
   showBackground = true,
   focusFitToken = 0,
@@ -530,11 +536,16 @@ export function WorkbenchPlot({
           <span style={{ fontSize: 11, color: color.secondary }}>{highlight.label}</span>
         </div>
       )}
+      {fitActive && onResetFitRange && !highlight && (
+        <div style={fitRangeOverlay}>
+          <span style={{ fontFamily: mono, fontSize: 11, color: color.secondary }}>
+            fit {formatX(fitLo, vspan)}–{formatX(fitHi, vspan)}{xShort ? ` ${xShort}` : ""}
+          </span>
+          <SmallButton onClick={onResetFitRange}>Reset range</SmallButton>
+        </div>
+      )}
       {zoomed && (
         <div style={zoomOverlay}>
-          <span style={{ fontFamily: mono, fontSize: 11, color: color.secondary }}>
-            view {formatX(vlo, vspan)}–{formatX(vhi, vspan)}
-          </span>
           <SmallButton onClick={zoomOut}>Zoom out</SmallButton>
           <SmallButton onClick={() => setView(null)}>Reset zoom</SmallButton>
         </div>
@@ -558,4 +569,5 @@ function SmallButton({ children, onClick }: { children: React.ReactNode; onClick
 }
 
 const zoomOverlay: CSSProperties = { position: "absolute", bottom: 6, right: 8, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,253,249,0.85)", borderRadius: 8, padding: "3px 6px" };
+const fitRangeOverlay: CSSProperties = { position: "absolute", top: 6, right: 8, display: "flex", alignItems: "center", gap: 7, background: "rgba(255,253,249,0.92)", border: `1px solid ${color.border}`, borderRadius: 8, padding: "3px 8px" };
 const tickPickOverlay: CSSProperties = { position: "absolute", top: 6, right: 8, display: "flex", alignItems: "center", gap: 7, background: "rgba(255,253,249,0.92)", border: `1px solid ${color.border}`, borderRadius: 8, padding: "3px 9px", cursor: "pointer" };
