@@ -180,9 +180,13 @@ function ParamRow({ param, esd, onChange, disabled }: { param: RefinementParamet
   const locked = isLocked(param);
   const [buf, setBuf] = useState<string | null>(null);
   const shown = buf ?? String(+param.value.toFixed(5));
-  const commit = (): void => {
-    if (buf === null) return;
-    const v = Number(buf);
+  // Commit the edited value. `raw` (passed on Enter) is read straight from the
+  // input, so a keypress applies even if React hasn't flushed the buffered state
+  // yet — otherwise Enter could no-op and the profile would look unresponsive.
+  const commit = (raw?: string): void => {
+    const source = raw !== undefined ? raw : buf;
+    if (source === null) return;
+    const v = Number(source);
     if (Number.isFinite(v)) onChange(param.id, { value: v });
     setBuf(null);
   };
@@ -198,8 +202,8 @@ function ParamRow({ param, esd, onChange, disabled }: { param: RefinementParamet
         value={shown}
         onClick={(e) => e.stopPropagation()}
         onChange={(e) => setBuf(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        onBlur={() => commit()}
+        onKeyDown={(e) => { if (e.key === "Enter") { commit((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).blur(); } }}
         style={valueInput}
       />
       <span style={{ fontFamily: mono, fontSize: 11, color: color.faint }}>{esd !== undefined ? `±${+esd.toPrecision(2)}` : "—"}</span>
