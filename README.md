@@ -1,11 +1,11 @@
-# Materia Workbench
+# MATERIA Workbench
 
 [![Live demo](https://img.shields.io/badge/demo-live-2563eb)](https://drthyang.github.io/web-refinement/)
 [![Status: beta](https://img.shields.io/badge/status-public%20beta-d97706)](docs/LIMITATIONS.md)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-3c8c3c)](LICENSE)
 [![Runs in the browser](https://img.shields.io/badge/runs-in%20your%20browser-6b6b6b)](https://drthyang.github.io/web-refinement/)
 
-**Materia — an AI-native foundation for materials science.** Crystal and magnetic
+**MATERIA — an AI-native foundation for materials science.** Crystal and magnetic
 structure refinement that runs entirely in your browser, and is built from the
 core up to be driven by LLM agents as well as by people. This is its web
 workbench; the same pure core is exposed to agents as tools (see
@@ -16,17 +16,12 @@ fully static GitHub Pages app; nothing to install, and your data never leaves
 your machine.
 
 <p align="center">
-  <img src="docs/screenshots/desktop.png" alt="Desktop — two-phase Mn₃Ga + MnO Rietveld refinement of POWGEN time-of-flight data, converged at wR 8.16%: observed/calculated/difference curves, per-phase Bragg ticks, and the symmetry-allowed parameter table with esds" width="100%" />
-</p>
-<p align="center">
-  <img src="docs/screenshots/ipad.png" alt="iPad — magnetic symmetry analysis: the refined Mn₃Ga cell with symmetry-allowed moment arrows for a selected magnetic space group" width="66%" />
-  <img src="docs/screenshots/iphone.png" alt="iPhone — the same workbench on a phone: summary cards, converged fit, and the refinement plot in a single-column layout" width="23%" />
+  <img src="docs/screenshots/desktop.png" alt="Two-phase Mn₃Ga + MnO Rietveld refinement of POWGEN time-of-flight data, converged at wR 8.16%: observed/calculated/difference curves, per-phase Bragg ticks, and the symmetry-allowed parameter table with esds" width="100%" />
 </p>
 <p align="center"><sub>
-One workbench, any device: a converged two-phase TOF Rietveld fit on desktop,
-the magnetic symmetry analysis (moment preview for a selected Shubnikov group)
-on iPad, and the same session on a phone. Screenshots are generated from the
-live app by <code>scripts/device-screenshots.mjs</code>.
+A converged two-phase TOF Rietveld fit (Mn₃Ga + MnO impurity, POWGEN) in the
+workbench. The screenshot is generated from the live app by
+<code>scripts/device-screenshots.mjs</code>.
 </sub></p>
 
 ## The vision: refinement an agent can reason about
