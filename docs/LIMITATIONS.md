@@ -12,7 +12,7 @@ This statement appears in the app UI and the README, not only here.
 ## Current scope
 
 A working static app performs **atomic/nuclear structure refinement** for both
-single-crystal and powder data (536 passing tests), with the scientific
+single-crystal and powder data (656 passing tests), with the scientific
 foundations for magnetic refinement in place. The Levenberg–Marquardt engine,
 symmetry-adapted constrained parameters, Chebyshev / cosine / power-series
 backgrounds, Caglioti profile, Le Bail extraction, multi-phase powder, and
@@ -97,7 +97,7 @@ accidental gap — each is tracked as a roadmap item.
   indicates a correct model *and* correctly-estimated uncertainties. The F_obs/F_calc
   decomposition is multi-phase aware — every phase's peaks share the apportionment,
   so an impurity peak overlapping a main-phase reflection is not miscredited to it,
-  and each phase's reflections are coloured to match its Bragg-tick row.
+  and each phase's reflections are colored to match its Bragg-tick row.
 - **Corrections modelled:** March–Dollase preferred orientation, Debye–Scherrer
   cylinder absorption, isotropic size (Scherrer) and microstrain broadening.
   **Not modelled:** anisotropic size / microstrain (Stephens), spherical-harmonic

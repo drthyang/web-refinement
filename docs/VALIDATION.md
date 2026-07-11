@@ -21,7 +21,7 @@ comparison recorded here.
 > reimplement independently (no code copied), but its outputs are our correctness
 > gate and must be cited. Full bibliography in [`REFERENCES.md`](./REFERENCES.md).
 
-## Test matrix (536 passing, 53 real-data/slow tests skipped without local `data/`)
+## Test matrix (656 passing, 53 real-data/slow tests skipped without local `data/`)
 
 | Area | Test kind | Status |
 | --- | --- | --- |
@@ -37,7 +37,7 @@ comparison recorded here.
 | Nuclear structure factor `F_N` | analytic golden | ✅ `core/diffraction/structureFactor.test.ts` |
 | Reflection generation + multiplicity | golden | ✅ `core/diffraction/reflections.test.ts` |
 | Residual & agreement factors | unit | ✅ (via engine tests) |
-| Optimizer behaviour (LM convergence) | unit | ✅ `core/refinement/engine.test.ts` |
+| Optimizer behavior (LM convergence) | unit | ✅ `core/refinement/engine.test.ts` |
 | Constraint tie parsing/resolution | unit | ✅ `core/refinement/engine.test.ts` |
 | Linear algebra (solve/invert) | unit | ✅ `core/math/linalg.test.ts` |
 | Magnetic perpendicular-moment projection | unit | ✅ `core/magnetic/magnetic.test.ts` |

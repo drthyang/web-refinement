@@ -108,7 +108,7 @@ Web resources accessed **2026-07-08**.
   → [`magnetic/isotropy.ts`](../src/core/magnetic/isotropy.ts).
 - **Setting transformations for group identification** — *International Tables
   for Crystallography* Vol. A, §1.5 (transformations of coordinate systems:
-  R′ = P⁻¹RP, t′ = P⁻¹(Rp + t − p)); orthohexagonal C-centred cells for the
+  R′ = P⁻¹RP, t′ = P⁻¹(Rp + t − p)); orthohexagonal C-centered cells for the
   orthorhombic/monoclinic subgroups of hexagonal parents (ITA Vol. A1).
   → [`magnetic/bnsOg.ts`](../src/core/magnetic/bnsOg.ts)
   (`identifyMagneticGroupAnySetting`).

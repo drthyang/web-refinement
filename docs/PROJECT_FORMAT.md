@@ -17,7 +17,7 @@ The authoritative schema is the `ProjectFile` type in
     "title": "…",
     "createdAt": "2026-01-01T00:00:00.000Z",  // ISO-8601
     "modifiedAt": "2026-01-01T00:00:00.000Z",
-    "appVersion": "0.0.0",
+    "appVersion": "0.1.0",
     "notes": "…"                               // optional
   },
   "structures":     [ /* StructureModel[]  */ ],

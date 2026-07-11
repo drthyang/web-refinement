@@ -2,9 +2,9 @@
 
 **Project:** MATERIA Workbench — a browser-native refinement workbench for
 atomic and magnetic structures.
-**Date:** 2026-07-09
+**Date:** 2026-07-11
 **Stack:** React 18 · TypeScript 5 (strict) · Vite 5 · Vitest · Web Workers.
-**Status:** Working static app; **536 tests passing** (53 real-data/slow tests
+**Status:** Working static app; **656 tests passing** (53 real-data/slow tests
 skip without local `data/`); atomic **and magnetic**
 single-crystal + powder refinement, multi-phase, Le Bail extraction, and in-app
 magnetic space-group candidate generation & comparison; validated against the
@@ -157,8 +157,8 @@ in the app UI, README, and limitations doc.
 ## 5. Test summary
 
 ```
-Test Files  14 passed (14)
-Tests       66 passed (66)
+Test Files  101 passed | 9 skipped (110)
+Tests       656 passed | 53 skipped (709)
 ```
 
 Covering: linear algebra, unit-cell/metric/volume (GSAS golden), symmetry
@@ -171,8 +171,12 @@ crystal & powder workflow refinement, project round-trip, and plot math.
 
 ## 6. Suggested next steps
 
-1. Extend magnetic refinement to powder data (Phase 7); single-crystal magnetic is done.
-2. Add a TOF profile model to enable a genuine comparison against the GSAS-II
-   `.lst` wR on the bundled Mn₃Ga/MnO data.
+Since this report was first written, magnetic powder refinement, the TOF
+back-to-back-exponential profile (the two-phase Mn₃Ga/MnO demo converges at
+wR ≈ 3.9 %), and one-click FullProf / GSAS-II cross-check export have all
+landed. Remaining:
+
+1. Single-crystal-mode and multi-phase FullProf `.pcr` export (powder is done).
+2. Representation analysis and the star of k / multi-k magnetic workflow.
 3. Parameter grouping and refinement presets (Phase 8 remainder).
 4. WebGPU acceleration for structure-factor summation once coverage is broader.

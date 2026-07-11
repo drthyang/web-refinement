@@ -19,7 +19,7 @@ Guided by established crystallographic refinement practice:
 - Constrained parameters with fixed/free states and bounds.
 - Observed-vs-calculated comparison as a first-class view.
 - Refinement history you can read and undo.
-- Validation against known examples, with clearly labelled approximations.
+- Validation against known examples, with clearly labeled approximations.
 
 ## Layered architecture
 
@@ -132,7 +132,7 @@ never by hand-rolling `postMessage` calls in components.
 Summary here; details in [VALIDATION.md](./VALIDATION.md). Every scientific
 function has unit tests; key calculators have **golden-value** snapshot tests so
 numbers cannot change silently; selected examples are cross-checked against
-established tools where possible, with results labelled *validated* or
+established tools where possible, with results labeled *validated* or
 *approximate*.
 
 ## Future acceleration points (WASM / WebGPU)

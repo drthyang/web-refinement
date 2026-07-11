@@ -45,7 +45,7 @@ What differs is only the **observable and its corrections**, isolated in
 - **Parameter-freeing convention:** scale (and extinction) free on the first
   "Refine"; structural rows (positions, ADP, occupancy) and the cell start
   **fixed**, freed per row or by the staged sequence in the expert order
-  scale → cell → ADP → positions — the same "safe first click" behaviour as
+  scale → cell → ADP → positions — the same "safe first click" behavior as
   `buildPowderSpec`.
 
 ---
@@ -65,7 +65,7 @@ What differs is only the **observable and its corrections**, isolated in
 
 ### Reflection I/O — `parsers/shelxHkl.ts`
 - **SHELX HKLF 4** fixed-column parser (`3I4,2F8,I4` → h k l F² σ batch), with a
-  whitespace fallback for hand-edited files and the `0 0 0` terminator honoured.
+  whitespace fallback for hand-edited files and the `0 0 0` terminator honored.
 - **`.fcf` / CIF reflection loops** (LIST 4 F² and LIST 6 F, the latter squared
   with σ propagation), column order taken from the loop header.
 - Validated against fixed-column, batched, free-format, and both LIST variants
@@ -100,7 +100,7 @@ What differs is only the **observable and its corrections**, isolated in
 - ⬜ **Twinning** (batch scale factors / TWIN–BASF) and **anomalous dispersion**
   (f′, f″; Friedel-pair splitting for absolute structure).
 - ⬜ **Full WGHT scheme** — iterative a,b reweighting on Fc² (currently σ-only in
-  the solve; a,b honoured in the reported wR2/GooF).
+  the solve; a,b honored in the reported wR2/GooF).
 - ⬜ **Absorption correction tool** — the major forward piece, planned in §3.
 - ⬜ **Validation gate:** reproduce a published F² refinement (SHELXL/GSAS-II)
   within tolerance on a real HKL file.

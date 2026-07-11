@@ -108,7 +108,7 @@ powder) plus a commensurate single-k magnetic workflow — and a first agent-too
 layer over the same core. The scientific core, Levenberg–Marquardt refinement
 engine, symmetry-adapted constrained parameters, CIF parsing, a 3D
 structure/moment viewer, plots, and Web Worker compute are implemented and
-tested (**585 tests**). Crystallographic and scattering foundations are
+tested (**656 tests**). Crystallographic and scattering foundations are
 validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
 As with any beta, results intended for publication must be validated against
@@ -163,8 +163,10 @@ nuclear and magnetic structures:
   (Chebyshev / Fourier / lin+log interpolation), peak width, microstructure
   (crystallite size & microstrain, isotropic / uniaxial / generalized Mustrain),
   and magnetic moments — with fixed/free states, bounds, and constraints.
-- Compare observed vs calculated, track refinement history, and export a
-  reproducible project JSON.
+- Compare observed vs calculated, track refinement history, and export the
+  refinement — a reproducible project JSON, or a one-click FullProf / GSAS-II
+  cross-check bundle (control file + data + instrument, with your original
+  instrument and data files included verbatim).
 
 ## Architecture in one paragraph
 

@@ -99,7 +99,7 @@ the angle ψ between the reflection's scattering vector and the axis:
     X(hkl) = X_⊥ + (X_∥ − X_⊥)·cos²ψ ,   Γ_size = X(hkl)/(100·cosθ) ,
 
 with cosψ from the reciprocal metric (correct for any cell). `X_∥ = X_⊥`
-recovers the isotropic Scherrer term, so it is a strict generalisation. The two
+recovers the isotropic Scherrer term, so it is a strict generalization. The two
 coefficients convert to two crystallite dimensions through the same Scherrer
 relation as §2 (`uniaxialSizeDimensions`).
 
@@ -123,7 +123,7 @@ size does:
     Y(hkl) = Y_⊥ + (Y_∥ − Y_⊥)·cos²ψ ,   Γ_strain = Y(hkl)·tanθ / 100 ,
 
 with cos²ψ from the reciprocal metric (`uniaxialStrainFwhmDeg`). `Y_∥ = Y_⊥`
-recovers the isotropic `Y·tanθ` term, so it is a strict generalisation.
+recovers the isotropic `Y·tanθ` term, so it is a strict generalization.
 
 **Seeded net-zero.** Both coefficients are seeded from the *refined isotropic*
 `Y`, and `placePeaks` applies the uniaxial term as a *correction* on top of the
@@ -202,7 +202,7 @@ other parameter, so they refine through the LM engine with correlations/esds:
   uniaxial-strain Lorentzian breadth as a correction over the isotropic `Y`;
   `buildTofPeaks` adds the isotropic (`mustrainIso`) and Stephens σ in quadrature
   to the TOF Gaussian variance. Invariants are cached per space-group operation
-  list. No behaviour change when the options are off. Across phases the isotropic
+  list. No behavior change when the options are off. Across phases the isotropic
   size/strain (incl. `mustrainIso`) is shared; anisotropic microstructure is
   per-phase.
 

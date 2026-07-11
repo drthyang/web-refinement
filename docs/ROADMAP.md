@@ -43,7 +43,7 @@ only symmetry-allowed parameters, use global search only for starting models.
 
 ## 2. Current state (honest baseline)
 
-What genuinely works today (536 passing tests; real-data validated):
+What genuinely works today (656 passing tests; real-data validated):
 
 - **Refinement engine** — Levenberg–Marquardt with diagonal preconditioning,
   SVD-truncated pseudo-inverse, per-cycle shift limiting, bound projection,
@@ -313,7 +313,7 @@ agent tool it exposes.**
   - **Anisotropic size — uniaxial/spheroidal**
     ([`anisoSize.ts`](../src/core/diffraction/anisoSize.ts)): X(hkl) = X_⊥ +
     (X_∥−X_⊥)·cos²ψ about a unique axis (ψ from the reciprocal metric), a strict
-    generalisation of the isotropic Scherrer term.
+    generalization of the isotropic Scherrer term.
   - **Refinement integration**: new `stephensStrain`/`anisoSizePerp`/
     `anisoSizePar` parameter kinds through `applyParameters` → `placePeaks`
     (hkl-dependent, cached invariants), emitted by `buildStructureRefinement` and

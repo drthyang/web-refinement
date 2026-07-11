@@ -48,7 +48,7 @@ section, candidates whose sites can actually carry a moment sort first (the
 moment-forbidden ones stay listed, greyed, for completeness), then type I
 before type III, then by BNS number. When a candidate's identification needed
 a basis transformation, the 3D view can draw its **standard-setting cell**
-(e.g. the orthohexagonal C-centred cell of Cmcm-family subgroups) over the
+(e.g. the orthohexagonal C-centered cell of Cmcm-family subgroups) over the
 parent cell, from the transformation (P, p) reported by the setting search.
 
 For each candidate, the **symmetry-allowed moment directions** on a site are the
@@ -235,11 +235,11 @@ label is kept (**a wrong symbol is worse than none** — nothing is guessed).
 **Setting-transformation search ✅**
 ([`identifyMagneticGroupAnySetting`](../src/core/magnetic/bnsOg.ts)): a proper
 subgroup of a standard-setting parent is often expressed in a non-standard
-setting (2-fold along a instead of b, off-origin inversion centre, …), so the
+setting (2-fold along a instead of b, off-origin inversion center, …), so the
 exact lookup rightly misses. The search conjugates the operation set by the
 ITA basis transformation `R′ = P⁻¹RP, t′ = P⁻¹(Rp + t − p)` (ITA Vol. A §1.5)
 over the 24 proper signed axis permutations **and the three orthohexagonal
-C-centred cells (det P = 2, composed with the permutations)** × ¼-grid origin
+C-centered cells (det P = 2, composed with the permutations)** × ¼-grid origin
 shifts, and matches each transformed set **exactly** — the identification
 stays exact, only the setting is searched, and the transformation used is
 reported alongside the label (e.g. `(a, a+2b, c; 0, 0, 0)`). det P = 2 uses

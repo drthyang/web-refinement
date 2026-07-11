@@ -103,7 +103,7 @@ tables below). Web resources accessed **2026-07-08**.
 - **Convenient tabulation:** NIST Center for Neutron Research, "Neutron
   scattering lengths and cross sections,"
   <https://www.ncnr.nist.gov/resources/n-lengths/>
-- **Redistribution actually imported:** the Sears table (labelled ITC-C Vol. C
+- **Redistribution actually imported:** the Sears table (labeled ITC-C Vol. C
   §4.4.4) shipped in the `Dans_Diffraction` package
   (`data/neutron_isotope_scattering_lengths_sears.dat`), real part of the bound
   coherent length per natural element.
