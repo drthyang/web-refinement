@@ -757,7 +757,7 @@ export function PowderWorkbench({
       chipTone: isSynthetic ? "warn" : "ok",
       title: !hasContent ? "No data loaded" : isSynthetic ? "Synthetic demo pattern" : powderSource,
       meta: !hasContent
-        ? "Load a pattern (.xye / .dat / .gsa …)"
+        ? "Powder (.xye / .dat / .gsa) or single crystal (.hkl / .int)"
         : `${pattern.points.length} points · ${UNIT_LABEL[pattern.xUnit]} ${patternExtent.min.toFixed(0)}–${patternExtent.max.toFixed(0)}`,
     },
     {
