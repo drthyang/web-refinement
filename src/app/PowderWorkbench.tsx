@@ -753,7 +753,7 @@ export function PowderWorkbench({
     },
     {
       label: "Data",
-      help: "Loads most powder and single-crystal formats from the major facilities (POWGEN/GSAS, FullProf, ILL, .xye, .hkl, …). If your file isn't recognised, contact the author.",
+      help: "Loads most powder and single-crystal formats from the major facilities (POWGEN/GSAS, FullProf, ILL, .xye, .hkl, …). If your file isn't recognized, contact the author.",
       loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
       muted: !hasContent,
       chip: isSynthetic ? "⚠ synthetic" : "✓ loaded",
@@ -765,7 +765,7 @@ export function PowderWorkbench({
     },
     {
       label: "Instrument",
-      help: "Loads instrument files from the major facilities — GSAS-II .instprm, GSAS .prm, FullProf .irf. If your file isn't recognised, contact the author.",
+      help: "Loads instrument files from the major facilities — GSAS-II .instprm, GSAS .prm, FullProf .irf. If your file isn't recognized, contact the author.",
       loadLabel: "Load instrument…", accept: ".instprm,.prm,.irf,text/plain", onFile: onLoadInstrument,
       muted: !hasContent && !instrumentLoaded,
       chip: instrumentLoaded ? "✓ loaded" : "default",
@@ -814,7 +814,7 @@ export function PowderWorkbench({
                   </span>
                   {plotMode !== "structure" && (
                     <span style={{ display: "flex", gap: 14, fontFamily: themeMono, fontSize: 12.5 }}>
-                      <span style={{ color: theme.secondary }} title="Weighted profile R for the current parameters, coloured by wR/R_exp (Toby 2006)">
+                      <span style={{ color: theme.secondary }} title="Weighted profile R for the current parameters, colored by wR/R_exp (Toby 2006)">
                         wR <b style={{ color: qualityInk(liveGof) }}>{liveWr}%</b>
                       </span>
                       <span style={{ color: theme.secondary }} title="Goodness of fit = wR/R_exp at the last refinement; ≈1 = consistent with the data uncertainties">
@@ -1221,7 +1221,7 @@ function EmptyWorkbench({ onLoadDemo }: { onLoadDemo?: () => void }): JSX.Elemen
       <div style={{ fontSize: 16.5, fontWeight: 600, color: theme.ink, letterSpacing: "-0.005em" }}>No data loaded yet</div>
       <p style={{ margin: 0, maxWidth: 430, fontSize: 13.5, lineHeight: 1.55, color: theme.secondary }}>
         Load a structure (CIF) and diffraction data with the cards above, or explore
-        the bundled Mn₃Ga POWGEN example.
+        the built-in powder example.
       </p>
       {onLoadDemo && <button style={demoCta} onClick={onLoadDemo}>Load demo dataset</button>}
     </div>
