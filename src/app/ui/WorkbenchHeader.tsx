@@ -31,9 +31,13 @@ interface Props {
   readonly version: string;
   /** Export buttons for the current mode, rendered left-to-right. */
   readonly exports: readonly ExportAction[];
+  /** Toggle the bundled demo dataset: load it when clean, clear it when active. */
+  readonly onToggleDemo?: () => void;
+  /** Whether the demo is currently loaded (flips the toggle's label/state). */
+  readonly demoActive?: boolean;
 }
 
-export function WorkbenchHeader({ steps, active, onStep, version, exports }: Props): JSX.Element {
+export function WorkbenchHeader({ steps, active, onStep, version, exports, onToggleDemo, demoActive }: Props): JSX.Element {
   return (
     <header className="wb-header" style={headerBar}>
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
@@ -63,6 +67,11 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports }: Pro
         ))}
       </nav>
       <div className="wb-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
+        {onToggleDemo && (
+          <ActionButton onClick={onToggleDemo} active={!!demoActive}>
+            {demoActive ? "Exit demo" : "Demo"}
+          </ActionButton>
+        )}
         {exports.length > 0 && <ExportMenu exports={exports} />}
       </div>
     </header>

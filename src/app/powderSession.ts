@@ -14,11 +14,15 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import { buildPowderSpec, type SiteTies, type PowderSpec, type MustrainModel } from "@/app/powderSpec";
 import { buildMultiPhaseSpec } from "@/app/multiPhaseSpec";
 import { buildSyntheticPowder } from "@/examples/synthetic";
+import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 
 export const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", wavelength: 1.54 };
 export const DEFAULT_BACKGROUND_TERMS = 4;
 export const DEFAULT_TIES: SiteTies = { positions: true, adp: true };
 export const SYNTHETIC_SOURCE = "synthetic (self-consistent demo)";
+/** Provenance marker for a clean, data-less workbench — the app's first-run
+ *  state, before the demo or a user's own files are loaded. */
+export const EMPTY_SOURCE = "__empty__";
 
 export interface Session {
   structure: StructureModel;
@@ -54,6 +58,35 @@ export interface Session {
   rawData?: { name: string; text: string };
   /** Optional magnetic model over `structure`, for magnetic reflection ticks. */
   magnetic?: MagneticModel;
+}
+
+/** A valid but data-less placeholder structure (P1, unit cell, no sites). The
+ *  landing view renders instead of the workbench while this is loaded, so it is
+ *  never fed to the compute machinery — it only keeps `Session` non-null. */
+const EMPTY_STRUCTURE: StructureModel = {
+  id: "empty",
+  name: "",
+  cell: { a: 1, b: 1, c: 1, alpha: 90, beta: 90, gamma: 90 },
+  spaceGroup: { hermannMauguin: "P 1", operations: [parseSymmetryOperation("x,y,z")] },
+  sites: [],
+};
+
+/** The clean, data-less session the workbench opens on. The shell shows a
+ *  landing view until the user loads the demo or their own CIF; any load then
+ *  replaces this. Kept structurally valid so nothing downstream special-cases it. */
+export function emptySession(): Session {
+  return {
+    structure: EMPTY_STRUCTURE,
+    extraPhases: [],
+    pattern: { id: "empty", name: EMPTY_SOURCE, xUnit: "twoTheta", radiation: { kind: "neutron", wavelength: 1.54 }, points: [] },
+    powderParams: [],
+    powderBindings: [],
+    powderProfile: { shape: "gaussian" },
+    backgroundTerms: DEFAULT_BACKGROUND_TERMS,
+    siteTies: DEFAULT_TIES,
+    powderOverlay: null,
+    powderSource: EMPTY_SOURCE,
+  };
 }
 
 export function newSession(structure: StructureModel, instrument: InstrumentParameters = DEFAULT_INSTRUMENT): Session {

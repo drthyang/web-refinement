@@ -32,14 +32,17 @@ import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
 import { ComputeClient } from "@/workers/computeClient";
 import { PowderWorkbench } from "@/app/PowderWorkbench";
 import { SingleCrystalWorkbench } from "@/app/SingleCrystalWorkbench";
+import { Landing } from "@/app/ui/Landing";
 import { WorkbenchHeader, type Step, type ExportAction } from "@/app/ui/WorkbenchHeader";
 import { color as theme } from "@/app/theme";
 import {
   type Session,
   newSession,
   loadedSession,
+  emptySession,
   buildSpecFor,
   DEFAULT_INSTRUMENT,
+  EMPTY_SOURCE,
 } from "@/app/powderSession";
 import type { WorkbenchExports } from "@/app/workbenchEngine";
 
@@ -55,19 +58,22 @@ const SC_STEPS: readonly Step[] = [
 ];
 
 export function App(): JSX.Element {
-  // The bundled Mn₃Ga POWGEN 600 K TOF dataset (published) is the default the
-  // workbench opens with — embedded in the build, so it works on the deployed
-  // site with no runtime fetch or local data/ folder.
-  const example = mn3gaPowgenExample();
-  const [session, setSession] = useState<Session>(() => loadedSession(example.structure, example.pattern, example.instrument, example.extraPhases));
+  // The workbench opens clean (no data): the shell shows a landing view until the
+  // user loads the bundled Mn₃Ga POWGEN demo (the header "Demo" toggle) or their
+  // own CIF. The demo is embedded in the build, so it works on the deployed site
+  // with no runtime fetch or local data/ folder.
+  const [session, setSession] = useState<Session>(() => emptySession());
   const [powderResult, setPowderResult] = useState<RefinementResult | null>(null);
   // Single-crystal mode: set when hkl/fcf reflection data is loaded; the app
   // then renders the single-crystal workbench instead of the powder panels.
   // Cleared when powder data is loaded (auto-switch back).
   const [scDataset, setScDataset] = useState<SingleCrystalDataset | null>(null);
   const [step, setStep] = useState(0);
-  const [instrument, setInstrument] = useState<InstrumentParameters>(example.instrument);
-  const [instrumentLoaded, setInstrumentLoaded] = useState(true);
+  const [instrument, setInstrument] = useState<InstrumentParameters>(DEFAULT_INSTRUMENT);
+  const [instrumentLoaded, setInstrumentLoaded] = useState(false);
+  // True while the bundled demo is the loaded content — drives the header toggle
+  // (Demo → load, Exit demo → clear) and is cleared once the user loads their own.
+  const [demoActive, setDemoActive] = useState(false);
   // Once the user has loaded their own primary structure (replacing the bundled
   // example), the Structure card's load button becomes "Add CIF…" and appends a
   // phase instead of replacing — the multi-phase entry point.
@@ -96,12 +102,15 @@ export function App(): JSX.Element {
           // the nuclear + magnetic pattern and reflection ticks.
           const magStructure = { ...parsed, id: "loaded" };
           setSession({ ...newSession(magStructure, instrument), magnetic: { ...magnetic, structureId: "loaded" } as MagneticModel });
+          setOwnStructure(true);
+          setDemoActive(false);
           setPowderResult(null);
           setMessage(`Loaded magnetic CIF: ${parsed.name} · ${magnetic.moments.length} moments · ${parsed.spaceGroup.hermannMauguin ?? "BNS"}. Nuclear + magnetic pattern shown.`);
           return;
         }
         setSession(newSession({ ...parsed, id: "loaded" }, instrument));
         setOwnStructure(true);
+        setDemoActive(false);
         setPowderResult(null);
         setMessage(`Loaded CIF: ${parsed.name} (${parsed.sites.length} sites, ${parsed.spaceGroup.operations.length} symmetry ops). Load button is now "Add CIF…" to add impurity/secondary phases.`);
       } catch (e) {
@@ -110,15 +119,40 @@ export function App(): JSX.Element {
     });
   }
 
-  /** Clear all user-loaded structures — reset to the bundled Mn₃Ga POWGEN example. */
+  /** Reset the workbench to the clean, data-less landing (drops the demo or any
+   *  loaded structures/data/instrument). */
+  function clearWorkbench(): void {
+    setSession(emptySession());
+    setInstrument(DEFAULT_INSTRUMENT);
+    setInstrumentLoaded(false);
+    setOwnStructure(false);
+    setScDataset(null);
+    setPowderResult(null);
+    setDemoActive(false);
+  }
+
   function onClearStructures(): void {
+    clearWorkbench();
+    setMessage("Cleared the workbench.");
+  }
+
+  /** Header Demo toggle: load the bundled Mn₃Ga POWGEN example when clean, or
+   *  clear back to the landing when the demo is already loaded. */
+  function onToggleDemo(): void {
+    if (demoActive) {
+      clearWorkbench();
+      setMessage("Exited the demo — workbench cleared.");
+      return;
+    }
     const ex = mn3gaPowgenExample();
     setSession(loadedSession(ex.structure, ex.pattern, ex.instrument, ex.extraPhases));
     setInstrument(ex.instrument);
     setInstrumentLoaded(true);
     setOwnStructure(false);
+    setScDataset(null);
     setPowderResult(null);
-    setMessage("Cleared loaded structures — reset to the bundled Mn₃Ga POWGEN example.");
+    setDemoActive(true);
+    setMessage("Loaded the bundled Mn₃Ga + MnO POWGEN demo (two-phase TOF).");
   }
 
   /** Append a CIF as an additional crystallographic phase (multi-phase refinement),
@@ -180,6 +214,8 @@ export function App(): JSX.Element {
   function onLoadData(file: File): void {
     file.text().then((text) => {
       try {
+        // Any data load is the user's own content — no longer the pristine demo.
+        setDemoActive(false);
         // FullProf's ILL `.dat` templates share the extension but differ in
         // header — route each to its own reader before the generic detector.
         if (looksLikeInstrm6(text)) {
@@ -366,41 +402,53 @@ export function App(): JSX.Element {
         { label: "FullProf bundle (.zip)", onClick: () => powderExports.current?.fullprofBundle?.() },
       ];
 
+  // The workbench opens clean: until the user loads the demo or their own CIF
+  // (which replaces the empty session), the shell shows the landing view and
+  // hides the workflow steps, exports, and disclaimer.
+  const hasContent = session.powderSource !== EMPTY_SOURCE || scDataset !== null;
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <WorkbenchHeader
-        steps={scDataset ? SC_STEPS : STEPS}
+        steps={hasContent ? (scDataset ? SC_STEPS : STEPS) : []}
         active={step}
         onStep={setStep}
         version={`v${APP_VERSION}`}
-        exports={headerExports}
+        exports={hasContent ? headerExports : []}
+        demoActive={demoActive}
+        onToggleDemo={onToggleDemo}
       />
-      <div style={disclaimerBar}>
-        Public beta — validate results intended for publication against established tools. Export your refinement to GSAS-II or FullProf (Export ▸ bundle) to cross-check.
-      </div>
+      {!hasContent && <Landing onLoadDemo={onToggleDemo} onLoadCif={onLoadCif} />}
+      {hasContent && (
+        <div style={disclaimerBar}>
+          Public beta — validate results intended for publication against established tools. Export your refinement to GSAS-II or FullProf (Export ▸ bundle) to cross-check.
+        </div>
+      )}
       {/* The powder engine stays mounted in single-crystal mode (hidden) so all
           its state — fit range, plot mode, k-search picks — survives switching. */}
-      <PowderWorkbench
-        session={session}
-        setSession={setSession}
-        powderResult={powderResult}
-        setPowderResult={setPowderResult}
-        instrument={instrument}
-        instrumentLoaded={instrumentLoaded}
-        ownStructure={ownStructure}
-        client={client.current}
-        active={!scDataset}
-        step={step}
-        onStep={setStep}
-        setMessage={setMessage}
-        exportsRef={powderExports}
-        onLoadData={onLoadData}
-        onLoadCif={onLoadCif}
-        onAddPhase={onAddPhase}
-        onRemovePhase={onRemovePhase}
-        onClearStructures={onClearStructures}
-        onLoadInstrument={onLoadInstrument}
-      />
+      {hasContent && (
+        <PowderWorkbench
+          session={session}
+          setSession={setSession}
+          powderResult={powderResult}
+          setPowderResult={setPowderResult}
+          instrument={instrument}
+          instrumentLoaded={instrumentLoaded}
+          ownStructure={ownStructure}
+          client={client.current}
+          active={!scDataset}
+          step={step}
+          onStep={setStep}
+          setMessage={setMessage}
+          exportsRef={powderExports}
+          onLoadData={onLoadData}
+          onLoadCif={onLoadCif}
+          onAddPhase={onAddPhase}
+          onRemovePhase={onRemovePhase}
+          onClearStructures={onClearStructures}
+          onLoadInstrument={onLoadInstrument}
+        />
+      )}
       {scDataset && (
         // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
         // the dataset id so a new file remounts with a fresh parameter set.
