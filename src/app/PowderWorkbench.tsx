@@ -18,7 +18,9 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { APP_VERSION, PROJECT_SCHEMA_VERSION } from "@/app/constants";
-import { downloadText } from "@/app/download";
+import { downloadText, downloadBlob } from "@/app/download";
+import { fullprofBundle, gsas2Bundle, type BundleOptions } from "@/core/export/bundle";
+import { zipStore } from "@/core/export/zip";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { RefinementParameter, RefinementResult, ParameterBinding } from "@/core/refinement/types";
@@ -595,10 +597,39 @@ export function PowderWorkbench({
     }
   }
 
+  // A one-click cross-check bundle (.zip) for an established package: the refined
+  // model + data (+ instrument + build script), assembled and zipped in-browser.
+  function exportBundle(target: "fullprof" | "gsas2"): void {
+    const withEsd = powderParams.map((p) => {
+      const e = powderResult?.esd[p.id];
+      return e !== undefined ? { ...p, esd: e } : { ...p };
+    });
+    const s = powderResult?.agreement.goodnessOfFit;
+    const refinement: CifRefinementMeta | undefined = powderResult
+      ? { rwp: Number(wRpct), ...(s !== undefined ? { gof: s } : {}), nParam: withEsd.filter((p) => !p.fixed && !p.expression).length }
+      : undefined;
+    const opts: BundleOptions = {
+      name: structure.name || structure.id,
+      params: withEsd,
+      bindings: pBindings,
+      ...(instrumentLoaded ? { instrument } : {}),
+      ...(refinement ? { refinement } : {}),
+    };
+    const entries = target === "fullprof" ? fullprofBundle(structure, pattern, opts) : gsas2Bundle(structure, pattern, opts);
+    const base = (structure.name || structure.id).replace(/[^A-Za-z0-9._-]+/g, "_");
+    downloadBlob(`${base}_${target}.zip`, zipStore(entries), "application/zip");
+  }
+
   // Publish this engine's header exports while it is the active mode; cleared on
   // unmount (the shell's other ref serves single-crystal mode).
   useEffect(() => {
-    if (active) exportsRef.current = { cif: exportCif, csv: exportCsv, projectJson: exportProject };
+    if (active) exportsRef.current = {
+      cif: exportCif,
+      csv: exportCsv,
+      projectJson: exportProject,
+      fullprofBundle: () => exportBundle("fullprof"),
+      gsas2Bundle: () => exportBundle("gsas2"),
+    };
     return () => { exportsRef.current = null; };
   });
 

@@ -345,11 +345,13 @@ export function App(): JSX.Element {
   // CIF/mCIF + CSV + project JSON. Labels the shell can know (they depend only
   // on session state it owns); behavior lives in the engines.
   const headerExports: ExportAction[] = scDataset
-    ? [{ label: "Export CIF", onClick: () => scExports.current?.cif?.() }]
+    ? [{ label: "CIF", onClick: () => scExports.current?.cif?.() }]
     : [
-        { label: session.magnetic && session.magnetic.moments.length > 0 ? "Export mCIF" : "Export CIF", onClick: () => powderExports.current?.cif?.() },
-        { label: "Export CSV", onClick: () => powderExports.current?.csv?.() },
-        { label: "Export project JSON", onClick: () => powderExports.current?.projectJson?.() },
+        { label: session.magnetic && session.magnetic.moments.length > 0 ? "mCIF" : "CIF", onClick: () => powderExports.current?.cif?.() },
+        { label: "CSV", onClick: () => powderExports.current?.csv?.() },
+        { label: "Project JSON", onClick: () => powderExports.current?.projectJson?.() },
+        { label: "GSAS-II bundle (.zip)", onClick: () => powderExports.current?.gsas2Bundle?.() },
+        { label: "FullProf bundle (.zip)", onClick: () => powderExports.current?.fullprofBundle?.() },
       ];
 
   return (
@@ -362,7 +364,7 @@ export function App(): JSX.Element {
         exports={headerExports}
       />
       <div style={disclaimerBar}>
-        Early browser-native refinement workbench — results for publication must be validated against established tools.
+        Public beta — validate results intended for publication against established tools. Export your refinement to GSAS-II or FullProf (Export ▸ bundle) to cross-check.
       </div>
       {/* The powder engine stays mounted in single-crystal mode (hidden) so all
           its state — fit range, plot mode, k-search picks — survives switching. */}

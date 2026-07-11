@@ -5,7 +5,7 @@
  * clearer type ramp, and step pills with numbered badges.
  */
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { color, mono, radius, shadow, sans } from "@/app/theme";
 
 /** Display face for the Materia wordmark — geometric, loaded in index.html. */
@@ -63,9 +63,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports }: Pro
         ))}
       </nav>
       <div className="wb-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
-        {exports.map((e) => (
-          <ActionButton key={e.label} onClick={e.onClick}>{e.label}</ActionButton>
-        ))}
+        {exports.length > 0 && <ExportMenu exports={exports} />}
       </div>
     </header>
   );
@@ -115,8 +113,9 @@ function StepPill({ step, active, onClick }: { step: Step; active: boolean; onCl
   );
 }
 
-function ActionButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }): JSX.Element {
+function ActionButton({ children, onClick, active }: { children: React.ReactNode; onClick: () => void; active?: boolean }): JSX.Element {
   const [hover, setHover] = useState(false);
+  const lit = hover || active;
   return (
     <button
       className="wb-header-action"
@@ -124,9 +123,9 @@ function ActionButton({ children, onClick }: { children: React.ReactNode; onClic
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        border: `1px solid ${hover ? color.primaryTintBorder : color.control}`,
-        background: hover ? color.primaryTintBg : color.surface,
-        color: hover ? color.primary : color.ink,
+        border: `1px solid ${lit ? color.primaryTintBorder : color.control}`,
+        background: lit ? color.primaryTintBg : color.surface,
+        color: lit ? color.primary : color.ink,
         borderRadius: radius.button,
         padding: "8px 16px",
         fontSize: 13,
@@ -139,6 +138,72 @@ function ActionButton({ children, onClick }: { children: React.ReactNode; onClic
     </button>
   );
 }
+
+/** A single "Export ▾" button that opens a menu of the mode's export actions —
+ *  keeps the header uncluttered as the export set grows. */
+function ExportMenu({ exports }: { exports: readonly ExportAction[] }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <ActionButton onClick={() => setOpen((o) => !o)} active={open}>Export ▾</ActionButton>
+      {open && (
+        <div style={menu}>
+          {exports.map((e) => (
+            <MenuItem key={e.label} onClick={() => { setOpen(false); e.onClick(); }}>{e.label}</MenuItem>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({ children, onClick }: { children: React.ReactNode; onClick: () => void }): JSX.Element {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        whiteSpace: "nowrap",
+        border: "none",
+        background: hover ? color.primaryTintBg : "transparent",
+        color: hover ? color.primary : color.ink,
+        padding: "8px 14px",
+        fontSize: 13,
+        fontWeight: 500,
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+const menu: CSSProperties = {
+  position: "absolute",
+  top: "calc(100% + 6px)",
+  right: 0,
+  zIndex: 40,
+  minWidth: 180,
+  padding: "5px 0",
+  background: color.surface,
+  border: `1px solid ${color.border}`,
+  borderRadius: radius.button,
+  boxShadow: "0 10px 28px rgba(25,23,20,0.14)",
+};
 
 const headerBar: CSSProperties = {
   display: "flex",

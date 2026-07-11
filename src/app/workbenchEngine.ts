@@ -35,6 +35,10 @@ export interface WorkbenchExports {
   csv?: () => void;
   /** Whole-session project JSON (powder). */
   projectJson?: () => void;
+  /** Model + data + build script as a FullProf bundle (.zip). */
+  fullprofBundle?: () => void;
+  /** Model + data + instprm + build_gpx.py as a GSAS-II bundle (.zip). */
+  gsas2Bundle?: () => void;
 }
 
 /** The shell-owned ref an engine publishes its exports into (null when unmounted/inactive). */
