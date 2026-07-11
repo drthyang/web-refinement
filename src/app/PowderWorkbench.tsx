@@ -103,13 +103,14 @@ export interface PowderWorkbenchProps {
   onLoadCif: (file: File) => void;
   onAddPhase: (file: File) => void;
   onRemovePhase: (id: string) => void;
+  onClearStructures: () => void;
   onLoadInstrument: (file: File) => void;
 }
 
 export function PowderWorkbench({
   session, setSession, powderResult, setPowderResult, instrument, instrumentLoaded, ownStructure,
   client, active, step, onStep, setMessage, exportsRef,
-  onLoadData, onLoadCif, onAddPhase, onRemovePhase, onLoadInstrument,
+  onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, onLoadInstrument,
 }: PowderWorkbenchProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
@@ -718,6 +719,11 @@ export function PowderWorkbench({
             onRemovePhase,
           }
         : {}),
+      // Once the user has loaded their own structure(s), offer a one-click reset
+      // back to the bundled example (the app always needs a structure loaded).
+      ...(ownStructure
+        ? { control: <button style={clearStructuresBtn} onClick={onClearStructures} title="Remove all loaded structures and reset to the bundled example">Clear structures</button> }
+        : {}),
     },
     {
       label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
@@ -1151,5 +1157,6 @@ const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 
 const stepHelp: React.CSSProperties = { fontSize: 13, color: theme.secondary, marginTop: 0 };
 const toolbarBtn: React.CSSProperties = { border: `1px solid ${theme.primary}`, background: "#fff", color: theme.primary, borderRadius: 8, padding: "3px 11px", fontSize: 11, fontWeight: 600, fontFamily: themeMono, cursor: "pointer" };
 const resetRangeBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "1px 9px", fontSize: 11, fontFamily: themeMono, color: theme.secondary, cursor: "pointer" };
+const clearStructuresBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "3px 10px", fontSize: 11.5, color: theme.secondary, cursor: "pointer" };
 const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "2px 6px", fontSize: 12, color: theme.ink, cursor: "pointer" };
 const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };

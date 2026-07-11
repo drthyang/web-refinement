@@ -110,6 +110,17 @@ export function App(): JSX.Element {
     });
   }
 
+  /** Clear all user-loaded structures — reset to the bundled Mn₃Ga POWGEN example. */
+  function onClearStructures(): void {
+    const ex = mn3gaPowgenExample();
+    setSession(loadedSession(ex.structure, ex.pattern, ex.instrument, ex.extraPhases));
+    setInstrument(ex.instrument);
+    setInstrumentLoaded(true);
+    setOwnStructure(false);
+    setPowderResult(null);
+    setMessage("Cleared loaded structures — reset to the bundled Mn₃Ga POWGEN example.");
+  }
+
   /** Append a CIF as an additional crystallographic phase (multi-phase refinement),
    *  rebuilding the spec while preserving every existing parameter value/state. */
   function onAddPhase(file: File): void {
@@ -386,6 +397,7 @@ export function App(): JSX.Element {
         onLoadCif={onLoadCif}
         onAddPhase={onAddPhase}
         onRemovePhase={onRemovePhase}
+        onClearStructures={onClearStructures}
         onLoadInstrument={onLoadInstrument}
       />
       {scDataset && (
