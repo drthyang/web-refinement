@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { color, mono, radius, shadow, sans } from "@/app/theme";
 
-/** Display face for the Materia wordmark — geometric, loaded in index.html. */
+/** Display face for the MATERIA wordmark — geometric, loaded in index.html. */
 const display = '"Space Grotesk", "IBM Plex Sans", system-ui, sans-serif';
 
 export interface Step {
@@ -42,7 +42,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, onTog
     <header className="wb-header" style={headerBar}>
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
         <div className="wb-header-mark" style={brandMark}>
-          {/* Materia monogram: a clean geometric M. */}
+          {/* MATERIA monogram: a clean geometric M. */}
           <svg viewBox="0 0 100 100" width={28} height={28} aria-hidden>
             <path d="M18 82 L18 20 L50 58 L82 20 L82 82" fill="none" stroke="#fff" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
           </svg>
@@ -56,7 +56,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, onTog
               WORKBENCH
             </span>
           </div>
-          <span style={betaBadge} title="Materia is in public beta — validate results against established tools before publication">beta</span>
+          <span style={betaBadge} title="MATERIA is in public beta — validate results against established tools before publication">beta</span>
           <span className="wb-version-chip" style={versionChip}>{version}</span>
         </div>
       </div>
