@@ -38,13 +38,14 @@
   }
 }
 
-/* Refining pixel shimmer: a violet mosaic sweeps across the Refine button while
- * a refinement runs. A ::before overlay carries a fine pixel grid over a moving
- * purple gradient, so it covers the button's own colour without fighting inline
- * styles; the label sits above it. */
+/* Refining pixel shimmer: a pixelated cobalt "rocket-exhaust" flame flows right
+ * to left across the Refine button while a refinement runs — each band ramps
+ * from deep cobalt up into white, then resets. A ::before overlay carries a fine
+ * pixel grid over the moving gradient, covering the button's own colour without
+ * fighting inline styles; the label sits above it. */
 @keyframes wb-pixel-sweep {
-  from { background-position: 0 0, 0 0, 200% 0; }
-  to   { background-position: 0 0, 0 0, -200% 0; }
+  from { background-position: 0 0, 0 0, 0 0; }
+  to   { background-position: 0 0, 0 0, -96px 0; }
 }
 .wb-refining-pixels {
   position: relative;
@@ -60,11 +61,11 @@
   inset: 0;
   z-index: 0;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.18) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px),
-    linear-gradient(100deg, #6d4bd8 0%, #8b5cf6 26%, #cbbafd 50%, #8b5cf6 74%, #6d4bd8 100%);
-  background-size: 6px 6px, 6px 6px, 200% 100%;
-  animation: wb-pixel-sweep 1.2s linear infinite;
+    linear-gradient(rgba(255, 255, 255, 0.14) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.14) 1px, transparent 1px),
+    repeating-linear-gradient(90deg, #163a9e 0px, #1f4fd8 26px, #7fa0f2 58px, #ffffff 84px, #163a9e 96px);
+  background-size: 4px 4px, 4px 4px, auto;
+  animation: wb-pixel-sweep 1s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .wb-refining-pixels::before { animation: none; }
