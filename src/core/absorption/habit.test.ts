@@ -3,7 +3,13 @@ import type { StructureModel, AtomSite, UnitCell } from "@/core/crystal/types";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { dot } from "@/core/math/vec3";
 import { linearAbsorptionCoefficient } from "@/core/scattering/neutronAbsorption";
-import { crystalHabit, faceNormalCartesian, type CrystalFace } from "@/core/absorption/habit";
+import {
+  crystalHabit,
+  crystalHabitFromForms,
+  expandFaceFamily,
+  faceNormalCartesian,
+  type CrystalFace,
+} from "@/core/absorption/habit";
 import { transmissionFactor } from "@/core/absorption/transmission";
 import { boxShape } from "@/core/absorption/shape";
 
@@ -65,6 +71,39 @@ describe("crystalHabit", () => {
       { hkl: [2, 0, 1], distance: 0.3 },
     ];
     expect(() => crystalHabit(cubic(4), open)).toThrow(/unbounded or degenerate/);
+  });
+});
+
+describe("crystal forms (point-group face families)", () => {
+  // The orthorhombic point group mmm (8 operations), hand-listed.
+  const mmm = [
+    "x,y,z", "-x,-y,z", "-x,y,-z", "x,-y,-z",
+    "-x,-y,-z", "x,y,-z", "x,-y,z", "-x,y,z",
+  ].map(parseSymmetryOperation);
+
+  it("expands a form to its full family", () => {
+    // Under mmm the general {111} form has 8 faces, {100} the pinacoid has 2.
+    expect(expandFaceFamily(mmm, [1, 1, 1])).toHaveLength(8);
+    const family100 = expandFaceFamily(mmm, [1, 0, 0]).map((v) => v.join(","));
+    expect(family100).toHaveLength(2);
+    expect(family100).toContain("1,0,0");
+    expect(family100).toContain("-1,0,0");
+  });
+
+  it("builds a cube from the three pinacoid forms", () => {
+    const shape = crystalHabitFromForms(cubic(4), mmm, [
+      { hkl: [1, 0, 0], distance: 0.3 },
+      { hkl: [0, 1, 0], distance: 0.3 },
+      { hkl: [0, 0, 1], distance: 0.3 },
+    ]);
+    expect(shape.faces).toHaveLength(6);
+    expect(shape.min).toEqual([-0.3, -0.3, -0.3]);
+    const beam: [number, number, number] = [1, 0, 0];
+    const out: [number, number, number] = [0, 1, 0];
+    expect(transmissionFactor(shape, 2, beam, out)).toBeCloseTo(
+      transmissionFactor(boxShape([0.6, 0.6, 0.6]), 2, beam, out),
+      10,
+    );
   });
 });
 

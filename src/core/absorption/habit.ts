@@ -16,7 +16,7 @@
  * face family through the point group. Both end up as {(hkl, distance)} lists.
  */
 
-import type { UnitCell } from "@/core/crystal/types";
+import type { SymmetryOperation, UnitCell } from "@/core/crystal/types";
 import type { Mat3, Vec3 } from "@/core/math/types";
 import { orthogonalizationMatrix } from "@/core/crystal/unitCell";
 import { inverse, transpose, mulVec, determinant } from "@/core/math/mat3";
@@ -28,6 +28,18 @@ export interface CrystalFace {
   /** Miller indices (h, k, l) of the face. */
   readonly hkl: Vec3;
   /** Perpendicular distance from the crystal centre to the face (length unit). */
+  readonly distance: number;
+}
+
+/**
+ * A crystal form: a representative face {hkl} standing for its whole symmetry-
+ * equivalent family, and the central distance the family shares. This is how a
+ * habit is described in practice — e.g. the cube form {100} at 0.3 mm.
+ */
+export interface CrystalForm {
+  /** A representative face of the form. */
+  readonly hkl: Vec3;
+  /** Central distance shared by every face in the family (length unit). */
   readonly distance: number;
 }
 
@@ -67,6 +79,40 @@ export function crystalHabit(cell: UnitCell, faces: readonly CrystalFace[]): Con
     }
   }
   return { faces: planes, min, max };
+}
+
+/**
+ * The star of (hkl): every symmetry-equivalent Miller index under the point
+ * group (the rotation parts of the given operations). Each operation R maps a
+ * reflection by h' = (R⁻¹)ᵀ·h; the union over the group is the face family.
+ */
+export function expandFaceFamily(operations: readonly SymmetryOperation[], hkl: Vec3): Vec3[] {
+  const seen = new Map<string, Vec3>();
+  for (const op of operations) {
+    const mapped = mulVec(transpose(inverse(op.rotation)), hkl);
+    const rounded: Vec3 = [Math.round(mapped[0]), Math.round(mapped[1]), Math.round(mapped[2])];
+    seen.set(rounded.join(","), rounded);
+  }
+  return [...seen.values()];
+}
+
+/**
+ * Build a habit from crystal forms: each form is expanded to its full face
+ * family through the point group, and all faces of a family sit at the form's
+ * shared distance. The natural crystallographic way to specify a shape.
+ */
+export function crystalHabitFromForms(
+  cell: UnitCell,
+  operations: readonly SymmetryOperation[],
+  forms: readonly CrystalForm[],
+): ConvexShape {
+  const faces: CrystalFace[] = [];
+  for (const form of forms) {
+    for (const hkl of expandFaceFamily(operations, form.hkl)) {
+      faces.push({ hkl, distance: form.distance });
+    }
+  }
+  return crystalHabit(cell, faces);
 }
 
 /** Corner points of the convex body: feasible intersections of face triples. */
