@@ -8,6 +8,8 @@ import { card, color, mono, radius, uppercaseLabel, fz } from "@/app/theme";
 
 export interface SummaryCardData {
   readonly label: string;
+  /** Optional help text shown in a hover tooltip on a "?" badge by the title. */
+  readonly help?: string;
   readonly loadLabel: string;
   readonly accept: string;
   readonly onFile: (file: File) => void;
@@ -45,8 +47,9 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
   const chipStyle = data.chipTone === "warn" ? warnChip : okChip;
   return (
     <div style={{ ...card, padding: "15px 18px", display: "flex", flexDirection: "column", gap: 7 }}>
-      <div style={{ display: "flex", alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={uppercaseLabel}>{data.label}</span>
+        {data.help && <HelpBadge text={data.help} />}
         <LoadButton label={data.loadLabel} accept={data.accept} onFile={data.onFile} />
       </div>
       {showChipRow && (
@@ -118,6 +121,57 @@ function LoadButton({ label, accept, onFile }: { label: string; accept: string; 
     </label>
   );
 }
+
+/** A low-key "?" badge that reveals a help tooltip on hover — a quiet way to
+ *  surface what each card accepts without cluttering the resting layout. */
+function HelpBadge({ text }: { text: string }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <span
+      style={{ position: "relative", display: "inline-flex" }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <span style={{ ...helpBadge, ...(open ? { color: color.secondary, borderColor: color.control } : {}) }} aria-label={text} role="img">?</span>
+      {open && <span role="tooltip" style={helpTip}>{text}</span>}
+    </span>
+  );
+}
+
+const helpBadge: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 14,
+  height: 14,
+  borderRadius: "50%",
+  border: `1px solid ${color.border}`,
+  background: color.chipBg,
+  color: color.faint,
+  fontSize: 9.5,
+  fontWeight: 700,
+  lineHeight: 1,
+  cursor: "help",
+};
+
+const helpTip: CSSProperties = {
+  position: "absolute",
+  top: "calc(100% + 7px)",
+  left: -2,
+  zIndex: 60,
+  width: 232,
+  padding: "9px 11px",
+  background: color.ink,
+  color: "#f4efe6",
+  fontSize: 11.5,
+  lineHeight: 1.5,
+  fontWeight: 400,
+  letterSpacing: 0,
+  textTransform: "none",
+  borderRadius: 9,
+  boxShadow: "0 8px 24px rgba(25,23,20,0.22)",
+  whiteSpace: "normal",
+};
 
 const okChip: CSSProperties = {
   fontSize: fz.micro,

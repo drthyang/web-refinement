@@ -719,6 +719,7 @@ export function PowderWorkbench({
   const summaryCards: SummaryCardData[] = [
     {
       label: "Structure",
+      help: "Load a crystal structure from a CIF. Up to two phases are supported — load a second CIF to add an impurity or secondary phase.",
       loadLabel: ownStructure ? "Add CIF…" : "Load CIF…",
       accept: ".cif,text/plain",
       onFile: ownStructure ? onAddPhase : onLoadCif,
@@ -751,7 +752,9 @@ export function PowderWorkbench({
         : {}),
     },
     {
-      label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
+      label: "Data",
+      help: "Loads most powder and single-crystal formats from the major facilities (POWGEN/GSAS, FullProf, ILL, .xye, .hkl, …). If your file isn't recognised, contact the author.",
+      loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
       muted: !hasContent,
       chip: isSynthetic ? "⚠ synthetic" : "✓ loaded",
       chipTone: isSynthetic ? "warn" : "ok",
@@ -761,7 +764,9 @@ export function PowderWorkbench({
         : `${pattern.points.length} points · ${UNIT_LABEL[pattern.xUnit]} ${patternExtent.min.toFixed(0)}–${patternExtent.max.toFixed(0)}`,
     },
     {
-      label: "Instrument", loadLabel: "Load instrument…", accept: ".instprm,.prm,.irf,text/plain", onFile: onLoadInstrument,
+      label: "Instrument",
+      help: "Loads instrument files from the major facilities — GSAS-II .instprm, GSAS .prm, FullProf .irf. If your file isn't recognised, contact the author.",
+      loadLabel: "Load instrument…", accept: ".instprm,.prm,.irf,text/plain", onFile: onLoadInstrument,
       muted: !hasContent && !instrumentLoaded,
       chip: instrumentLoaded ? "✓ loaded" : "default",
       title: !hasContent && !instrumentLoaded ? "No instrument loaded" : instTitle,
