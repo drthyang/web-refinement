@@ -72,7 +72,7 @@ import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono a
 import { applyParameters } from "@/core/workflow/apply";
 import { excludedPointMask } from "@/core/refinement/factors";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
-import { type Session, buildSpecFor, DEFAULT_INSTRUMENT, SYNTHETIC_SOURCE } from "@/app/powderSession";
+import { type Session, buildSpecFor, DEFAULT_INSTRUMENT, SYNTHETIC_SOURCE, EMPTY_SOURCE } from "@/app/powderSession";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 
 // Lazy so three.js (~550 kB) only loads when the user opens the 3D view.
@@ -106,12 +106,14 @@ export interface PowderWorkbenchProps {
   onRemovePhase: (id: string) => void;
   onClearStructures: () => void;
   onLoadInstrument: (file: File) => void;
+  /** Load the bundled demo (from the empty-state prompt). */
+  onLoadDemo?: () => void;
 }
 
 export function PowderWorkbench({
   session, setSession, powderResult, setPowderResult, instrument, instrumentLoaded, ownStructure,
   client, active, step, onStep, setMessage, exportsRef,
-  onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, onLoadInstrument,
+  onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, onLoadInstrument, onLoadDemo,
 }: PowderWorkbenchProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
@@ -149,6 +151,9 @@ export function PowderWorkbench({
   }, []);
 
   const { structure, pattern, powderParams, powderSource } = session;
+  // Clean, data-less start: the workbench renders its chrome (the Structure/Data/
+  // Instrument cards + Load buttons) with an empty-state where the plot goes.
+  const hasContent = powderSource !== EMPTY_SOURCE;
   // A freshly-loaded pattern is a new object; drop the window and axis choice.
   useEffect(() => {
     setFitRange(null);
@@ -177,6 +182,8 @@ export function PowderWorkbench({
   const refinedStructure = refinedPhases[0]!;
 
   const curves = useMemo(() => {
+    // Clean, data-less workbench: nothing to plot (the empty-state renders instead).
+    if (pattern.points.length === 0) return { x: [], yObs: [], yCalc: [], yBackground: [], diff: [] };
     // TOF patterns cannot be profile-fit by the minimal engine; show the observed
     // data with GSAS-II's own calc/background as a faithful reference overlay.
     if (powderIsTof && session.powderOverlay) {
@@ -206,6 +213,7 @@ export function PowderWorkbench({
   // Full pattern extent; the plot handles default to this until the user drags.
   const patternExtent = useMemo<FitRangeSelection>(() => {
     const xs = curves.x;
+    if (xs.length === 0) return { min: 0, max: 0 };
     return { min: Math.min(...xs), max: Math.max(...xs) };
   }, [curves.x]);
   const effectiveFitRange = fitRange ?? patternExtent;
@@ -714,11 +722,16 @@ export function PowderWorkbench({
       loadLabel: ownStructure ? "Add CIF…" : "Load CIF…",
       accept: ".cif,text/plain",
       onFile: ownStructure ? onAddPhase : onLoadCif,
-      chip: session.extraPhases.length > 0 ? `✓ ${session.extraPhases.length + 1} phases` : "✓ parsed",
-      title: session.extraPhases.length > 0
+      chip: !hasContent ? "none" : session.extraPhases.length > 0 ? `✓ ${session.extraPhases.length + 1} phases` : "✓ parsed",
+      chipTone: hasContent ? "ok" : "muted",
+      title: !hasContent
+        ? "No structure loaded"
+        : session.extraPhases.length > 0
         ? `${structure.name} + ${session.extraPhases.map((p) => p.name).join(" + ")}`
         : `${structure.name}${structure.spaceGroup.hermannMauguin ? ` · ${structure.spaceGroup.hermannMauguin}` : ""}`,
-      meta: session.extraPhases.length > 0
+      meta: !hasContent
+        ? "Load a CIF to begin, or click Demo"
+        : session.extraPhases.length > 0
         ? [structure, ...session.extraPhases].map((p) => `${p.name} ${p.spaceGroup.hermannMauguin ?? ""}`.trim()).join(" · ")
         : `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
       ...(session.extraPhases.length > 0
@@ -739,18 +752,32 @@ export function PowderWorkbench({
     },
     {
       label: "Data", loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
-      chip: isSynthetic ? "⚠ synthetic" : "✓ loaded",
-      chipTone: isSynthetic ? "warn" : "ok",
-      title: isSynthetic ? "Synthetic demo pattern" : powderSource,
-      meta: `${pattern.points.length} points · ${UNIT_LABEL[pattern.xUnit]} ${patternExtent.min.toFixed(0)}–${patternExtent.max.toFixed(0)}`,
+      chip: !hasContent ? "none" : isSynthetic ? "⚠ synthetic" : "✓ loaded",
+      chipTone: !hasContent ? "muted" : isSynthetic ? "warn" : "ok",
+      title: !hasContent ? "No data loaded" : isSynthetic ? "Synthetic demo pattern" : powderSource,
+      meta: !hasContent
+        ? "Load a pattern (.xye / .dat / .gsa …)"
+        : `${pattern.points.length} points · ${UNIT_LABEL[pattern.xUnit]} ${patternExtent.min.toFixed(0)}–${patternExtent.max.toFixed(0)}`,
     },
     {
       label: "Instrument", loadLabel: "Load instrument…", accept: ".instprm,.prm,.irf,text/plain", onFile: onLoadInstrument,
-      chip: instrumentLoaded ? "✓ loaded" : "default",
-      title: instTitle,
-      meta: instMeta,
+      chip: !hasContent && !instrumentLoaded ? "none" : instrumentLoaded ? "✓ loaded" : "default",
+      chipTone: !hasContent && !instrumentLoaded ? "muted" : "ok",
+      title: !hasContent && !instrumentLoaded ? "No instrument loaded" : instTitle,
+      meta: !hasContent && !instrumentLoaded ? "Load .instprm / .prm / .irf" : instMeta,
     },
   ];
+
+  // Clean start: show the workbench chrome (the load cards) with an empty-state
+  // where the plot/parameters go, until a structure + data are loaded.
+  if (!hasContent) {
+    return (
+      <main className="wb-main" style={{ flex: 1, display: active ? undefined : "none" }}>
+        <SummaryCards cards={summaryCards} />
+        <EmptyWorkbench {...(onLoadDemo ? { onLoadDemo } : {})} />
+      </main>
+    );
+  }
 
   return (
     // Both step panels stay mounted; tabs only toggle visibility, so the
@@ -1173,3 +1200,26 @@ const resetRangeBtn: React.CSSProperties = { border: `1px solid ${theme.control}
 const clearStructuresBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "3px 10px", fontSize: 11.5, color: theme.secondary, cursor: "pointer" };
 const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "2px 6px", fontSize: 12, color: theme.ink, cursor: "pointer" };
 const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };
+
+/** Empty-state panel shown in place of the plot/parameters on a clean start —
+ *  the load cards sit above it; this points the user at them or the demo. */
+function EmptyWorkbench({ onLoadDemo }: { onLoadDemo?: () => void }): JSX.Element {
+  return (
+    <div style={{ ...themeCard, padding: "clamp(40px, 9vh, 104px) 24px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 14 }}>
+      <div style={emptyIconBox} aria-hidden>
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke={theme.faint} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 3v18h18" />
+          <path d="M7 14l3-4 3 3 5-7" />
+        </svg>
+      </div>
+      <div style={{ fontSize: 17, fontWeight: 700, color: theme.ink }}>No data loaded yet</div>
+      <p style={{ margin: 0, maxWidth: 430, fontSize: 13.5, lineHeight: 1.55, color: theme.secondary }}>
+        Load a structure (CIF) and diffraction data with the cards above, or explore
+        the bundled Mn₃Ga POWGEN example.
+      </p>
+      {onLoadDemo && <button style={demoCta} onClick={onLoadDemo}>Load demo dataset</button>}
+    </div>
+  );
+}
+const emptyIconBox: React.CSSProperties = { width: 56, height: 56, borderRadius: 14, background: theme.chipBg, border: `1px solid ${theme.border}`, display: "flex", alignItems: "center", justifyContent: "center" };
+const demoCta: React.CSSProperties = { marginTop: 4, border: `1px solid ${theme.primary}`, background: theme.primary, color: "#fff", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer" };

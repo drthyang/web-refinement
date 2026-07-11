@@ -32,7 +32,6 @@ import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
 import { ComputeClient } from "@/workers/computeClient";
 import { PowderWorkbench } from "@/app/PowderWorkbench";
 import { SingleCrystalWorkbench } from "@/app/SingleCrystalWorkbench";
-import { Landing } from "@/app/ui/Landing";
 import { WorkbenchHeader, type Step, type ExportAction } from "@/app/ui/WorkbenchHeader";
 import { color as theme } from "@/app/theme";
 import {
@@ -418,37 +417,36 @@ export function App(): JSX.Element {
         demoActive={demoActive}
         onToggleDemo={onToggleDemo}
       />
-      {!hasContent && <Landing onLoadDemo={onToggleDemo} onLoadCif={onLoadCif} />}
       {hasContent && (
         <div style={disclaimerBar}>
           Public beta — validate results intended for publication against established tools. Export your refinement to GSAS-II or FullProf (Export ▸ bundle) to cross-check.
         </div>
       )}
       {/* The powder engine stays mounted in single-crystal mode (hidden) so all
-          its state — fit range, plot mode, k-search picks — survives switching. */}
-      {hasContent && (
-        <PowderWorkbench
-          session={session}
-          setSession={setSession}
-          powderResult={powderResult}
-          setPowderResult={setPowderResult}
-          instrument={instrument}
-          instrumentLoaded={instrumentLoaded}
-          ownStructure={ownStructure}
-          client={client.current}
-          active={!scDataset}
-          step={step}
-          onStep={setStep}
-          setMessage={setMessage}
-          exportsRef={powderExports}
-          onLoadData={onLoadData}
-          onLoadCif={onLoadCif}
-          onAddPhase={onAddPhase}
-          onRemovePhase={onRemovePhase}
-          onClearStructures={onClearStructures}
-          onLoadInstrument={onLoadInstrument}
-        />
-      )}
+          its state — fit range, plot mode, k-search picks — survives switching.
+          On a clean start it renders its load cards + an empty-state placeholder. */}
+      <PowderWorkbench
+        session={session}
+        setSession={setSession}
+        powderResult={powderResult}
+        setPowderResult={setPowderResult}
+        instrument={instrument}
+        instrumentLoaded={instrumentLoaded}
+        ownStructure={ownStructure}
+        client={client.current}
+        active={!scDataset}
+        step={step}
+        onStep={setStep}
+        setMessage={setMessage}
+        exportsRef={powderExports}
+        onLoadData={onLoadData}
+        onLoadCif={onLoadCif}
+        onAddPhase={onAddPhase}
+        onRemovePhase={onRemovePhase}
+        onClearStructures={onClearStructures}
+        onLoadInstrument={onLoadInstrument}
+        onLoadDemo={onToggleDemo}
+      />
       {scDataset && (
         // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
         // the dataset id so a new file remounts with a fresh parameter set.

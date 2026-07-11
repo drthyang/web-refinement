@@ -12,8 +12,9 @@ export interface SummaryCardData {
   readonly accept: string;
   readonly onFile: (file: File) => void;
   readonly chip: string;
-  /** Status chip tone: "ok" (green, default) or "warn" (red, e.g. synthetic data). */
-  readonly chipTone?: "ok" | "warn";
+  /** Status chip tone: "ok" (green, default), "warn" (red, e.g. synthetic data),
+   *  or "muted" (neutral, e.g. nothing loaded yet). */
+  readonly chipTone?: "ok" | "warn" | "muted";
   readonly title: string;
   readonly meta: string;
   /** One badge per crystallographic phase (multi-phase); removable ones show an ×. */
@@ -42,7 +43,7 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
         <LoadButton label={data.loadLabel} accept={data.accept} onFile={data.onFile} />
       </div>
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-        <span style={data.chipTone === "warn" ? warnChip : okChip}>{data.chip}</span>
+        <span style={data.chipTone === "warn" ? warnChip : data.chipTone === "muted" ? mutedChip : okChip}>{data.chip}</span>
         {data.phaseBadges && data.phaseBadges.map((ph) => (
           <span key={ph.id} style={phaseChip}>
             {ph.label}
@@ -124,4 +125,12 @@ const warnChip: CSSProperties = {
   background: color.warnBg,
   border: `1px solid ${color.warnBorder}`,
   color: color.warnInk,
+};
+
+/** Neutral tone (grey) — nothing loaded yet. */
+const mutedChip: CSSProperties = {
+  ...okChip,
+  background: color.chipBg,
+  border: `1px solid ${color.border}`,
+  color: color.faint,
 };
