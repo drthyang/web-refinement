@@ -455,8 +455,8 @@ export function App(): JSX.Element {
         </main>
       )}
       <footer style={copyrightBar}>
-        © 2026 Tsung-Han Yang. All rights reserved.
-        <span style={{ margin: "0 8px", color: theme.border }}>·</span>
+        <span>© 2026 Tsung-Han Yang</span>
+        <span aria-hidden style={{ color: theme.faintest }}>·</span>
         <a href="https://github.com/drthyang/web-refinement#readme" target="_blank" rel="noopener noreferrer" style={footerLink}>
           About &amp; documentation
         </a>
@@ -466,5 +466,5 @@ export function App(): JSX.Element {
 }
 
 const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk };
-const copyrightBar: React.CSSProperties = { padding: "10px 24px", fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised, textAlign: "center" };
-const footerLink: React.CSSProperties = { color: theme.secondary, textDecoration: "none", borderBottom: `1px solid ${theme.border}` };
+const copyrightBar: React.CSSProperties = { display: "flex", justifyContent: "center", alignItems: "center", gap: 8, padding: "10px 24px", fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised };
+const footerLink: React.CSSProperties = { color: theme.secondary, textDecoration: "none" };
