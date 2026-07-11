@@ -115,6 +115,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMag
       </div>
       <div style={actionBar}>
         <button
+          className={busy ? "wb-refining-pixels" : undefined}
           style={{ ...primaryButton, flex: "1 1 auto", minWidth: 120, textAlign: "center", padding: "11px 18px", fontSize: 14.5, fontWeight: 650, ...(busy ? refiningStyle : disabled ? disabledStyle : {}) }}
           disabled={busy || disabled}
           onClick={onRefine}
