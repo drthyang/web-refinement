@@ -78,12 +78,29 @@ export class ComputeClient {
     return this.run({ ...req, type: "refineMagnetic", requestId: this.nextId++ });
   }
 
+  /** Abort any in-flight refinement: terminate the worker (a fresh one is
+   *  created on the next run) and reject every pending request as cancelled. */
+  cancel(): void {
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+    for (const [requestId, resolve] of this.pending) {
+      resolve({ requestId, ok: false, error: CANCELLED });
+    }
+    this.pending.clear();
+    this.progress.clear();
+  }
+
   dispose(): void {
     this.worker?.terminate();
     this.worker = null;
     this.pending.clear();
   }
 }
+
+/** Error message a cancelled refinement rejects with (callers detect it). */
+export const CANCELLED = "__refinement_cancelled__";
 
 function runInline(req: ComputeRequest, onProgress?: PowderProgress): RefinementResult {
   if (req.type === "refinePowder") {

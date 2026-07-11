@@ -62,6 +62,8 @@ interface Props {
   readonly esd?: Readonly<Record<string, number>> | undefined;
   readonly onChange: (id: string, patch: Partial<RefinementParameter>) => void;
   readonly onRefine: () => void;
+  /** Abort a running refinement; a Cancel button appears while `busy`. */
+  readonly onCancel?: () => void;
   readonly onReset: () => void;
   /** Hand the refined structure to the magnetic symmetry analysis page (powder). */
   readonly onMagnetic?: () => void;
@@ -80,7 +82,7 @@ interface Props {
   readonly groupControls?: Partial<Record<string, ReactNode>> | undefined;
 }
 
-export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls }: Props): JSX.Element {
+export function ParameterPanel({ params, esd, onChange, onRefine, onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls }: Props): JSX.Element {
   const groups = useMemo(() => {
     const byGroup = new Map<string, RefinementParameter[]>();
     for (const p of params) {
@@ -122,6 +124,11 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMag
         >
           {busy ? <span className="wb-shimmer-text">Refining…</span> : "Refine"}
         </button>
+        {busy && onCancel && (
+          <button style={cancelButton} onClick={onCancel} title="Abort the running refinement">
+            Cancel
+          </button>
+        )}
         {onMagnetic && (
           <button
             style={{ ...secondaryButton, padding: "11px 15px", fontSize: 13.5, ...(busy ? disabledStyle : {}) }}
@@ -264,5 +271,6 @@ const footer: CSSProperties = { borderTop: `1px solid ${color.border}`, padding:
 const banner: CSSProperties = { borderRadius: 8, padding: "6px 10px", fontSize: 12 };
 const hcell: CSSProperties = { padding: "1px 10px 1px 0", textAlign: "left", color: color.faint };
 const disabledStyle: CSSProperties = { opacity: 0.55, cursor: "not-allowed" };
+const cancelButton: CSSProperties = { padding: "11px 15px", fontSize: 13.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${color.warnBorder}`, background: color.warnBg, color: color.warnInk, cursor: "pointer" };
 // While refining, keep the button vivid (so the shimmer reads) but show progress.
 const refiningStyle: CSSProperties = { cursor: "progress" };

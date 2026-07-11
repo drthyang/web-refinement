@@ -40,6 +40,7 @@ import { powderPatternCsv, projectJson } from "@/core/export/exporters";
 import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from "@/core/export/cif";
 import { isMomentParameterKind } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
+import { CANCELLED } from "@/workers/computeClient";
 import { KSearchPanel } from "@/components/KSearchPanel";
 import { withAdpModel } from "@/core/crystal/adp";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
@@ -518,11 +519,18 @@ export function PowderWorkbench({
       setPowderResult(result);
       setMessage(`Powder ${guided ? "guided " : ""}refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`);
     } catch (e) {
-      setMessage(`Powder refinement failed: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(msg === CANCELLED ? "Refinement cancelled." : `Powder refinement failed: ${msg}`);
     } finally {
       livePreview.current = null;
       setBusy(false);
     }
+  }
+
+  /** Abort the running refinement (worker path); the awaited promise rejects as
+   *  cancelled, so runPowder's finally clears the busy state. */
+  function cancelPowder(): void {
+    client.cancel();
   }
 
   function exportProject(): void {
@@ -921,6 +929,7 @@ export function PowderWorkbench({
                 esd={powderResult?.esd}
                 onChange={patchPowder}
                 onRefine={() => runPowder(false)}
+                onCancel={cancelPowder}
                 onReset={resetPowderParams}
                 onMagnetic={() => {
                   onStep(1);
