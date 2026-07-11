@@ -848,42 +848,6 @@ export function PowderWorkbench({
                         <button style={smallBtn} onClick={() => setFitRange(null)}>Reset range</button>
                       )}
                     </p>
-                    {!tofViewOnly && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, rowGap: 5, marginTop: 4, fontSize: 12, color: theme.secondary, flexWrap: "wrap" }}>
-                        <span style={{ ...themeLabel, marginRight: 2 }}>Background</span>
-                        <select
-                          value={session.powderProfile.backgroundType ?? "chebyshev"}
-                          onChange={(e) => setBackgroundType(e.target.value as BackgroundType)}
-                          style={bgSelect}
-                        >
-                          <option value="chebyshev">Chebyshev</option>
-                          <option value="cosine">Cosine (Fourier)</option>
-                          <option value="powerSeries">Power series</option>
-                          <option value="linInterpolate">Linear interpolate</option>
-                          <option value="logInterpolate">Log interpolate</option>
-                        </select>
-                        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          terms
-                          <input type="number" min={1} max={24} step={1} value={session.backgroundTerms} onChange={(e) => setBackgroundTerms(Number(e.target.value))} style={bgTermsInput} />
-                        </label>
-                        <span style={{ ...themeLabel, marginLeft: 8, marginRight: 2 }} title="Displacement-parameter model: one isotropic B_iso per site, or the full anisotropic U tensor (symmetry-allowed modes)">ADPs</span>
-                        <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Refine the anisotropic U tensor. Each site's U is seeded from its current B_iso; symmetry fixes which components are free. Turn on after an isotropic fit converges.">
-                          <input type="checkbox" checked={session.anisotropicAdp ?? false} onChange={(e) => setAnisotropicAdp(e.target.checked)} />
-                          anisotropic
-                        </label>
-                        <span style={{ ...themeLabel, marginLeft: 8, marginRight: 2 }} title="Sample microstrain (Mustrain) model, GSAS-II-style: isotropic (Lorentzian Y), uniaxial (Y about a unique axis, 2θ only), or generalized (Stephens anisotropic).">Mustrain</span>
-                        <select
-                          value={session.mustrain ?? "isotropic"}
-                          onChange={(e) => setMustrain(e.target.value as MustrainModel)}
-                          style={bgSelect}
-                          title="Isotropic uses the Lorentzian Y (always present); uniaxial and generalized add anisotropic microstrain rows — free them (Microstructure) or run guided after the isotropic profile converges."
-                        >
-                          <option value="isotropic">isotropic</option>
-                          {session.pattern.xUnit === "twoTheta" && <option value="uniaxial">uniaxial</option>}
-                          <option value="generalized">generalized</option>
-                        </select>
-                      </div>
-                    )}
                     {!tofViewOnly && mustrainReadout && (mustrainReadout.strainPpm.value > 0 || mustrainReadout.sampleY !== 0) && (
                       <div style={{ display: "flex", alignItems: "center", gap: 14, rowGap: 5, marginTop: 6, fontSize: 12, color: theme.secondary, fontFamily: themeMono, flexWrap: "wrap" }} title="Derived from the refined Lorentzian X (size) and Y (microstrain), with the instrument seed deconvoluted (GSAS-II microstrain = LY·π/72000·10⁶ ppm).">
                         <span style={themeLabel}>Microstructure</span>
@@ -927,6 +891,45 @@ export function PowderWorkbench({
                 busy={busy}
                 result={powderResult}
                 disabled={tofViewOnly}
+                groupControls={tofViewOnly ? undefined : {
+                  "Background": (
+                    <>
+                      <span style={themeLabel}>function</span>
+                      <select value={session.powderProfile.backgroundType ?? "chebyshev"} onChange={(e) => setBackgroundType(e.target.value as BackgroundType)} style={bgSelect}>
+                        <option value="chebyshev">Chebyshev</option>
+                        <option value="cosine">Cosine (Fourier)</option>
+                        <option value="powerSeries">Power series</option>
+                        <option value="linInterpolate">Linear interpolate</option>
+                        <option value="logInterpolate">Log interpolate</option>
+                      </select>
+                      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        terms
+                        <input type="number" min={1} max={24} step={1} value={session.backgroundTerms} onChange={(e) => setBackgroundTerms(Number(e.target.value))} style={bgTermsInput} />
+                      </label>
+                    </>
+                  ),
+                  "ADPs (thermal)": (
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }} title="Refine the anisotropic U tensor. Each site's U is seeded from its current B_iso; symmetry fixes which components are free. Turn on after an isotropic fit converges.">
+                      <input type="checkbox" checked={session.anisotropicAdp ?? false} onChange={(e) => setAnisotropicAdp(e.target.checked)} />
+                      anisotropic (U tensor)
+                    </label>
+                  ),
+                  "Microstructure": (
+                    <>
+                      <span style={themeLabel}>model</span>
+                      <select
+                        value={session.mustrain ?? "isotropic"}
+                        onChange={(e) => setMustrain(e.target.value as MustrainModel)}
+                        style={bgSelect}
+                        title="Isotropic uses the Lorentzian Y (always present); uniaxial and generalized add anisotropic microstrain rows — free them or run guided after the isotropic profile converges."
+                      >
+                        <option value="isotropic">isotropic</option>
+                        {session.pattern.xUnit === "twoTheta" && <option value="uniaxial">uniaxial</option>}
+                        <option value="generalized">generalized</option>
+                      </select>
+                    </>
+                  ),
+                }}
               />
             </div>
           </>

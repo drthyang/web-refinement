@@ -72,9 +72,15 @@ interface Props {
   readonly title?: string;
   /** Extra footer buttons (e.g. single-crystal "Refine free" / "Export CIF"). */
   readonly extraActions?: ReactNode;
+  /**
+   * Per-group model controls (keyed by group name, e.g. "Background",
+   * "ADPs (thermal)", "Microstructure"). Rendered as a strip under the group
+   * header when the group is expanded — where the parameters they govern live.
+   */
+  readonly groupControls?: Partial<Record<string, ReactNode>> | undefined;
 }
 
-export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMagnetic, busy, result, disabled, title, extraActions }: Props): JSX.Element {
+export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls }: Props): JSX.Element {
   const groups = useMemo(() => {
     const byGroup = new Map<string, RefinementParameter[]>();
     for (const p of params) {
@@ -150,6 +156,9 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onReset, onMag
                   all
                 </label>
               </div>
+              {open[g.name] && groupControls?.[g.name] && (
+                <div style={groupControlRow}>{groupControls[g.name]}</div>
+              )}
               {open[g.name] &&
                 g.rows.map((p) => (
                   <ParamRow key={p.id} param={p} esd={esd?.[p.id] ?? p.esd} onChange={onChange} disabled={disabled} />
@@ -243,6 +252,7 @@ function ResultBanner({ result }: { result: RefinementResult }): JSX.Element {
 const colHeader: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 104px 62px 62px", padding: "6px 14px", borderBottom: `1px solid ${color.border}`, ...uppercaseLabel };
 const groupHeader: CSSProperties = { display: "flex", alignItems: "center", gap: 8, background: color.groupBg, borderTop: `1px solid ${color.subtle}`, padding: "8px 14px", cursor: "pointer" };
 const paramRow: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 104px 62px 62px", alignItems: "center", padding: "4px 14px 4px 26px", borderTop: `1px solid ${color.subtle2}` };
+const groupControlRow: CSSProperties = { display: "flex", alignItems: "center", gap: 8, rowGap: 5, flexWrap: "wrap", padding: "7px 14px 7px 26px", borderTop: `1px solid ${color.subtle2}`, fontSize: 12, color: color.secondary };
 const valueInput: CSSProperties = { width: 88, border: `1px solid ${color.input}`, borderRadius: 7, fontSize: 12, fontFamily: mono, padding: "2px 6px", background: "#fff" };
 const pill: CSSProperties = { fontSize: 11, padding: "1px 8px", borderRadius: 999, textAlign: "center", justifySelf: "start" };
 const actionBar: CSSProperties = { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 14px", borderBottom: `1px solid ${color.border}`, background: color.muted2 };
