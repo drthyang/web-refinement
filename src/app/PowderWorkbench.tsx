@@ -740,6 +740,12 @@ export function PowderWorkbench({
                       </span>
                     </span>
                   )}
+                  {plotMode === "curves" && !tofViewOnly && fitRangeActive && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: themeMono, fontSize: 12, color: theme.secondary }} title="The data range used for refinement (set with the blue handles)">
+                      fit {displayFitRange.min.toFixed(2)}–{displayFitRange.max.toFixed(2)} {axisShortLabel(effectiveUnit)}
+                      <button style={resetRangeBtn} onClick={() => setFitRange(null)} title="Refine over the full pattern again">Reset range</button>
+                    </span>
+                  )}
                   <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, rowGap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     {plotMode === "curves" && (
                       <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />
@@ -834,8 +840,7 @@ export function PowderWorkbench({
                       focusPeakToken={focusPeakToken}
                       highlight={highlight}
                       onHighlight={setHighlight}
-                      xShort={axisShortLabel(effectiveUnit)}
-                      {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay, onResetFitRange: () => setFitRange(null) })}
+                      {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                     />
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
                       {tofViewOnly
@@ -1114,5 +1119,6 @@ function ViewModeToggle({
 const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 700, color: theme.ink };
 const stepHelp: React.CSSProperties = { fontSize: 13, color: theme.secondary, marginTop: 0 };
 const toolbarBtn: React.CSSProperties = { border: `1px solid ${theme.primary}`, background: "#fff", color: theme.primary, borderRadius: 8, padding: "3px 11px", fontSize: 11, fontWeight: 600, fontFamily: themeMono, cursor: "pointer" };
+const resetRangeBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "1px 9px", fontSize: 11, fontFamily: themeMono, color: theme.secondary, cursor: "pointer" };
 const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "2px 6px", fontSize: 12, color: theme.ink, cursor: "pointer" };
 const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };
