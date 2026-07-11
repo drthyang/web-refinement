@@ -623,6 +623,10 @@ export function PowderWorkbench({
       bindings: pBindings,
       ...(instrumentLoaded ? { instrument } : {}),
       ...(refinement ? { refinement } : {}),
+      // The user's original files, retained verbatim on load — bundled as-is so
+      // the instrument (whose model is lossy) and data are exactly what they gave.
+      ...(session.rawInstrument ? { rawInstrument: session.rawInstrument } : {}),
+      ...(session.rawData ? { rawData: session.rawData } : {}),
     };
     const entries = target === "fullprof" ? fullprofBundle(structure, pattern, opts) : gsas2Bundle(structure, pattern, opts);
     const base = (structure.name || structure.id).replace(/[^A-Za-z0-9._-]+/g, "_");

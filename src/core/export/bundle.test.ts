@@ -75,3 +75,41 @@ describe("gsas2Bundle", () => {
     expect(new TextDecoder().decode(zip)).toContain("My_Sample.cif");
   });
 });
+
+describe("verbatim original files", () => {
+  const rawInstprm = { name: "powgen.instprm", text: "#GSAS-II instrument parameter file\nType:PNT\ndifC:22585.8\n" };
+  const rawData = { name: "PG3_600K.dat", text: "XYDATA\n# Mantid\n3389.2 48.5 2.9\n" };
+
+  it("GSAS-II uses the user's .instprm verbatim instead of regenerating it", () => {
+    const e = gsas2Bundle(structure, powder, { rawInstrument: rawInstprm, rawData });
+    expect(names(e)).toContain("powgen.instprm");
+    expect(names(e)).not.toContain("MnO.instprm"); // not regenerated
+    expect(e.find((x) => x.name === "powgen.instprm")!.data).toBe(rawInstprm.text); // byte-for-byte
+    // build_gpx.py points at the verbatim instrument, and the original data ships too.
+    expect((e.find((x) => x.name === "build_gpx.py")!.data as string)).toContain("'powgen.instprm'");
+    expect(names(e)).toContain("PG3_600K.dat");
+    expect(e.find((x) => x.name === "PG3_600K.dat")!.data).toBe(rawData.text);
+  });
+
+  it("a non-.instprm instrument file is shipped verbatim but not adopted as the instprm", () => {
+    const irf = { name: "d1b.irf", text: "! FullProf resolution\nD2TOF ...\n" };
+    const e = gsas2Bundle(structure, powder, { rawInstrument: irf });
+    expect(names(e)).toContain("MnO.instprm"); // still generated
+    expect(names(e)).toContain("d1b.irf"); // original shipped for reference
+  });
+
+  it("FullProf ships the verbatim originals alongside the generated .pcr + .dat", () => {
+    const e = fullprofBundle(structure, powder, { rawInstrument: rawInstprm, rawData });
+    expect(names(e)).toEqual(expect.arrayContaining(["MnO.pcr", "MnO.dat", "powgen.instprm", "PG3_600K.dat", "README.txt"]));
+    expect(e.find((x) => x.name === "PG3_600K.dat")!.data).toBe(rawData.text);
+  });
+
+  it("a raw file colliding with a generated name is renamed, not clobbered", () => {
+    const collide = { name: "MnO.dat", text: "verbatim original\n" };
+    const e = fullprofBundle(structure, powder, { rawData: collide });
+    const dat = e.filter((x) => x.name.endsWith(".dat"));
+    expect(dat.map((x) => x.name)).toEqual(["MnO.dat", "original_MnO.dat"]);
+    // Generated MnO.dat is the portable XYE, the verbatim keeps its content.
+    expect(e.find((x) => x.name === "original_MnO.dat")!.data).toBe(collide.text);
+  });
+});

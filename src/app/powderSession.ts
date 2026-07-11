@@ -44,6 +44,14 @@ export interface Session {
   powderOverlay?: { calc: number[]; background: number[] } | null;
   /** Provenance of the observed data driving the refinement. */
   powderSource: string;
+  /** The user's original instrument file, retained verbatim on load. Exported
+   *  into cross-check bundles as-is (the instrument model is lossy — it keeps
+   *  difC/λ + a few width terms, not the full peak-shape profile). Undefined for
+   *  the bundled demo and synthetic sessions. */
+  rawInstrument?: { name: string; text: string };
+  /** The user's original data file, retained verbatim on load, shipped in bundles
+   *  as the exact original alongside the portable re-serialized data. */
+  rawData?: { name: string; text: string };
   /** Optional magnetic model over `structure`, for magnetic reflection ticks. */
   magnetic?: MagneticModel;
 }

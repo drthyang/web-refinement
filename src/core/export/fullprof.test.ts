@@ -66,3 +66,47 @@ describe("structureToPcr", () => {
     expect(aniso).toMatch(/Fe1\s+Fe\s+0\.00000\s+0\.00000\s+0\.00000\s+0\.78957/);
   });
 });
+
+describe("structureToPcr — TOF", () => {
+  const pcr = structureToPcr(structure, {
+    title: "MnO_TOF",
+    datFile: "mno.dat",
+    instrument: { kind: "tof", difC: 22585.8, difA: -3.55, difB: 0.24, zero: -15.13 },
+    dataRange: [14300, 282000],
+    background: [[14300, 20], [150000, 15], [282000, 12]],
+  });
+  const lines = pcr.split("\n");
+
+  it("selects the TOF job/profile (Job −1, Npr 9) and TOF header blocks", () => {
+    const jobIdx = lines.findIndex((l) => l.startsWith("!Job"));
+    const flags = lines[jobIdx + 1]!.trim().split(/\s+/).map(Number);
+    expect(flags[0]).toBe(-1); // Job = neutron TOF
+    expect(flags[1]).toBe(9); // Npr = back-to-back exp ⊗ pV
+    expect(flags[3]).toBe(3); // Nba matches the 3 background points
+    for (const marker of ["TOF-min", "Dtt1", "2ThetaBank", "alph0", "Sig-2", "Back-to-back"]) {
+      expect(pcr).toContain(marker);
+    }
+    // Phase profile number is 9, not the CW 7.
+    const natIdx = lines.findIndex((l) => l.includes("!Nat Dis Ang"));
+    const phaseFlags = lines[natIdx + 1]!.trim().split(/\s+/).map(Number);
+    expect(phaseFlags[phaseFlags.length - 2]).toBe(9);
+    expect(pcr).not.toContain("Lambda1  Lambda2"); // no CW wavelength block
+  });
+
+  it("maps difC/difA/difB/Zero onto Dtt1/Dtt2/Dtt_1overd/Zero", () => {
+    const hdr = lines.findIndex((l) => l.includes("Zero") && l.includes("Dtt1") && l.includes("2ThetaBank"));
+    const vals = lines[hdr + 1]!.trim().split(/\s+/).map(Number);
+    // Zero Code Dtt1 Code Dtt2 Code Dtt_1overd Code 2ThetaBank
+    expect(vals[0]).toBeCloseTo(-15.13, 2);
+    expect(vals[2]).toBeCloseTo(22585.8, 1);
+    expect(vals[4]).toBeCloseTo(-3.55, 2);
+    expect(vals[6]).toBeCloseTo(0.24, 2);
+  });
+
+  it("uses the TOF data range for the plot range", () => {
+    const plotIdx = lines.findIndex((l) => l.includes("2Th1/TOF1"));
+    const vals = lines[plotIdx + 1]!.trim().split(/\s+/).map(Number);
+    expect(vals[0]).toBeCloseTo(14300, 0);
+    expect(vals[1]).toBeCloseTo(282000, 0);
+  });
+});

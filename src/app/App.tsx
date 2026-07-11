@@ -230,7 +230,7 @@ export function App(): JSX.Element {
     const wavelength = parsed.wavelength ?? cw?.wavelength ?? 2.5;
     const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
     const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
-    setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+    setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
     if (instrument.kind === "tof") { setInstrument(DEFAULT_INSTRUMENT); setInstrumentLoaded(false); }
     setPowderResult(null);
     const last = parsed.points[parsed.points.length - 1]!;
@@ -246,7 +246,7 @@ export function App(): JSX.Element {
     setScDataset(null);
     const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
     const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
-    setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+    setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
     if (instrument.kind === "tof") { setInstrument(DEFAULT_INSTRUMENT); setInstrumentLoaded(false); }
     setPowderResult(null);
     const last = parsed.points[parsed.points.length - 1]!;
@@ -284,6 +284,7 @@ export function App(): JSX.Element {
           powderProfile: { shape: "gaussian" },
           powderOverlay: overlay ? { calc: overlay.calc, background: overlay.background } : null,
           powderSource: filename,
+          rawData: { name: filename, text },
         }));
         setPowderResult(null);
         setMessage(
@@ -294,7 +295,7 @@ export function App(): JSX.Element {
         return;
       }
       const spec = buildPowderSpec(structure, parsed, tofInstrument, true, session.backgroundTerms, session.siteTies);
-      setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+      setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
       setPowderResult(null);
       setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag}. ${spec.params.length} parameters, back-to-back-exponential profile — click “Refine”. ${fmt.note}`);
       return;
@@ -309,7 +310,7 @@ export function App(): JSX.Element {
     // workbench into the matching mode instead of staying view-only.
     const cwInstrument = instrumentLoaded && instrument.kind === "constantWavelength" ? instrument : DEFAULT_INSTRUMENT;
     const spec = buildPowderSpec(structure, parsed, cwInstrument, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
-    setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename }));
+    setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
     if (instrument.kind === "tof") {
       setInstrument(DEFAULT_INSTRUMENT);
       setInstrumentLoaded(false);
@@ -337,7 +338,7 @@ export function App(): JSX.Element {
               ? { ...s.pattern, radiation: { kind: parsed.radiationKind ?? "neutron", wavelength: parsed.wavelength }, wavelength: parsed.wavelength }
               : s.pattern;
           const spec = buildSpecFor(s.structure, s.extraPhases, pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic");
-          return { ...s, pattern, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile };
+          return { ...s, pattern, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, rawInstrument: { name: file.name, text } };
         });
         setPowderResult(null);
         setMessage(
