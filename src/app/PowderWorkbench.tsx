@@ -756,7 +756,7 @@ export function PowderWorkbench({
       // Once the user has loaded their own structure(s), offer a one-click reset
       // back to the bundled example (the app always needs a structure loaded).
       ...(ownStructure
-        ? { control: <button style={clearStructuresBtn} onClick={onClearStructures} title="Remove all loaded structures and reset to the bundled example">Clear structures</button> }
+        ? { headerControl: <button style={clearStructuresBtn} onClick={onClearStructures} title="Remove all loaded structures and reset to the bundled example">Clear</button> }
         : {}),
     },
     {

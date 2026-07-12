@@ -24,6 +24,9 @@ export interface SummaryCardData {
   /** Optional interactive control rendered under the meta line (e.g. the
    *  single-crystal X-ray/neutron probe toggle, which the data file can't carry). */
   readonly control?: ReactNode;
+  /** Optional control rendered in the header row, immediately left of the load
+   *  button (e.g. "Clear structures" beside "Add CIF…"). */
+  readonly headerControl?: ReactNode;
   /** Placeholder (nothing loaded): drops the status chip and renders the title
    *  as calm, lighter text so a clean start doesn't feel over-highlighted. */
   readonly muted?: boolean;
@@ -50,7 +53,10 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={uppercaseLabel}>{data.label}</span>
         {data.help && <HelpBadge text={data.help} />}
-        <LoadButton label={data.loadLabel} accept={data.accept} onFile={data.onFile} />
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+          {data.headerControl}
+          <LoadButton label={data.loadLabel} accept={data.accept} onFile={data.onFile} />
+        </div>
       </div>
       {showChipRow && (
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
@@ -97,7 +103,6 @@ function LoadButton({ label, accept, onFile }: { label: string; accept: string; 
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        marginLeft: "auto",
         border: `1px solid ${color.control}`,
         borderRadius: radius.small,
         padding: "2px 10px",
