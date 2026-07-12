@@ -21,7 +21,7 @@
  * matching `_atom_site_moment.crystalaxis_x/y/z`.
  */
 
-import type { StructureModel, UnitCell } from "@/core/crystal/types";
+import type { AtomSite, StructureModel, UnitCell } from "@/core/crystal/types";
 import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { orthogonalizationMatrix } from "@/core/crystal/unitCell";
@@ -287,14 +287,17 @@ function momentLoop(structure: StructureModel, magnetic: MagneticModel): string 
 }
 
 /** Magnetic (BNS) symmetry-operation loop, when the space group carries them. */
-function magneticSymopBlock(structure: StructureModel, label: string | undefined): string {
-  // The magnetic operation set is the full spatial operation list — a nuclear
-  // op with no explicit BNS flag is a unitary (+1) magnetic op, not a non-op.
-  // Filtering on `timeReversal !== undefined` used to drop every unflagged op,
-  // so a magnetic model built on a nuclear-CIF structure (whose ops carry no
-  // flag) exported an empty loop that external tools read as P1. Genuine −1
-  // operations keep their sign; everything else defaults to +1 below.
-  const ops = structure.spaceGroup.operations;
+function magneticSymopBlock(structure: StructureModel, magnetic: MagneticModel, label: string | undefined): string {
+  // The magnetic operations are the model's own subgroup ops when it carries
+  // them (an in-app model built by buildMagneticModel refines in a subgroup of
+  // the parent nuclear group — writing the parent ops would claim the wrong
+  // symmetry); a loaded mCIF's structure ops ARE its magnetic ops, so the
+  // fallback is equivalent there. An op with no explicit BNS flag is a unitary
+  // (+1) magnetic op, not a non-op: filtering on `timeReversal !== undefined`
+  // used to drop every unflagged op, so a magnetic model built on a
+  // nuclear-CIF structure exported an empty loop that external tools read as
+  // P1. Genuine −1 operations keep their sign; everything else defaults to +1.
+  const ops = magnetic.operations ?? structure.spaceGroup.operations;
   const head: string[] = [];
   if (label) head.push(`_space_group_magn.name_bns  "${label}"`);
   if (structure.spaceGroup.hermannMauguin && !label) head.push(`_parent_space_group.name_H-M_alt  "${structure.spaceGroup.hermannMauguin}"`);
@@ -304,6 +307,35 @@ function magneticSymopBlock(structure: StructureModel, label: string | undefined
     ops.map((o, i) => [`${i + 1}`, `"${o.xyz},${o.timeReversal === -1 ? "-1" : "+1"}"`]),
   );
   return [...head, opLoop].join("\n");
+}
+
+/**
+ * Split-orbit moments (`orbitIndex` ≥ 2) anchor at an orbit-representative
+ * position, not the asymmetric-unit site — written as-is, the moment loop would
+ * repeat one site label with different implied positions and no reader could
+ * resolve it. Emit each split orbit as its own atom-site row (label suffixed
+ * `_oN`, at the orbit position) and point its moment row at that label — the
+ * same convention GSAS-II uses for orbit-split magnetic sites (e.g. the
+ * Mn1_0/Mn1_1 of the Mn₃Ga golden data).
+ */
+function withOrbitSites(
+  structure: StructureModel,
+  magnetic: MagneticModel,
+): { structure: StructureModel; magnetic: MagneticModel } {
+  const extra: AtomSite[] = [];
+  const moments = magnetic.moments.map((m) => {
+    if (!m.orbitIndex || m.orbitIndex <= 1 || !m.position) return m;
+    const base = structure.sites.find((s) => s.label === m.siteLabel);
+    if (!base) return m;
+    const label = `${m.siteLabel}_o${m.orbitIndex}`;
+    if (!extra.some((s) => s.label === label)) extra.push({ ...base, label, position: m.position });
+    return { ...m, siteLabel: label };
+  });
+  if (extra.length === 0) return { structure, magnetic };
+  return {
+    structure: { ...structure, sites: [...structure.sites, ...extra] },
+    magnetic: { ...magnetic, moments },
+  };
 }
 
 /**
@@ -320,16 +352,17 @@ export function magneticStructureToMcif(
   const esd = buildEsdMap(opts.params ?? [], opts.bindings ?? []);
   const block = sanitizeBlock(opts.blockName ?? structure.name);
   const k = magnetic.propagation[0] ?? [0, 0, 0];
+  const aug = withOrbitSites(structure, magnetic);
   const parts = [
     HEADER,
     `# propagation vector k = (${k[0]}, ${k[1]}, ${k[2]})`,
     `data_${block}`,
     `_pd_phase_name  '${structure.name}'`,
     cellBlock(structure.cell, esd),
-    magneticSymopBlock(structure, opts.magneticLabel),
+    magneticSymopBlock(structure, magnetic, opts.magneticLabel),
     refinementBlock(opts.refinement),
-    atomSiteBlocks(structure, esd),
-    momentLoop(structure, magnetic),
+    atomSiteBlocks(aug.structure, esd),
+    momentLoop(structure, aug.magnetic),
   ].filter((s) => s.length > 0);
   return parts.join("\n\n") + "\n";
 }

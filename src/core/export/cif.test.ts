@@ -136,6 +136,51 @@ describe("magneticStructureToMcif — round-trips through parseMagneticCif", () 
       nuclear.spaceGroup.operations.length,
     );
   });
+
+  // Regression: an in-app model (buildMagneticModel) refines in a magnetic
+  // SUBGROUP of the parent nuclear group, carried on `magnetic.operations`, and
+  // may split a site's orbit into independent sublattices (`orbitIndex` ≥ 2).
+  // The export must write the subgroup ops — not the parent's — and give each
+  // split orbit its own atom-site row so the moment loop's labels resolve.
+  it("writes the model's subgroup ops and split-orbit sites for an in-app model", () => {
+    const parent: StructureModel = {
+      ...structure,
+      spaceGroup: {
+        ...structure.spaceGroup,
+        // Parent nuclear group: 4 unflagged ops (parseCif style).
+        operations: [
+          { rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], translation: [0, 0, 0], xyz: "x,y,z" },
+          { rotation: [[-1, 0, 0], [0, -1, 0], [0, 0, -1]], translation: [0, 0, 0], xyz: "-x,-y,-z" },
+          { rotation: [[-1, 0, 0], [0, -1, 0], [0, 0, 1]], translation: [0, 0, 0], xyz: "-x,-y,z" },
+          { rotation: [[1, 0, 0], [0, 1, 0], [0, 0, -1]], translation: [0, 0, 0], xyz: "x,y,-z" },
+        ],
+      },
+    };
+    const subgroup = [
+      { rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] as const, translation: [0, 0, 0] as const, xyz: "x,y,z", timeReversal: 1 as const },
+      { rotation: [[-1, 0, 0], [0, -1, 0], [0, 0, -1]] as const, translation: [0, 0, 0] as const, xyz: "-x,-y,-z", timeReversal: -1 as const },
+    ];
+    const magSub: MagneticModel = {
+      id: "m", structureId: "s", propagation: [[0, 0, 0]],
+      operations: subgroup,
+      moments: [
+        { siteLabel: "Fe1", frame: "crystallographic", components: [0, 0, 3.2] },
+        // Split orbit: same site label, anchored at the orbit representative.
+        { siteLabel: "Fe1", frame: "crystallographic", components: [0, 0, -3.2], orbitIndex: 2, position: [0.5, 0.5, 0.5] },
+      ],
+    };
+    const out = magneticStructureToMcif(parent, magSub, {});
+    // Symop loop = the 2 subgroup ops with their θ signs, not the 4 parent ops.
+    const rows = out.match(/"[^"]*,[+-]1"/g) ?? [];
+    expect(rows).toEqual(['"x,y,z,+1"', '"-x,-y,-z,-1"']);
+    // The split orbit becomes its own atom-site row at the orbit position…
+    expect(out).toMatch(/Fe1_o2 Fe 0\.50000 0\.50000 0\.50000/);
+    // …and the moment loop references it.
+    const back = parseMagneticCif(out);
+    const labels = back.magnetic!.moments.map((m) => m.siteLabel).sort();
+    expect(labels).toEqual(["Fe1", "Fe1_o2"]);
+    expect(back.structure.sites.map((s) => s.label)).toContain("Fe1_o2");
+  });
 });
 
 describe("formatWithEsd", () => {
