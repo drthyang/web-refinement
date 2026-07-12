@@ -11,26 +11,15 @@
  * how many independent components each carries.
  */
 
-import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
+import type { StructureModel } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
-import { applyOperation } from "@/core/crystal/symmetry";
+import { applyOperation, siteStabilizer } from "@/core/crystal/symmetry";
 import { wrapFractional } from "@/core/math/vec3";
 import { classifyPointGroup } from "@/core/crystal/pointGroup";
 import { allowedPositionShifts } from "@/core/crystal/siteConstraints";
 import { allowedAnisotropicAdpModes } from "@/core/crystal/adpConstraints";
 import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
-
-/** Whether `op` maps `pos` onto itself modulo a lattice translation. */
-function fixesSite(op: SymmetryOperation, pos: Vec3, tol = 1e-3): boolean {
-  const p = wrapFractional(applyOperation(op, pos));
-  const q = wrapFractional(pos);
-  for (let i = 0; i < 3; i++) {
-    let d = Math.abs(p[i]! - q[i]!);
-    d = Math.min(d, 1 - d);
-    if (d > tol) return false;
-  }
-  return true;
-}
+import { assignWyckoff } from "@/core/crystal/wyckoff";
 
 export interface SiteSymmetry {
   readonly label: string;
@@ -52,6 +41,8 @@ export interface SiteSymmetry {
   /** Independent magnetic-moment components the site symmetry allows (0–3);
    *  0 means a moment is symmetry-forbidden on this site. */
   readonly allowedMomentComponents: number;
+  /** Wyckoff label (e.g. "6h") for the built-in space groups; null otherwise. */
+  readonly wyckoff: string | null;
 }
 
 /**
@@ -62,7 +53,7 @@ export interface SiteSymmetry {
 export function analyzeSiteSymmetry(structure: StructureModel): SiteSymmetry[] {
   const ops = structure.spaceGroup.operations;
   return structure.sites.map((site) => {
-    const stabilizer = ops.filter((op) => fixesSite(op, site.position));
+    const stabilizer = siteStabilizer(ops, site.position);
     const pg = classifyPointGroup(stabilizer);
     // Multiplicity = orbit size = |G| / |stabilizer point ops|. Compute the orbit
     // directly so centring/screw/glide translations are handled correctly.
@@ -82,6 +73,7 @@ export function analyzeSiteSymmetry(structure: StructureModel): SiteSymmetry[] {
       freePositionParams: allowedPositionShifts(ops, site.position).dimension,
       freeAdpModes: allowedAnisotropicAdpModes(ops, site.position, [0, 0, 0, 0, 0, 0]).dimension,
       allowedMomentComponents: allowedMomentDirections(ops, site.position).dimension,
+      wyckoff: assignWyckoff(structure.spaceGroup, site.position)?.label ?? null,
     };
   });
 }

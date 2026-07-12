@@ -180,6 +180,23 @@ export function siteMultiplicity(
   return equivalentPositions(ops, pos, tol).length;
 }
 
+/** Whether `op` maps `pos` onto itself modulo a lattice translation. */
+export function fixesSite(op: SymmetryOperation, pos: Vec3, tol = 1e-3): boolean {
+  const p = wrapFractional(applyOperation(op, pos));
+  const q = wrapFractional(pos);
+  for (let i = 0; i < 3; i++) {
+    let d = Math.abs(p[i]! - q[i]!);
+    d = Math.min(d, 1 - d);
+    if (d > tol) return false;
+  }
+  return true;
+}
+
+/** The site-symmetry group (stabilizer): the operations fixing `position`. */
+export function siteStabilizer(operations: readonly SymmetryOperation[], position: Vec3): SymmetryOperation[] {
+  return operations.filter((op) => fixesSite(op, position));
+}
+
 /**
  * Systematic-absence test: a reflection is absent if any operation maps (hkl)
  * onto itself (in reciprocal space) but the associated phase shift

@@ -151,10 +151,14 @@ The null-space constraint machinery is correct but is only ever as good as the
    validated for correct orders, distinct signatures, and round-trip naming), and
    [`crystal/siteSymmetry.ts`](../src/core/crystal/siteSymmetry.ts) reports each
    site's multiplicity, point-group site symmetry, and refinable DOF (free
-   coordinates / ADP components / moment components). **Remaining:** **Wyckoff
-   *letters*** (multiplicity + site symmetry already identify the position; the
-   letter needs canonical-coordinate tables), full 230-group coverage, and
-   standard settings.
+   coordinates / ADP components / moment components). **Wyckoff letters** now land
+   too ([`crystal/wyckoff.ts`](../src/core/crystal/wyckoff.ts)): curated ITA
+   representatives per group + a general orbit-of-locus matcher (a group image of
+   the site must lie on the position's affine locus — the correct invariant, since
+   mod-lattice stabilizer conjugacy cannot tell (0,0,0) from (0,0,½)). Covers
+   P1/P-1/P2₁/c/P6₃/mmc/F-4̄3m/Fm-3̄m; validated by round-trip + ITA multiplicities
+   + the demo (Mn₃Ga Mn→6h, Ga→2d). **Remaining:** full 230-group Wyckoff coverage
+   and standard settings.
 2. **Systematic-absence generation** 🚧 — derive allowed reflections from the
    group rather than only from the supplied operation list. `generateReflections`
    already filters with the per-operation absence test

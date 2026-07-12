@@ -166,8 +166,8 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   },
   {
     name: "analyze_site_symmetry",
-    title: "Site symmetry & refinable DOF",
-    description: "Per-site symmetry: for each atom, its multiplicity, point-group site symmetry, and the symmetry-allowed refinable degrees of freedom — free positional coordinates (0–3), anisotropic-ADP components (0–6), and magnetic-moment components (0–3). The parameterization guardrail: read this BEFORE freeing coordinates or moments so you never fight a symmetry constraint — an atom on a fixed special position has 0 free coordinates, and a site with `allowedMomentComponents: 0` cannot carry a moment. Also reports the crystal's overall point group.",
+    title: "Site symmetry, Wyckoff & refinable DOF",
+    description: "Per-site symmetry: for each atom, its Wyckoff label (e.g. \"6h\", for the built-in space groups), multiplicity, point-group site symmetry, and the symmetry-allowed refinable degrees of freedom — free positional coordinates (0–3), anisotropic-ADP components (0–6), and magnetic-moment components (0–3). The parameterization guardrail: read this BEFORE freeing coordinates or moments so you never fight a symmetry constraint — an atom on a fixed special position has 0 free coordinates, and a site with `allowedMomentComponents: 0` cannot carry a moment. Also reports the crystal's overall point group.",
     inputSchema: { structure: anyObj },
     handler: tools.analyze_site_symmetry,
   },
