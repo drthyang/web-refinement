@@ -10,7 +10,7 @@
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
-import type { LinearRestraint, ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
+import type { CalculateOptions, LinearRestraint, ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
 import { weightsFromSigma, excludedPointMask, applyExclusionMask, fitRangeMask } from "@/core/refinement/factors";
 import { resolveTies } from "@/core/refinement/constraints";
@@ -179,26 +179,46 @@ const GEOMETRY_BINDING_KINDS = new Set<ParameterKind>([
  * geometry-bound parameter value plus the reflection d-window (which for TOF
  * depends on the calibration and zero shift).
  */
+/** Precomputed |F_N|² for a d-window, injected to skip the CPU structure-factor
+ *  sum (the GPU evaluator's seam). */
+export interface InjectedStructureFactors {
+  readonly f2: Float64Array;
+  readonly dMin: number;
+  readonly dMax: number;
+}
+
 export function createPeakBuilder(
   pattern: PowderPattern,
   bindings: readonly ParameterBinding[],
   applyLorentz = true,
-): (applied: AppliedModel, resolved: Readonly<Record<string, number>>) => ProfilePeak[] {
+): (applied: AppliedModel, resolved: Readonly<Record<string, number>>, injected?: InjectedStructureFactors) => ProfilePeak[] {
   const geomIds = [...new Set(bindings.filter((b) => GEOMETRY_BINDING_KINDS.has(b.kind)).map((b) => b.parameterId))];
   let lastKey: string | null = null;
   let unitIntensities: ReturnType<typeof powderPeakIntensities> = [];
 
-  return (applied, resolved) => {
+  return (applied, resolved, injected) => {
     const { dMin, dMax } = reflectionDRange(pattern, applied);
-    let key = `${dMin}|${dMax}`;
-    for (const id of geomIds) key += `|${resolved[id]}`;
-    if (key !== lastKey) {
+    let unit: ReturnType<typeof powderPeakIntensities>;
+    // Injected |F|² path (GPU evaluator): recompute the unit intensities from the
+    // supplied structure factors — same intensity assembly, |F|² sourced off-core.
+    // Only when the d-window matches; the geometry cache is left untouched so a
+    // later CPU-sum call still recomputes. `powderPeakIntensities` re-checks the
+    // reflection count and silently falls back to the CPU sum on any mismatch.
+    if (injected && injected.dMin === dMin && injected.dMax === dMax) {
       const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
-      unitIntensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, 1, applied.po, applyLorentz);
-      lastKey = key;
+      unit = powderPeakIntensities(applied.model, pattern.radiation, reflections, 1, applied.po, applyLorentz, injected.f2);
+    } else {
+      let key = `${dMin}|${dMax}`;
+      for (const id of geomIds) key += `|${resolved[id]}`;
+      if (key !== lastKey) {
+        const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
+        unitIntensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, 1, applied.po, applyLorentz);
+        lastKey = key;
+      }
+      unit = unitIntensities;
     }
     const s = applied.scale;
-    const intensities = s === 1 ? unitIntensities : unitIntensities.map((q) => ({ ...q, intensity: q.intensity * s }));
+    const intensities = s === 1 ? unit : unit.map((q) => ({ ...q, intensity: q.intensity * s }));
     return placePeaks(pattern, applied, intensities);
   };
 }
@@ -389,10 +409,10 @@ export function buildPowderProblem(
   const applyLorentz = profile.lorentz ?? true;
   const peaksFor = createPeakBuilder(pattern, bindings, applyLorentz);
 
-  const calculate = (values: Readonly<Record<string, number>>): Float64Array => {
+  const calculate = (values: Readonly<Record<string, number>>, options?: CalculateOptions): Float64Array => {
     const resolved = resolveTies(parameters, values);
     const applied = applyParameters(structure, bindings, resolved);
-    const peaks = peaksFor(applied, resolved);
+    const peaks = peaksFor(applied, resolved, options?.structureFactors);
     const opts: ProfileOptions = {
       shape: profile.shape,
       ...(profile.eta !== undefined ? { eta: profile.eta } : {}),

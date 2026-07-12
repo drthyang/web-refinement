@@ -120,7 +120,15 @@ export interface PowderPeak {
   readonly intensity: number;
 }
 
-/** Integrated peak intensities for a powder pattern (before profile spreading). */
+/**
+ * Integrated peak intensities for a powder pattern (before profile spreading).
+ *
+ * `f2Override`, when given, supplies |F_N|² per reflection (in `reflections`
+ * order) instead of computing the CPU structure-factor sum — the seam the GPU
+ * evaluator uses to inject its batched |F|² while reusing this exact intensity
+ * assembly (multiplicity·Lp·PO·scale). Ignored unless its length matches
+ * `reflections`, so a stale/mismatched cache silently falls back to the CPU sum.
+ */
 export function powderPeakIntensities(
   model: StructureModel,
   radiation: Radiation,
@@ -128,10 +136,13 @@ export function powderPeakIntensities(
   scale: number,
   po?: PreferredOrientation,
   applyLorentz = true,
+  f2Override?: ArrayLike<number>,
 ): PowderPeak[] {
+  const useOverride = f2Override !== undefined && f2Override.length === reflections.length;
   const peaks: PowderPeak[] = [];
-  for (const r of reflections) {
-    const f2 = nuclearStructureFactorSquared(model, radiation, r.h, r.k, r.l);
+  for (let i = 0; i < reflections.length; i++) {
+    const r = reflections[i]!;
+    const f2 = useOverride ? f2Override![i]! : nuclearStructureFactorSquared(model, radiation, r.h, r.k, r.l);
     // Pre-reduced synchrotron I(Q) (e.g. area-detector PDF beamlines) is already
     // Lorentz-corrected; re-applying the 2θ factor double-corrects and wildly
     // over-weights low Q. `applyLorentz=false` skips it for such data.

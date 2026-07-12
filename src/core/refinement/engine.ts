@@ -11,6 +11,7 @@
 import type {
   AgreementFactors,
   BoundActiveParameter,
+  CalculateOptions,
   ParameterKind,
   RefinementIteration,
   RefinementOptions,
@@ -31,7 +32,7 @@ export interface RefinementProblem {
   readonly parameters: readonly RefinementParameter[];
   readonly observations: Float64Array;
   readonly weights: Float64Array;
-  readonly calculate: (values: Readonly<Record<string, number>>) => Float64Array;
+  readonly calculate: (values: Readonly<Record<string, number>>, options?: CalculateOptions) => Float64Array;
   /**
    * Optional analytic derivatives (roadmap F1.1). Given the current free
    * parameters and their values, return ∂calc/∂p (in *calculated-pattern* space,

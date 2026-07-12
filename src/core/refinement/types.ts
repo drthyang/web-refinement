@@ -240,6 +240,26 @@ export interface RefinementResult {
 }
 
 /** Tuning knobs for the least-squares driver. */
+/**
+ * Optional per-call hints to a problem's `calculate`. A forward model may reuse
+ * a precomputed intermediate instead of recomputing it. Generic data (no
+ * diffraction imports here): each problem type interprets what it understands
+ * and ignores the rest, so passing options never changes a result.
+ */
+export interface CalculateOptions {
+  /**
+   * Precomputed |F|² per reflection, in the problem's own reflection order, for
+   * the given d-window — the seam the GPU structure-factor evaluator uses to
+   * inject its batched |F|² while reusing the CPU intensity/profile assembly.
+   * Applied only when the d-window and reflection count match; otherwise ignored.
+   */
+  readonly structureFactors?: {
+    readonly f2: Float64Array;
+    readonly dMin: number;
+    readonly dMax: number;
+  };
+}
+
 export interface RefinementOptions {
   readonly maxIterations: number;
   /** Relative change in χ² below which the fit is considered converged. */
