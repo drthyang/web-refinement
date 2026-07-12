@@ -260,6 +260,17 @@ export interface RefinementOptions {
   /** Maximum number of high-correlation pairs kept in diagnostics. */
   readonly maxReportedCorrelations?: number;
   /**
+   * Opt into the problem's closed-form Jacobian columns (roadmap F1.1), when it
+   * provides any. Default false, so `refine` and `refineParallel` stay
+   * bit-identical (both finite-difference) out of the box. The parallel driver
+   * ignores this even when set: an analytic column is computed inline on the
+   * thread running the generator, which for `refineParallel` is the UI/driver
+   * thread — running a structure-factor derivative there would block the UI, and
+   * the pool already evaluates FD columns off-thread. Meant for serial callers
+   * with no UI (node/MCP) that want fewer evaluations.
+   */
+  readonly analyticDerivatives?: boolean;
+  /**
    * Runtime-only per-cycle callback for live progress (never serialized through
    * the worker protocol — set locally by the worker/runner, not by requests).
    * Called after each accepted iteration with the current calculated vector and

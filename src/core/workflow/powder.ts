@@ -298,29 +298,53 @@ export function placePeaks(
 }
 
 /**
- * Per-reflection ∂(integrated intensity)/∂p for one nuclear structural
- * parameter — the occupancy or isotropic B_iso of a single site (roadmap F1.1).
- * The derivative flows only through |F|²; peak positions and widths do not
- * depend on occupancy or B_iso, so the caller spreads these derivative
- * intensities with the ordinary profile to get ∂yCalc/∂p. The intensity
- * prefactor (multiplicity·Lp·PO·scale) is rebuilt from the very same helpers
- * `powderPeakIntensities` uses, so the analytic column is consistent with the
- * forward model by construction — the analytic-vs-FD test just confirms it.
+ * Per-reflection structure-factor breakdown at the current model, plus the
+ * intensity prefactor (multiplicity·Lp·PO·scale — everything the forward model
+ * multiplies onto |F|²). Computed ONCE per analytic-column request and shared by
+ * every occupancy/B_iso column, so freeing several such parameters costs a
+ * single structure-factor pass rather than one per column. The prefactor is
+ * rebuilt from the very helpers `powderPeakIntensities` uses, so the analytic
+ * columns are consistent with the forward model by construction.
  */
-function nuclearDerivativeIntensities(
-  applied: AppliedModel,
-  pattern: PowderPattern,
-  kind: "occupancy" | "bIso",
-  siteLabels: readonly string[],
-  applyLorentz: boolean,
-): { d: number; intensity: number; h: number; k: number; l: number }[] {
+interface DerivativeReflection {
+  readonly d: number;
+  readonly h: number;
+  readonly k: number;
+  readonly l: number;
+  readonly prefactor: number;
+  readonly partials: ReturnType<typeof nuclearStructureFactorPartials>;
+}
+
+function derivativeReflections(applied: AppliedModel, pattern: PowderPattern, applyLorentz: boolean): DerivativeReflection[] {
   const { dMin, dMax } = reflectionDRange(pattern, applied);
   const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
   const radiation = pattern.radiation;
+  return reflections.map((r) => {
+    const lp = applyLorentz ? lorentzPolarization(radiation, r.d) : 1;
+    const poFactor = applied.po ? marchDollase(applied.model.cell, applied.po.axis, r.h, r.k, r.l, applied.po.ratio) : 1;
+    return {
+      d: r.d, h: r.h, k: r.k, l: r.l,
+      prefactor: r.multiplicity * lp * poFactor * applied.scale,
+      partials: nuclearStructureFactorPartials(applied.model, radiation, r.h, r.k, r.l),
+    };
+  });
+}
+
+/**
+ * ∂(integrated intensity)/∂p per reflection for one occupancy or isotropic
+ * B_iso parameter, derived from the shared per-reflection breakdown (roadmap
+ * F1.1). Positions and widths do not depend on occupancy or B_iso, so the caller
+ * spreads these derivative intensities with the ordinary profile to get
+ * ∂yCalc/∂p.
+ */
+function nuclearDerivativeIntensities(
+  reflections: readonly DerivativeReflection[],
+  kind: "occupancy" | "bIso",
+  siteLabels: readonly string[],
+): { d: number; intensity: number; h: number; k: number; l: number }[] {
   const labels = new Set(siteLabels);
-  const out: { d: number; intensity: number; h: number; k: number; l: number }[] = [];
-  for (const r of reflections) {
-    const { f, s, perSite } = nuclearStructureFactorPartials(applied.model, radiation, r.h, r.k, r.l);
+  return reflections.map((r) => {
+    const { f, s, perSite } = r.partials;
     // A parameter bound to several symmetry-equivalent sites (a shared-B ADP
     // group) moves them together, so ∂|F|²/∂p sums the per-site contributions.
     let dF2 = 0;
@@ -333,12 +357,8 @@ function nuclearDerivativeIntensities(
       // (apply.ts leaves them untouched), so they contribute zero — matching FD.
       dF2 += kind === "occupancy" ? 2 * reDot : site.isotropic ? -2 * s * s * site.occupancy * reDot : 0;
     }
-    const lp = applyLorentz ? lorentzPolarization(radiation, r.d) : 1;
-    const poFactor = applied.po ? marchDollase(applied.model.cell, applied.po.axis, r.h, r.k, r.l, applied.po.ratio) : 1;
-    const intensity = r.multiplicity * lp * poFactor * applied.scale * dF2;
-    out.push({ d: r.d, intensity, h: r.h, k: r.k, l: r.l });
-  }
-  return out;
+    return { d: r.d, intensity: r.prefactor * dF2, h: r.h, k: r.k, l: r.l };
+  });
 }
 
 export function buildPowderProblem(
@@ -415,18 +435,26 @@ export function buildPowderProblem(
             // Background is independent of occupancy/B_iso, so it is deliberately
             // omitted here: the derivative is the peaks-only synthesis.
           };
-          return freeParams.map((p) => {
+          // Decide which columns are analytic before touching structure factors,
+          // so a request with no occupancy/B_iso free skips the whole pass.
+          const kindOf = (p: RefinementParameter): "occupancy" | "bIso" | null => {
             const bs = bindings.filter((b) => b.parameterId === p.id);
             if (bs.length === 0) return null;
-            // A parameter is analytically differentiable only when every one of
-            // its bindings is the same coupling-free kind (occupancy or B_iso) on
-            // a named site — e.g. a shared-B ADP group. Any other/mixed kind falls
-            // back to finite differences.
+            // Analytic only when every binding is the same coupling-free kind on a
+            // named site (e.g. a shared-B ADP group); mixed/other kinds → FD.
             const kind = bs[0]!.kind;
             if (kind !== "occupancy" && kind !== "bIso") return null;
-            if (!bs.every((b) => b.kind === kind && b.targetKey)) return null;
-            const labels = bs.map((b) => b.targetKey!);
-            const derivPeaks = nuclearDerivativeIntensities(applied, pattern, kind, labels, applyLorentz);
+            return bs.every((b) => b.kind === kind && b.targetKey) ? kind : null;
+          };
+          const kinds = freeParams.map(kindOf);
+          if (kinds.every((k) => k === null)) return kinds.map(() => null);
+          // One structure-factor pass shared by every analytic column.
+          const refl = derivativeReflections(applied, pattern, applyLorentz);
+          return freeParams.map((p, i) => {
+            const kind = kinds[i];
+            if (!kind) return null;
+            const labels = bindings.filter((b) => b.parameterId === p.id).map((b) => b.targetKey!);
+            const derivPeaks = nuclearDerivativeIntensities(refl, kind, labels);
             return synthesizePattern(xValues, placePeaks(pattern, applied, derivPeaks), opts);
           });
         }

@@ -191,6 +191,7 @@ function jacobianPlan(
   problem: RefinementProblem,
   freeParams: readonly RefinementParameter[],
   freeValues: readonly number[],
+  useAnalytic: boolean,
 ): { sets: Record<string, number>[]; plan: JacobianColumnPlan[] } {
   const freeIds = freeParams.map((p) => p.id);
   const sets: Record<string, number>[] = [];
@@ -198,8 +199,10 @@ function jacobianPlan(
   // Ask the problem for closed-form columns up front (roadmap F1.1); each entry
   // is either an exact ∂calc/∂p (no evaluation batch needed) or null → finite
   // difference below. Providing analytic columns is purely additive: an unaware
-  // problem leaves `analyticColumns` undefined and every column stays FD.
-  const analytic = problem.analyticColumns?.(freeParams, freeValues);
+  // problem leaves `analyticColumns` undefined and every column stays FD. The
+  // parallel driver disables them (useAnalytic=false) so column work stays on
+  // the worker pool rather than the UI thread — see refineCore.
+  const analytic = useAnalytic ? problem.analyticColumns?.(freeParams, freeValues) : undefined;
   for (let j = 0; j < freeValues.length; j++) {
     const base = freeValues[j]!;
     const analyticCol = analytic?.[j];
@@ -357,8 +360,19 @@ function highCorrelations(
 function* refineCore(
   problem: RefinementProblem,
   options: Partial<RefinementOptions> = {},
+  // Whether this driver may consult the problem's closed-form columns (roadmap
+  // F1.1). Only the serial `refine` passes true; the parallel driver passes
+  // false because an analytic column is computed inline on the thread running
+  // the generator — for `refineParallel` that is the UI/driver thread, so an
+  // analytic structure-factor derivative would drag heavy synthesis back onto
+  // the main thread and freeze the UI (the pool already evaluates FD columns
+  // off-thread). Even for `refine`, analytic is gated behind
+  // `options.analyticDerivatives` (default off) so the two drivers stay
+  // bit-identical out of the box.
+  allowAnalytic = false,
 ): Generator<Record<string, number>[], RefinementResult, Float64Array[]> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
+  const useAnalytic = allowAnalytic && (opts.analyticDerivatives ?? false);
   const freeParams = problem.parameters.filter((p) => !p.fixed);
   const freeIds = freeParams.map((p) => p.id);
   const n = freeParams.length;
@@ -399,7 +413,7 @@ function* refineCore(
 
   for (let iter = 0; iter < opts.maxIterations; iter++) {
     const r = weightedResiduals(problem.observations, current.yCalc, problem.weights);
-    const { sets, plan } = jacobianPlan(problem, freeParams, freeValues);
+    const { sets, plan } = jacobianPlan(problem, freeParams, freeValues, useAnalytic);
     const jac = assembleJacobian(problem, plan, n, current.yCalc, yield sets);
     const { jtj, jtr } = normalEquations(jac, r);
 
@@ -513,7 +527,7 @@ function* refineCore(
   const dof = Math.max(nUsed - n, 1);
   const reducedChi = current.chi / dof;
   const finalResiduals = weightedResiduals(problem.observations, current.yCalc, problem.weights);
-  const { sets: finalSets, plan: finalPlan } = jacobianPlan(problem, freeParams, freeValues);
+  const { sets: finalSets, plan: finalPlan } = jacobianPlan(problem, freeParams, freeValues, useAnalytic);
   const finalJacobian = assembleJacobian(problem, finalPlan, n, current.yCalc, yield finalSets);
   const { jtj: finalJtj } = normalEquations(finalJacobian, finalResiduals);
   const { covarianceBase, diagnostics: covDiagnostics } = normalizedPseudoInverse(
@@ -570,7 +584,9 @@ export function refine(
   problem: RefinementProblem,
   options: Partial<RefinementOptions> = {},
 ): RefinementResult {
-  const gen = refineCore(problem, options);
+  // Serial driver runs in-thread (a worker in the browser, inline in node/MCP),
+  // so it may use analytic columns when the caller opts in via options.
+  const gen = refineCore(problem, options, true);
   let step = gen.next();
   while (!step.done) {
     step = gen.next(step.value.map((values) => problem.calculate(values)));
@@ -600,7 +616,9 @@ export async function refineParallel(
   options: Partial<RefinementOptions>,
   evaluator: BatchEvaluator,
 ): Promise<RefinementResult> {
-  const gen = refineCore(problem, options);
+  // allowAnalytic=false: keep every column's evaluation on the worker pool
+  // rather than computing analytic derivatives on the UI/driver thread.
+  const gen = refineCore(problem, options, false);
   let step = gen.next();
   while (!step.done) {
     const sets = step.value;

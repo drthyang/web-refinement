@@ -3,6 +3,7 @@ import { buildPowderProblem, powderCurves } from "@/core/workflow/powder";
 import { buildPowderSpec } from "@/app/powderSpec";
 import { exampleStructure } from "@/examples/mn3ga";
 import type { PowderPattern } from "@/core/diffraction/types";
+import { refine, refineParallel, type BatchEvaluator, type RefinementProblem } from "@/core/refinement/engine";
 
 /**
  * F1.1 gate — every analytic Jacobian column must agree with the central
@@ -78,6 +79,42 @@ describe("analytic Jacobian columns (F1.1)", () => {
     }
     expect(checkedOcc).toBeGreaterThan(0);
     expect(checkedB).toBeGreaterThan(0);
+  });
+
+  it("the parallel driver never computes analytic columns (keeps them off the UI thread)", async () => {
+    // The freeze regression: analytic structure-factor derivatives are computed
+    // inline on whichever thread runs the generator. For refineParallel that is
+    // the UI/driver thread, so it must send every column to the pool instead.
+    const base = makeProblem(new Set(["occupancy", "bIso"]));
+    let analyticCalls = 0;
+    const spied: RefinementProblem = {
+      ...base,
+      analyticColumns: (fp, fv) => {
+        analyticCalls++;
+        return base.analyticColumns!(fp, fv);
+      },
+    };
+    const evaluator: BatchEvaluator = {
+      evaluate: (sets) => Promise.resolve(sets.map((s) => spied.calculate(s))),
+    };
+    await refineParallel(spied, { maxIterations: 4 }, evaluator);
+    expect(analyticCalls).toBe(0);
+  });
+
+  it("opt-in serial analytic path converges to the same minimum as finite differences", () => {
+    const problem = makeProblem(new Set(["occupancy", "bIso"]));
+    const fd = refine(problem, { maxIterations: 20 });
+    const analytic = refine(problem, { maxIterations: 20, analyticDerivatives: true });
+    // Analytic and FD columns agree to <1e-5 relative, so both LM runs land in
+    // the same basin at effectively the same wR.
+    const wrFd = fd.agreement.rWeighted ?? 0;
+    const wrAn = analytic.agreement.rWeighted ?? 0;
+    expect(Math.abs(wrAn - wrFd)).toBeLessThan(1e-4);
+    for (const id of Object.keys(fd.parameters)) {
+      const a = analytic.parameters[id]!;
+      const f = fd.parameters[id]!;
+      expect(Math.abs(a - f)).toBeLessThan(1e-6 * (1 + Math.abs(f)));
+    }
   });
 
   it("a problem with restraints exposes no analytic columns (conservative fallback)", () => {
