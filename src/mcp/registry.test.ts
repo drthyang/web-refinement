@@ -119,6 +119,7 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   simulate_pattern: { args: { structure, points: 200 }, keys: ["curves", "summary", "xUnit"] },
   reflection_list: { args: { structure, dMin: 1.5, dMax: 4 }, keys: ["count", "reflections"] },
   bond_geometry: { args: { structure, cutoff: 3.5 }, keys: ["bonds", "shortest"] },
+  analyze_site_symmetry: { args: { structure }, keys: ["crystalPointGroup", "sites"] },
   find_unexplained_peaks: {
     // A clean residual with one artificial 100-count peak at d = 2.5 Å.
     args: {

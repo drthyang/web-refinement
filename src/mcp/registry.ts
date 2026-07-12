@@ -165,6 +165,13 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     handler: tools.bond_geometry,
   },
   {
+    name: "analyze_site_symmetry",
+    title: "Site symmetry & refinable DOF",
+    description: "Per-site symmetry: for each atom, its multiplicity, point-group site symmetry, and the symmetry-allowed refinable degrees of freedom — free positional coordinates (0–3), anisotropic-ADP components (0–6), and magnetic-moment components (0–3). The parameterization guardrail: read this BEFORE freeing coordinates or moments so you never fight a symmetry constraint — an atom on a fixed special position has 0 free coordinates, and a site with `allowedMomentComponents: 0` cannot carry a moment. Also reports the crystal's overall point group.",
+    inputSchema: { structure: anyObj },
+    handler: tools.analyze_site_symmetry,
+  },
+  {
     name: "find_unexplained_peaks",
     title: "Find unexplained residual peaks",
     description: "Find peaks in the residual (obs − calc) that the nuclear model does not explain — the magnetic-order / impurity-phase signal. Robust MAD-based thresholding; returns d-spacings ranked by height. A handful of peaks suggests magnetic satellites; dozens mean the nuclear fit itself is poor.",

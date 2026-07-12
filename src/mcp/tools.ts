@@ -31,6 +31,8 @@ import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { abscissaFromD } from "@/core/diffraction/instrument";
 import { bondLengths } from "@/core/crystal/geometry";
+import { analyzeSiteSymmetry, type SiteSymmetry } from "@/core/crystal/siteSymmetry";
+import { classifyPointGroup } from "@/core/crystal/pointGroup";
 import { detectExtraPeaks, type ExtraPeakOptions } from "@/core/magnetic/extraPeaks";
 import { searchPropagationVector, type KSearchOptions } from "@/core/magnetic/kSearch";
 import { magneticSubgroupLattice, latticeRepresentatives } from "@/core/magnetic/subgroupLattice";
@@ -362,6 +364,25 @@ export function bond_geometry(args: { structure: StructureModel; cutoff?: number
 } {
   const bonds = bondLengths(args.structure, args.cutoff ?? 3.2);
   return { bonds, shortest: bonds[0] ?? null };
+}
+
+/**
+ * Per-site symmetry: for each atom, its multiplicity, point-group site symmetry,
+ * and the symmetry-allowed refinable degrees of freedom (free positional
+ * coordinates, anisotropic-ADP components, and magnetic-moment components). The
+ * parameterization guardrail — read this before freeing coordinates or moments so
+ * you never fight a symmetry constraint (e.g. an atom on a fixed special position
+ * has 0 free coordinates; a site with `allowedMomentComponents: 0` cannot carry a
+ * moment). Also reports the crystal's overall point group.
+ */
+export function analyze_site_symmetry(args: { structure: StructureModel }): {
+  crystalPointGroup: string | null;
+  sites: SiteSymmetry[];
+} {
+  return {
+    crystalPointGroup: classifyPointGroup(args.structure.spaceGroup.operations).symbol,
+    sites: analyzeSiteSymmetry(args.structure),
+  };
 }
 
 /**

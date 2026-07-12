@@ -144,8 +144,17 @@ The null-space constraint machinery is correct but is only ever as good as the
    hook that closes partial CIF op-lists ([`crystal/spaceGroups.ts`](../src/core/crystal/spaceGroups.ts)).
    Validated by group order, the closure property, special-position
    multiplicities, and an exact operation-set match to the real F-4̄3m CIF.
-   **Remaining:** **Wyckoff-position enumeration** (letters, site symmetry,
-   canonical coordinates), full 230-group coverage, and standard settings.
+   **Also landed — point-group + site-symmetry determination (computed, not
+   tabulated):** [`crystal/pointGroup.ts`](../src/core/crystal/pointGroup.ts)
+   classifies any operation set into one of the 32 crystallographic point groups
+   by its det/trace element-type signature (table derived from generators;
+   validated for correct orders, distinct signatures, and round-trip naming), and
+   [`crystal/siteSymmetry.ts`](../src/core/crystal/siteSymmetry.ts) reports each
+   site's multiplicity, point-group site symmetry, and refinable DOF (free
+   coordinates / ADP components / moment components). **Remaining:** **Wyckoff
+   *letters*** (multiplicity + site symmetry already identify the position; the
+   letter needs canonical-coordinate tables), full 230-group coverage, and
+   standard settings.
 2. **Systematic-absence generation** ⬜ — derive allowed reflections from the
    group rather than only from the supplied operation list. (The per-operation
    absence test already exists in [`crystal/symmetry.ts`](../src/core/crystal/symmetry.ts);
