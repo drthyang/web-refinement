@@ -105,7 +105,7 @@ describe.skipIf(!hasCif)("Mn3Ga 350K golden — magnetic symmetry vs GSAS-II", (
       const residual = [...m] as [number, number, number];
       for (const b of basis) {
         const a = dot(structure.cell, m, b) / dot(structure.cell, b, b);
-        for (let i = 0; i < 3; i++) residual[i] -= a * b[i]!;
+        for (let i = 0; i < 3; i++) residual[i] = residual[i]! - a * b[i]!;
       }
       expect(Math.hypot(...residual)).toBeLessThan(1e-9);
     }
