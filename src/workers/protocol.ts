@@ -93,6 +93,21 @@ export type EvaluatorSpec =
       readonly bindings: ParameterBinding[];
       readonly shape: PeakShape;
       readonly eta?: number;
+    }
+  | {
+      readonly kind: "singleCrystal";
+      readonly structure: StructureModel;
+      readonly dataset: SingleCrystalDataset;
+      readonly parameters: RefinementParameter[];
+      readonly bindings: ParameterBinding[];
+    }
+  | {
+      readonly kind: "magneticSingleCrystal";
+      readonly structure: StructureModel;
+      readonly magnetic: MagneticModel;
+      readonly dataset: SingleCrystalDataset;
+      readonly parameters: RefinementParameter[];
+      readonly bindings: ParameterBinding[];
     };
 
 export interface InitEvaluatorRequest {

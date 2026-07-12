@@ -227,8 +227,26 @@ export class ComputeClient {
     return this.run({ ...req, type: "refineSingleCrystal", requestId: this.nextId++ });
   }
 
+  /** Single-crystal refinement with the Jacobian over the evaluator pool —
+   *  nearly every SC parameter is geometry (each column recomputes all |F|²),
+   *  so large aniso-ADP refinements scale with the pool size. */
+  async refineSingleCrystalParallel(
+    req: Omit<RefineSingleCrystalRequest, "requestId" | "type">,
+  ): Promise<RefinementResult> {
+    if (this.poolSize() < 2) return this.refineSingleCrystal(req);
+    const spec: EvaluatorSpec = { kind: "singleCrystal", structure: req.structure, dataset: req.dataset, parameters: req.parameters, bindings: req.bindings };
+    return this.runParallel(spec, req.options ?? {}, req.dataset.reflections.length);
+  }
+
   refineMagnetic(req: Omit<RefineMagneticRequest, "requestId" | "type">): Promise<RefinementResult> {
     return this.run({ ...req, type: "refineMagnetic", requestId: this.nextId++ });
+  }
+
+  /** Magnetic single-crystal (nuclear + moments) through the evaluator pool. */
+  async refineMagneticParallel(req: Omit<RefineMagneticRequest, "requestId" | "type">): Promise<RefinementResult> {
+    if (this.poolSize() < 2) return this.refineMagnetic(req);
+    const spec: EvaluatorSpec = { kind: "magneticSingleCrystal", structure: req.structure, magnetic: req.magnetic, dataset: req.dataset, parameters: req.parameters, bindings: req.bindings };
+    return this.runParallel(spec, req.options ?? {}, req.dataset.reflections.length);
   }
 
   /** Abort any in-flight refinement: terminate the worker(s) (fresh ones are

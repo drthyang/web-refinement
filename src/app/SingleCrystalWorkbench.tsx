@@ -178,10 +178,10 @@ export function SingleCrystalWorkbench({ structure, dataset, client, step, onSte
       // matching the powder path; the σ-filtered `activeDataset` is refined.
       // With a magnetic model applied, fit nuclear + moments together (F² total).
       const res = magnetic
-        ? await client.refineMagnetic({
+        ? await client.refineMagneticParallel({
             structure, magnetic, dataset: activeDataset, parameters: start, bindings: [...bindings, ...momentBindings], options: { maxIterations: 25 },
           })
-        : await client.refineSingleCrystal({
+        : await client.refineSingleCrystalParallel({
             structure, dataset: activeDataset, parameters: start, bindings, options: { maxIterations: 25 },
           });
       setParams(start.map((p) => ({ ...p, value: res.parameters[p.id] ?? p.value, ...(guided ? { fixed: false } : {}) })));
@@ -201,7 +201,7 @@ export function SingleCrystalWorkbench({ structure, dataset, client, step, onSte
     agreementLabel: "wR2",
     refine: async (mag, momentParams, mBindings) => {
       const nuclearFixed = params.map((p) => ({ ...p, fixed: true }));
-      const res = await client.refineMagnetic({
+      const res = await client.refineMagneticParallel({
         structure, magnetic: mag, dataset: activeDataset,
         parameters: [...nuclearFixed, ...momentParams], bindings: [...bindings, ...mBindings],
         options: { maxIterations: 20 },

@@ -9,6 +9,8 @@ import type { AgreementFactors, RefinementOptions, RefinementResult } from "@/co
 import { refine, type RefinementProblem } from "@/core/refinement/engine";
 import { buildPowderProblem, type PowderProfile } from "@/core/workflow/powder";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
+import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
+import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
 import { buildMultiPhasePowderProblem } from "@/core/workflow/multiPhase";
 import { refineStaged } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
@@ -20,6 +22,12 @@ import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
  * single construction path.
  */
 export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
+  if (spec.kind === "singleCrystal") {
+    return buildSingleCrystalRefinementProblem(spec.structure, spec.dataset, spec.parameters, spec.bindings);
+  }
+  if (spec.kind === "magneticSingleCrystal") {
+    return buildMagneticSingleCrystalProblem(spec.structure, spec.magnetic, spec.dataset, spec.parameters, spec.bindings);
+  }
   if (spec.kind === "magneticPowder") {
     return buildMagneticPowderProblem(spec.structure, spec.magnetic, spec.pattern, spec.parameters, spec.bindings, {
       shape: spec.shape,
