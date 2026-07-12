@@ -75,7 +75,11 @@ export function parseMagneticSymmetryOperation(xyz: string): SymmetryOperation {
   const spatial = parseSymmetryOperation(parts.slice(0, 3).join(","));
   const flag = parts[3]!.trim();
   const timeReversal: 1 | -1 = flag.startsWith("-") ? -1 : 1;
-  return { ...spatial, xyz: xyz.replace(/\s+/g, ""), timeReversal };
+  // `xyz` keeps the SPATIAL string only — the flag lives in `timeReversal`,
+  // matching generated ops (formatOperationXyz). Storing the 4-field string
+  // here made the mCIF exporter (which appends the flag) emit "x,y,z,+1,+1"
+  // and leaked ",+1" into nuclear symop loops.
+  return { ...spatial, timeReversal };
 }
 
 /** Compose two operations: (a∘b)(x) = a(b(x)). Translations wrapped into [0,1). */

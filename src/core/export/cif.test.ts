@@ -113,6 +113,15 @@ describe("magneticStructureToMcif — round-trips through parseMagneticCif", () 
     expect(ops.some((o) => o.timeReversal === -1)).toBe(true);
   });
 
+  it("re-exporting a parsed mCIF does not double the time-reversal flag", () => {
+    // Regression: parsed magnetic ops stored the 4-field string in xyz, so a
+    // parse → export cycle emitted "x,y,z,+1,+1" (and every further cycle
+    // appended another flag).
+    const again = magneticStructureToMcif(back.structure, back.magnetic!, {});
+    expect(again).not.toMatch(/,[+-]1,[+-]1"/);
+    expect(again).toContain('"x,y,z,+1"');
+  });
+
   // Regression: a magnetic model built on a structure loaded from a *nuclear*
   // CIF (spatial ops carry no BNS time-reversal flag) must still export the full
   // symmetry — the exporter used to filter on `timeReversal !== undefined`, which

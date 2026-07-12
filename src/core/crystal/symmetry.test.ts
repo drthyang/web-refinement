@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parseSymmetryOperation,
+  parseMagneticSymmetryOperation,
   applyOperation,
   siteMultiplicity,
   isReflectionAbsent,
@@ -27,6 +28,16 @@ describe("symmetry — parsing", () => {
   it("applies an operation to a coordinate", () => {
     const op = parseSymmetryOperation("-x,-y,1/2+z");
     expect(applyOperation(op, [0.1, 0.2, 0.3])).toEqual([-0.1, -0.2, 0.8]);
+  });
+
+  it("a magnetic op keeps the SPATIAL string in xyz; the flag in timeReversal", () => {
+    // Regression: xyz used to store the full 4-field string ("x,-y,1/2+z,-1"),
+    // so the mCIF exporter — which appends the flag — emitted "…,-1,-1" and
+    // nuclear symop loops leaked a trailing ",±1".
+    const op = parseMagneticSymmetryOperation("x, -y, 1/2+z, -1");
+    expect(op.xyz).toBe("x,-y,1/2+z");
+    expect(op.timeReversal).toBe(-1);
+    expect(parseMagneticSymmetryOperation("-x,1/2+y,-z,+1").timeReversal).toBe(1);
   });
 });
 
