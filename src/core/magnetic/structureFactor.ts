@@ -13,7 +13,7 @@
  */
 
 import type { Complex, Vec3 } from "@/core/math/types";
-import type { StructureModel } from "@/core/crystal/types";
+import type { StructureModel, DisplacementParameters } from "@/core/crystal/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { MagneticFormFactorTable } from "@/core/scattering/types";
 import { add, expι, scale as cscale, ZERO } from "@/core/math/complex";
@@ -54,6 +54,66 @@ export interface MagneticStructureFactor {
   readonly vector: readonly [Complex, Complex, Complex];
   /** |F_M|² = |Fx|² + |Fy|² + |Fz|². */
   readonly squared: number;
+}
+
+/**
+ * One magnetic scatterer of the cell: a moment replicated to each DISTINCT orbit
+ * position, carrying the op-rotated moment ALREADY in Cartesian (μ_B) and the
+ * scattering properties needed downstream. This is precisely the (moment,
+ * distinct-op) expansion `magneticStructureFactor` sums over — but with the
+ * REFLECTION-INDEPENDENT parts pulled out (position, Cartesian moment, occupancy,
+ * form factor, DW), so an off-core consumer (the WebGPU magnetic kernel) marshals
+ * the identical atom list and applies only the per-reflection q̂ projection and
+ * ⟨j0⟩(s) itself. No drift: same ops, same dedup, same axial transform.
+ */
+export interface ExpandedMagneticAtom {
+  readonly position: Vec3;
+  /** Op-rotated, axial-signed moment in the Cartesian frame (μ_B). */
+  readonly momentCart: Vec3;
+  readonly occupancy: number;
+  readonly formFactorId: string;
+  readonly adp: DisplacementParameters;
+}
+
+/** Expand a magnetic model over each moment's distinct orbit (see the type doc). */
+export function expandMagneticAtoms(structure: StructureModel, magnetic: MagneticModel): ExpandedMagneticAtom[] {
+  const ops = magnetic.operations ?? structure.spaceGroup.operations;
+  const dedup = magnetic.operations !== undefined;
+  const out: ExpandedMagneticAtom[] = [];
+  for (const moment of magnetic.moments) {
+    const site = structure.sites.find((st) => st.label === moment.siteLabel);
+    if (!site) continue;
+    const ffId = formFactorId(structure, moment.siteLabel, moment.formFactorId);
+    const seen: Vec3[] | null = dedup ? [] : null;
+    const basePos = moment.position ?? site.position;
+    for (const op of ops) {
+      const p = applyOperation(op, basePos);
+      if (seen) {
+        const wrapped: Vec3 = [((p[0] % 1) + 1) % 1, ((p[1] % 1) + 1) % 1, ((p[2] % 1) + 1) % 1];
+        const isDup = seen.some((q) => {
+          for (let i = 0; i < 3; i++) {
+            let dd = Math.abs(wrapped[i]! - q[i]!);
+            dd = Math.min(dd, 1 - dd);
+            if (dd > 1e-3) return false;
+          }
+          return true;
+        });
+        if (isDup) continue;
+        seen.push(wrapped);
+      }
+      const r = op.rotation;
+      const axial = determinant(r) * (op.timeReversal ?? 1);
+      const comps = moment.components;
+      const rotatedComps: [number, number, number] = [
+        axial * (r[0][0] * comps[0] + r[0][1] * comps[1] + r[0][2] * comps[2]),
+        axial * (r[1][0] * comps[0] + r[1][1] * comps[1] + r[1][2] * comps[2]),
+        axial * (r[2][0] * comps[0] + r[2][1] * comps[1] + r[2][2] * comps[2]),
+      ];
+      const momentCart = moment.frame === "cartesian" ? rotatedComps : crystalComponentsToCartesian(structure.cell, rotatedComps);
+      out.push({ position: p, momentCart, occupancy: site.occupancy, formFactorId: ffId, adp: site.adp });
+    }
+  }
+  return out;
 }
 
 /**

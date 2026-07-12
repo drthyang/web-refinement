@@ -8,11 +8,17 @@
  */
 
 import { GpuStructureFactor, structureFactorInputs, gpuStructureFactorValidation } from "@/workers/gpuStructureFactor";
+import { gpuMagneticValidation } from "@/workers/gpuMagneticStructureFactor";
 import { expandStructureAtoms, nuclearStructureFactorSquared } from "@/core/diffraction/structureFactor";
+import { magneticStructureFactor } from "@/core/magnetic/structureFactor";
+import { buildMagneticModel } from "@/core/magnetic/momentModel";
+import { generateMagneticCandidatesForK } from "@/core/magnetic/magneticGroups";
+import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { exampleStructure } from "@/examples/mn3ga";
 import type { Radiation } from "@/core/diffraction/types";
 import type { StructureModel } from "@/core/crystal/types";
+import type { Vec3 } from "@/core/math/types";
 
 function reflectionsOf(model: StructureModel, dMin: number, dMax: number) {
   return generateReflections(model.cell, model.spaceGroup, dMin, dMax).map((r) => ({ h: r.h, k: r.k, l: r.l }));
@@ -68,6 +74,31 @@ async function validateBatch(model: StructureModel, radiation: Radiation) {
   }
 }
 
+/** Validate the magnetic |F_M|² kernel on a genuine AFM (Mn₃Ga, k=(½,0,0)). */
+async function validateMagnetic() {
+  const structure = exampleStructure();
+  const k: Vec3 = [0.5, 0, 0];
+  let build: ReturnType<typeof buildMagneticModel> | null = null;
+  for (const sub of generateMagneticCandidatesForK(structure.spaceGroup.operations, k)) {
+    if (!sub.operations.some((op) => op.timeReversal === -1)) continue;
+    const b = buildMagneticModel(structure, k, ["Mn1"], sub.operations, { moment: 3, tieSameSite: true });
+    if (b.params.length > 0) { build = b; break; }
+  }
+  if (!build) return { name: "Mn3Ga AFM (magnetic |F_M|²)", error: "no subgroup" };
+  const amps: Record<string, number> = {};
+  for (const p of build.params) amps[p.id] = p.value;
+  const magnetic = applyMagneticMoments(build.magnetic, build.bindings, amps);
+  // (½,0,0)-type satellites over a small G range.
+  const hkls: { h: number; k: number; l: number }[] = [];
+  for (let H = -3; H <= 3; H++) for (let K = -2; K <= 2; K++) for (let L = -2; L <= 2; L++) {
+    hkls.push({ h: H + 0.5, k: K, l: L });
+  }
+  const report = await gpuMagneticValidation(structure, magnetic, hkls, (h, kk, l) =>
+    magneticStructureFactor(structure, magnetic, h, kk, l).squared,
+  );
+  return { name: "Mn3Ga AFM (magnetic |F_M|²)", ...report };
+}
+
 export function installGpuValidationHarness(): void {
   (window as unknown as { __gpuBench: () => Promise<unknown> }).__gpuBench = async () => {
     const model = exampleStructure();
@@ -95,6 +126,7 @@ export function installGpuValidationHarness(): void {
       await validateSingle("Mn3Ga (X-ray, isotropic)", mn3ga, { kind: "xray", wavelength: 1.5406 }),
       await validateSingle("Mn3Ga (neutron, anisotropic ADP)", toAnisotropic(mn3ga), { kind: "neutron", wavelength: 1.54 }),
       await validateBatch(mn3ga, { kind: "neutron", wavelength: 1.54 }),
+      await validateMagnetic(),
     ];
     // eslint-disable-next-line no-console
     console.table(results);
