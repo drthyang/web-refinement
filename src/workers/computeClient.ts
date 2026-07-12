@@ -31,7 +31,17 @@ import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
 
 type Pending = (response: ComputeResponse) => void;
 
-const workerUrl = (): URL => new URL("./compute.worker.ts", import.meta.url);
+/**
+ * Spawn the compute worker. The `new URL("./compute.worker.ts", import.meta.url)`
+ * must appear LITERALLY inside `new Worker(...)` — Vite detects that exact pattern
+ * to emit a proper worker chunk. Hiding it behind a helper made Vite treat the
+ * `.ts` as a generic asset and inline it as a `data:video/mp2t` URL, which a
+ * module worker refuses to load, so `EvaluatorPool.init` awaited an ack that never
+ * came and the whole refinement hung. Keep the pattern inline at every call site.
+ */
+function spawnWorker(): Worker {
+  return new Worker(new URL("./compute.worker.ts", import.meta.url), { type: "module" });
+}
 
 /** WebGPU present on this thread — a reliable proxy for the worker having it too
  *  (same browser), used to decide whether to try the GPU |F|² evaluator. */
@@ -47,7 +57,7 @@ function hasWebGpu(): boolean {
  * spin up its own device). Off the driver thread, so the UI stays free.
  */
 class GpuEvaluator implements BatchEvaluator {
-  private readonly worker = new Worker(workerUrl(), { type: "module" });
+  private readonly worker = spawnWorker();
   private nextId = 1;
   private readonly pending = new Map<number, (r: ComputeResponse) => void>();
 
@@ -61,6 +71,17 @@ class GpuEvaluator implements BatchEvaluator {
         resolve(msg);
       }
     });
+    // A worker that fails to load (bad chunk URL, CSP, network) fires `error`
+    // before any message; reject every pending request so init/evaluate throws
+    // instead of awaiting forever. runParallel then falls back to the CPU pool.
+    this.worker.addEventListener("error", () => this.failAll("gpu evaluator worker failed to load"));
+  }
+
+  private failAll(error: string): void {
+    for (const [id, resolve] of this.pending) {
+      this.pending.delete(id);
+      resolve({ requestId: id, ok: false, error });
+    }
   }
 
   private send(req: ComputeRequest): Promise<ComputeResponse> {
@@ -101,7 +122,7 @@ class EvaluatorPool implements BatchEvaluator {
 
   constructor(size: number) {
     for (let i = 0; i < size; i++) {
-      const w = new Worker(workerUrl(), { type: "module" });
+      const w = spawnWorker();
       w.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {
         const msg = event.data;
         if ("progress" in msg) return;
@@ -109,6 +130,15 @@ class EvaluatorPool implements BatchEvaluator {
         if (entry) {
           this.pending.delete(msg.requestId);
           entry.resolve(msg);
+        }
+      });
+      // A worker that fails to load fires `error` before any message — fail every
+      // pending request so `init`/`evaluate` throws instead of hanging forever
+      // (the bug that inlined the worker as a data: URL and spun the UI).
+      w.addEventListener("error", () => {
+        for (const [id, entry] of this.pending) {
+          this.pending.delete(id);
+          entry.resolve({ requestId: id, ok: false, error: "evaluator worker failed to load" });
         }
       });
       this.workers.push(w);
@@ -170,7 +200,7 @@ export class ComputeClient {
   private ensureWorker(): Worker | null {
     if (this.worker) return this.worker;
     if (typeof Worker === "undefined") return null;
-    this.worker = new Worker(workerUrl(), { type: "module" });
+    this.worker = spawnWorker();
     this.worker.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {
       const msg = event.data;
       if ("progress" in msg) {
@@ -182,6 +212,15 @@ export class ComputeClient {
         this.pending.delete(msg.requestId);
         this.progress.delete(msg.requestId);
         resolve(msg);
+      }
+    });
+    // Surface a worker load failure as a rejected request rather than an infinite
+    // wait (see spawnWorker's note on the data:-URL hang).
+    this.worker.addEventListener("error", () => {
+      for (const [id, resolve] of this.pending) {
+        this.pending.delete(id);
+        this.progress.delete(id);
+        resolve({ requestId: id, ok: false, error: "compute worker failed to load" });
       }
     });
     return this.worker;
