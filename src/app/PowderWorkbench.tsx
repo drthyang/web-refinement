@@ -508,6 +508,11 @@ export function PowderWorkbench({
         setMessage(`Nuclear + magnetic refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`);
         return;
       }
+      // The WebGPU structure-factor kernel accelerates only the flat single-phase
+      // nuclear-powder Jacobian; the client itself gates on that + WebGPU support
+      // and falls back to the CPU pool otherwise, so requesting it here is safe.
+      const gpuActive = !guided && session.extraPhases.length === 0 && !session.magnetic
+        && typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu;
       // Parallel-Jacobian path for the flat single-phase case; the client
       // falls back to the single-worker path for staged/multi-phase requests.
       const result = await client.refinePowderParallel({
@@ -516,6 +521,7 @@ export function PowderWorkbench({
         ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),
         ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         options: { maxIterations: guided ? 15 : 20 },
+        useGpu: true,
       }, onPowderProgress);
       setSession((s) => ({
         ...s,
@@ -527,7 +533,7 @@ export function PowderWorkbench({
         })),
       }));
       setPowderResult(result);
-      setMessage(`Powder ${guided ? "guided " : ""}refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`);
+      setMessage(`Powder ${guided ? "guided " : ""}refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%${gpuActive ? " · GPU |F|²" : ""}.`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setMessage(msg === CANCELLED ? "Refinement cancelled." : `Powder refinement failed: ${msg}`);

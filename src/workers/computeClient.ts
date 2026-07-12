@@ -14,6 +14,7 @@
 import type {
   ComputeRequest,
   ComputeResponse,
+  EvaluatorReady,
   EvaluatorSpec,
   RefineMagneticRequest,
   RefinePowderRequest,
@@ -31,6 +32,62 @@ import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
 type Pending = (response: ComputeResponse) => void;
 
 const workerUrl = (): URL => new URL("./compute.worker.ts", import.meta.url);
+
+/** WebGPU present on this thread — a reliable proxy for the worker having it too
+ *  (same browser), used to decide whether to try the GPU |F|² evaluator. */
+function hasWebGpu(): boolean {
+  return typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu;
+}
+
+/**
+ * A single evaluator worker that sources the Jacobian's |F|² from the WebGPU
+ * structure-factor kernel. Unlike the CPU pool it does NOT split the batch: one
+ * worker receives every column so the kernel can batch them in one dispatch (the
+ * GPU serializes work regardless, so more workers would not help and each would
+ * spin up its own device). Off the driver thread, so the UI stays free.
+ */
+class GpuEvaluator implements BatchEvaluator {
+  private readonly worker = new Worker(workerUrl(), { type: "module" });
+  private nextId = 1;
+  private readonly pending = new Map<number, (r: ComputeResponse) => void>();
+
+  constructor() {
+    this.worker.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {
+      const msg = event.data;
+      if ("progress" in msg) return;
+      const resolve = this.pending.get(msg.requestId);
+      if (resolve) {
+        this.pending.delete(msg.requestId);
+        resolve(msg);
+      }
+    });
+  }
+
+  private send(req: ComputeRequest): Promise<ComputeResponse> {
+    return new Promise((resolve) => {
+      this.pending.set(req.requestId, resolve);
+      this.worker.postMessage(req);
+    });
+  }
+
+  /** Build the replica and try to engage the GPU. Returns whether it engaged. */
+  async init(spec: EvaluatorSpec): Promise<boolean> {
+    const ack = await this.send({ type: "initEvaluator", requestId: this.nextId++, spec, useGpu: true });
+    if (!ack.ok) throw new Error(`gpu evaluator init failed: ${(ack as { error?: string }).error ?? "unknown"}`);
+    return (ack as EvaluatorReady).gpu === true;
+  }
+
+  async evaluate(sets: readonly Record<string, number>[]): Promise<Float64Array[]> {
+    const r = await this.send({ type: "evaluate", requestId: this.nextId++, sets: sets as Record<string, number>[] });
+    if (!r.ok || !("results" in r)) throw new Error(`gpu evaluation failed: ${(r as { error?: string }).error ?? "bad response"}`);
+    return r.results;
+  }
+
+  dispose(): void {
+    this.worker.terminate();
+    this.pending.clear();
+  }
+}
 
 /**
  * A pool of evaluator workers for the parallel Jacobian. Each worker holds a
@@ -108,6 +165,7 @@ export class ComputeClient {
   private readonly pending = new Map<number, Pending>();
   private readonly progress = new Map<number, PowderProgress>();
   private activePool: EvaluatorPool | null = null;
+  private activeGpu: GpuEvaluator | null = null;
 
   private ensureWorker(): Worker | null {
     if (this.worker) return this.worker;
@@ -200,7 +258,7 @@ export class ComputeClient {
       // stage-local fixed flags and carried values never touch them.
       return this.runStagedParallel(spec, req.staged, req.options ?? {}, req.pattern.points.length, onProgress);
     }
-    return this.runParallel(spec, req.options ?? {}, req.pattern.points.length, onProgress);
+    return this.runParallel(spec, req.options ?? {}, req.pattern.points.length, onProgress, req.useGpu ?? false);
   }
 
   private async runStagedParallel(
@@ -254,17 +312,43 @@ export class ComputeClient {
     options: Partial<RefinementOptions>,
     patternLen: number,
     onProgress?: PowderProgress,
+    useGpu = false,
   ): Promise<RefinementResult> {
+    const onIteration = onProgress
+      ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
+          onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
+      : undefined;
+    const opts = { ...options, ...(onIteration ? { onIteration } : {}) };
+
+    // GPU |F|² path (opt-in): single-phase nuclear powder batches its Jacobian
+    // columns through the structure-factor kernel in ONE worker. Falls through to
+    // the CPU pool when not requested, WebGPU is unavailable, or the worker could
+    // not engage it — the baseline/trial evaluations stay on the driver either way.
+    if (useGpu && spec.kind === "powder" && hasWebGpu()) {
+      const gpuEval = new GpuEvaluator();
+      let engaged = false;
+      try {
+        engaged = await gpuEval.init(spec);
+      } catch {
+        engaged = false;
+      }
+      if (engaged) {
+        this.activeGpu = gpuEval;
+        try {
+          return await refineParallel(buildProblemForSpec(spec), opts, gpuEval);
+        } finally {
+          gpuEval.dispose();
+          if (this.activeGpu === gpuEval) this.activeGpu = null;
+        }
+      }
+      gpuEval.dispose();
+    }
+
     const pool = new EvaluatorPool(this.poolSize());
     this.activePool = pool;
     try {
       await pool.init(spec);
-      const problem = buildProblemForSpec(spec);
-      const onIteration = onProgress
-        ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
-            onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
-        : undefined;
-      return await refineParallel(problem, { ...options, ...(onIteration ? { onIteration } : {}) }, pool);
+      return await refineParallel(buildProblemForSpec(spec), opts, pool);
     } finally {
       pool.dispose();
       if (this.activePool === pool) this.activePool = null;
@@ -308,6 +392,8 @@ export class ComputeClient {
     }
     this.activePool?.dispose();
     this.activePool = null;
+    this.activeGpu?.dispose();
+    this.activeGpu = null;
     for (const [requestId, resolve] of this.pending) {
       resolve({ requestId, ok: false, error: CANCELLED });
     }
@@ -320,6 +406,8 @@ export class ComputeClient {
     this.worker = null;
     this.activePool?.dispose();
     this.activePool = null;
+    this.activeGpu?.dispose();
+    this.activeGpu = null;
     this.pending.clear();
   }
 }

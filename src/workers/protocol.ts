@@ -41,6 +41,14 @@ export interface RefinePowderRequest {
   /** Restrict refinement to an inclusive abscissa window; omit for full range. */
   readonly fitRange?: { readonly min?: number; readonly max?: number };
   readonly options?: Partial<RefinementOptions>;
+  /**
+   * Opt into the WebGPU structure-factor kernel for the parallel Jacobian
+   * (single-phase, non-staged powder only). Default off: the exact f64 CPU pool
+   * stays the reference path. When on, |F|² is the kernel's validated ~5e-7 f32
+   * approximation and the fit converges to the same minimum (see
+   * gpuPowderEvaluator); falls back to the CPU pool if WebGPU is unavailable.
+   */
+  readonly useGpu?: boolean;
 }
 
 export interface RefineSingleCrystalRequest {
@@ -123,6 +131,13 @@ export interface InitEvaluatorRequest {
   readonly type: "initEvaluator";
   readonly requestId: number;
   readonly spec: EvaluatorSpec;
+  /**
+   * Request that this evaluator source |F|² from the WebGPU structure-factor
+   * kernel (single-phase powder only). The worker feature-detects WebGPU and
+   * reports back whether it actually engaged (EvaluatorReady.gpu); when it can't,
+   * it silently serves the CPU forward model, so this is only ever a hint.
+   */
+  readonly useGpu?: boolean;
 }
 
 export interface EvaluateRequest {
@@ -149,6 +164,8 @@ export interface EvaluatorReady {
   readonly requestId: number;
   readonly ok: true;
   readonly ready: true;
+  /** Whether the worker engaged the WebGPU |F|² path (requested via useGpu). */
+  readonly gpu?: boolean;
 }
 
 /** Evaluation results, ordered like the request's `sets`. */

@@ -12,27 +12,42 @@
  * transfer. Replica outputs are bit-identical to the driver's.
  */
 
-import type { ComputeRequest, ComputeResponse } from "@/workers/protocol";
+import type { ComputeRequest, ComputeResponse, EvaluatorSpec } from "@/workers/protocol";
 import { refine, type RefinementProblem } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
 import { runPowderRefinement, buildProblemForSpec } from "@/workers/runPowder";
+import { GpuStructureFactor } from "@/workers/gpuStructureFactor";
+import { evaluatePowderBatchOnGpu } from "@/workers/gpuPowderEvaluator";
 
 const post = (msg: unknown, transfer?: Transferable[]): void =>
   (self as DedicatedWorkerGlobalScope).postMessage(msg, transfer ?? []);
 
 /** The problem replica when this worker serves as a pool evaluator. */
 let evaluatorProblem: RefinementProblem | null = null;
+/** GPU |F|² accelerator + its spec, set when this evaluator runs the GPU path. */
+let gpu: GpuStructureFactor | null = null;
+let gpuSpec: Extract<EvaluatorSpec, { kind: "powder" }> | null = null;
 
-function handle(req: ComputeRequest): ComputeResponse {
+async function handle(req: ComputeRequest): Promise<ComputeResponse> {
   try {
     if (req.type === "initEvaluator") {
       evaluatorProblem = buildProblemForSpec(req.spec);
-      return { requestId: req.requestId, ok: true, ready: true };
+      gpu = null;
+      gpuSpec = null;
+      // GPU |F|² path: single-phase nuclear powder only. Feature-detected; on any
+      // failure the worker just serves the CPU forward model (gpu: false).
+      if (req.useGpu && req.spec.kind === "powder") {
+        gpu = await GpuStructureFactor.create();
+        if (gpu) gpuSpec = req.spec;
+      }
+      return { requestId: req.requestId, ok: true, ready: true, gpu: gpu !== null };
     }
     if (req.type === "evaluate") {
       if (!evaluatorProblem) throw new Error("evaluate before initEvaluator");
-      const results = req.sets.map((values) => evaluatorProblem!.calculate(values));
+      const results = gpu && gpuSpec
+        ? await evaluatePowderBatchOnGpu(gpuSpec, evaluatorProblem, gpu, req.sets)
+        : req.sets.map((values) => evaluatorProblem!.calculate(values));
       return { requestId: req.requestId, ok: true, results };
     }
     if (req.type === "refinePowder") {
@@ -59,8 +74,9 @@ function handle(req: ComputeRequest): ComputeResponse {
 }
 
 self.addEventListener("message", (event: MessageEvent<ComputeRequest>) => {
-  const response = handle(event.data);
-  // Zero-copy the evaluation curves back to the driver.
-  const transfer = "results" in response && response.ok ? response.results.map((r) => r.buffer as ArrayBuffer) : [];
-  post(response, transfer);
+  void handle(event.data).then((response) => {
+    // Zero-copy the evaluation curves back to the driver.
+    const transfer = "results" in response && response.ok ? response.results.map((r) => r.buffer as ArrayBuffer) : [];
+    post(response, transfer);
+  });
 });
