@@ -5,6 +5,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
     "module": "ESNext",
     "skipLibCheck": true,
+    "types": ["@webgpu/types", "vite/client"],
 
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

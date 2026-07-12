@@ -160,19 +160,26 @@ numbers cannot change silently; selected examples are cross-checked against
 established tools where possible, with results labeled *validated* or
 *approximate*.
 
-## Future acceleration points (WASM / WebGPU)
+## Acceleration status (workers shipped; WebGPU foundation; WASM skipped)
 
-Not built until the TS core is correct and tested. Candidate hotspots, in
-likely order of payoff:
+Three layers are live, every one exactness-tested: windowed peak synthesis,
+the geometry cache in the problem builders, and the parallel-Jacobian
+evaluator pools (browser Web Workers AND node worker_threads for the MCP
+server — the same sans-io LM core drives both, bit-identically).
 
-1. Structure-factor summation over many reflections × many atoms (embarrassingly
-   parallel; good WebGPU fit).
-2. Powder profile convolution across the full pattern.
-3. Jacobian assembly and the normal-equations solve in refinement.
+**WebGPU**: `src/workers/gpuSynthesizer.ts` is the validated foundation — a
+batched Gaussian/pseudo-Voigt synthesis kernel with double-f32 coordinate
+splits, measured at 17× over the (already windowed) CPU path with max
+deviation 1.1e-5 of the pattern maximum on Jacobian-scale batches. GPU math
+is f32, so results are approximate (sub-esd) rather than bit-identical;
+integration therefore stays opt-in and per-class validated via its
+`gpuValidation` harness. The next GPU step with real leverage is the
+structure-factor kernel (reflections × sites × ops), which would need its own
+golden-data validation campaign.
 
-Because `src/core` is pure and side-effect-free, these can be introduced as
-drop-in alternative implementations behind the existing interfaces.
-```
+**WASM**: deliberately skipped — the windowed CPU kernels plus worker pools
+already cover its niche, and a second implementation of the same physics in
+another language is exactly the maintenance drift this architecture avoids.
 
 ## Implementation rules (enforced)
 
