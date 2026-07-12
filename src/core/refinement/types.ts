@@ -48,18 +48,15 @@ export type ParameterKind =
   | "momentX"
   | "momentY"
   | "momentZ"
-  | "momentMode"
-  | "momentMagnitude"
-  | "momentAngle";
+  | "momentMode";
 
 /**
- * True for parameter kinds that drive magnetic moments — the per-mode
- * amplitudes (`momentMode`) and the shared-magnitude parametrization
- * (`momentMagnitude` + `momentAngle`). Used wherever "the magnetic moment
- * parameters" are added/removed as a set.
+ * True for parameter kinds that drive magnetic moments — the symmetry-mode
+ * amplitudes (`momentMode`). Used wherever "the magnetic moment parameters"
+ * are added/removed as a set.
  */
 export function isMomentParameterKind(kind: ParameterKind): boolean {
-  return kind === "momentMode" || kind === "momentMagnitude" || kind === "momentAngle";
+  return kind === "momentMode";
 }
 
 /** A single refinable (or fixed) parameter. */
@@ -129,20 +126,8 @@ export interface ParameterBinding {
    * `momentMode` binding. The moment of a site is the sum of its bound modes:
    * m = Σ value·momentBasis, so only symmetry-allowed directions can be nonzero
    * (mirrors `positionShift`/`uAniso`). Coupled components move together.
-   *
-   * For the shared-magnitude parametrization the same field carries the
-   * orbit's metric-orthonormal frame: the `momentMagnitude` binding holds ê₁
-   * and each `momentAngle` binding holds the axis its angle rotates toward
-   * (ê₂ for the first angle, ê₃ for the second), so
-   *   m = |M|·(cos θ·(cos φ·ê₁ + sin φ·ê₂) + sin θ·ê₃)
-   * has |m| = |M| exactly for every angle.
    */
   readonly momentBasis?: readonly [number, number, number];
-  /**
-   * Which direction angle a `momentAngle` binding drives: 0 = φ (rotation from
-   * ê₁ toward ê₂), 1 = θ (elevation toward ê₃). Angles are in degrees.
-   */
-  readonly angleIndex?: 0 | 1;
 }
 
 /** A soft linear restraint appended as pseudo-observation to least squares. */

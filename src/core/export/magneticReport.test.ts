@@ -16,13 +16,20 @@ function mn3gaReport(): string {
     const bns = r.candidate.standard?.bnsSymbol ?? r.settingMatch?.identity.bnsSymbol ?? "";
     return bns.replace(/\s/g, "") === "Cm'cm'";
   })!;
-  const build = buildMagneticModel(structure, k, ["Mn1"], [...cand.candidate.operations], { moment: 2.5, equalAmplitude: true });
-  const magP = build.params.find((p) => p.kind === "momentMagnitude")!;
-  const angP = build.params.find((p) => p.kind === "momentAngle")!;
+  const build = buildMagneticModel(structure, k, ["Mn1"], [...cand.candidate.operations], { moment: 2.5 });
+  // Symmetry-mode amplitudes: orbit 1 is 2-D (in-plane), orbit 2 is 1-D. Modes
+  // are unit Cartesian µ_B, so driving one mode per orbit at 2.5 gives every
+  // sublattice |m| = 2.5 — no shared-magnitude constraint involved.
+  const modes = build.params.filter((p) => p.kind === "momentMode");
+  const orbit1 = modes.filter((p) => !p.id.includes("_o2_"));
+  const orbit2 = modes.filter((p) => p.id.includes("_o2_"));
+  const values: Record<string, number> = {};
+  orbit1.forEach((p, i) => { values[p.id] = i === 0 ? 2.5 : 0; });
+  orbit2.forEach((p) => { values[p.id] = 2.5; });
   return magneticReportHtml({
     structure,
     magnetic: build.magnetic,
-    values: { [magP.id]: 2.5, [angP.id]: 30 },
+    values,
     params: build.params,
     bindings: build.bindings,
     k,
@@ -49,13 +56,12 @@ describe("magneticReportHtml", () => {
     expect(heads.length).toBeGreaterThanOrEqual(6);
   });
 
-  it("reports the shared magnitude, angle, and equal |m| on both sublattices", () => {
+  it("reports the mode amplitudes and per-orbit |m| on both sublattices", () => {
     expect(html).toContain("2.50 µ<sub>B</sub>");
-    expect(html).toContain("30.00 °");
     expect(html).toContain("orbit 2");
-    // Every sublattice row ends with |m| = 2.50.
+    // Both sublattice rows end with |m| = 2.50 (one unit mode driven per orbit).
     const magCells = html.match(/<td class="num">2\.50<\/td>/g) ?? [];
-    expect(magCells.length).toBe(2); // two moment entries, same |m|
+    expect(magCells.length).toBe(2);
     expect(html).not.toContain("NaN");
     expect(html).not.toContain("undefined");
   });
@@ -77,14 +83,16 @@ describe("magneticReportHtml — k ≠ 0 supercell and out-of-plane moments", ()
   };
   const k: Vec3 = [0, 0, 0.5];
   const cands = generateMagneticCandidatesForK(sg.operations, k);
-  const build = buildMagneticModel(structure, k, ["Fe1"], cands[0]!.operations, { moment: 2, equalAmplitude: true });
+  const build = buildMagneticModel(structure, k, ["Fe1"], cands[0]!.operations, { moment: 2 });
 
   it("renders the magnetic supercell and marks out-of-plane components", () => {
-    const magP = build.params.find((p) => p.kind === "momentMagnitude")!;
-    const angs = build.params.filter((p) => p.kind === "momentAngle");
-    // Point the moment (mostly) out of plane: θ = 80° toward ê₃.
-    const values: Record<string, number> = { [magP.id]: 2 };
-    for (const a of angs) values[a.id] = a.id.endsWith("ang1") ? 80 : 0;
+    // Point the moment (mostly) out of plane: drive the mode whose basis has
+    // the largest c-axis component, zero the rest.
+    const modes = build.params.filter((p) => p.kind === "momentMode");
+    const basisOf = (id: string) => build.bindings.find((b) => b.parameterId === id)?.momentBasis ?? [0, 0, 0];
+    const zMode = [...modes].sort((a, b) => Math.abs(basisOf(b.id)[2]!) - Math.abs(basisOf(a.id)[2]!))[0]!;
+    const values: Record<string, number> = {};
+    for (const p of modes) values[p.id] = p.id === zMode.id ? 2 : 0;
     const html = magneticReportHtml({
       structure,
       magnetic: build.magnetic,

@@ -75,18 +75,12 @@ viewer draws no arrow there and says why). Tested in
 **Cartesian** length before parameters are built, so one unit of amplitude is
 1 µ_B along the mode whatever the cell metric (a raw null-space vector like
 (−1,1,0) is √3 µ_B long in a hexagonal cell — Mn₃Ga/Cm'cm' previously seeded
-one sublattice √3× larger than the other). On top of that, the **equal-|m|
-constraint** (`equalAmplitude`, the step-5 "same moment size" checkbox, on by
-default) replaces the per-mode amplitudes with ONE shared magnitude `|M|` per
-site — across all of its split orbits — plus per-orbit direction **angles**
-(degrees) over a metric-orthonormal frame:
-`m = |M|·(cos θ·(cos φ·ê₁ + sin φ·ê₂) + sin θ·ê₃)`. Every sublattice's moment
-has exactly the same size by construction (the physical prior for a single
-magnetic species, e.g. all six Mn of the Mn₃Ga triangular antiferromagnet),
-and the refinement fits sizes and directions instead of raw components.
-Tested in
-[`equalAmplitude.test.ts`](../src/core/magnetic/equalAmplitude.test.ts),
-including a powder refinement recovering the shared `|M|` and angle.
+one sublattice √3× larger than the other). The refinable quantities are the
+per-mode amplitudes themselves: only what the magnetic symmetry allows is
+refined, and nothing beyond it is imposed. (An earlier equal-|m| constraint —
+one shared magnitude per site with per-orbit direction angles — was removed:
+same-size moments across sublattices are a physical prior, not a symmetry
+requirement, and the fit should be free to disagree.)
 
 **Report export.** Step 5's "Export report" button downloads a self-contained
 HTML report of the current magnetic model: a projected structure figure

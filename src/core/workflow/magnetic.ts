@@ -33,47 +33,19 @@ export function applyMagneticMoments(
   // entries per site label, each addressed independently.
   const byKey = new Map(moments.map((m) => [momentBindingKey(m), m]));
 
-  // Symmetry-mode and shared-magnitude bindings define the moment fully, so
-  // zero any driven site first, then accumulate.
+  // Symmetry-mode bindings define the moment fully, so zero any driven site
+  // first, then accumulate the bound modes.
   const driven = new Set(
-    bindings
-      .filter(
-        (b) =>
-          (b.kind === "momentMode" || b.kind === "momentMagnitude" || b.kind === "momentAngle") &&
-          b.targetKey,
-      )
-      .map((b) => b.targetKey!),
+    bindings.filter((b) => b.kind === "momentMode" && b.targetKey).map((b) => b.targetKey!),
   );
   for (const key of driven) {
     const m = byKey.get(key);
     if (m) (m.components as [number, number, number]) = [0, 0, 0];
   }
 
-  // Shared-magnitude parametrization: per moment key, gather |M| with its ê₁
-  // and the direction angles φ (→ê₂) and θ (→ê₃); the frame vectors ride on
-  // the bindings (see ParameterBinding.momentBasis).
-  interface Spherical { M: number; e1?: Vec3; phi: number; e2?: Vec3; theta: number; e3?: Vec3 }
-  const spherical = new Map<string, Spherical>();
-
   for (const binding of bindings) {
     const v = values[binding.parameterId];
     if (v === undefined || !binding.targetKey) continue;
-    if (binding.kind === "momentMagnitude" || binding.kind === "momentAngle") {
-      if (!binding.momentBasis || !byKey.has(binding.targetKey)) continue;
-      let s = spherical.get(binding.targetKey);
-      if (!s) { s = { M: 0, phi: 0, theta: 0 }; spherical.set(binding.targetKey, s); }
-      if (binding.kind === "momentMagnitude") {
-        s.M = v;
-        s.e1 = binding.momentBasis as Vec3;
-      } else if (binding.angleIndex === 1) {
-        s.theta = v;
-        s.e3 = binding.momentBasis as Vec3;
-      } else {
-        s.phi = v;
-        s.e2 = binding.momentBasis as Vec3;
-      }
-      continue;
-    }
     const moment = byKey.get(binding.targetKey);
     if (!moment) continue;
     if (binding.kind === "momentMode" && binding.momentBasis) {
@@ -84,22 +56,6 @@ export function applyMagneticMoments(
     } else if (binding.kind === "momentX" || binding.kind === "momentY" || binding.kind === "momentZ") {
       const idx = binding.kind === "momentX" ? 0 : binding.kind === "momentY" ? 1 : 2;
       (moment.components as [number, number, number])[idx] = v;
-    }
-  }
-
-  // m = |M|·(cos θ·(cos φ·ê₁ + sin φ·ê₂) + sin θ·ê₃): with an orthonormal
-  // frame the magnitude is |M| exactly, for every angle (degrees).
-  const RAD = Math.PI / 180;
-  for (const [key, s] of spherical) {
-    const moment = byKey.get(key);
-    if (!moment || !s.e1) continue;
-    const cp = Math.cos(s.phi * RAD);
-    const sp = Math.sin(s.phi * RAD);
-    const ct = Math.cos(s.theta * RAD);
-    const st = Math.sin(s.theta * RAD);
-    const c = moment.components as [number, number, number];
-    for (let i = 0; i < 3; i++) {
-      c[i]! += s.M * (ct * (cp * (s.e1[i] ?? 0) + sp * (s.e2?.[i] ?? 0)) + st * (s.e3?.[i] ?? 0));
     }
   }
   return { ...magnetic, moments };

@@ -28,7 +28,7 @@ const structure: StructureModel = {
 };
 
 function tickCount(ops: SymmetryOperation[]): number {
-  const build = buildMagneticModel(structure, k0, ["M"], ops, { moment: 2, tieSameSite: true, equalAmplitude: true });
+  const build = buildMagneticModel(structure, k0, ["M"], ops, { moment: 2, tieSameSite: true });
   const amps: Record<string, number> = {};
   for (const p of build.params) amps[p.id] = p.value;
   const applied = applyMagneticMoments(build.magnetic, build.bindings, amps);

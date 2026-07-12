@@ -20,12 +20,6 @@
  * metric — a raw null-space vector like (−1, 1, 0) is √3 µ_B long in a
  * hexagonal cell, and seeding it with the same amplitude as a (1, 0, 0) mode
  * would silently make one sublattice's moment √3× the other's.
- *
- * `equalAmplitude` swaps the per-mode amplitudes for the usual equal-|m|
- * crystallographic constraint: ONE shared magnitude |M| per site (across all
- * of its split orbits and co-located ions) plus per-orbit direction angles
- * over a metric-orthonormal basis, so every moment has exactly the same size
- * by construction and only directions are refined per sublattice.
  */
 
 import type { AtomSite, StructureModel, SymmetryOperation, UnitCell } from "@/core/crystal/types";
@@ -72,28 +66,6 @@ function cartDot(cell: UnitCell, a: Vec3, b: Vec3): number {
 function unitMode(cell: UnitCell, v: Vec3): Vec3 {
   const n = Math.sqrt(cartDot(cell, v, v));
   return n > 1e-12 ? [v[0]! / n, v[1]! / n, v[2]! / n] : v;
-}
-
-/**
- * Gram–Schmidt over the Cartesian metric: an orthonormal frame (unit µ_B,
- * mutually perpendicular in real space) spanning the same allowed subspace.
- * Needed by the shared-magnitude parametrization — with an orthonormal frame
- * the direction angles never change |m|.
- */
-function orthonormalModes(cell: UnitCell, basis: readonly Vec3[]): Vec3[] {
-  const out: Vec3[] = [];
-  for (const v of basis) {
-    const w: [number, number, number] = [v[0]!, v[1]!, v[2]!];
-    for (const e of out) {
-      const p = cartDot(cell, w, e);
-      w[0] -= p * e[0]!;
-      w[1] -= p * e[1]!;
-      w[2] -= p * e[2]!;
-    }
-    const n = Math.sqrt(cartDot(cell, w, w));
-    if (n > 1e-9) out.push([w[0] / n, w[1] / n, w[2] / n]);
-  }
-  return out;
 }
 
 function wrap01(v: number): number {
@@ -180,14 +152,6 @@ function groupByPosition(sites: readonly AtomSite[], tie: boolean): AtomSite[][]
  * site (occupancy disorder) are constrained to the **same moment**: a single set
  * of moment-mode parameters drives all of them, so their moment vectors stay
  * identical (each still carries its own occupancy and form factor in |F_M|²).
- *
- * When `equalAmplitude` is true, the refinable quantities become ONE shared
- * moment magnitude |M| per site plus per-orbit direction angles (degrees) over
- * a metric-orthonormal frame — every sublattice's |m| is identical by
- * construction (the "all moments the same size" constraint). A relative sign
- * flip of a 1-D orbit is not an independent degree of freedom here: for a
- * single 1-D orbit it is absorbed by global time reversal plus the other
- * orbits' angles (diffraction-equivalent), which covers the common cases.
  */
 export function buildMagneticModel(
   structure: StructureModel,
@@ -197,12 +161,10 @@ export function buildMagneticModel(
   options: {
     readonly moment?: number;
     readonly tieSameSite?: boolean;
-    readonly equalAmplitude?: boolean;
   } = {},
 ): MagneticModelBuild {
   const moment0 = options.moment ?? 1.0;
   const tieSameSite = options.tieSameSite ?? true;
-  const equalAmplitude = options.equalAmplitude ?? false;
   const magId = `${structure.id}-mag`;
   const moments: MagneticMoment[] = [];
   const params: RefinementParameter[] = [];
@@ -223,26 +185,6 @@ export function buildMagneticModel(
 
     const groupLabel = group.length > 1 ? `${rep.label}+${group.length - 1}` : rep.label;
 
-    // Shared-magnitude parametrization: one |M| parameter for the whole site
-    // (every split orbit, every co-located ion), created lazily so a site whose
-    // moment is forbidden on all orbits emits nothing.
-    const magnitudeId = `mom_${rep.label}_M`;
-    let magnitudeEmitted = false;
-    const emitMagnitudeParam = (): void => {
-      if (magnitudeEmitted) return;
-      magnitudeEmitted = true;
-      params.push({
-        id: magnitudeId,
-        label: `${groupLabel} |M|`,
-        kind: "momentMagnitude",
-        value: moment0,
-        initialValue: moment0,
-        min: 0,
-        max: 12,
-        fixed: true, // shown but fixed on build; freed by the user like atomic rows
-      });
-    };
-
     orbitReps.forEach((orbitPos, oi) => {
       const orbitIndex = oi + 1;
       const allowed = allowedMomentDirections(subgroupOps, orbitPos, k);
@@ -256,85 +198,42 @@ export function buildMagneticModel(
       const orbitId = orbitIndex > 1 ? `o${orbitIndex}_` : "";
       const orbitTag = orbitIndex > 1 ? ` orbit ${orbitIndex}` : "";
 
-      let seed: [number, number, number];
-      if (equalAmplitude) {
-        // Shared |M| + per-orbit direction angles over an orthonormal frame:
-        // m = |M|·(cos θ·(cos φ·ê₁ + sin φ·ê₂) + sin θ·ê₃), angles in degrees,
-        // seeded at 0 so the starting moment is |M|·ê₁ — the same magnitude on
-        // every sublattice.
-        const frame = orthonormalModes(structure.cell, basis);
-        const e1 = frame[0]!;
-        seed = [moment0 * e1[0]!, moment0 * e1[1]!, moment0 * e1[2]!];
-        emitMagnitudeParam();
+      // Per-mode amplitudes: the first allowed mode at moment0, the rest at 0.
+      const amps = basis.map((_, i) => (i === 0 ? moment0 : 0));
+      const seed: [number, number, number] = [0, 0, 0];
+      basis.forEach((b, i) => {
+        const a = amps[i]!;
+        seed[0] += a * b[0]!;
+        seed[1] += a * b[1]!;
+        seed[2] += a * b[2]!;
+      });
+
+      // One shared set of moment-mode params (keyed by the group
+      // representative), bound to every member so their moments stay equal.
+      basis.forEach((b, i) => {
+        const id = `mom_${rep.label}_${orbitId}${i}`;
+        const modeName = describeMomentMode(b);
+        const suffix = basis.length > 1 ? ` ${i + 1}` : "";
+        params.push({
+          id,
+          label: `${groupLabel}${orbitTag} M${suffix} (${modeName})`,
+          kind: "momentMode",
+          value: amps[i]!,
+          initialValue: amps[i]!,
+          min: -12,
+          max: 12,
+          fixed: true, // shown but fixed on build; freed by the user like atomic rows
+        });
         for (const m of group) {
           bindings.push({
-            parameterId: magnitudeId,
-            kind: "momentMagnitude",
+            parameterId: id,
+            kind: "momentMode",
             targetId: magId,
             targetKey: momentBindingKey({ siteLabel: m.label, orbitIndex }),
-            momentBasis: e1,
+            momentBasis: b,
           });
         }
-        frame.slice(1).forEach((axis, ai) => {
-          const id = `mom_${rep.label}_${orbitId}ang${ai}`;
-          const angleName = ai === 0 ? "∠" : "∠₂";
-          params.push({
-            id,
-            label: `${groupLabel}${orbitTag} M${angleName} (${ai === 0 ? `${describeMomentMode(e1)}→` : "→"}${describeMomentMode(axis)})`,
-            kind: "momentAngle",
-            value: 0,
-            initialValue: 0,
-            fixed: true,
-          });
-          for (const m of group) {
-            bindings.push({
-              parameterId: id,
-              kind: "momentAngle",
-              targetId: magId,
-              targetKey: momentBindingKey({ siteLabel: m.label, orbitIndex }),
-              momentBasis: axis,
-              angleIndex: ai as 0 | 1,
-            });
-          }
-        });
-      } else {
-        // Per-mode amplitudes: the first allowed mode at moment0, the rest at 0.
-        const amps = basis.map((_, i) => (i === 0 ? moment0 : 0));
-        seed = [0, 0, 0];
-        basis.forEach((b, i) => {
-          const a = amps[i]!;
-          seed[0] += a * b[0]!;
-          seed[1] += a * b[1]!;
-          seed[2] += a * b[2]!;
-        });
-
-        // One shared set of moment-mode params (keyed by the group
-        // representative), bound to every member so their moments stay equal.
-        basis.forEach((b, i) => {
-          const id = `mom_${rep.label}_${orbitId}${i}`;
-          const modeName = describeMomentMode(b);
-          const suffix = basis.length > 1 ? ` ${i + 1}` : "";
-          params.push({
-            id,
-            label: `${groupLabel}${orbitTag} M${suffix} (${modeName})`,
-            kind: "momentMode",
-            value: amps[i]!,
-            initialValue: amps[i]!,
-            min: -12,
-            max: 12,
-            fixed: true, // shown but fixed on build; freed by the user like atomic rows
-          });
-          for (const m of group) {
-            bindings.push({
-              parameterId: id,
-              kind: "momentMode",
-              targetId: magId,
-              targetKey: momentBindingKey({ siteLabel: m.label, orbitIndex }),
-              momentBasis: b,
-            });
-          }
-        });
-      }
+      });
 
       for (const m of group) {
         moments.push({

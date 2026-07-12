@@ -235,8 +235,6 @@ function buildFigure(
 
 const KIND_UNIT: Partial<Record<RefinementParameter["kind"], string>> = {
   momentMode: "µ<sub>B</sub>",
-  momentMagnitude: "µ<sub>B</sub>",
-  momentAngle: "°",
   momentX: "µ<sub>B</sub>",
   momentY: "µ<sub>B</sub>",
   momentZ: "µ<sub>B</sub>",

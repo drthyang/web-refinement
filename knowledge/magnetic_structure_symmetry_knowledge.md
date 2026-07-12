@@ -122,7 +122,7 @@ Before refining anything, determine what symmetry permits:
   antiparallel, or phase-shifted) — these are constraints, not free choices
 ```
 
-See `src/core/magnetic/allowedMoments.ts` (`allowedMomentDirections`); equal-moment relations are carried by the moment model (`momentModel.ts`) and covered by `equalAmplitude.test.ts`. Refine only symmetry-allowed degrees of freedom; enforcing zero moments and equal-moment relations is what makes the refinement stable and the answer physical.
+See `src/core/magnetic/allowedMoments.ts` (`allowedMomentDirections`); symmetry-related-site relations are carried by the moment model (`momentModel.ts`), which expands each orbit's moment from its mode amplitudes over the magnetic operations. Refine only symmetry-allowed degrees of freedom; enforcing zero moments and the symmetry relations between equivalent sites is what makes the refinement stable and the answer physical.
 
 ## 6. Correct parameterization (the central rule)
 
