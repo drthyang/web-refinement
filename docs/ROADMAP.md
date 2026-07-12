@@ -440,10 +440,19 @@ texture)** and **M7 (single-crystal refinement)** are parallel extensions off th
 shared core — sequence them by whichever real dataset arrives first, not by a
 gate.
 
-**Deferred until the core is correct:** WebAssembly / WebGPU acceleration for
-structure-factor summation, profile convolution, and the normal-equations solve.
-Superspace (3+d) modulated structures and full structure *solution* (charge
-flipping) are beyond this arc.
+**GPU acceleration (opt-in, validated foundations):** the core stayed correct in
+f64 first; GPU kernels are approximate f32 accelerators, each gated by its own
+hardware validation harness and precision contract, never bit-identical.
+Shipped: the profile-synthesis kernel
+([`gpuSynthesizer.ts`](../src/workers/gpuSynthesizer.ts), 17×) and the nuclear
+**structure-factor kernel** ([`gpuStructureFactor.ts`](../src/workers/gpuStructureFactor.ts)) —
+|F_N|² for a batch of models × a shared reflection list (neutron/X-ray, iso/aniso
+DW), validated on hardware to ≤5e-7 relative vs the CPU f64 truth (13.6× on 1439
+reflections × 24 models). Neither is wired into refinement yet; the next step is a
+pooled OFF-THREAD path (never the UI/driver thread — cf. the F1.1 freeze). Still
+deferred: WASM; the GPU normal-equations solve; magnetic |F_M|² on GPU. Superspace
+(3+d) modulated structures and full structure *solution* (charge flipping) are
+beyond this arc.
 
 **Every milestone ships with:** passing tests (golden values where an external
 reference exists), updated docs, a working local app, and no broken intermediate
