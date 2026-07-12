@@ -174,7 +174,8 @@ A static web app (React + TypeScript + Vite) with strict layering and
 one-directional dependencies. `src/core/**` is **pure TypeScript** — no React,
 DOM, or workers — so every scientific function is pure and independently
 testable. UI components handle presentation only; long calculations run in Web
-Workers, with WebAssembly/WebGPU as future accelerators. Full detail in
+Workers, with optional WebGPU kernels adding opt-in f32 acceleration over the
+correct f64 CPU path (WebAssembly is skipped). Full detail in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Documentation

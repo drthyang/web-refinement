@@ -43,7 +43,8 @@ where `J_ij = ∂r_i/∂p_j`, `r_i = sqrt(w_i) * (y_obs,i - y_calc,i)`.
   the minimum). `λ` is decreased on a successful step, increased on a rejected one.
 - **Jacobian:** exact one-evaluation columns for affine parameters (scale,
   magnetic scale, background); central finite differences for non-linear
-  parameters.
+  parameters by default, with opt-in **analytic derivatives for occupancy and
+  isotropic B_iso** (validated against FD — roadmap F1.1).
 - **Scaling:** the normal matrix is diagonal-preconditioned before each LM solve,
   so scale factors, cell lengths, ADPs, and background coefficients can coexist
   without one unit system dominating the linear algebra.
@@ -127,8 +128,10 @@ project shows how it got where it is.
 
 ## What is intentionally *not* here yet
 
-- Analytic derivatives for the full crystallographic model (only affine
-  parameters have exact columns today; see [ROADMAP.md](./ROADMAP.md)).
+- Analytic derivatives for the *full* crystallographic model — affine parameters
+  have exact columns, and occupancy/isotropic-B_iso have opt-in validated analytic
+  columns (F1.1); coordinates, cell, profile, zero-shift and moments are still
+  finite-difference (see [ROADMAP.md](./ROADMAP.md)).
 - Symbolic constraint language — Phase 8 starts with direct tying and grouping
   via `RefinementParameter.group` / `expression`, not a full expression compiler.
 - Simulated annealing / global optimization — LM is local; good starting models

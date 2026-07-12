@@ -21,7 +21,7 @@ comparison recorded here.
 > reimplement independently (no code copied), but its outputs are our correctness
 > gate and must be cited. Full bibliography in [`REFERENCES.md`](./REFERENCES.md).
 
-## Test matrix (656 passing, 53 real-data/slow tests skipped without local `data/`)
+## Test matrix (734 passing, 48 real-data/slow tests skipped without local `data/`)
 
 | Area | Test kind | Status |
 | --- | --- | --- |
@@ -71,6 +71,15 @@ comparison recorded here.
 | Grouped (equal-value) constraints | unit | ✅ `core/refinement/engine.test.ts` |
 | Real 200 K/350 K CIF + reflection lists | golden (GSAS d-spacings) | ✅ `parsers/realData.test.ts` |
 | Plot scaling math | unit | ✅ `visualization/scale.test.ts` |
+| Parallel-Jacobian pool ≡ serial (bit-identical trajectory) | unit | ✅ `core/refinement/engineParallel.test.ts` |
+| Analytic Jacobian columns (occupancy, B_iso) vs central FD | unit (F1.1) | ✅ `core/workflow/analyticJacobian.test.ts` |
+| Staged controller guards (re-fix degenerate additions) | unit (F1.4) | ✅ `core/refinement/stagedGuards.test.ts` |
+| Robust starting values (envelope background + zero sanity) | unit (F1.3) | ✅ `core/workflow/startingValues.test.ts` |
+| Next-parameter sensitivity ranking | unit (F1.5) | ✅ `core/workflow/nextParameters.test.ts` |
+| GPU \|F\|²-injection seam is bit-identical to the CPU sum | unit | ✅ `core/workflow/structureFactorInjection.test.ts` |
+| GPU nuclear kernel: WGSL strides + f64 formula ≡ CPU `F_N` | unit (CI) | ✅ `workers/gpuStructureFactor.test.ts` |
+| GPU magnetic kernel: WGSL strides + f64 formula ≡ CPU `F_M` | unit (CI) | ✅ `workers/gpuMagneticStructureFactor.test.ts` |
+| GPU batch evaluator plumbing (grouping/order/injection) | unit | ✅ `workers/gpuPowderEvaluator.test.ts` |
 
 ## Golden examples
 
@@ -125,6 +134,34 @@ instrument profile functions, background, and profile coefficients beyond this
 minimal engine's scope (see [LIMITATIONS.md](./LIMITATIONS.md)). Our
 refinement is validated only as *self-consistent* (recovers known parameters
 from synthetic data), not against GSAS-II's wR.
+
+## GPU acceleration precision
+
+The WebGPU kernels are **approximate f32 accelerators, opt-in and never
+bit-identical** (see [LIMITATIONS.md](./LIMITATIONS.md)). Their reference is the
+CPU f64 path — itself validated above against GSAS-II. Two gates enforce the
+precision contract before any refinement trusts a GPU value:
+
+1. **CI (node, no GPU):** the WGSL struct field-counts must equal the JS
+   marshaling strides, and the kernel's formula reimplemented in f64 must
+   reproduce the CPU structure factor (`< 1e-9`) — catches marshaling/stride
+   drift without hardware.
+2. **Hardware (browser, `window.__gpuValidate`):** the actual kernel vs the CPU
+   f64 truth. Measured on Apple GPU (metal-3), max relative deviation:
+
+| Kernel | Case | Max rel. deviation |
+| --- | --- | --- |
+| Nuclear \|F_N\|² | Mn₃Ga neutron, isotropic ADP | 3.9e-7 |
+| Nuclear \|F_N\|² | Mn₃Ga X-ray, isotropic ADP | 7.9e-8 |
+| Nuclear \|F_N\|² | Mn₃Ga neutron, anisotropic ADP | 5.0e-7 |
+| Nuclear \|F_N\|² | 8-model perturbed batch | 4.7e-7 |
+| Magnetic \|F_M\|² | Mn₃Ga AFM k=(½,0,0), 175 satellites | 4.5e-7 |
+| Profile synthesis | 20k pts × 5.5k pseudo-Voigt peaks | 1.1e-5 of pattern max |
+
+All are **far below counting statistics and esd scales (≥1e-3 relative)**.
+End-to-end, a GPU-accelerated powder refinement converges to the *same minimum*
+as the CPU pool (both wR 5.00% on a Mn₃Ga occupancy+ADP fit) — the f32 |F|²
+nudges the LM path but not the answer.
 
 ## Honesty rule
 

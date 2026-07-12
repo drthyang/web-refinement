@@ -2,9 +2,9 @@
 
 Browser-native refinement workbench for atomic and magnetic structures. Static
 web app (React + TypeScript + Vite), deployable to GitHub Pages, no backend for
-the core workflow. Heavy computation runs in Web Workers; WebAssembly/WebGPU are
-future accelerators, added only after the TypeScript implementation is correct
-and tested.
+the core workflow. Heavy computation runs in Web Workers; optional WebGPU kernels
+add opt-in f32 acceleration over the correct f64 CPU path (validated against it,
+never the default). WebAssembly is deliberately skipped.
 
 This document is the map. Detailed models live in
 [DATA_MODEL.md](./DATA_MODEL.md) and [REFINEMENT_ENGINE.md](./REFINEMENT_ENGINE.md);
@@ -160,22 +160,30 @@ numbers cannot change silently; selected examples are cross-checked against
 established tools where possible, with results labeled *validated* or
 *approximate*.
 
-## Acceleration status (workers shipped; WebGPU foundation; WASM skipped)
+## Acceleration status (workers + GPU kernels shipped; WASM skipped)
 
-Three layers are live, every one exactness-tested: windowed peak synthesis,
+Three CPU layers are live, every one exactness-tested: windowed peak synthesis,
 the geometry cache in the problem builders, and the parallel-Jacobian
 evaluator pools (browser Web Workers AND node worker_threads for the MCP
 server — the same sans-io LM core drives both, bit-identically).
 
-**WebGPU**: `src/workers/gpuSynthesizer.ts` is the validated foundation — a
-batched Gaussian/pseudo-Voigt synthesis kernel with double-f32 coordinate
-splits, measured at 17× over the (already windowed) CPU path with max
-deviation 1.1e-5 of the pattern maximum on Jacobian-scale batches. GPU math
-is f32, so results are approximate (sub-esd) rather than bit-identical;
-integration therefore stays opt-in and per-class validated via its
-`gpuValidation` harness. The next GPU step with real leverage is the
-structure-factor kernel (reflections × sites × ops), which would need its own
-golden-data validation campaign.
+**WebGPU** (f32, approximate, opt-in, each with a hardware validation harness +
+precision contract; the exact f64 CPU path stays the default and reference):
+- `gpuSynthesizer.ts` — batched Gaussian/pseudo-Voigt synthesis, 17×, max
+  deviation 1.1e-5 of the pattern maximum.
+- `gpuStructureFactor.ts` — the nuclear **structure-factor kernel** (|F_N|² over
+  a batch of models × shared reflections; neutron/X-ray, iso/aniso DW), ≤5e-7 vs
+  the CPU f64 truth, 13.6× on 1439 reflections × 24 models. **Wired into the
+  refinement pool** (opt-in `useGpu`, single-phase powder) through a |F|²-injection
+  seam that reuses the exact CPU intensity/profile/background assembly, so only
+  |F|² comes from the GPU — no second forward model. Runs in a Web Worker, so the
+  driver/UI thread stays free (the batched GPU work never touches the main thread).
+- `gpuMagneticStructureFactor.ts` — the magnetic **|F_M|² kernel**: the
+  complex-vector structure factor with the M⊥ perpendicular projection and ⟨j0⟩
+  form factor, 4.5e-7 vs CPU on the Mn₃Ga AFM (175 satellites). Kernel + campaign
+  done; pool-wiring pending (mirrors the nuclear injection seam).
+
+Full precision numbers in [VALIDATION.md](./VALIDATION.md#gpu-acceleration-precision).
 
 **WASM**: deliberately skipped — the windowed CPU kernels plus worker pools
 already cover its niche, and a second implementation of the same physics in
@@ -187,6 +195,8 @@ another language is exactly the maintenance drift this architecture avoids.
 - Scientific functions pure and independently testable.
 - React components handle UI state and presentation only.
 - Long-running calculations run in Web Workers.
-- No WebGPU/WebAssembly until the TS implementation is correct and tested.
+- GPU kernels only as opt-in f32 accelerators *over* a correct, tested f64 CPU
+  path — each validated against it on hardware; never the default or the
+  reference. No WebAssembly (dual-implementation drift).
 - Every phase ends with: passing tests, updated docs, a working local app, and
   no broken intermediate state.

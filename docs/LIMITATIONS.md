@@ -24,11 +24,21 @@ accidental gap — each is tracked as a roadmap item.
 
 ## Known simplifications (by design)
 
-- **Optimizer.** Local Levenberg–Marquardt with a **numerical (finite-difference)
-  Jacobian** for all non-linear parameters; only linear parameters (scale,
-  background, magnetic scale) have exact columns. No analytic crystallographic
-  derivatives yet and no global optimization — a reasonable starting model is
-  assumed, and poor starting points can converge to false minima. (Roadmap F1.)
+- **Optimizer.** Local Levenberg–Marquardt. Linear parameters (scale, background,
+  magnetic scale) get exact columns; non-linear parameters use a **central
+  finite-difference Jacobian by default**, with **opt-in analytic derivatives for
+  occupancy and isotropic B_iso** (validated against FD; other kinds are still FD
+  — roadmap F1.1). No global optimization, so a reasonable starting model is
+  assumed — but auto-background + zero-shift starting values (F1.3) and a staged
+  controller that re-fixes degenerate/harmful parameter additions (F1.4) reduce
+  the false-minimum risk. (Roadmap F1.)
+- **GPU acceleration (optional, approximate).** WebGPU kernels can accelerate the
+  structure-factor sum (nuclear and magnetic) and profile synthesis. They compute
+  in **f32 and are APPROXIMATE — not bit-identical** to the CPU f64 path: validated
+  on hardware to ≤5e-7 relative for structure factors (far below esd scales), and
+  a GPU-accelerated refinement converges to the *same minimum* as the CPU pool.
+  They are **opt-in**; the exact f64 CPU path is the default and the reference.
+  See [VALIDATION.md](./VALIDATION.md#gpu-acceleration-precision).
 - **Space groups.** Represented as the **explicit operation list parsed from the
   CIF** — no built-in 230-group tables, Wyckoff lookup, or automatic
   systematic-absence generation. Symmetry constraints are therefore only as
