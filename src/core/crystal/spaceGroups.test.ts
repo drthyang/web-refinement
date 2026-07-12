@@ -5,9 +5,11 @@ import {
   expandGenerators,
   isKnownSpaceGroup,
   knownSpaceGroups,
+  latticeCenteringTranslations,
 } from "@/core/crystal/spaceGroups";
 import {
   composeOperations,
+  isReflectionAbsent,
   operationKey,
   parseSymmetryOperation,
   siteMultiplicity,
@@ -159,5 +161,49 @@ describe.skipIf(!dataExists(CIF))("golden: F-4̄3m vs GaNb₄Se₈ CIF", () => {
     const built = buildSpaceGroup(216);
     expect(built.operations.length).toBe(parsed.spaceGroup.operations.length);
     expect(keySet(built)).toEqual(keySet(parsed.spaceGroup));
+  });
+});
+
+describe("lattice-centering completion (systematic-absence generation, F2.2)", () => {
+  it("maps each Hermann–Mauguin lattice letter to its centring translations", () => {
+    expect(latticeCenteringTranslations("P 1")).toEqual([]);
+    expect(latticeCenteringTranslations("C 1 2 1")).toEqual([[0.5, 0.5, 0]]);
+    expect(latticeCenteringTranslations("I 21 3")).toEqual([[0.5, 0.5, 0.5]]);
+    expect(latticeCenteringTranslations("F m -3 m")).toEqual([[0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]]);
+    // R centring is setting-dependent → deliberately not added (F2.4).
+    expect(latticeCenteringTranslations("R -3 m")).toEqual([]);
+  });
+
+  it("adds the centring implied by the symbol to a primitive-only operation list", () => {
+    // A CIF that lists only the identity but names a C lattice: the centring copy
+    // must be recovered, or the C absences (h+k odd) would be missed.
+    const completed = completeSpaceGroup({
+      operations: [parseSymmetryOperation("x,y,z")],
+      hermannMauguin: "C 1 2 1",
+    });
+    expect(completed.operations.length).toBe(2); // identity + C-centring
+    // C-centring rule: hkl present iff h+k even.
+    expect(isReflectionAbsent(completed.operations, 1, 0, 0)).toBe(true); // h+k=1 → absent
+    expect(isReflectionAbsent(completed.operations, 2, 1, 3)).toBe(true); // h+k=3 → absent
+    expect(isReflectionAbsent(completed.operations, 1, 1, 0)).toBe(false); // h+k=2 → present
+    expect(isReflectionAbsent(completed.operations, 0, 0, 5)).toBe(false); // h+k=0 → present
+  });
+
+  it("recovers F-centring absences from a primitive-only list (all-even or all-odd)", () => {
+    const f = completeSpaceGroup({
+      operations: [parseSymmetryOperation("x,y,z")],
+      hermannMauguin: "F m -3 m",
+    });
+    expect(f.operations.length).toBe(4); // identity + 3 F-centrings
+    expect(isReflectionAbsent(f.operations, 1, 0, 0)).toBe(true); // mixed parity → absent
+    expect(isReflectionAbsent(f.operations, 2, 1, 0)).toBe(true); // mixed → absent
+    expect(isReflectionAbsent(f.operations, 1, 1, 1)).toBe(false); // all odd → present
+    expect(isReflectionAbsent(f.operations, 2, 2, 0)).toBe(false); // all even → present
+  });
+
+  it("is a no-op on a group whose operation list already contains the centring", () => {
+    const full = buildSpaceGroup("F m -3 m"); // 192 ops, centring already present
+    const again = completeSpaceGroup(full);
+    expect(again.operations.length).toBe(full.operations.length);
   });
 });

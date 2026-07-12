@@ -155,10 +155,17 @@ The null-space constraint machinery is correct but is only ever as good as the
    *letters*** (multiplicity + site symmetry already identify the position; the
    letter needs canonical-coordinate tables), full 230-group coverage, and
    standard settings.
-2. **Systematic-absence generation** ⬜ — derive allowed reflections from the
-   group rather than only from the supplied operation list. (The per-operation
-   absence test already exists in [`crystal/symmetry.ts`](../src/core/crystal/symmetry.ts);
-   this drives it from the built-in group.)
+2. **Systematic-absence generation** 🚧 — derive allowed reflections from the
+   group rather than only from the supplied operation list. `generateReflections`
+   already filters with the per-operation absence test
+   ([`crystal/symmetry.ts`](../src/core/crystal/symmetry.ts)), and
+   `completeSpaceGroup` now closes a partial op-list AND adds the **centring
+   implied by the Hermann–Mauguin lattice letter** (A/B/C/I/F via
+   `latticeCenteringTranslations`) before closing — so the centring absences
+   (F: all-even/all-odd; I: h+k+l even; C: h+k even; …) are correct even when a
+   CIF lists only the primitive general positions. **Remaining:** R-lattice
+   centring (setting-dependent — deferred to F2.4), and glide/screw conditions
+   from the built-in group for symbol-only input.
 3. **Unified constraint-transform layer** 🚧 — document and consolidate the
    existing "emit reduced modes" mechanism as *the* single constraint path
    (`raw = transform(free)`), covering positions, ADPs, occupancy ties/groups,

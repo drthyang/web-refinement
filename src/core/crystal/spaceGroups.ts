@@ -25,6 +25,7 @@
  */
 
 import type { SpaceGroup, SymmetryOperation } from "@/core/crystal/types";
+import type { Vec3 } from "@/core/math/types";
 import { composeOperations, operationKey, parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { wrapFractional } from "@/core/math/vec3";
 
@@ -193,11 +194,48 @@ export function buildSpaceGroup(id: number | string): SpaceGroup {
 }
 
 /**
+ * Fractional centering translations implied by a Hermann–Mauguin LATTICE letter
+ * (the leading symbol character). These are the copies a CIF may leave implicit,
+ * listing only the primitive general positions and relying on the letter for the
+ * centring — in which case the centring systematic absences (F: h,k,l all even or
+ * all odd; I: h+k+l even; C: h+k even; …) would be missed without adding them.
+ *
+ * A/B/C/I/F are unambiguous. R is deliberately EXCLUDED: its centring exists only
+ * in the hexagonal setting, and telling that apart from a primitive rhombohedral
+ * setting needs the setting/origin machinery (roadmap F2.4) — adding hexagonal
+ * centring blindly would be a physics error in the rhombohedral setting.
+ */
+export function latticeCenteringTranslations(hermannMauguin: string): Vec3[] {
+  const letter = (hermannMauguin.trim().match(/[A-Za-z]/)?.[0] ?? "P").toUpperCase();
+  switch (letter) {
+    case "A": return [[0, 0.5, 0.5]];
+    case "B": return [[0.5, 0, 0.5]];
+    case "C": return [[0.5, 0.5, 0]];
+    case "I": return [[0.5, 0.5, 0.5]];
+    case "F": return [[0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]];
+    default: return []; // P, R (setting-dependent), or unknown → no centring added
+  }
+}
+
+/** Format a centring component (0 or ½) as an xyz-string suffix. */
+function half(v: number): string {
+  return Math.abs(v - 0.5) < 1e-9 ? "+1/2" : "";
+}
+
+/** Centering translations as identity-rotation operations (for group closure). */
+function centeringOperations(hermannMauguin: string): SymmetryOperation[] {
+  return latticeCenteringTranslations(hermannMauguin).map((t) =>
+    parseSymmetryOperation(`x${half(t[0])},y${half(t[1])},z${half(t[2])}`),
+  );
+}
+
+/**
  * Ensure a space group has a complete operation list.
  *
- * - If it already carries operations, close them (a CIF may list only a
- *   generating subset). Returns the input unchanged when already complete, so
- *   the original operation objects/ordering are preserved.
+ * - If it already carries operations, close them together with the centring
+ *   implied by the Hermann–Mauguin lattice letter (a CIF may list only the
+ *   primitive general positions, or only a generating subset). Returns the input
+ *   unchanged when already complete, so the original objects/ordering are kept.
  * - If it has no operations but a known number/symbol, build from the table.
  * - Otherwise return it untouched.
  *
@@ -206,7 +244,8 @@ export function buildSpaceGroup(id: number | string): SpaceGroup {
  */
 export function completeSpaceGroup(sg: SpaceGroup): SpaceGroup {
   if (sg.operations.length > 0) {
-    const closed = expandGenerators(sg.operations);
+    const centering = sg.hermannMauguin ? centeringOperations(sg.hermannMauguin) : [];
+    const closed = expandGenerators([...sg.operations, ...centering]);
     return closed.length === sg.operations.length ? sg : { ...sg, operations: closed };
   }
   const id = sg.number ?? sg.hermannMauguin;
