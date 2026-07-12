@@ -71,10 +71,10 @@ function canonicalPacked(indices: Set<number>): { h: number; k: number; l: numbe
 const reflCache = new Map<string, Reflection[]>();
 const REFL_CACHE_MAX = 24;
 
-function reflectionCacheKey(cell: UnitCell, sg: SpaceGroup, dMin: number, dMax: number): string {
+function reflectionCacheKey(cell: UnitCell, sg: SpaceGroup, dMin: number, dMax: number, absences: boolean): string {
   // Full-precision cell values so cell-derivative Jacobian columns don't collide
   // with the base cell; other (non-cell) parameters reuse the same key → hits.
-  return `${cell.a},${cell.b},${cell.c},${cell.alpha},${cell.beta},${cell.gamma}|${dMin},${dMax}|${sg.operations.length}|${sg.hermannMauguin ?? ""}`;
+  return `${cell.a},${cell.b},${cell.c},${cell.alpha},${cell.beta},${cell.gamma}|${dMin},${dMax}|${sg.operations.length}|${sg.hermannMauguin ?? ""}|${absences ? "" : "noabs"}`;
 }
 
 /**
@@ -84,14 +84,24 @@ function reflectionCacheKey(cell: UnitCell, sg: SpaceGroup, dMin: number, dMax: 
  * The reciprocal tensor is computed once (not a matrix inversion per hkl), and
  * results are memoized on the cell — reflections only change when the cell (or
  * range) changes, so refinements of scale/width/ADP/positions reuse the list.
+ *
+ * `options.absences: false` keeps systematically-absent families in the list
+ * (still grouped, with their Laue multiplicity). The NUCLEAR extinction rules
+ * come from the spatial ops' translations, but they do not bind the MAGNETIC
+ * structure factor: in a gray anti-translation lattice (e.g. BNS P_c 6/mcc,
+ * FeCoSn 1.7 K) the (0,0,½)′ op looks like a nuclear centring, yet every
+ * magnetic satellite lives exactly at those l-odd "absent" positions —
+ * filtering them silently deletes the entire magnetic signal.
  */
 export function generateReflections(
   cell: UnitCell,
   sg: SpaceGroup,
   dMin: number,
   dMax: number,
+  options: { readonly absences?: boolean } = {},
 ): Reflection[] {
-  const cacheKey = reflectionCacheKey(cell, sg, dMin, dMax);
+  const absences = options.absences ?? true;
+  const cacheKey = reflectionCacheKey(cell, sg, dMin, dMax, absences);
   const cached = reflCache.get(cacheKey);
   if (cached) return cached;
 
@@ -123,7 +133,7 @@ export function generateReflections(
         const family = equivalentPacked(sg, h, k, l);
         for (const p of family) seen.add(p);
         const rep = canonicalPacked(family);
-        if (isReflectionAbsent(sg.operations, rep.h, rep.k, rep.l)) continue;
+        if (absences && isReflectionAbsent(sg.operations, rep.h, rep.k, rep.l)) continue;
 
         const repInvd2 = A.a11 * rep.h * rep.h + A.a22 * rep.k * rep.k + A.a33 * rep.l * rep.l + A.a12 * rep.h * rep.k + A.a13 * rep.h * rep.l + A.a23 * rep.k * rep.l;
         const d = 1 / Math.sqrt(repInvd2);

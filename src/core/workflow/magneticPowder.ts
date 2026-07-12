@@ -74,8 +74,13 @@ function buildCombinedPeaks(
   // position (the ±k satellites coincide, so emit once). |F_M|² evaluated at the
   // non-integer satellite indices carries the k-phase automatically. Parent
   // nuclear multiplicity approximates the exact star-of-k satellite multiplicity.
+  // Nuclear systematic absences do NOT apply to the magnetic structure factor
+  // (`absences: false`): AFM structures put their satellites exactly at
+  // nuclear-extinct positions — a gray anti-translation lattice (BNS P_c…)
+  // even makes the (0,0,½)′ op look like a centring, and filtering would
+  // delete every magnetic peak. |F_M|² itself decides what is absent.
   const { dMin, dMax } = reflectionDRange(pattern, applied);
-  const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
+  const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax, { absences: false });
   const magIntensities: { d: number; intensity: number }[] = [];
   for (const r of reflections) {
     const sats: [number, number, number][] = isK0
