@@ -112,6 +112,30 @@ describe("magneticStructureToMcif — round-trips through parseMagneticCif", () 
     const ops = back.structure.spaceGroup.operations;
     expect(ops.some((o) => o.timeReversal === -1)).toBe(true);
   });
+
+  // Regression: a magnetic model built on a structure loaded from a *nuclear*
+  // CIF (spatial ops carry no BNS time-reversal flag) must still export the full
+  // symmetry — the exporter used to filter on `timeReversal !== undefined`, which
+  // dropped every unflagged op and left external tools reading the mCIF as P1.
+  it("exports full symmetry when the structure ops carry no time-reversal flag", () => {
+    const nuclear: StructureModel = {
+      ...structure,
+      spaceGroup: {
+        ...structure.spaceGroup,
+        // No timeReversal on any operation — as produced by parseCif.
+        operations: structure.spaceGroup.operations.map(({ timeReversal: _t, ...o }) => o),
+      },
+    };
+    const out = magneticStructureToMcif(nuclear, magnetic, {});
+    expect(out).toContain("_space_group_symop_magn_operation.xyz");
+    const rows = out.match(/"[^"]*,[+-]1"/g) ?? [];
+    expect(rows).toHaveLength(nuclear.spaceGroup.operations.length);
+    // Unflagged spatial ops export as unitary (+1), and round-trip.
+    expect(out).toContain('"x,y,z,+1"');
+    expect(parseMagneticCif(out).structure.spaceGroup.operations).toHaveLength(
+      nuclear.spaceGroup.operations.length,
+    );
+  });
 });
 
 describe("formatWithEsd", () => {

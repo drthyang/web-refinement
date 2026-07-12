@@ -288,7 +288,13 @@ function momentLoop(structure: StructureModel, magnetic: MagneticModel): string 
 
 /** Magnetic (BNS) symmetry-operation loop, when the space group carries them. */
 function magneticSymopBlock(structure: StructureModel, label: string | undefined): string {
-  const ops = structure.spaceGroup.operations.filter((o) => o.timeReversal !== undefined);
+  // The magnetic operation set is the full spatial operation list — a nuclear
+  // op with no explicit BNS flag is a unitary (+1) magnetic op, not a non-op.
+  // Filtering on `timeReversal !== undefined` used to drop every unflagged op,
+  // so a magnetic model built on a nuclear-CIF structure (whose ops carry no
+  // flag) exported an empty loop that external tools read as P1. Genuine −1
+  // operations keep their sign; everything else defaults to +1 below.
+  const ops = structure.spaceGroup.operations;
   const head: string[] = [];
   if (label) head.push(`_space_group_magn.name_bns  "${label}"`);
   if (structure.spaceGroup.hermannMauguin && !label) head.push(`_parent_space_group.name_H-M_alt  "${structure.spaceGroup.hermannMauguin}"`);
