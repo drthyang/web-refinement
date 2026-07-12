@@ -27,9 +27,8 @@ import type { RefinementParameter, RefinementResult, ParameterBinding } from "@/
 import type { ProjectFile } from "@/core/project/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
-import { magneticPowderComponents, buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
+import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
-import { refine } from "@/core/refinement/engine";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
 import { extractSizeStrain } from "@/core/diffraction/microstructure";
@@ -488,16 +487,17 @@ export function PowderWorkbench({
     setBusy(true);
     try {
       // Magnetic-aware branch: when a magnetic model + moment parameters are
-      // present, refine nuclear + moments together (shared scale) on the main
-      // thread. (A Web Worker path is a future optimization; the solve is small.)
+      // present, refine nuclear + moments together (shared scale) with the
+      // Jacobian parallelized over the evaluator-worker pool (falls back to an
+      // in-thread solve when workers are unavailable).
       if (session.magnetic && powderParams.some((p) => isMomentParameterKind(p.kind))) {
         await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
         const magParams = guided ? guidedPowderParams(powderParams) : powderParams;
-        const problem = buildMagneticPowderProblem(structure, session.magnetic, pattern, magParams, pBindings, {
+        const result = await client.refineMagneticPowderParallel({
+          structure, magnetic: session.magnetic, pattern, parameters: [...magParams], bindings: [...pBindings],
           shape: session.powderProfile.shape,
           ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
-        });
-        const result = refine(problem, { maxIterations: guided ? 15 : 20 });
+        }, { maxIterations: guided ? 15 : 20 });
         const refinedMag = applyMagneticMoments(session.magnetic, pBindings, result.parameters);
         setSession((s) => ({
           ...s,
@@ -508,7 +508,9 @@ export function PowderWorkbench({
         setMessage(`Nuclear + magnetic refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`);
         return;
       }
-      const result = await client.refinePowder({
+      // Parallel-Jacobian path for the flat single-phase case; the client
+      // falls back to the single-worker path for staged/multi-phase requests.
+      const result = await client.refinePowderParallel({
         structure, pattern, parameters: guided ? guidedPowderParams(powderParams) : powderParams, bindings: pBindings, ...profileReq(),
         ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
         ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),

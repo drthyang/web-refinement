@@ -135,9 +135,14 @@ in the domain model. Full design in [REFINEMENT_ENGINE.md](./REFINEMENT_ENGINE.m
 ## Worker / compute layer
 
 Structure-factor and profile calculation, and the refinement loop, run in a Web
-Worker to keep the UI responsive. The protocol is a typed, versioned
-request/response message set; data types cross the boundary as plain JSON
-(structured clone). The UI layer talks to workers through a thin typed client,
+Worker to keep the UI responsive. The Levenberg–Marquardt core is a sans-io
+generator (`refineCore`): the synchronous driver evaluates serially, and the
+parallel driver fans the Jacobian columns out over a pool of EVALUATOR workers,
+each holding a bit-identical problem replica built by the same construction
+path — `engineParallel.test.ts` pins the two drivers to identical trajectories.
+The protocol is a typed, versioned request/response message set; data types
+cross the boundary as plain JSON (structured clone). The UI layer talks to
+workers through a thin typed client,
 never by hand-rolling `postMessage` calls in components.
 
 ## Import / export layer

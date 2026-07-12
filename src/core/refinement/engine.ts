@@ -147,47 +147,97 @@ function weightedResiduals(
  *
  * Non-linear parameters use a central difference as before.
  */
-function computeJacobian(
+interface JacobianColumnPlan {
+  /** Column index in the Jacobian. */
+  readonly j: number;
+  readonly linear: boolean;
+  readonly h: number;
+  /** Index of the forward evaluation in the batch. */
+  readonly forward: number;
+  /** Index of the backward evaluation (central difference), −1 for linear. */
+  readonly backward: number;
+}
+
+/**
+ * The evaluation batch for one Jacobian: every column's perturbed value-set,
+ * built exactly as the sequential loop used to (linear: one forward point with
+ * h = max(1, |p|); non-linear: central difference with h = max(1e-6, |p|·1e-5)).
+ * The sets are independent pure evaluations, so a driver may run them serially
+ * or in parallel — the assembled Jacobian is identical either way.
+ */
+function jacobianPlan(
   problem: RefinementProblem,
   freeParams: readonly RefinementParameter[],
-  freeValues: number[],
-  baseline: Float64Array,
-): Matrix {
-  const m = problem.observations.length;
-  const n = freeValues.length;
+  freeValues: readonly number[],
+): { sets: Record<string, number>[]; plan: JacobianColumnPlan[] } {
   const freeIds = freeParams.map((p) => p.id);
-  const jac: Matrix = Array.from({ length: m }, () => new Array<number>(n).fill(0));
-  const sqrtW = new Float64Array(m);
-  for (let i = 0; i < m; i++) sqrtW[i] = Math.sqrt(problem.weights[i]!);
-
-  for (let j = 0; j < n; j++) {
+  const sets: Record<string, number>[] = [];
+  const plan: JacobianColumnPlan[] = [];
+  for (let j = 0; j < freeValues.length; j++) {
     const base = freeValues[j]!;
-
     if (isLinear(freeParams[j]!)) {
       const h = Math.max(1, Math.abs(base));
       const forward = [...freeValues];
       forward[j] = base + h;
-      const yF = problem.calculate(valuesRecord(problem.parameters, freeIds, forward));
+      plan.push({ j, linear: true, h, forward: sets.length, backward: -1 });
+      sets.push(valuesRecord(problem.parameters, freeIds, forward));
+    } else {
+      const h = Math.max(1e-6, Math.abs(base) * 1e-5);
+      const forward = [...freeValues];
+      forward[j] = base + h;
+      const backward = [...freeValues];
+      backward[j] = base - h;
+      plan.push({ j, linear: false, h, forward: sets.length, backward: sets.length + 1 });
+      sets.push(valuesRecord(problem.parameters, freeIds, forward));
+      sets.push(valuesRecord(problem.parameters, freeIds, backward));
+    }
+  }
+  return { sets, plan };
+}
+
+/**
+ * Jacobian J_ij = ∂r_i/∂p_j of the weighted residual r = √w·(obs − calc); the
+ * −√w factor is folded in so J carries the residual's sign.
+ *
+ * Linear parameters (scale, background — the model is affine in them) get an
+ * exact column: since `calc(base + h) = calc(base) + h·∂calc/∂p` with no
+ * higher-order terms, `(calc(base + h) − baseline)/h` is the true derivative for
+ * *any* step `h`, with zero truncation error. It reuses the already-computed
+ * baseline y_calc, costing one `calculate()` call instead of the two a central
+ * difference needs. The step is sized to the parameter's own magnitude (floored
+ * at 1) so the perturbed contribution stays well clear of the baseline — no
+ * catastrophic cancellation whether the parameter sits at ~1e-11 (scale) or
+ * ~1e4 (a background coefficient).
+ *
+ * Non-linear parameters use a central difference as before.
+ */
+function assembleJacobian(
+  problem: RefinementProblem,
+  plan: readonly JacobianColumnPlan[],
+  n: number,
+  baseline: Float64Array,
+  results: readonly Float64Array[],
+): Matrix {
+  const m = problem.observations.length;
+  const jac: Matrix = Array.from({ length: m }, () => new Array<number>(n).fill(0));
+  const sqrtW = new Float64Array(m);
+  for (let i = 0; i < m; i++) sqrtW[i] = Math.sqrt(problem.weights[i]!);
+
+  for (const col of plan) {
+    if (col.linear) {
+      const yF = results[col.forward]!;
       for (let i = 0; i < m; i++) {
         // r = √w·(obs − calc) ⇒ ∂r/∂p = −√w·∂calc/∂p.
-        const dCalc = (yF[i]! - baseline[i]!) / h;
-        jac[i]![j] = -sqrtW[i]! * dCalc;
+        const dCalc = (yF[i]! - baseline[i]!) / col.h;
+        jac[i]![col.j] = -sqrtW[i]! * dCalc;
       }
-      continue;
-    }
-
-    const h = Math.max(1e-6, Math.abs(base) * 1e-5);
-    const forward = [...freeValues];
-    forward[j] = base + h;
-    const yF = problem.calculate(valuesRecord(problem.parameters, freeIds, forward));
-
-    const backward = [...freeValues];
-    backward[j] = base - h;
-    const yB = problem.calculate(valuesRecord(problem.parameters, freeIds, backward));
-
-    for (let i = 0; i < m; i++) {
-      const dCalc = (yF[i]! - yB[i]!) / (2 * h);
-      jac[i]![j] = -sqrtW[i]! * dCalc;
+    } else {
+      const yF = results[col.forward]!;
+      const yB = results[col.backward]!;
+      for (let i = 0; i < m; i++) {
+        const dCalc = (yF[i]! - yB[i]!) / (2 * col.h);
+        jac[i]![col.j] = -sqrtW[i]! * dCalc;
+      }
     }
   }
   return jac;
@@ -258,10 +308,18 @@ function highCorrelations(
   return pairs.sort((a, b) => Math.abs(b.coefficient) - Math.abs(a.coefficient)).slice(0, maxPairs);
 }
 
-export function refine(
+/**
+ * The Levenberg–Marquardt core as a sans-io generator: it yields batches of
+ * value-sets to evaluate and receives their `calculate` results, so the SAME
+ * algorithm runs under the synchronous driver (`refine`) or the parallel one
+ * (`refineParallel`) — a driver only decides WHERE evaluations happen, never
+ * what happens next. Evaluations are pure, so any faithful driver produces a
+ * bit-identical trajectory.
+ */
+function* refineCore(
   problem: RefinementProblem,
   options: Partial<RefinementOptions> = {},
-): RefinementResult {
+): Generator<Record<string, number>[], RefinementResult, Float64Array[]> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const freeParams = problem.parameters.filter((p) => !p.fixed);
   const freeIds = freeParams.map((p) => p.id);
@@ -277,13 +335,13 @@ export function refine(
   // opt-in shift-based convergence test.
   let lastMaxRelShift = Infinity;
 
-  const evalChi = (vals: number[]): { yCalc: Float64Array; chi: number } => {
-    const yCalc = problem.calculate(valuesRecord(problem.parameters, freeIds, vals));
-    return { yCalc, chi: chiSquared(problem.observations, yCalc, problem.weights) };
-  };
+  const withChi = (yCalc: Float64Array): { yCalc: Float64Array; chi: number } => ({
+    yCalc,
+    chi: chiSquared(problem.observations, yCalc, problem.weights),
+  });
 
   if (n === 0) {
-    const { yCalc, chi } = evalChi(freeValues);
+    const { yCalc, chi } = withChi((yield [valuesRecord(problem.parameters, freeIds, freeValues)])[0]!);
     const agreement = computeAgreementFactors(problem.observations, yCalc, problem.weights, 0);
     return {
       status: "converged",
@@ -295,7 +353,7 @@ export function refine(
     };
   }
 
-  let current = evalChi(freeValues);
+  let current = withChi((yield [valuesRecord(problem.parameters, freeIds, freeValues)])[0]!);
   let status: RefinementStatus = "maxIterations";
   const solveDropped = new Set<string>();
   let maxSolveZeroCount = 0;
@@ -303,7 +361,8 @@ export function refine(
 
   for (let iter = 0; iter < opts.maxIterations; iter++) {
     const r = weightedResiduals(problem.observations, current.yCalc, problem.weights);
-    const jac = computeJacobian(problem, freeParams, freeValues, current.yCalc);
+    const { sets, plan } = jacobianPlan(problem, freeParams, freeValues);
+    const jac = assembleJacobian(problem, plan, n, current.yCalc, yield sets);
     const { jtj, jtr } = normalEquations(jac, r);
 
     // Gradient norm ‖Jᵀr‖: near zero means we sit at a (local) minimum.
@@ -348,7 +407,7 @@ export function refine(
       }
 
       const trial = freeValues.map((v, j) => clamp(v + delta[j]!, freeParams[j]!));
-      const trialEval = evalChi(trial);
+      const trialEval = withChi((yield [valuesRecord(problem.parameters, freeIds, trial)])[0]!);
 
       // Reject non-finite objectives (overflow/NaN) as well as uphill steps.
       if (Number.isFinite(trialEval.chi) && trialEval.chi < current.chi) {
@@ -416,7 +475,8 @@ export function refine(
   const dof = Math.max(nUsed - n, 1);
   const reducedChi = current.chi / dof;
   const finalResiduals = weightedResiduals(problem.observations, current.yCalc, problem.weights);
-  const finalJacobian = computeJacobian(problem, freeParams, freeValues, current.yCalc);
+  const { sets: finalSets, plan: finalPlan } = jacobianPlan(problem, freeParams, freeValues);
+  const finalJacobian = assembleJacobian(problem, finalPlan, n, current.yCalc, yield finalSets);
   const { jtj: finalJtj } = normalEquations(finalJacobian, finalResiduals);
   const { covarianceBase, diagnostics: covDiagnostics } = normalizedPseudoInverse(
     finalJtj,
@@ -465,4 +525,51 @@ export function refine(
       diagnostics.svdZeroCount > 0 ? `; SVD dropped ${diagnostics.svdZeroCount} near-null direction(s)` : ""
     }`,
   };
+}
+
+/** Synchronous driver: every yielded batch is evaluated serially in-process. */
+export function refine(
+  problem: RefinementProblem,
+  options: Partial<RefinementOptions> = {},
+): RefinementResult {
+  const gen = refineCore(problem, options);
+  let step = gen.next();
+  while (!step.done) {
+    step = gen.next(step.value.map((values) => problem.calculate(values)));
+  }
+  return step.value;
+}
+
+/**
+ * Evaluates batches of value-sets, e.g. on a pool of Web Workers each holding a
+ * replica of the problem. Results must be ordered like the input sets and be
+ * exactly what `problem.calculate` would return — replicas are pure functions
+ * of the same problem definition, so this holds by construction.
+ */
+export interface BatchEvaluator {
+  evaluate(sets: readonly Record<string, number>[]): Promise<Float64Array[]>;
+}
+
+/**
+ * Parallel driver: multi-evaluation batches (the Jacobian columns — the bulk
+ * of every iteration's cost) go to the evaluator; single evaluations
+ * (baseline, trial steps — inherently sequential) run in-process where the
+ * problem's geometry cache stays warm. Identical trajectory to `refine` for
+ * any faithful evaluator, enforced by engineParallel.test.ts.
+ */
+export async function refineParallel(
+  problem: RefinementProblem,
+  options: Partial<RefinementOptions>,
+  evaluator: BatchEvaluator,
+): Promise<RefinementResult> {
+  const gen = refineCore(problem, options);
+  let step = gen.next();
+  while (!step.done) {
+    const sets = step.value;
+    const results = sets.length === 1
+      ? [problem.calculate(sets[0]!)]
+      : await evaluator.evaluate(sets);
+    step = gen.next(results);
+  }
+  return step.value;
 }

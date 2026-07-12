@@ -4,13 +4,36 @@
  * (guided) sequence, rebuilding the profile from the request fields.
  */
 
-import type { RefinePowderRequest } from "@/workers/protocol";
+import type { EvaluatorSpec, RefinePowderRequest } from "@/workers/protocol";
 import type { AgreementFactors, RefinementOptions, RefinementResult } from "@/core/refinement/types";
-import { refine } from "@/core/refinement/engine";
+import { refine, type RefinementProblem } from "@/core/refinement/engine";
 import { buildPowderProblem, type PowderProfile } from "@/core/workflow/powder";
+import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { buildMultiPhasePowderProblem } from "@/core/workflow/multiPhase";
 import { refineStaged } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
+
+/**
+ * Build the refinement problem an evaluator spec describes. Used by BOTH the
+ * parallel driver (its local problem) and every pool worker (its replica), so
+ * the two cannot diverge — the parallel-refinement exactness rests on this
+ * single construction path.
+ */
+export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
+  if (spec.kind === "magneticPowder") {
+    return buildMagneticPowderProblem(spec.structure, spec.magnetic, spec.pattern, spec.parameters, spec.bindings, {
+      shape: spec.shape,
+      ...(spec.eta !== undefined ? { eta: spec.eta } : {}),
+    });
+  }
+  const profile: PowderProfile = {
+    shape: spec.shape,
+    ...(spec.eta !== undefined ? { eta: spec.eta } : {}),
+    ...(spec.lorentz !== undefined ? { lorentz: spec.lorentz } : {}),
+    ...(spec.backgroundType !== undefined ? { backgroundType: spec.backgroundType } : {}),
+  };
+  return buildPowderProblem(spec.structure, spec.pattern, spec.parameters, spec.bindings, profile, spec.restraints ?? [], spec.fitRange);
+}
 
 /** Per-cycle progress: the calculated pattern (data points only) + weighted R. */
 export type PowderProgress = (yCalc: number[], rWeighted: number) => void;

@@ -64,15 +64,74 @@ export interface RefineMagneticRequest {
   readonly options?: Partial<RefinementOptions>;
 }
 
+/**
+ * Problem definition for an EVALUATOR worker — a pool member that holds a
+ * replica of the refinement problem and evaluates value-sets for the parallel
+ * Jacobian. The replica is a pure function of this spec, so its outputs are
+ * bit-identical to the driver's own problem.
+ */
+export type EvaluatorSpec =
+  | {
+      readonly kind: "powder";
+      readonly structure: StructureModel;
+      readonly pattern: PowderPattern;
+      readonly parameters: RefinementParameter[];
+      readonly bindings: ParameterBinding[];
+      readonly restraints?: readonly LinearRestraint[];
+      readonly shape: PeakShape;
+      readonly eta?: number;
+      readonly lorentz?: boolean;
+      readonly backgroundType?: BackgroundType;
+      readonly fitRange?: { readonly min?: number; readonly max?: number };
+    }
+  | {
+      readonly kind: "magneticPowder";
+      readonly structure: StructureModel;
+      readonly magnetic: MagneticModel;
+      readonly pattern: PowderPattern;
+      readonly parameters: RefinementParameter[];
+      readonly bindings: ParameterBinding[];
+      readonly shape: PeakShape;
+      readonly eta?: number;
+    };
+
+export interface InitEvaluatorRequest {
+  readonly type: "initEvaluator";
+  readonly requestId: number;
+  readonly spec: EvaluatorSpec;
+}
+
+export interface EvaluateRequest {
+  readonly type: "evaluate";
+  readonly requestId: number;
+  readonly sets: Record<string, number>[];
+}
+
 export type ComputeRequest =
   | RefinePowderRequest
   | RefineSingleCrystalRequest
-  | RefineMagneticRequest;
+  | RefineMagneticRequest
+  | InitEvaluatorRequest
+  | EvaluateRequest;
 
 export interface ComputeSuccess {
   readonly requestId: number;
   readonly ok: true;
   readonly result: RefinementResult;
+}
+
+/** Acknowledgement that an evaluator worker built its problem replica. */
+export interface EvaluatorReady {
+  readonly requestId: number;
+  readonly ok: true;
+  readonly ready: true;
+}
+
+/** Evaluation results, ordered like the request's `sets`. */
+export interface EvaluateSuccess {
+  readonly requestId: number;
+  readonly ok: true;
+  readonly results: Float64Array[];
 }
 
 export interface ComputeFailure {
@@ -81,7 +140,7 @@ export interface ComputeFailure {
   readonly error: string;
 }
 
-export type ComputeResponse = ComputeSuccess | ComputeFailure;
+export type ComputeResponse = ComputeSuccess | EvaluatorReady | EvaluateSuccess | ComputeFailure;
 
 /** Per-cycle progress emitted during a powder refinement (before the final
  *  response), so the UI can animate the calculated curve as it converges. */
