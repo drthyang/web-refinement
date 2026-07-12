@@ -15,6 +15,7 @@
     "typecheck": "tsc -b --noEmit",
     "screenshots": "node scripts/device-screenshots.mjs",
     "build:mcp": "node scripts/build-mcp.mjs",
+    "gen:tooldoc": "node scripts/gen-tooldoc.mjs",
     "mcp": "node scripts/build-mcp.mjs && node dist/mcp-server.mjs"
   },
   "dependencies": {

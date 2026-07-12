@@ -121,22 +121,38 @@ Register it with a client, e.g. Claude Desktop / Claude Code:
 }
 ```
 
-**Tools shipped:** `parse_structure`, `parse_powder_data`, `parse_instrument`,
-`build_refinement`, `refine_powder`, `assess_refinement`, `suggest_next_steps`,
-`interpret_structure`, plus the **analysis primitives** `evaluate_pattern`
-(obs/calc + wR at the current values — the cheap what-if, with separate
-nuclear/magnetic components when a magnetic model is passed),
-`simulate_pattern` (structure-only pattern on a CW/TOF instrument),
-`reflection_list` (hkl/d/multiplicity, `absences:false` keeps the
-nuclear-extinct families where AFM satellites live), and `bond_geometry`
-(nearest-neighbour distance sanity). `assess_refinement` /
-`suggest_next_steps` / `interpret_structure` are the judgement layer — the
-"figure out what matters and guide the next step" surface — and live as pure,
-tested core in [`src/core/diagnostics/`](../src/core/diagnostics)
-(`assessment.ts`, `interpret.ts`), so the same functions can back a future
-in-app chat panel. The whole expert loop runs end to end on the real GaNb4Se8
-dataset, and the primitives are covered data-free by a simulate→evaluate
-self-consistency loop (see `src/mcp/tools.test.ts`).
+**Tools shipped** — this table is generated from the single source of truth,
+[`src/mcp/registry.ts`](../src/mcp/registry.ts), by `npm run gen:tooldoc`;
+`registry.test.ts` fails if it drifts. Every tool is one capability, a pure
+JSON → JSON wrapper over tested core — a handler never calls another handler,
+and multi-step procedures belong to the skill layer.
+
+<!-- TOOLS:BEGIN (generated — edit src/mcp/registry.ts, then npm run gen:tooldoc) -->
+| Tool | Title | Description |
+|---|---|---|
+| `parse_structure` | Parse structure (CIF/mCIF) | Parse CIF/mCIF text into a StructureModel (cell, sites, space group) and any magnetic model. The entry point: feed its `structure` to build_refinement / interpret_structure. |
+| `parse_powder_data` | Parse powder pattern | Auto-detect and parse powder data (xye/xy/dat/GSAS/FullProf/ILL). Returns the pattern, a summary (points, unit, range, radiation), and how the format was detected (source + confidence). |
+| `parse_instrument` | Parse instrument file | Parse an instrument-parameter file (GSAS-II .instprm, classic GSAS .prm, FullProf .irf) into a CW or TOF calibration. Pass the result to build_refinement/refine_powder so the wavelength and profile are right. |
+| `build_refinement` | Build refinement parameter set | Build the SYMMETRY-ALLOWED parameter set, bindings, and profile for a structure + pattern. Only symmetry-allowed parameters are created, so an agent cannot free a forbidden one. Feed `parameters`/`bindings`/`profile` to refine_powder. |
+| `refine_powder` | Refine (constrained least squares) | Run the deterministic Levenberg–Marquardt refinement of the FREED parameters (fix a parameter by setting its `fixed:true`). Returns refined values, esds, agreement (wR/GoF), the SVD/correlation/at-bound diagnostics, the observation count, and the residual — everything assess_refinement needs. The agent decides what to free; it never sets values. |
+| `assess_refinement` | Assess refinement (expert judgment) | The judgment tool. Turn a refinement result into a structured expert read: a trust VERDICT (Toby GoF bands) plus ranked FINDINGS — dangerous correlations (with the physical reason), at-bound/unphysical parameters, ill-conditioning, over/under-parameterization, and UNEXPLAINED RESIDUAL PEAKS (the missing-phase / magnetic-order signal). Pass the refine_powder outputs straight in. |
+| `suggest_next_steps` | Suggest next steps | The decision tool. Given an assessment, return ranked next ACTIONS (sequencing the constrained refinement — never inventing values): fix an unphysical value, hold an at-bound parameter, break a correlation, hunt an impurity/magnetic phase, or validate a good fit before extending it. |
+| `interpret_structure` | Interpret structure (materials science) | The materials tool. Read a refined structure for engineering/discovery signals: crystallite size & microstrain (microstructure), partial occupancy (off-stoichiometry / vacancies / doping), large displacement parameters (disorder), magnetic order, and bond-length sanity — each paired with its materials meaning. |
+| `evaluate_pattern` | Evaluate pattern (no refinement) | Compute the calculated pattern and agreement (wR/GoF) at the CURRENT parameter values — no refinement. The cheap what-if tool: tweak a value, evaluate, compare. Pass a magnetic model to get the nuclear and magnetic components separately (what do the moments alone contribute?). |
+| `simulate_pattern` | Simulate pattern (structure only) | Simulate the powder pattern of a structure on an instrument before any data exists — planning, phase identification by eye, generating a reference. Grid defaults: CW 5–120° 2θ; TOF the d = 0.6–6 Å band of the calibration. Pass a magnetic model to include (and separate out) the magnetic contribution. |
+| `reflection_list` | Reflection list (hkl, d, multiplicity) | Unique hkl families with d-spacing and multiplicity for a structure, optionally with the instrument-frame position (2θ or TOF µs). Set absences:false to keep nuclear-extinct families — that is where AFM magnetic satellites live, and how you match an unexplained peak to a candidate hkl. |
+| `bond_geometry` | Bond lengths (sanity check) | Nearest-neighbour bond lengths (Å) up to a cutoff from the symmetry-expanded structure, sorted shortest first. The physical-plausibility check after refining positions: an impossibly short contact means the refinement went somewhere unphysical. |
+<!-- TOOLS:END -->
+
+`assess_refinement` / `suggest_next_steps` / `interpret_structure` are the
+judgement layer — the "figure out what matters and guide the next step"
+surface — and live as pure, tested core in
+[`src/core/diagnostics/`](../src/core/diagnostics) (`assessment.ts`,
+`interpret.ts`), so the same functions can back a future in-app chat panel.
+The whole expert loop runs end to end on the real GaNb4Se8 dataset, and the
+analysis primitives are covered data-free by a simulate→evaluate
+self-consistency loop (see `src/mcp/tools.test.ts`). Every tool's output
+shape is pinned by a contract test in `src/mcp/registry.test.ts`.
 
 ## Status
 
