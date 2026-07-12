@@ -223,6 +223,17 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     handler: tools.build_magnetic_model,
   },
   {
+    name: "rank_next_parameters",
+    title: "Rank next parameters (sensitivity)",
+    description: "The next-step diagnostic: rank the currently-FIXED parameter groups by the χ² improvement freeing them is expected to buy (Gauss–Newton estimate from probed Jacobian columns at the current values). Read `predictedWr` vs `wrNow` for absolute progress — on a converged model every group promises nothing. A LOCAL probe: align the pattern first; badly displaced peaks under-credit the cell/zero groups.",
+    inputSchema: {
+      structure: anyObj, pattern: anyObj,
+      parameters: anyArr, bindings: anyArr, profile: anyObj,
+      magnetic: anyObj.nullable().optional(),
+    },
+    handler: tools.rank_next_parameters,
+  },
+  {
     name: "refine_magnetic_powder",
     title: "Refine nuclear + magnetic (staged)",
     description: "Co-refine nuclear + magnetic against a powder pattern. Staged by default: scale + background converge with moments and profile held, then everything requested is freed — a flat co-refinement from a poor moment start can collapse the scale against exploding moments. Combine the nuclear parameters/bindings from build_refinement with the moment set from build_magnetic_model. Returns the result, the refined magnetic model, and separated nuclear/magnetic component curves.",

@@ -20,6 +20,7 @@ import {
   allowed_moments,
   build_magnetic_model,
   refine_magnetic_powder,
+  rank_next_parameters,
 } from "@/mcp/tools";
 import { exampleStructure } from "@/examples/mn3ga";
 import { exampleMagnetic, magneticParameters, magneticBindings } from "@/examples/mn3gaMagnetic";
@@ -131,6 +132,25 @@ describe("MCP analysis primitives (no data files needed)", () => {
     // Sorted ascending, and no physically absurd contact in this real structure.
     for (let i = 1; i < bonds.length; i++) expect(bonds[i]!.distance).toBeGreaterThanOrEqual(bonds[i - 1]!.distance);
     expect(shortest!.distance).toBeGreaterThan(1.5);
+  });
+
+  it("rank_next_parameters points at the group carrying the model error", () => {
+    const grid = Array.from({ length: 800 }, (_, i) => 10 + (i * 80) / 799);
+    const inst = { kind: "constantWavelength" as const, wavelength: 1.54, radiationKind: "neutron" as const, u: 60, v: -12, w: 230, x: 8, y: 2 };
+    let pattern = { id: "p", name: "s", xUnit: "twoTheta" as const, radiation: { kind: "neutron" as const, wavelength: 1.54 }, points: grid.map((x) => ({ x, yObs: 0 })) };
+    const probe = build_refinement({ structure, pattern, instrument: inst, backgroundTerms: 3 });
+    const sim = evaluate_pattern({ structure, pattern, parameters: probe.parameters.map((p) => (p.kind === "scale" ? { ...p, value: 4 } : p)), bindings: probe.bindings, profile: probe.profile });
+    pattern = { ...pattern, points: grid.map((x, i) => ({ x, yObs: (sim.curves.yCalc[i] ?? 0) + 15 })) };
+    const built = build_refinement({ structure, pattern, instrument: inst, backgroundTerms: 3 });
+    const params = built.parameters.map((p) => ({
+      ...p,
+      fixed: !(p.kind === "scale" || p.kind === "background"),
+      value: p.kind === "bIso" ? p.value + 2.5 : p.kind === "scale" ? 4 : p.value,
+    }));
+    const out = rank_next_parameters({ structure, pattern, parameters: params, bindings: built.bindings, profile: built.profile });
+    expect(out.groups.length).toBeGreaterThan(1);
+    expect(out.groups[0]!.group).toBe("ADP");
+    expect(out.groups[0]!.predictedWr).toBeLessThan(out.wrNow);
   });
 
   it("the magnetic solution loop closes: subgroups → allowed moments → build → refine recovers the truth", async () => {

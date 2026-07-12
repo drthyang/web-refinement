@@ -37,6 +37,8 @@ import { magneticSubgroupLattice, latticeRepresentatives } from "@/core/magnetic
 import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
+import { rankNextParameterGroups } from "@/core/workflow/nextParameters";
+import { buildPowderProblem } from "@/core/workflow/powder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { refine, refineParallel } from "@/core/refinement/engine";
 import { createNodeEvaluatorPool } from "@/mcp/nodeEvaluator";
@@ -544,6 +546,49 @@ export async function refine_magnetic_powder(args: {
   } finally {
     await pool?.dispose();
   }
+}
+
+/**
+ * The next-parameter diagnostic (roadmap F1.5): rank the currently-FIXED
+ * parameter groups by the χ² improvement freeing them is expected to buy —
+ * a Gauss–Newton estimate from probed Jacobian columns at the current values.
+ * A LOCAL probe: run it after the pattern is roughly aligned (badly displaced
+ * peaks under-credit cell/zero groups; see find_unexplained_peaks for that).
+ */
+export function rank_next_parameters(args: {
+  structure: StructureModel;
+  pattern: PowderPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  profile: PowderProfile;
+  magnetic?: MagneticModel | null;
+}): {
+  wrNow: number;
+  chiSquared: number;
+  groups: {
+    group: string;
+    parameterIds: readonly string[];
+    expectedRelativeImprovement: number;
+    predictedWr: number;
+  }[];
+} {
+  const problem = args.magnetic
+    ? buildMagneticPowderProblem(args.structure, args.magnetic, args.pattern, args.parameters, args.bindings, {
+        shape: args.profile.shape,
+        ...(args.profile.eta !== undefined ? { eta: args.profile.eta } : {}),
+      })
+    : buildPowderProblem(args.structure, args.pattern, args.parameters, args.bindings, args.profile);
+  const ranking = rankNextParameterGroups(problem);
+  return {
+    wrNow: ranking.wrNow,
+    chiSquared: ranking.chiSquared,
+    groups: ranking.groups.map((g) => ({
+      group: g.group,
+      parameterIds: g.parameterIds,
+      expectedRelativeImprovement: g.expectedRelativeImprovement,
+      predictedWr: g.predictedWr,
+    })),
+  };
 }
 
 /**

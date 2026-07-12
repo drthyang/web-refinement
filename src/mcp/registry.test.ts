@@ -134,6 +134,10 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   list_magnetic_subgroups: { args: { structure, maxIndex: 4 }, keys: ["candidates"] },
   allowed_moments: { args: { structure }, keys: ["sites"] },
   build_magnetic_model: { args: { structure, ionLabels: ["Po1"] }, keys: ["activeSites", "bindings", "magnetic", "parameters"] },
+  rank_next_parameters: {
+    args: { structure, pattern, parameters: built.parameters.map((q) => ({ ...q, fixed: q.kind === "scale" ? false : true })), bindings: built.bindings, profile: built.profile },
+    keys: ["chiSquared", "groups", "wrNow"],
+  },
   refine_magnetic_powder: (() => {
     const build = tools.build_magnetic_model({ structure, ionLabels: ["Po1"], moment: 0.5 });
     return {
