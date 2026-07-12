@@ -10,7 +10,14 @@ import {
   assess_refinement,
   suggest_next_steps,
   interpret_structure,
+  evaluate_pattern,
+  simulate_pattern,
+  reflection_list,
+  bond_geometry,
 } from "@/mcp/tools";
+import { exampleStructure } from "@/examples/mn3ga";
+import { exampleMagnetic, magneticParameters, magneticBindings } from "@/examples/mn3gaMagnetic";
+import type { RefinementParameter } from "@/core/refinement/types";
 
 const DATA = resolve(__dirname, "../../data/GaNb4Se8_XRD");
 const read = (f: string): string => readFileSync(resolve(DATA, f), "utf8");
@@ -65,5 +72,85 @@ describe("MCP tool handlers", () => {
       expect(typeof interp.summary).toBe("string");
       expect(Array.isArray(interp.findings)).toBe(true);
     });
+  });
+});
+
+describe("MCP analysis primitives (no data files needed)", () => {
+  const structure = exampleStructure(); // hexagonal Mn3Ga, P6₃/mmc
+
+  it("simulate → evaluate on its own output is self-consistent (wR ≈ 0)", () => {
+    const sim = simulate_pattern({ structure, xMin: 20, xMax: 90, points: 2000 });
+    expect(sim.xUnit).toBe("twoTheta");
+    expect(sim.curves.yCalc.length).toBe(2000);
+    expect(Math.max(...sim.curves.yCalc)).toBeGreaterThan(0);
+
+    // Feed the simulation back as "observed" data with the same model.
+    const pattern = {
+      id: "p", name: "sim", xUnit: "twoTheta" as const,
+      radiation: { kind: "xray" as const, wavelength: 1.54 },
+      points: sim.curves.x.map((x, i) => ({ x, yObs: sim.curves.yCalc[i]! })),
+    };
+    const built = build_refinement({ structure, pattern, backgroundTerms: 1 });
+    const params = built.parameters.map((p) =>
+      p.kind === "scale" ? { ...p, value: 1 } : p.kind === "background" ? { ...p, value: 0 } : p,
+    );
+    const ev = evaluate_pattern({ structure, pattern, parameters: params, bindings: built.bindings, profile: built.profile });
+    expect(ev.agreement.wR).toBeLessThan(0.5);
+    // The exactly-zero background plateau of a noise-free simulation trips the
+    // sentinel-plateau exclusion mask (its job on GSAS-style masked data), so
+    // the count covers the peak-bearing region, not all grid points.
+    expect(ev.observationCount).toBeGreaterThan(1000);
+    expect(ev.observationCount).toBeLessThanOrEqual(2000);
+  });
+
+  it("reflection_list returns families with d + multiplicity; absences:false adds extinct ones", () => {
+    const withAbs = reflection_list({ structure, dMin: 1.0, dMax: 5 });
+    expect(withAbs.count).toBeGreaterThan(5);
+    for (const r of withAbs.reflections) {
+      expect(r.d).toBeGreaterThanOrEqual(1.0);
+      expect(r.multiplicity).toBeGreaterThan(0);
+    }
+    // P6₃/mmc has systematic absences (e.g. (00l) l odd) — keeping them grows the list.
+    const noAbs = reflection_list({ structure, dMin: 1.0, dMax: 5, absences: false });
+    expect(noAbs.count).toBeGreaterThan(withAbs.count);
+    // Instrument-frame positions when a calibration is passed.
+    const withX = reflection_list({ structure, dMin: 1.0, dMax: 5, instrument: { kind: "tof", difC: 22000 } });
+    expect(withX.reflections[0]!.x).toBeCloseTo(22000 * withX.reflections[0]!.d, 3);
+  });
+
+  it("bond_geometry returns sorted nearest-neighbour distances", () => {
+    const { bonds, shortest } = bond_geometry({ structure, cutoff: 3.2 });
+    expect(bonds.length).toBeGreaterThan(0);
+    expect(shortest).not.toBeNull();
+    // Sorted ascending, and no physically absurd contact in this real structure.
+    for (let i = 1; i < bonds.length; i++) expect(bonds[i]!.distance).toBeGreaterThanOrEqual(bonds[i - 1]!.distance);
+    expect(shortest!.distance).toBeGreaterThan(1.5);
+  });
+
+  it("evaluate_pattern with a magnetic model separates nuclear and magnetic components", () => {
+    const ex = exampleMagnetic();
+    const grid = Array.from({ length: 500 }, (_, i) => 10 + (i * 80) / 499);
+    const pattern = {
+      id: "p", name: "m", xUnit: "twoTheta" as const,
+      radiation: { kind: "neutron" as const, wavelength: 2.41 },
+      points: grid.map((x) => ({ x, yObs: 0 })),
+    };
+    const params = magneticParameters(ex.magnetic);
+    const bindings = magneticBindings(ex.magnetic);
+    const scale: RefinementParameter = { id: "scale", label: "scale", kind: "scale", value: 5, initialValue: 5, fixed: false };
+    const ev = evaluate_pattern({
+      structure: ex.structure, pattern,
+      parameters: [scale, ...params],
+      bindings: [{ parameterId: "scale", kind: "scale", targetId: ex.structure.id }, ...bindings],
+      profile: { shape: "gaussian" },
+      magnetic: ex.magnetic,
+    });
+    expect(ev.curves.yNuclear).toBeDefined();
+    expect(ev.curves.yMagnetic).toBeDefined();
+    expect(Math.max(...ev.curves.yMagnetic!)).toBeGreaterThan(0);
+    // Total = nuclear + magnetic.
+    for (let i = 0; i < 500; i += 50) {
+      expect(ev.curves.yCalc[i]!).toBeCloseTo(ev.curves.yNuclear![i]! + ev.curves.yMagnetic![i]!, 6);
+    }
   });
 });

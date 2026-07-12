@@ -25,8 +25,12 @@ import { parseInstrumentParameters } from "@/parsers/instrument";
 import { buildPowderSpec, type MustrainModel } from "@/app/powderSpec";
 import { runPowderRefinement } from "@/workers/runPowder";
 import { powderCurves } from "@/core/workflow/powder";
-import { excludedPointMask } from "@/core/refinement/factors";
+import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
+import { computeAgreementFactors, excludedPointMask, weightsFromSigma } from "@/core/refinement/factors";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
+import { generateReflections } from "@/core/diffraction/reflections";
+import { abscissaFromD } from "@/core/diffraction/instrument";
+import { bondLengths } from "@/core/crystal/geometry";
 import type { PeakShape } from "@/core/diffraction/profile";
 import {
   assessRefinement,
@@ -172,6 +176,143 @@ export function assess_refinement(args: {
 /** The decision tool: rank the next actions given an assessment (sequencing only). */
 export function suggest_next_steps(args: { assessment: RefinementAssessment }): ReturnType<typeof suggestNextSteps> {
   return suggestNextSteps(args.assessment);
+}
+
+/**
+ * Evaluate the calculated pattern at the CURRENT parameter values — no
+ * refinement. The cheap what-if tool: change a value (or a moment), evaluate,
+ * compare wR. With a magnetic model the nuclear and magnetic components come
+ * back separately, so an agent can see what the moments alone contribute.
+ */
+export function evaluate_pattern(args: {
+  structure: StructureModel;
+  pattern: PowderPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  profile: PowderProfile;
+  magnetic?: MagneticModel | null;
+}): {
+  curves: { x: number[]; yObs: number[]; yCalc: number[]; diff: number[]; yNuclear?: number[]; yMagnetic?: number[] };
+  agreement: { wR: number; rFactor: number; goodnessOfFit: number | null };
+  observationCount: number;
+} {
+  const curves = args.magnetic
+    ? magneticPowderComponents(args.structure, args.magnetic, args.pattern, args.parameters, args.bindings, { shape: args.profile.shape, ...(args.profile.eta !== undefined ? { eta: args.profile.eta } : {}) })
+    : powderCurves(args.structure, args.pattern, args.parameters, args.bindings, args.profile);
+  // Poisson fallback with the standard 1-count floor: σ = √max(N, 1). Without
+  // the floor a near-zero intensity (e.g. the background of a simulated
+  // pattern) gets an exploding weight and poisons the agreement sums.
+  const weights = weightsFromSigma(args.pattern.points.map((p) => p.sigma ?? Math.sqrt(Math.max(p.yObs, 1))));
+  const nFree = args.parameters.filter((p) => !p.fixed && !p.expression).length;
+  const a = computeAgreementFactors(Float64Array.from(curves.yObs), Float64Array.from(curves.yCalc), weights, nFree);
+  const excluded = excludedPointMask(curves.yObs);
+  return {
+    curves: {
+      x: [...curves.x],
+      yObs: [...curves.yObs],
+      yCalc: [...curves.yCalc],
+      diff: curves.yObs.map((o, i) => o - (curves.yCalc[i] ?? 0)),
+      ...("yNuclear" in curves ? { yNuclear: [...curves.yNuclear] } : {}),
+      ...("yMagnetic" in curves ? { yMagnetic: [...curves.yMagnetic] } : {}),
+    },
+    agreement: { wR: 100 * (a.rWeighted ?? 0), rFactor: 100 * a.rFactor, goodnessOfFit: a.goodnessOfFit ?? null },
+    observationCount: excluded.reduce((n, ex) => n + (ex ? 0 : 1), 0),
+  };
+}
+
+/**
+ * Simulate the powder pattern of a structure alone — "what would this phase
+ * look like on this instrument?" Used for planning, phase identification by
+ * eye, and generating a reference before any data is loaded. The grid follows
+ * the instrument (2θ for CW, µs for TOF) unless an explicit range is given.
+ */
+export function simulate_pattern(args: {
+  structure: StructureModel;
+  instrument?: InstrumentParameters;
+  xMin?: number;
+  xMax?: number;
+  points?: number;
+  scale?: number;
+  magnetic?: MagneticModel | null;
+}): {
+  xUnit: string;
+  curves: { x: number[]; yCalc: number[]; yNuclear?: number[]; yMagnetic?: number[] };
+  summary: { points: number; xMin: number; xMax: number };
+} {
+  const instrument = args.instrument ?? DEFAULT_INSTRUMENT;
+  const isTof = instrument.kind === "tof";
+  // Default window: CW 5–120° 2θ; TOF the d = 0.6–6 Å band of the calibration.
+  const xMin = args.xMin ?? (isTof ? abscissaFromD(instrument, 0.6) : 5);
+  const xMax = args.xMax ?? (isTof ? abscissaFromD(instrument, 6) : 120);
+  const n = Math.min(Math.max(args.points ?? 4000, 100), 20000);
+  const grid = Array.from({ length: n }, (_, i) => xMin + (i * (xMax - xMin)) / (n - 1));
+  const pattern: PowderPattern = {
+    id: "sim",
+    name: "simulated",
+    xUnit: isTof ? "tof" : "twoTheta",
+    radiation: isTof ? { kind: "neutron-tof" } : { kind: instrument.radiationKind === "neutron" ? "neutron" : "xray", wavelength: instrument.wavelength },
+    points: grid.map((x) => ({ x, yObs: 0 })),
+  };
+  const spec = buildPowderSpec(args.structure, pattern, instrument, true, 1, {});
+  // The spec seeds scale against observed data (zeros here) and a background;
+  // a simulation wants a clean pattern: unit scale, zero background.
+  const params = spec.params.map((p) =>
+    p.kind === "scale" ? { ...p, value: args.scale ?? 1 } : p.kind === "background" ? { ...p, value: 0 } : p,
+  );
+  const curves = args.magnetic
+    ? magneticPowderComponents(args.structure, args.magnetic, pattern, params, spec.bindings, { shape: spec.profile.shape, ...(spec.profile.eta !== undefined ? { eta: spec.profile.eta } : {}) })
+    : powderCurves(args.structure, pattern, params, spec.bindings, spec.profile);
+  return {
+    xUnit: pattern.xUnit,
+    curves: {
+      x: [...curves.x],
+      yCalc: [...curves.yCalc],
+      ...("yNuclear" in curves ? { yNuclear: [...curves.yNuclear] } : {}),
+      ...("yMagnetic" in curves ? { yMagnetic: [...curves.yMagnetic] } : {}),
+    },
+    summary: { points: n, xMin, xMax },
+  };
+}
+
+/**
+ * The reflection list: unique hkl families with d-spacing and multiplicity for
+ * a structure, optionally with the instrument-frame position (2θ or TOF µs).
+ * `absences: false` keeps nuclear-extinct families — where AFM magnetic
+ * satellites live (see the FeCoSn golden case).
+ */
+export function reflection_list(args: {
+  structure: StructureModel;
+  dMin?: number;
+  dMax?: number;
+  absences?: boolean;
+  instrument?: InstrumentParameters;
+}): { reflections: { h: number; k: number; l: number; d: number; multiplicity: number; x?: number }[]; count: number } {
+  const refs = generateReflections(
+    args.structure.cell,
+    args.structure.spaceGroup,
+    args.dMin ?? 0.8,
+    args.dMax ?? 10,
+    { absences: args.absences ?? true },
+  );
+  const reflections = refs.map((r) => ({
+    h: r.h, k: r.k, l: r.l, d: r.d, multiplicity: r.multiplicity,
+    ...(args.instrument ? { x: abscissaFromD(args.instrument, r.d) } : {}),
+  }));
+  return { reflections, count: reflections.length };
+}
+
+/**
+ * Bond-length sanity: nearest-neighbour distances (Å) up to a cutoff, from the
+ * symmetry-expanded structure. The physical-plausibility check an expert runs
+ * after refining positions (a 1.2 Å metal–metal contact means the refinement
+ * went somewhere wrong).
+ */
+export function bond_geometry(args: { structure: StructureModel; cutoff?: number }): {
+  bonds: { from: string; to: string; distance: number }[];
+  shortest: { from: string; to: string; distance: number } | null;
+} {
+  const bonds = bondLengths(args.structure, args.cutoff ?? 3.2);
+  return { bonds, shortest: bonds[0] ?? null };
 }
 
 /**

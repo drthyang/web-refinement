@@ -108,6 +108,46 @@ server.registerTool("suggest_next_steps", {
   inputSchema: { assessment: anyObj.describe("Output of assess_refinement") },
 }, json(tools.suggest_next_steps));
 
+server.registerTool("evaluate_pattern", {
+  title: "Evaluate pattern (no refinement)",
+  description: "Compute the calculated pattern and agreement (wR/GoF) at the CURRENT parameter values — no refinement. The cheap what-if tool: tweak a value, evaluate, compare. Pass a magnetic model to get the nuclear and magnetic components separately (what do the moments alone contribute?).",
+  inputSchema: {
+    structure: anyObj, pattern: anyObj,
+    parameters: anyArr, bindings: anyArr, profile: anyObj,
+    magnetic: anyObj.nullable().optional().describe("MagneticModel — adds yNuclear/yMagnetic component curves"),
+  },
+}, json(tools.evaluate_pattern));
+
+server.registerTool("simulate_pattern", {
+  title: "Simulate pattern (structure only)",
+  description: "Simulate the powder pattern of a structure on an instrument before any data exists — planning, phase identification by eye, generating a reference. Grid defaults: CW 5–120° 2θ; TOF the d = 0.6–6 Å band of the calibration. Pass a magnetic model to include (and separate out) the magnetic contribution.",
+  inputSchema: {
+    structure: anyObj,
+    instrument: anyObj.optional().describe("CW or TOF calibration; defaults to CW λ=1.54 Å"),
+    xMin: z.number().optional(), xMax: z.number().optional(),
+    points: z.number().int().min(100).max(20000).optional(),
+    scale: z.number().positive().optional(),
+    magnetic: anyObj.nullable().optional(),
+  },
+}, json(tools.simulate_pattern));
+
+server.registerTool("reflection_list", {
+  title: "Reflection list (hkl, d, multiplicity)",
+  description: "Unique hkl families with d-spacing and multiplicity for a structure, optionally with the instrument-frame position (2θ or TOF µs). Set absences:false to keep nuclear-extinct families — that is where AFM magnetic satellites live, and how you match an unexplained peak to a candidate hkl.",
+  inputSchema: {
+    structure: anyObj,
+    dMin: z.number().positive().optional(), dMax: z.number().positive().optional(),
+    absences: z.boolean().optional().describe("false keeps systematically-absent nuclear families"),
+    instrument: anyObj.optional(),
+  },
+}, json(tools.reflection_list));
+
+server.registerTool("bond_geometry", {
+  title: "Bond lengths (sanity check)",
+  description: "Nearest-neighbour bond lengths (Å) up to a cutoff from the symmetry-expanded structure, sorted shortest first. The physical-plausibility check after refining positions: an impossibly short contact means the refinement went somewhere unphysical.",
+  inputSchema: { structure: anyObj, cutoff: z.number().positive().max(8).optional() },
+}, json(tools.bond_geometry));
+
 server.registerTool("interpret_structure", {
   title: "Interpret structure (materials science)",
   description: "The materials tool. Read a refined structure for engineering/discovery signals: crystallite size & microstrain (microstructure), partial occupancy (off-stoichiometry / vacancies / doping), large displacement parameters (disorder), magnetic order, and bond-length sanity — each paired with its materials meaning.",

@@ -123,12 +123,20 @@ Register it with a client, e.g. Claude Desktop / Claude Code:
 
 **Tools shipped:** `parse_structure`, `parse_powder_data`, `parse_instrument`,
 `build_refinement`, `refine_powder`, `assess_refinement`, `suggest_next_steps`,
-`interpret_structure`. The last three are the judgement layer — the "figure out
-what matters and guide the next step" surface — and live as pure, tested core in
-[`src/core/diagnostics/`](../src/core/diagnostics) (`assessment.ts`,
-`interpret.ts`), so the same functions can back a future in-app chat panel. The
-whole expert loop runs end to end on the real GaNb4Se8 dataset (see
-`src/mcp/tools.test.ts`).
+`interpret_structure`, plus the **analysis primitives** `evaluate_pattern`
+(obs/calc + wR at the current values — the cheap what-if, with separate
+nuclear/magnetic components when a magnetic model is passed),
+`simulate_pattern` (structure-only pattern on a CW/TOF instrument),
+`reflection_list` (hkl/d/multiplicity, `absences:false` keeps the
+nuclear-extinct families where AFM satellites live), and `bond_geometry`
+(nearest-neighbour distance sanity). `assess_refinement` /
+`suggest_next_steps` / `interpret_structure` are the judgement layer — the
+"figure out what matters and guide the next step" surface — and live as pure,
+tested core in [`src/core/diagnostics/`](../src/core/diagnostics)
+(`assessment.ts`, `interpret.ts`), so the same functions can back a future
+in-app chat panel. The whole expert loop runs end to end on the real GaNb4Se8
+dataset, and the primitives are covered data-free by a simulate→evaluate
+self-consistency loop (see `src/mcp/tools.test.ts`).
 
 ## Status
 
