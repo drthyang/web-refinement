@@ -13,3 +13,9 @@ createRoot(container).render(
     <App />
   </StrictMode>,
 );
+
+// Dev-only: expose the WebGPU validation harness on window.__gpuValidate for the
+// structure-factor precision campaign. Tree-shaken out of production builds.
+if (import.meta.env.DEV) {
+  void import("@/workers/gpuValidationHarness").then((m) => m.installGpuValidationHarness());
+}

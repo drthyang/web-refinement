@@ -9,7 +9,7 @@
  */
 
 import type { Complex, Vec3 } from "@/core/math/types";
-import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
+import type { StructureModel, SymmetryOperation, DisplacementParameters } from "@/core/crystal/types";
 import type { Radiation } from "@/core/diffraction/types";
 import type { ScatteringTable } from "@/core/scattering/types";
 import { add, expι, modulusSquared, scale, ZERO } from "@/core/math/complex";
@@ -138,6 +138,38 @@ export function nuclearStructureFactor(
     }
   }
   return f;
+}
+
+/**
+ * One symmetry-equivalent atom of the unit cell: a site replicated to each
+ * DISTINCT position of its orbit, carrying the site's scattering properties.
+ * This is exactly the (site, distinct-op) expansion `nuclearStructureFactor`
+ * sums over — factored out so an off-core consumer (the WebGPU structure-factor
+ * kernel) marshals the identical atom list rather than re-deriving the orbit.
+ */
+export interface ExpandedAtom {
+  readonly position: Vec3;
+  readonly occupancy: number;
+  readonly element: string;
+  readonly isotope?: number;
+  readonly adp: DisplacementParameters;
+}
+
+/** Expand a structure's asymmetric unit over each site's distinct orbit. */
+export function expandStructureAtoms(model: StructureModel): ExpandedAtom[] {
+  const out: ExpandedAtom[] = [];
+  for (const site of model.sites) {
+    for (const op of distinctSiteOps(model.spaceGroup.operations, site.position)) {
+      out.push({
+        position: applyOperation(op, site.position),
+        occupancy: site.occupancy,
+        element: site.element,
+        ...(site.isotope !== undefined ? { isotope: site.isotope } : {}),
+        adp: site.adp,
+      });
+    }
+  }
+  return out;
 }
 
 /**
