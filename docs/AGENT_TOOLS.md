@@ -12,22 +12,43 @@ about the refinement rather than just execute it.
 
 ---
 
+## 0. The layer contract
+
+Three layers, each with one owner and one invariant. The maintainability of
+the whole agent surface rests on keeping these boundaries mechanical:
+
+| Layer | Owns | Form | Invariant |
+|---|---|---|---|
+| **Tools** | one capability (mechanism) | pure JSON → JSON handler + schema, registered in [`src/mcp/registry.ts`](../src/mcp/registry.ts) | a handler never calls another handler; no sequencing, no judgment prose |
+| **Skills** | an expert procedure | SKILL.md referencing tools by name | branches only on *structured* outputs of the judgment tools, never on vibes |
+| **Orchestration** | conversation, files, when to invoke | the agent runtime (Claude Code, Claude Desktop, any MCP client) | not built here — staying framework-agnostic is the design |
+
+The sorting rule: *must be correct every time* → core function, exposed as a
+tool (e.g. the staged anti-collapse recipe inside `refine_magnetic_powder`).
+*Known-good sequence with checkpoints* → skill. *Needs user context* →
+orchestration. Anything that must be reliable gets pushed **down** a layer,
+never encoded as prompt text.
+
+Enforcement (see `src/mcp/registry.test.ts`): two-way registry completeness,
+naming/description hygiene, a contract test that calls every tool on canned
+fixtures and pins its output shape, and doc-table sync via `npm run gen:tooldoc`.
+
 ## 1. The app's core as agent tools
 
-The goal is a thin, typed tool layer over `src/core/**` — no new science, just a
-callable surface. Candidate tools, each a pure function mapping JSON → JSON:
+The tool layer is a thin, typed surface over `src/core/**` — no new science,
+just callable wrappers. The **shipped tools** are listed in the generated
+table under "Running the MCP server" below. Next candidate slices, in
+priority order:
 
-| Tool | Wraps | In → out |
+| Slice | Tools | Wraps |
 |---|---|---|
-| `parse_structure` | `parsers/cif` | CIF text → `StructureModel` (cell, sites, space group) |
-| `parse_powder_data` | `parsers/powderData` + `detectFormat` | file text → pattern + detected unit/radiation |
-| `parse_instrument` | `parsers/instrument` | `.instprm` → CW/TOF calibration |
-| `build_refinement` | `workflow/structureRefinement` | structure + pattern + instrument → parameter set + bindings + staged plan |
-| `refine_powder` | `workflow/powder` + `refinement/engine` | parameters (+ fit range, background type, staged) → refined values, esds, agreement, diagnostics, per-cycle history |
-| `evaluate_pattern` | `workflow/powder` | parameters → obs/calc/bkg/diff curves + wR/GoF |
-| `reflection_ticks` | `diffraction/reflections` | cell + space group → hkl positions |
-| `magnetic_candidates` | `workflow/magnetic` | structure + k → allowed magnetic space groups |
-| `bond_geometry` | `crystal/geometry` | structure → bond lengths/angles for sanity checks |
+| Exports & project | `export_cif` / `export_mcif`, `export_bundle`, `magnetic_report`, `save_project` / `load_project` | `core/export`, `core/project` |
+| Single crystal | `parse_single_crystal_data`, `build_single_crystal_refinement`, `refine_single_crystal` | `parsers/shelxHkl`, `workflow/singleCrystalRefinement` |
+| Absorption | `attenuation_coefficient`, `transmission_correction`, `index_crystal_faces` | `core/absorption` |
+
+Plus one non-tool item: expose `knowledge/*.md` and
+[REFINEMENT_PROCEDURE.md](./REFINEMENT_PROCEDURE.md) as **MCP resources** so an
+agent can consult the domain knowledge the tools assume.
 
 Properties that make these good tools (already true of the core):
 

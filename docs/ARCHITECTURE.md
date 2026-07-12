@@ -27,54 +27,74 @@ Strict one-directional dependencies: upper layers may import lower layers, never
 the reverse. Scientific code never imports React.
 
 ```
-┌──────────────────────────────────────────────┐
-│ UI layer            src/components, src/app    │  React only: state + presentation
-├──────────────────────────────────────────────┤
-│ Visualization layer src/visualization          │  plots, structure/arrow rendering
-├──────────────────────────────────────────────┤
-│ Worker/compute layer src/workers                │  offload long calculations
-├──────────────────────────────────────────────┤
-│ Import/export layer  src/parsers, project I/O   │  CIF, hkl, powder, project JSON
-├──────────────────────────────────────────────┤
-│ Refinement engine    src/core/refinement        │  least-squares driver
-├──────────────────────────────────────────────┤
-│ Calculation engine   src/core/{crystal,         │  structure factors, profiles
-│                       diffraction,magnetic,math} │
-├──────────────────────────────────────────────┤
-│ Scientific data model src/core/*/types.ts        │  pure data types (this phase)
-└──────────────────────────────────────────────┘
+┌───────────────────┬───────────────────────┬─────────────────────┐
+│ Web app UI        │ MCP agent server      │ Web workers         │  three thin consumer
+│ src/app,          │ src/mcp               │ src/workers         │  surfaces over the
+│ src/components    │ (18-tool registry)    │ (long solves)       │  same core functions
+├───────────────────┴───────────────────────┴─────────────────────┤
+│ Import & presentation   src/parsers, src/visualization           │  CIF/hkl/powder in,
+├──────────────────────────────────────────────────────────────────┤  plot data out
+│ src/core — pure TypeScript, no DOM, no React, no side effects    │
+│                                                                  │
+│   workflow      problem builders (powder, magnetic, multi-phase) │
+│   refinement    Levenberg–Marquardt driver, esds, diagnostics    │
+│   diffraction   structure factors, reflections, peak profiles    │
+│   magnetic      MSG candidates, k-search, moments, |F_M|²        │
+│   crystal       cells, symmetry, site/ADP constraints            │
+│   scattering    neutron b, X-ray f(Q), magnetic ⟨j0⟩/⟨j2⟩ tables │
+│   diagnostics   assess / suggest / interpret (judgment as code)  │
+│   export        CIF, mCIF, FullProf + GSAS-II bundles, reports   │
+│   absorption    μ, transmission, habit, face indexing            │
+│   math, project Vec3/Mat3/complex; project (de)serialization     │
+└──────────────────────────────────────────────────────────────────┘
                     ▲
-        validation/test layer  src/**/*.test.ts (cross-cutting)
+   validation layer  src/**/*.test.ts — unit + golden GSAS-II datasets
+   (git-ignored data/, skip when absent) + MCP contract shapes + doc-sync
 ```
 
 The **golden rule**: `src/core/**` is pure TypeScript with no DOM, React, or
 worker dependencies. Every scientific function is pure and independently
-testable. This is what makes validation and future WASM porting tractable.
+testable. This is what makes validation and future WASM porting tractable —
+and it is why every consumer surface is thin: the web app is React state over
+core functions, the MCP server is a registry of the same functions behind a
+stdio transport (see [AGENT_TOOLS.md](./AGENT_TOOLS.md)), and the workers are
+the same functions off the UI thread. Adding a surface never adds science.
 
 ## Source tree
 
 ```
 src/
-  app/              application shell, constants, top-level state
+  app/              application shell, workbenches, parameter specs
   components/        React UI components (presentation only)
   core/
     math/            Vec3/Mat3/Complex types + pure linear algebra
-    crystal/         unit cell, symmetry, structure model, structure factors
-    diffraction/     single-crystal & powder data models + calculators
-    magnetic/        magnetic model, moment projection, magnetic form factors
+    crystal/         unit cell, symmetry, structure model, constraints
+    scattering/      neutron b, X-ray f(Q), magnetic ⟨j0⟩/⟨j2⟩ tables
+    diffraction/     reflections, structure factors, peak profiles
+    magnetic/        MSG/k machinery, moment models, magnetic |F|²
     refinement/      parameters, constraints, least-squares engine
-  parsers/           CIF, hkl, powder, project (de)serialization
+    workflow/        problem builders: powder, magnetic, multi-phase, SC
+    diagnostics/     assessment / next-steps / interpretation (judgment)
+    export/          CIF, mCIF, FullProf + GSAS-II bundles, reports
+    absorption/      μ, transmission, crystal habit, face indexing
+    project/         project file (de)serialization
+  parsers/           CIF/mCIF, hkl, powder formats, instrument files
+  mcp/               agent tool layer: tools.ts (pure handlers),
+                     registry.ts (single source of truth), server.ts (stdio)
   workers/           Web Worker entry points + typed message protocol
   visualization/     plotting and structure/arrow rendering helpers
   examples/          bundled reference datasets and projects
-  tests/             cross-module and golden-value tests
+  testSupport/       helpers for tests over the git-ignored data/ folder
 docs/
   ARCHITECTURE.md ROADMAP.md DATA_MODEL.md REFINEMENT_ENGINE.md
-  VALIDATION.md LIMITATIONS.md PROJECT_FORMAT.md
+  AGENT_TOOLS.md MAGNETIC_SYMMETRY.md SINGLE_CRYSTAL.md VALIDATION.md
+  LIMITATIONS.md PROJECT_FORMAT.md …
 ```
 
-(Feature-specific tests may also live next to the code as `*.test.ts`; the
-`tests/` directory holds cross-cutting and golden-example suites.)
+Tests live next to the code as `*.test.ts`. Suites that validate against real
+GSAS-II refinements read the git-ignored `data/` folder through
+`src/testSupport` and skip gracefully when it is absent (CI, fresh clones) —
+see [VALIDATION.md](./VALIDATION.md).
 
 ## Core scientific data model
 
