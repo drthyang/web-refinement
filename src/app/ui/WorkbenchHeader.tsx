@@ -58,6 +58,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, onTog
           </div>
           <span style={betaBadge} title="MATERIA is in public beta — validate results against established tools before publication">beta</span>
           <span className="wb-version-chip" style={versionChip}>{version}</span>
+          <GpuBadge />
         </div>
       </div>
       <div className="wb-header-divider" style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
@@ -75,6 +76,49 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, onTog
         {exports.length > 0 && <ExportMenu exports={exports} />}
       </div>
     </header>
+  );
+}
+
+/**
+ * Capability badge: lit when this machine can GPU-accelerate refinement, dimmed
+ * otherwise. `navigator.gpu` may exist without a usable adapter, so support is
+ * confirmed by actually requesting one. Purely informational — the per-refinement
+ * status line still reports whether a given fit used the GPU ("· GPU |F|²").
+ */
+function GpuBadge(): JSX.Element {
+  const [supported, setSupported] = useState<boolean>(
+    () => typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
+    if (!gpu) {
+      setSupported(false);
+      return;
+    }
+    gpu.requestAdapter().then(
+      (adapter) => !cancelled && setSupported(!!adapter),
+      () => !cancelled && setSupported(false),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return (
+    <span
+      className="wb-gpu-badge"
+      style={{ ...gpuBadgeBase, ...(supported ? gpuBadgeOn : gpuBadgeOff) }}
+      title={
+        supported
+          ? "GPU acceleration available — single-phase powder refinement runs structure factors on the WebGPU kernel (validated f32, far below esd)."
+          : "GPU acceleration unavailable in this browser — refinement runs on the CPU."
+      }
+    >
+      <svg width={8} height={11} viewBox="0 0 8 11" aria-hidden style={{ display: "block" }}>
+        <path d="M4.7 0 0 6.4h2.7L2.1 11 8 4.2H4.8z" fill="currentColor" />
+      </svg>
+      GPU
+    </span>
   );
 }
 
@@ -258,4 +302,33 @@ const betaBadge: CSSProperties = {
   border: `1px solid ${color.noteBorder}`,
   borderRadius: radius.chip,
   padding: "2px 7px",
+};
+
+const gpuBadgeBase: CSSProperties = {
+  fontFamily: mono,
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  borderRadius: radius.chip,
+  padding: "2px 7px",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  whiteSpace: "nowrap",
+  cursor: "default",
+  transition: "opacity 160ms, color 160ms, background 160ms",
+};
+
+const gpuBadgeOn: CSSProperties = {
+  color: color.primary,
+  background: color.primaryTintBg,
+  border: `1px solid ${color.primaryTintBorder}`,
+};
+
+const gpuBadgeOff: CSSProperties = {
+  color: color.faint,
+  background: color.chipBg,
+  border: `1px solid ${color.border}`,
+  opacity: 0.5,
 };
