@@ -137,7 +137,10 @@ export function powderPeakIntensities(
     // over-weights low Q. `applyLorentz=false` skips it for such data.
     const lp = applyLorentz ? lorentzPolarization(radiation, r.d) : 1;
     const poFactor = po ? marchDollase(model.cell, po.axis, r.h, r.k, r.l, po.ratio) : 1;
-    const intensity = scale * r.multiplicity * lp * poFactor * f2;
+    // Scale multiplies LAST so unit-scale intensities scaled afterwards are
+    // bit-identical to computing at the target scale directly — the invariant
+    // the geometry cache in workflow/powder.ts relies on.
+    const intensity = r.multiplicity * lp * poFactor * f2 * scale;
     let twoTheta = NaN;
     if (radiation.kind !== "neutron-tof") {
       const theta = braggTheta(r.d, radiation.wavelength);

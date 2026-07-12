@@ -10,7 +10,7 @@
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
-import type { LinearRestraint, ParameterBinding, RefinementParameter } from "@/core/refinement/types";
+import type { LinearRestraint, ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
 import { weightsFromSigma, excludedPointMask, applyExclusionMask, fitRangeMask } from "@/core/refinement/factors";
 import { resolveTies } from "@/core/refinement/constraints";
@@ -152,6 +152,57 @@ export function buildPeaks(pattern: PowderPattern, applied: AppliedModel, applyL
 }
 
 /**
+ * Parameter kinds whose value changes the reflection intensity list
+ * (d-spacings, |F|², multiplicity, LP, March–Dollase). Everything else —
+ * scale (hoisted out as a pure multiplier), background, zero shift, all
+ * profile widths/shapes, absorption, microstructure broadening — only affects
+ * peak PLACEMENT or synthesis, which stay cheap and uncached.
+ */
+const GEOMETRY_BINDING_KINDS = new Set<ParameterKind>([
+  "cellLength", "cellAngle", "positionShift", "uAniso", "bIso", "occupancy", "poRatio",
+]);
+
+/**
+ * A peak builder with a single-entry geometry cache, for use inside a
+ * refinement problem's `calculate` closure. The expensive stage — structure
+ * factors over every reflection — is reused whenever no geometry parameter
+ * moved since the previous evaluation. During a Levenberg–Marquardt iteration
+ * that is every scale/background (linear) column, every profile/zero column,
+ * and every synthesis-only trial, which dominate the Jacobian; geometry
+ * columns necessarily recompute.
+ *
+ * EXACT by construction, not approximate: intensities are cached at unit
+ * scale and multiplied by the current scale on retrieval, which is
+ * bit-identical to a direct computation because `powderPeakIntensities`
+ * multiplies scale last. The cache key is the exact string form of every
+ * geometry-bound parameter value plus the reflection d-window (which for TOF
+ * depends on the calibration and zero shift).
+ */
+export function createPeakBuilder(
+  pattern: PowderPattern,
+  bindings: readonly ParameterBinding[],
+  applyLorentz = true,
+): (applied: AppliedModel, resolved: Readonly<Record<string, number>>) => ProfilePeak[] {
+  const geomIds = [...new Set(bindings.filter((b) => GEOMETRY_BINDING_KINDS.has(b.kind)).map((b) => b.parameterId))];
+  let lastKey: string | null = null;
+  let unitIntensities: ReturnType<typeof powderPeakIntensities> = [];
+
+  return (applied, resolved) => {
+    const { dMin, dMax } = reflectionDRange(pattern, applied);
+    let key = `${dMin}|${dMax}`;
+    for (const id of geomIds) key += `|${resolved[id]}`;
+    if (key !== lastKey) {
+      const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
+      unitIntensities = powderPeakIntensities(applied.model, pattern.radiation, reflections, 1, applied.po, applyLorentz);
+      lastKey = key;
+    }
+    const s = applied.scale;
+    const intensities = s === 1 ? unitIntensities : unitIntensities.map((q) => ({ ...q, intensity: q.intensity * s }));
+    return placePeaks(pattern, applied, intensities);
+  };
+}
+
+/**
  * Place pre-computed {d, intensity} peaks at the pattern's abscissa with the
  * instrument profile: CW Caglioti/TCH-pseudo-Voigt width, Finger–Cox–Jephcoat
  * axial asymmetry and cylinder absorption on a 2θ pattern, or the TOF
@@ -271,11 +322,12 @@ export function buildPowderProblem(
     weights[xValues.length + i] = 1 / (sigma * sigma);
   }
   const applyLorentz = profile.lorentz ?? true;
+  const peaksFor = createPeakBuilder(pattern, bindings, applyLorentz);
 
   const calculate = (values: Readonly<Record<string, number>>): Float64Array => {
     const resolved = resolveTies(parameters, values);
     const applied = applyParameters(structure, bindings, resolved);
-    const peaks = buildPeaks(pattern, applied, applyLorentz);
+    const peaks = peaksFor(applied, resolved);
     const opts: ProfileOptions = {
       shape: profile.shape,
       ...(profile.eta !== undefined ? { eta: profile.eta } : {}),
