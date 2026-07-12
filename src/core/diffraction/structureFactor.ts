@@ -71,7 +71,7 @@ function distinctSiteOps(ops: readonly SymmetryOperation[], pos: Vec3): readonly
 }
 
 /** Isotropic Debye-Waller factor exp(−B_iso · s²), s = sinθ/λ = 1/(2d). */
-function debyeWaller(bIso: number, s: number): number {
+export function debyeWaller(bIso: number, s: number): number {
   return Math.exp(-bIso * s * s);
 }
 
@@ -80,7 +80,7 @@ function debyeWaller(bIso: number, s: number): number {
  *   T = exp(−2π²(U11 h²a*² + U22 k²b*² + U33 l²c*² + 2U12 hk a*b* + 2U13 hl a*c* + 2U23 kl b*c*))
  * with reciprocal lengths a*=√G*11 etc. from the reciprocal metric tensor.
  */
-function anisotropicDebyeWaller(
+export function anisotropicDebyeWaller(
   cell: UnitCell,
   u: readonly [number, number, number, number, number, number],
   h: number,

@@ -45,6 +45,22 @@ export type InstrumentParameters =
       readonly difB?: number;
       /** Zero offset in μs. */
       readonly zero?: number;
+      /**
+       * Back-to-back-exponential shape coefficients, when the file carries them
+       * (a GSAS-II `.instprm` does): α = alpha/d (rising edge, µs⁻¹),
+       * β = beta0 + beta1/d⁴ + betaQ/d² (falling edge), σ² = sig0 + sig1·d² +
+       * sig2·d⁴ + sigQ/d² (Gaussian variance, µs²). Instrument-calibrated
+       * profile seeds, so a loaded TOF pattern fits on load instead of
+       * starting from ballparks.
+       */
+      readonly alpha?: number;
+      readonly beta0?: number;
+      readonly beta1?: number;
+      readonly betaQ?: number;
+      readonly sig0?: number;
+      readonly sig1?: number;
+      readonly sig2?: number;
+      readonly sigQ?: number;
     };
 
 export function tofFromD(p: Extract<InstrumentParameters, { kind: "tof" }>, d: number): number {

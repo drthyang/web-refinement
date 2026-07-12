@@ -341,9 +341,15 @@ export function parseMagneticCif(text: string, id = "structure"): MagneticCifRes
     sites: parseSites(loops),
   };
   const moments = parseMoments(loops);
+  // Carry the BNS operations on the magnetic model: the structure factor then
+  // expands each moment over the magnetic group with position deduplication.
+  // Without them it falls back to the legacy no-dedup expansion, which
+  // over-counts special positions by their stabilizer order — sites of
+  // different multiplicity (e.g. Mn₃Ga 350 K: 8g and 4c Mn) get *different*
+  // spurious factors and the relative magnetic intensities come out wrong.
   const magnetic: MagneticModel | null =
     magSg && moments.length > 0
-      ? { id: `${id}-mag`, structureId: id, propagation: [[0, 0, 0]], moments }
+      ? { id: `${id}-mag`, structureId: id, propagation: [[0, 0, 0]], moments, operations: magSg.operations }
       : null;
   return { structure, magnetic };
 }

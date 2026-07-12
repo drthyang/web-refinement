@@ -188,8 +188,9 @@ function readValues(text: string): Map<string, number> {
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (line === "" || line.startsWith("#")) continue;
-    // Keys may carry a dot or slash (GSAS-II `Polariz.`, `SH/L`).
-    const m = line.match(/^([A-Za-z0-9_./]+)\s*[:=\s]\s*(-?\d[\d.eE+-]*)/);
+    // Keys may carry a dot, slash, or hyphen (GSAS-II `Polariz.`, `SH/L`,
+    // `beta-0`, `sig-1`).
+    const m = line.match(/^([A-Za-z0-9_./-]+)\s*[:=\s]\s*(-?\d[\d.eE+-]*)/);
     if (!m) continue;
     const key = m[1]!.toLowerCase();
     const value = parseFloat(m[2]!);
@@ -227,6 +228,15 @@ function parseInstrumentBase(text: string): InstrumentParameters {
       ...(v.get("difa") !== undefined ? { difA: v.get("difa")! } : {}),
       ...(v.get("difb") !== undefined ? { difB: v.get("difb")! } : {}),
       ...(v.get("zero") !== undefined ? { zero: v.get("zero")! } : {}),
+      // Back-to-back-exponential shape calibration (GSAS-II .instprm keys).
+      ...(v.get("alpha") !== undefined ? { alpha: v.get("alpha")! } : {}),
+      ...(v.get("beta-0") !== undefined ? { beta0: v.get("beta-0")! } : {}),
+      ...(v.get("beta-1") !== undefined ? { beta1: v.get("beta-1")! } : {}),
+      ...(v.get("beta-q") !== undefined ? { betaQ: v.get("beta-q")! } : {}),
+      ...(v.get("sig-0") !== undefined ? { sig0: v.get("sig-0")! } : {}),
+      ...(v.get("sig-1") !== undefined ? { sig1: v.get("sig-1")! } : {}),
+      ...(v.get("sig-2") !== undefined ? { sig2: v.get("sig-2")! } : {}),
+      ...(v.get("sig-q") !== undefined ? { sigQ: v.get("sig-q")! } : {}),
     };
     return params;
   }

@@ -52,8 +52,8 @@ export interface AppliedModel {
    */
   readonly tofProfile?: {
     readonly alpha0: number; readonly alpha1: number;
-    readonly beta0: number; readonly beta1: number;
-    readonly sig0: number; readonly sig1: number; readonly sig2: number;
+    readonly beta0: number; readonly beta1: number; readonly betaQ: number;
+    readonly sig0: number; readonly sig1: number; readonly sig2: number; readonly sigQ: number;
   };
   /** Zero-point shift of the abscissa, in the pattern's x-unit. */
   readonly zeroShift: number;
@@ -291,8 +291,8 @@ export function applyParameters(
   const tofProfile = tofProf.size
     ? {
         alpha0: tofProf.get("alpha0") ?? 0, alpha1: tofProf.get("alpha1") ?? 0,
-        beta0: tofProf.get("beta0") ?? 0, beta1: tofProf.get("beta1") ?? 0,
-        sig0: tofProf.get("sig0") ?? 0, sig1: tofProf.get("sig1") ?? 0, sig2: tofProf.get("sig2") ?? 0,
+        beta0: tofProf.get("beta0") ?? 0, beta1: tofProf.get("beta1") ?? 0, betaQ: tofProf.get("betaQ") ?? 0,
+        sig0: tofProf.get("sig0") ?? 0, sig1: tofProf.get("sig1") ?? 0, sig2: tofProf.get("sig2") ?? 0, sigQ: tofProf.get("sigQ") ?? 0,
       }
     : undefined;
   const stephensStrain = stephensS.size

@@ -117,7 +117,7 @@ export function buildSingleCrystalSpec(
     extinction = 0,
     tieSharedSites = true,
     positionBound = 0.2,
-    startB = 0.5,
+    startB,
   } = opts;
 
   const params: RefinementParameter[] = [];
@@ -149,7 +149,8 @@ export function buildSingleCrystalSpec(
     for (const g of groups) {
       if (g.rep.adp.kind === "isotropic") {
         const id = `B_${g.key}`;
-        params.push({ id, label: `${groupLabel(g)} B`, kind: "bIso", value: startB, initialValue: startB, min: 0, max: 10, fixed: true });
+        const b0 = startB ?? (g.rep.adp.kind === "isotropic" ? g.rep.adp.bIso : 0.5);
+        params.push({ id, label: `${groupLabel(g)} B`, kind: "bIso", value: b0, initialValue: b0, min: 0, max: 10, fixed: true });
         for (const m of g.members) if (m.adp.kind === "isotropic") bindings.push({ parameterId: id, kind: "bIso", targetId: structure.id, targetKey: m.label });
       } else {
         const allowed = allowedAnisotropicAdpModes(structure.spaceGroup.operations, g.rep.position, g.rep.adp.uAniso);

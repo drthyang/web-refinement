@@ -12,7 +12,7 @@
  * never touches nuclear code.
  */
 
-import type { Complex } from "@/core/math/types";
+import type { Complex, Vec3 } from "@/core/math/types";
 import type { StructureModel } from "@/core/crystal/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { MagneticFormFactorTable } from "@/core/scattering/types";
@@ -22,6 +22,7 @@ import { applyOperation } from "@/core/crystal/symmetry";
 import { magneticTable } from "@/core/scattering/magnetic";
 import { crystalComponentsToCartesian, perpendicularMoment, qCartesian } from "@/core/magnetic/moment";
 import { determinant } from "@/core/math/mat3";
+import { anisotropicDebyeWaller, debyeWaller } from "@/core/diffraction/structureFactor";
 
 const TWO_PI = 2 * Math.PI;
 /**
@@ -89,7 +90,15 @@ export function magneticStructureFactor(
     if (!site) continue;
     const ffId = formFactorId(structure, moment.siteLabel, moment.formFactorId);
     const fMag = table.has(ffId) ? table.j0(ffId, s) : 1;
-    const seen = dedup ? new Set<string>() : null;
+    // Thermal damping: the same Debye-Waller factor as the nuclear structure
+    // factor — the magnetic scatterer is the same vibrating atom (GSAS-II and
+    // FullProf damp |F_M| identically). Omitting it inflates the calculated
+    // magnetic intensity at low d, biasing refined moments low.
+    const dw =
+      site.adp.kind === "isotropic"
+        ? debyeWaller(site.adp.bIso, s)
+        : anisotropicDebyeWaller(structure.cell, site.adp.uAniso, h, k, l);
+    const seen: Vec3[] | null = dedup ? [] : null;
     // A split-orbit moment (magnetic subgroup ⊂ nuclear group) expands from its
     // own orbit-representative position, not the site's asymmetric-unit one.
     const basePos = moment.position ?? site.position;
@@ -97,10 +106,22 @@ export function magneticStructureFactor(
     for (const op of ops) {
       const p = applyOperation(op, basePos);
       if (seen) {
-        // One atom per unique position in the cell (no special-position over-count).
-        const key = p.map((v) => (((v % 1) + 1) % 1).toFixed(4)).join(",");
-        if (seen.has(key)) continue;
-        seen.add(key);
+        // One atom per unique position in the cell (no special-position
+        // over-count). Compare by periodic distance, not a rounded string key:
+        // a refined coordinate a hair off a special position (e.g. x = 0.50005)
+        // puts images at 0.00005 and 0.99995 — the same atom mod 1 — and
+        // rounded keys split them, over-counting the sublattice.
+        const wrapped: Vec3 = [((p[0] % 1) + 1) % 1, ((p[1] % 1) + 1) % 1, ((p[2] % 1) + 1) % 1];
+        const isDup = seen.some((q) => {
+          for (let i = 0; i < 3; i++) {
+            let dd = Math.abs(wrapped[i]! - q[i]!);
+            dd = Math.min(dd, 1 - dd);
+            if (dd > 1e-3) return false;
+          }
+          return true;
+        });
+        if (isDup) continue;
+        seen.push(wrapped);
       }
       // Transform the moment as an axial vector in the crystal-axis frame:
       // m' = θ · det(R) · R · m (θ = time-reversal flag ±1), then convert to
@@ -122,7 +143,7 @@ export function magneticStructureFactor(
 
       const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
       const ph = expι(phase);
-      const w = MAGNETIC_PREFACTOR * site.occupancy * fMag;
+      const w = MAGNETIC_PREFACTOR * site.occupancy * fMag * dw;
       fx = add(fx, cscale(ph, w * mPerp[0]));
       fy = add(fy, cscale(ph, w * mPerp[1]));
       fz = add(fz, cscale(ph, w * mPerp[2]));

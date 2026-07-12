@@ -71,7 +71,12 @@ export interface StructureRefinementOptions {
    * V and W absorb sample broadening.
    */
   readonly refineU?: boolean;
-  /** Starting isotropic B for every site, in Å². Default 0.5. */
+  /**
+   * Starting isotropic B for every site, in Å² — an explicit override. By
+   * default each site's B parameter seeds from the site's own B_iso (like
+   * occupancy/cell/position parameters), so a fixed B row reproduces the
+   * loaded structure instead of silently rewriting it to a constant.
+   */
   readonly startB?: number;
   /** Refine per-site isotropic ADP (B_iso). Default true. */
   readonly refineAdp?: boolean;
@@ -168,13 +173,19 @@ export interface TofSeed {
   /** α = α₀ + α₁/d (rising edge, µs⁻¹). */
   readonly alpha0?: number;
   readonly alpha1?: number;
-  /** β = β₀ + β₁/d⁴ (falling tail, µs⁻¹). */
+  /** β = β₀ + β₁/d⁴ + β_q/d² (falling tail, µs⁻¹ — GSAS-II beta-0/-1/-q). */
   readonly beta0?: number;
   readonly beta1?: number;
-  /** σ² = σ₀ + σ₁·d² + σ₂·d⁴ (Gaussian variance, µs²). */
+  readonly betaQ?: number;
+  /**
+   * σ² = σ₀ + σ₁·d² + σ₂·d⁴ + σ_q/d² (Gaussian variance, µs² — GSAS-II
+   * sig-0/-1/-2/-q). Individual terms may be negative in a real calibration
+   * (e.g. POWGEN sig-0 ≈ −41, sig-1 ≈ −569); only the sum must stay positive.
+   */
   readonly sig0?: number;
   readonly sig1?: number;
   readonly sig2?: number;
+  readonly sigQ?: number;
 }
 
 export interface StructureRefinementSpec {
@@ -221,7 +232,7 @@ export function buildStructureRefinement(
     zero = 0,
     refineZero = caglioti !== undefined || tof !== undefined,
     refineU = false,
-    startB = 0.5,
+    startB,
     refineAdp = true,
     refineAnisotropicAdp = refineAdp,
     refinePositions = true,
@@ -301,13 +312,15 @@ export function buildStructureRefinement(
       ["alpha0", "α₀", tof.alpha0 ?? 0, 0, 10],
       ["alpha1", "α₁", tof.alpha1 ?? 1, 0, 200],
       ["beta0", "β₀", tof.beta0 ?? 0.03, 1e-4, 10],
-      ["beta1", "β₁", tof.beta1 ?? 0, 0, 1e8],
-      ["sig0", "σ₀²", tof.sig0 ?? 0, 0, 1e7],
+      ["beta1", "β₁", tof.beta1 ?? 0, -1e8, 1e8],
+      ["betaQ", "β_q", tof.betaQ ?? 0, -10, 10],
+      ["sig0", "σ₀²", tof.sig0 ?? 0, -1e7, 1e7],
       // σ₁²·d² is the isotropic-strain variance. When an isotropic Mustrain is
       // emitted it carries that term (physical µstrain), so σ₁² is dropped here
       // to keep the two from being an exactly-degenerate free pair.
-      ...(mustrainIso === undefined ? [["sig1", "σ₁²", tof.sig1 ?? 200, 0, 1e7]] as [string, string, number, number, number][] : []),
-      ["sig2", "σ₂²", tof.sig2 ?? 0, 0, 1e7],
+      ...(mustrainIso === undefined ? [["sig1", "σ₁²", tof.sig1 ?? 200, -1e7, 1e7]] as [string, string, number, number, number][] : []),
+      ["sig2", "σ₂²", tof.sig2 ?? 0, -1e7, 1e7],
+      ["sigQ", "σ_q²", tof.sigQ ?? 0, -1e7, 1e7],
     ];
     for (const [key, label, value, min, max] of prof) {
       params.push({ id: `tof_${key}`, label: `TOF ${label}`, kind: "tofProfile", value, initialValue: value, min, max, fixed: false });
@@ -358,7 +371,8 @@ export function buildStructureRefinement(
     for (const g of siteGroups(structure.sites, tieSharedAdp)) {
       if (g.rep.adp.kind !== "isotropic") continue;
       const id = `B_${g.key}`;
-      params.push({ id, label: `${groupLabel(g)} B`, kind: "bIso", value: startB, initialValue: startB, min: 0, max: 10, fixed: false });
+      const b0 = startB ?? g.rep.adp.bIso;
+      params.push({ id, label: `${groupLabel(g)} B`, kind: "bIso", value: b0, initialValue: b0, min: 0, max: 10, fixed: false });
       for (const m of g.members) {
         if (m.adp.kind === "isotropic") bindings.push({ parameterId: id, kind: "bIso", targetId: structure.id, targetKey: m.label });
       }

@@ -87,6 +87,11 @@ function buildProblem(
     id: `${candidate.id}-mag`,
     structureId: structure.id,
     propagation: [[0, 0, 0]],
+    // Carry the candidate's operations so the structure factor expands with
+    // position deduplication — same convention as a parsed mCIF / built model.
+    // Without them special positions over-count by their stabilizer order and
+    // the fitted magnitudes come out low by the same factor.
+    operations: candidate.operations,
     moments: siteBases.map((sb) => {
       const comps: [number, number, number] = [0, 0, 0];
       sb.basis.forEach((bv, d) => {

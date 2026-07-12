@@ -116,8 +116,8 @@ function buildTofPeaks(
     if (d <= 0) continue;
     const center = cal.difC * d + cal.difA * d * d + cal.difB / d + applied.zeroShift;
     const alpha = Math.max((tp?.alpha0 ?? 0) + (tp?.alpha1 ?? 0) / d, 1e-6);
-    const beta = Math.max((tp?.beta0 ?? 0) + (tp?.beta1 ?? 0) / (d * d * d * d), 1e-6);
-    let sig2 = Math.max((tp?.sig0 ?? 0) + (tp?.sig1 ?? 0) * d * d + (tp?.sig2 ?? 0) * d * d * d * d, 1e-6);
+    const beta = Math.max((tp?.beta0 ?? 0) + (tp?.beta1 ?? 0) / (d * d * d * d) + (tp?.betaQ ?? 0) / (d * d), 1e-6);
+    let sig2 = Math.max((tp?.sig0 ?? 0) + (tp?.sig1 ?? 0) * d * d + (tp?.sig2 ?? 0) * d * d * d * d + (tp?.sigQ ?? 0) / (d * d), 1e-6);
     // Isotropic Mustrain (GSAS-II): a constant Δd/d broadens ∝ d in TOF; add its
     // Gaussian variance in quadrature. σ_T = |dT/dd|·ε·d (see isotropicStrainSigmaTof).
     if (applied.mustrainIso !== undefined && applied.mustrainIso > 0) {

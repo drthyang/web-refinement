@@ -124,13 +124,20 @@ export function buildPowderSpec(
     // it carries the ∝d² strain term, so σ₁² is seeded to 0 and not emitted (the
     // two are the same functional form — see buildStructureRefinement).
     const useIsoMustrain = mustrain === "isotropic" || mustrain === "uniaxial";
+    // Shape coefficients: prefer the instrument's own calibration when the
+    // .instprm carries it (GSAS-II α = alpha/d → our alpha1; β and σ² terms map
+    // one-to-one), falling back to moderator-scale ballparks refined later.
     const tof = {
       difC: instrument.difC,
       difA: instrument.difA ?? 0,
       difB: instrument.difB ?? 0,
-      alpha0: 0, alpha1: 1.5,
-      beta0: 0.02, beta1: 0,
-      sig0: 0, sig1: useIsoMustrain ? 0 : (instrument.difC * resolution) ** 2, sig2: 0,
+      alpha0: 0, alpha1: instrument.alpha ?? 1.5,
+      beta0: instrument.beta0 ?? 0.02, beta1: instrument.beta1 ?? 0,
+      betaQ: instrument.betaQ ?? 0,
+      sig0: instrument.sig0 ?? 0,
+      sig1: instrument.sig1 ?? (useIsoMustrain ? 0 : (instrument.difC * resolution) ** 2),
+      sig2: instrument.sig2 ?? 0,
+      sigQ: instrument.sigQ ?? 0,
     };
     const microOpt = mustrain === "generalized" ? { stephensStrain: true }
       : useIsoMustrain ? { mustrainIso: resolution * 1e6 } // µstrain seed (×10⁻⁶)
