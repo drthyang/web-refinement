@@ -95,6 +95,15 @@ export type EvaluatorSpec =
       readonly eta?: number;
     }
   | {
+      readonly kind: "multiPhasePowder";
+      readonly phases: readonly { readonly structure: StructureModel; readonly id: string }[];
+      readonly pattern: PowderPattern;
+      readonly parameters: RefinementParameter[];
+      readonly bindings: ParameterBinding[];
+      readonly shape: PeakShape;
+      readonly eta?: number;
+    }
+  | {
       readonly kind: "singleCrystal";
       readonly structure: StructureModel;
       readonly dataset: SingleCrystalDataset;

@@ -60,10 +60,9 @@ describe("MCP tool registry — completeness & hygiene", () => {
   });
 });
 
-describe("MCP tool registry — output contract shapes", () => {
-  // Minimal fixtures: a one-atom cubic structure and a tiny simulated pattern.
-  // Cheap enough to call EVERY tool (refine_powder runs 2 LM iterations).
-  const CIF = `data_po
+// Minimal fixtures: a one-atom cubic structure and a tiny simulated pattern.
+// Cheap enough to call EVERY tool (refine_powder runs 2 LM iterations).
+const CIF = `data_po
 _cell_length_a 3.35
 _cell_length_b 3.35
 _cell_length_c 3.35
@@ -82,81 +81,84 @@ _atom_site_fract_z
 _atom_site_occupancy
 Po1 Po 0 0 0 1.0
 `;
-  const { structure } = tools.parse_structure({ cif: CIF });
-  const sim = tools.simulate_pattern({ structure, xMin: 20, xMax: 80, points: 400 });
-  const pattern = {
-    id: "p", name: "sim", xUnit: "twoTheta" as const,
-    radiation: { kind: "xray" as const, wavelength: 1.54 },
-    points: sim.curves.x.map((x, i) => ({ x, yObs: (sim.curves.yCalc[i] ?? 0) + 5 })),
-  };
-  const built = tools.build_refinement({ structure, pattern, backgroundTerms: 1 });
-  const refined = tools.refine_powder({ structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile, maxIterations: 2 });
-  const assessment = tools.assess_refinement({ result: refined.result, parameters: built.parameters, observationCount: refined.observationCount, residual: refined.residual });
+const { structure } = tools.parse_structure({ cif: CIF });
+const sim = tools.simulate_pattern({ structure, xMin: 20, xMax: 80, points: 400 });
+const pattern = {
+  id: "p", name: "sim", xUnit: "twoTheta" as const,
+  radiation: { kind: "xray" as const, wavelength: 1.54 },
+  points: sim.curves.x.map((x, i) => ({ x, yObs: (sim.curves.yCalc[i] ?? 0) + 5 })),
+};
+const built = tools.build_refinement({ structure, pattern, backgroundTerms: 1 });
+// Top-level await: refine_powder is async (node evaluator pool when available).
+const refined = await tools.refine_powder({ structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile, maxIterations: 2 });
+const assessment = tools.assess_refinement({ result: refined.result, parameters: built.parameters, observationCount: refined.observationCount, residual: refined.residual });
 
-  /** Canned args + the pinned top-level output keys for every tool. */
-  const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
-    parse_structure: { args: { cif: CIF }, keys: ["magnetic", "structure"] },
-    parse_powder_data: {
-      args: { text: "10 5\n10.1 6\n10.2 5\n10.3 7\n10.4 5\n", filename: "t.xy" },
-      keys: ["detected", "pattern", "summary"],
-    },
-    parse_instrument: { args: { text: "Lam:1.54\nType:PXC\n" }, keys: ["kind", "radiationKind", "wavelength"] },
-    build_refinement: { args: { structure, pattern }, keys: ["bindings", "freeCount", "parameters", "profile"] },
-    refine_powder: {
-      args: { structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile, maxIterations: 2 },
-      keys: ["observationCount", "residual", "result"],
-    },
-    assess_refinement: {
-      args: { result: refined.result, parameters: built.parameters, observationCount: refined.observationCount },
-      keys: ["findings", "summary", "verdict"],
-    },
-    suggest_next_steps: { args: { assessment }, keys: [] }, // array result — element shape checked below
-    interpret_structure: { args: { structure }, keys: ["findings", "summary"] },
-    evaluate_pattern: {
-      args: { structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile },
-      keys: ["agreement", "curves", "observationCount"],
-    },
-    simulate_pattern: { args: { structure, points: 200 }, keys: ["curves", "summary", "xUnit"] },
-    reflection_list: { args: { structure, dMin: 1.5, dMax: 4 }, keys: ["count", "reflections"] },
-    bond_geometry: { args: { structure, cutoff: 3.5 }, keys: ["bonds", "shortest"] },
-    find_unexplained_peaks: {
-      // A clean residual with one artificial 100-count peak at d = 2.5 Å.
-      args: {
-        residual: {
-          d: Array.from({ length: 60 }, (_, i) => 4 - i * 0.05),
-          yObs: Array.from({ length: 60 }, (_, i) => (i === 30 ? 105 : 5)),
-          yCalc: Array.from({ length: 60 }, () => 5),
-        },
+/** Canned args + the pinned top-level output keys for every tool. */
+const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
+  parse_structure: { args: { cif: CIF }, keys: ["magnetic", "structure"] },
+  parse_powder_data: {
+    args: { text: "10 5\n10.1 6\n10.2 5\n10.3 7\n10.4 5\n", filename: "t.xy" },
+    keys: ["detected", "pattern", "summary"],
+  },
+  parse_instrument: { args: { text: "Lam:1.54\nType:PXC\n" }, keys: ["kind", "radiationKind", "wavelength"] },
+  build_refinement: { args: { structure, pattern }, keys: ["bindings", "freeCount", "parameters", "profile"] },
+  refine_powder: {
+    args: { structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile, maxIterations: 2 },
+    keys: ["observationCount", "parallel", "residual", "result"],
+  },
+  assess_refinement: {
+    args: { result: refined.result, parameters: built.parameters, observationCount: refined.observationCount },
+    keys: ["findings", "summary", "verdict"],
+  },
+  suggest_next_steps: { args: { assessment }, keys: [] }, // array result — element shape checked below
+  interpret_structure: { args: { structure }, keys: ["findings", "summary"] },
+  evaluate_pattern: {
+    args: { structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile },
+    keys: ["agreement", "curves", "observationCount"],
+  },
+  simulate_pattern: { args: { structure, points: 200 }, keys: ["curves", "summary", "xUnit"] },
+  reflection_list: { args: { structure, dMin: 1.5, dMax: 4 }, keys: ["count", "reflections"] },
+  bond_geometry: { args: { structure, cutoff: 3.5 }, keys: ["bonds", "shortest"] },
+  find_unexplained_peaks: {
+    // A clean residual with one artificial 100-count peak at d = 2.5 Å.
+    args: {
+      residual: {
+        d: Array.from({ length: 60 }, (_, i) => 4 - i * 0.05),
+        yObs: Array.from({ length: 60 }, (_, i) => (i === 30 ? 105 : 5)),
+        yCalc: Array.from({ length: 60 }, () => 5),
       },
-      keys: ["count", "peaks"],
     },
-    search_propagation_vector: { args: { structure, peakD: [6.7, 3.35] }, keys: ["candidates"] },
-    list_magnetic_subgroups: { args: { structure, maxIndex: 4 }, keys: ["candidates"] },
-    allowed_moments: { args: { structure }, keys: ["sites"] },
-    build_magnetic_model: { args: { structure, ionLabels: ["Po1"] }, keys: ["activeSites", "bindings", "magnetic", "parameters"] },
-    refine_magnetic_powder: (() => {
-      const build = tools.build_magnetic_model({ structure, ionLabels: ["Po1"], moment: 0.5 });
-      return {
-        args: {
-          structure, magnetic: build.magnetic, pattern,
-          parameters: [...built.parameters, ...build.parameters],
-          bindings: [...built.bindings, ...build.bindings],
-          profile: built.profile,
-          maxIterations: 2,
-        },
-        keys: ["components", "magnetic", "observationCount", "result"],
-      };
-    })(),
-  };
+    keys: ["count", "peaks"],
+  },
+  search_propagation_vector: { args: { structure, peakD: [6.7, 3.35] }, keys: ["candidates"] },
+  list_magnetic_subgroups: { args: { structure, maxIndex: 4 }, keys: ["candidates"] },
+  allowed_moments: { args: { structure }, keys: ["sites"] },
+  build_magnetic_model: { args: { structure, ionLabels: ["Po1"] }, keys: ["activeSites", "bindings", "magnetic", "parameters"] },
+  refine_magnetic_powder: (() => {
+    const build = tools.build_magnetic_model({ structure, ionLabels: ["Po1"], moment: 0.5 });
+    return {
+      args: {
+        structure, magnetic: build.magnetic, pattern,
+        parameters: [...built.parameters, ...build.parameters],
+        bindings: [...built.bindings, ...build.bindings],
+        profile: built.profile,
+        maxIterations: 2,
+      },
+      keys: ["components", "magnetic", "observationCount", "parallel", "result"],
+    };
+  })(),
+};
 
+
+describe("MCP tool registry — output contract shapes", () => {
   it("every registry tool has a contract entry (add one when adding a tool)", () => {
     expect(Object.keys(CONTRACTS).sort()).toEqual(TOOL_REGISTRY.map((t) => t.name).sort());
   });
 
   for (const tool of TOOL_REGISTRY) {
-    it(`${tool.name} returns its pinned output shape`, () => {
+    it(`${tool.name} returns its pinned output shape`, async () => {
       const contract = CONTRACTS[tool.name]!;
-      const out = tool.handler(contract.args);
+      const out = await tool.handler(contract.args);
       if (Array.isArray(out)) {
         expect(contract.keys).toEqual([]); // arrays are pinned as such
       } else {

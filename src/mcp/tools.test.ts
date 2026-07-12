@@ -48,7 +48,7 @@ describe("MCP tool handlers", () => {
       expect(structure.spaceGroup.operations.length).toBeGreaterThan(0);
     });
 
-    it("runs parse → build → refine → assess → suggest and produces an expert judgment", () => {
+    it("runs parse → build → refine → assess → suggest and produces an expert judgment", async () => {
       const { structure } = parse_structure({ cif: read("GaNb4Se8_100K.cif") });
       const instrument = parse_instrument({ text: read("xrd_instrum.instprm") });
       const { pattern } = parse_powder_data({ text: read("GaNb4Se8_799_T_298.8K_gsas.dat"), filename: "GaNb4Se8.dat" });
@@ -56,7 +56,7 @@ describe("MCP tool handlers", () => {
       const built = build_refinement({ structure, pattern, instrument });
       expect(built.parameters.length).toBeGreaterThan(0);
 
-      const refined = refine_powder({ structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile, instrument });
+      const refined = await refine_powder({ structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile, instrument });
       expect(["converged", "maxIterations", "stalled"]).toContain(refined.result.status);
       expect(refined.observationCount).toBeGreaterThan(0);
       expect(refined.residual.d.length).toBe(refined.residual.yObs.length);
@@ -133,7 +133,7 @@ describe("MCP analysis primitives (no data files needed)", () => {
     expect(shortest!.distance).toBeGreaterThan(1.5);
   });
 
-  it("the magnetic solution loop closes: subgroups → allowed moments → build → refine recovers the truth", () => {
+  it("the magnetic solution loop closes: subgroups → allowed moments → build → refine recovers the truth", async () => {
     // 1. Candidate magnetic subgroups of the hexagonal Mn3Ga parent at k = 0.
     const subs = list_magnetic_subgroups({ structure, k: [0, 0, 0], maxIndex: 6 });
     expect(subs.candidates.length).toBeGreaterThan(2);
@@ -173,7 +173,7 @@ describe("MCP analysis primitives (no data files needed)", () => {
       ...nuclear.parameters.map((p) => (["scale", "background"].includes(p.kind) ? p : { ...p, fixed: true })),
       ...truth.parameters.map((p) => ({ ...p, value: startAmps[p.id]!, fixed: false })),
     ];
-    const out = refine_magnetic_powder({
+    const out = await refine_magnetic_powder({
       structure, magnetic: truth.magnetic, pattern,
       parameters: params, bindings: [...nuclear.bindings, ...truth.bindings],
       profile: nuclear.profile, maxIterations: 25,
@@ -199,7 +199,7 @@ describe("MCP analysis primitives (no data files needed)", () => {
       ...nuclear.parameters.map((p) => (["scale", "background"].includes(p.kind) ? p : { ...p, fixed: true })),
       ...truth.parameters.map((p, i) => (i === 0 ? { ...p, value: 1.0, fixed: false } : { ...p, fixed: true })),
     ];
-    const single = refine_magnetic_powder({
+    const single = await refine_magnetic_powder({
       structure, magnetic: truth.magnetic, pattern,
       parameters: oneFree, bindings: [...nuclear.bindings, ...truth.bindings],
       profile: nuclear.profile, maxIterations: 25,

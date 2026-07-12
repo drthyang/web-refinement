@@ -11,6 +11,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { TOOL_REGISTRY } from "@/mcp/registry";
+import { maybeRunAsEvaluator } from "@/mcp/nodeEvaluator";
 
 const server = new McpServer({ name: "materia", version: "0.1.0" });
 
@@ -25,7 +26,7 @@ function json(handler: (args: any) => unknown): (args: any) => Promise<{ content
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return async (args: any) => {
     try {
-      const out = handler(args);
+      const out = await handler(args);
       // MCP `structuredContent` must be a JSON object; array results (e.g.
       // suggest_next_steps) travel as text only, which clients parse back.
       const isObject = out !== null && typeof out === "object" && !Array.isArray(out);
@@ -54,7 +55,14 @@ async function main(): Promise<void> {
   process.stderr.write(`materia MCP server ready (stdio, ${TOOL_REGISTRY.length} tools)\n`);
 }
 
-main().catch((e) => {
-  process.stderr.write(`fatal: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
-  process.exit(1);
-});
+// When this bundle is re-executed as a worker thread of the evaluator pool,
+// serve evaluations instead of starting a second MCP transport.
+maybeRunAsEvaluator()
+  .then((isEvaluator) => {
+    if (!isEvaluator) return main();
+    return undefined;
+  })
+  .catch((e) => {
+    process.stderr.write(`fatal: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
+    process.exit(1);
+  });

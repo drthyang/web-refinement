@@ -38,7 +38,10 @@ import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
-import { refine } from "@/core/refinement/engine";
+import { refine, refineParallel } from "@/core/refinement/engine";
+import { createNodeEvaluatorPool } from "@/mcp/nodeEvaluator";
+import { buildProblemForSpec } from "@/workers/runPowder";
+import type { EvaluatorSpec } from "@/workers/protocol";
 import type { SymmetryOperation } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
 import type { PeakShape } from "@/core/diffraction/profile";
@@ -121,7 +124,7 @@ export function build_refinement(args: {
  * (refined values, esds, agreement, and the SVD/correlation/at-bound
  * diagnostics) plus the observation count and residual for `assess_refinement`.
  */
-export function refine_powder(args: {
+export async function refine_powder(args: {
   structure: StructureModel;
   pattern: PowderPattern;
   parameters: RefinementParameter[];
@@ -132,23 +135,57 @@ export function refine_powder(args: {
   staged?: boolean;
   fitRange?: { min: number; max: number };
   maxIterations?: number;
-}): { result: RefinementResult; observationCount: number; residual: { d: number[]; yObs: number[]; yCalc: number[] } } {
+}): Promise<{ result: RefinementResult; observationCount: number; residual: { d: number[]; yObs: number[]; yCalc: number[] }; parallel: { workers: number } | null }> {
   const shape: PeakShape = args.profile.shape;
-  const result = runPowderRefinement({
-    type: "refinePowder",
-    requestId: 0,
-    structure: args.structure,
-    ...(args.extraPhases && args.extraPhases.length ? { extraPhases: args.extraPhases } : {}),
-    pattern: args.pattern,
-    parameters: args.parameters,
-    bindings: args.bindings,
-    shape,
-    ...(args.profile.eta !== undefined ? { eta: args.profile.eta } : {}),
-    ...(args.profile.lorentz !== undefined ? { lorentz: args.profile.lorentz } : {}),
-    ...(args.profile.backgroundType !== undefined ? { backgroundType: args.profile.backgroundType } : {}),
-    ...(args.fitRange ? { fitRange: args.fitRange } : {}),
-    options: { maxIterations: args.maxIterations ?? 20 },
-  });
+  const options = { maxIterations: args.maxIterations ?? 20 };
+
+  // Parallel fast path (flat single-phase): the Jacobian columns fan out over
+  // a node worker-thread pool when the runtime supports it (the bundled MCP
+  // server does; vitest/vite-node fall back to the serial driver). The
+  // trajectory is bit-identical either way — see engineParallel.test.ts.
+  let parallel: { workers: number } | null = null;
+  let result: RefinementResult | null = null;
+  const flat = !args.staged && (!args.extraPhases || args.extraPhases.length === 0);
+  if (flat) {
+    const spec: EvaluatorSpec = {
+      kind: "powder",
+      structure: args.structure,
+      pattern: args.pattern,
+      parameters: args.parameters,
+      bindings: args.bindings,
+      shape,
+      ...(args.profile.eta !== undefined ? { eta: args.profile.eta } : {}),
+      ...(args.profile.lorentz !== undefined ? { lorentz: args.profile.lorentz } : {}),
+      ...(args.profile.backgroundType !== undefined ? { backgroundType: args.profile.backgroundType } : {}),
+      ...(args.fitRange ? { fitRange: args.fitRange } : {}),
+    };
+    const pool = await createNodeEvaluatorPool(spec);
+    if (pool) {
+      try {
+        result = await refineParallel(buildProblemForSpec(spec), options, pool);
+        parallel = { workers: pool.size };
+      } finally {
+        await pool.dispose();
+      }
+    }
+  }
+  if (!result) {
+    result = runPowderRefinement({
+      type: "refinePowder",
+      requestId: 0,
+      structure: args.structure,
+      ...(args.extraPhases && args.extraPhases.length ? { extraPhases: args.extraPhases } : {}),
+      pattern: args.pattern,
+      parameters: args.parameters,
+      bindings: args.bindings,
+      shape,
+      ...(args.profile.eta !== undefined ? { eta: args.profile.eta } : {}),
+      ...(args.profile.lorentz !== undefined ? { lorentz: args.profile.lorentz } : {}),
+      ...(args.profile.backgroundType !== undefined ? { backgroundType: args.profile.backgroundType } : {}),
+      ...(args.fitRange ? { fitRange: args.fitRange } : {}),
+      options,
+    });
+  }
 
   // Residual (obs − calc) as d-spacing arrays, so assess_refinement can scan the
   // positive residual for the missing-phase / magnetic-order signal.
@@ -158,7 +195,7 @@ export function refine_powder(args: {
   const d = args.pattern.xUnit === "dSpacing" ? [...curves.x] : convertAxisArray(curves.x, args.pattern.xUnit, "dSpacing", ctx);
   const excluded = excludedPointMask(curves.yObs);
   const observationCount = excluded.reduce((n, ex) => n + (ex ? 0 : 1), 0);
-  return { result, observationCount, residual: { d, yObs: [...curves.yObs], yCalc: [...curves.yCalc] } };
+  return { result, observationCount, residual: { d, yObs: [...curves.yObs], yCalc: [...curves.yCalc] }, parallel };
 }
 
 /**
@@ -445,7 +482,7 @@ export function build_magnetic_model(args: {
  * both golden datasets showed it). Returns the result, the refined magnetic
  * model, and the separated nuclear/magnetic component curves.
  */
-export function refine_magnetic_powder(args: {
+export async function refine_magnetic_powder(args: {
   structure: StructureModel;
   magnetic: MagneticModel;
   pattern: PowderPattern;
@@ -454,35 +491,59 @@ export function refine_magnetic_powder(args: {
   profile: PowderProfile;
   staged?: boolean;
   maxIterations?: number;
-}): {
+}): Promise<{
   result: RefinementResult;
   magnetic: MagneticModel;
   observationCount: number;
   components: { x: number[]; yObs: number[]; yNuclear: number[]; yMagnetic: number[]; yCalc: number[] };
-} {
+  parallel: { workers: number } | null;
+}> {
   const prof = { shape: args.profile.shape, ...(args.profile.eta !== undefined ? { eta: args.profile.eta } : {}) };
   const maxIterations = args.maxIterations ?? 25;
   let params = args.parameters.map((p) => ({ ...p }));
 
-  if (args.staged ?? true) {
-    // Stage 1: scale + background only; hold moments, profile, microstructure.
-    const HOLD = new Set(["momentMode", "momentX", "momentY", "momentZ", "tofProfile", "mustrainIso", "peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY"]);
-    const pass1 = params.map((p) => (HOLD.has(p.kind) ? { ...p, fixed: true } : { ...p }));
-    const r1 = refine(buildMagneticPowderProblem(args.structure, args.magnetic, args.pattern, pass1, args.bindings, prof), { maxIterations: Math.min(maxIterations, 20) });
-    params = params.map((p) => ({ ...p, value: r1.parameters[p.id] ?? p.value }));
-  }
-
-  const result = refine(buildMagneticPowderProblem(args.structure, args.magnetic, args.pattern, params, args.bindings, prof), { maxIterations });
-  const refined = params.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value }));
-  const refinedMagnetic = applyMagneticMoments(args.magnetic, args.bindings, Object.fromEntries(refined.map((p) => [p.id, p.value])));
-  const c = magneticPowderComponents(args.structure, refinedMagnetic, args.pattern, refined, args.bindings, prof);
-  const excluded = excludedPointMask(c.yObs);
-  return {
-    result,
-    magnetic: refinedMagnetic,
-    observationCount: excluded.reduce((n, ex) => n + (ex ? 0 : 1), 0),
-    components: { x: c.x, yObs: c.yObs, yNuclear: c.yNuclear, yMagnetic: c.yMagnetic, yCalc: c.yCalc },
+  // Node evaluator pool when the runtime supports it (one init serves both
+  // passes — replicas evaluate from the full values record). Serial otherwise;
+  // trajectories are bit-identical either way.
+  const spec: EvaluatorSpec = {
+    kind: "magneticPowder",
+    structure: args.structure,
+    magnetic: args.magnetic,
+    pattern: args.pattern,
+    parameters: args.parameters,
+    bindings: args.bindings,
+    shape: args.profile.shape,
+    ...(args.profile.eta !== undefined ? { eta: args.profile.eta } : {}),
   };
+  const pool = await createNodeEvaluatorPool(spec);
+  const solve = (ps: RefinementParameter[], opts: { maxIterations: number }): Promise<RefinementResult> | RefinementResult => {
+    const problem = buildMagneticPowderProblem(args.structure, args.magnetic, args.pattern, ps, args.bindings, prof);
+    return pool ? refineParallel(problem, opts, pool) : refine(problem, opts);
+  };
+  try {
+    if (args.staged ?? true) {
+      // Stage 1: scale + background only; hold moments, profile, microstructure.
+      const HOLD = new Set(["momentMode", "momentX", "momentY", "momentZ", "tofProfile", "mustrainIso", "peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY"]);
+      const pass1 = params.map((p) => (HOLD.has(p.kind) ? { ...p, fixed: true } : { ...p }));
+      const r1 = await solve(pass1, { maxIterations: Math.min(maxIterations, 20) });
+      params = params.map((p) => ({ ...p, value: r1.parameters[p.id] ?? p.value }));
+    }
+
+    const result = await solve(params, { maxIterations });
+    const refined = params.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value }));
+    const refinedMagnetic = applyMagneticMoments(args.magnetic, args.bindings, Object.fromEntries(refined.map((p) => [p.id, p.value])));
+    const c = magneticPowderComponents(args.structure, refinedMagnetic, args.pattern, refined, args.bindings, prof);
+    const excluded = excludedPointMask(c.yObs);
+    return {
+      result,
+      magnetic: refinedMagnetic,
+      observationCount: excluded.reduce((n, ex) => n + (ex ? 0 : 1), 0),
+      components: { x: c.x, yObs: c.yObs, yNuclear: c.yNuclear, yMagnetic: c.yMagnetic, yCalc: c.yCalc },
+      parallel: pool ? { workers: pool.size } : null,
+    };
+  } finally {
+    await pool?.dispose();
+  }
 }
 
 /**

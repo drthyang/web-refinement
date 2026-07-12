@@ -22,6 +22,12 @@ import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
  * single construction path.
  */
 export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
+  if (spec.kind === "multiPhasePowder") {
+    return buildMultiPhasePowderProblem([...spec.phases], spec.pattern, spec.parameters, spec.bindings, {
+      shape: spec.shape,
+      ...(spec.eta !== undefined ? { eta: spec.eta } : {}),
+    });
+  }
   if (spec.kind === "singleCrystal") {
     return buildSingleCrystalRefinementProblem(spec.structure, spec.dataset, spec.parameters, spec.bindings);
   }

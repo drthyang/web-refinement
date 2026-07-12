@@ -25,6 +25,8 @@ import { refine, refineParallel, type BatchEvaluator } from "@/core/refinement/e
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
 import { runPowderRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
+import { refineStagedAsync } from "@/core/refinement/staged";
+import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
 
 type Pending = (response: ComputeResponse) => void;
 
@@ -165,23 +167,71 @@ export class ComputeClient {
     onProgress?: PowderProgress,
   ): Promise<RefinementResult> {
     const size = this.poolSize();
-    if (size < 2 || (req.staged && req.staged.length > 0) || (req.extraPhases && req.extraPhases.length > 0)) {
+    if (size < 2) {
       return this.refinePowder(req, onProgress);
     }
-    const spec: EvaluatorSpec = {
-      kind: "powder",
-      structure: req.structure,
-      pattern: req.pattern,
-      parameters: req.parameters,
-      bindings: req.bindings,
-      ...(req.restraints ? { restraints: req.restraints } : {}),
-      shape: req.shape,
-      ...(req.eta !== undefined ? { eta: req.eta } : {}),
-      ...(req.lorentz !== undefined ? { lorentz: req.lorentz } : {}),
-      ...(req.backgroundType !== undefined ? { backgroundType: req.backgroundType } : {}),
-      ...(req.fitRange ? { fitRange: req.fitRange } : {}),
-    };
+    const multiPhase = req.extraPhases && req.extraPhases.length > 0;
+    const spec: EvaluatorSpec = multiPhase
+      ? {
+          kind: "multiPhasePowder",
+          phases: [{ structure: req.structure, id: req.structure.id }, ...req.extraPhases!.map((st) => ({ structure: st, id: st.id }))],
+          pattern: req.pattern,
+          parameters: req.parameters,
+          bindings: req.bindings,
+          shape: req.shape,
+          ...(req.eta !== undefined ? { eta: req.eta } : {}),
+        }
+      : {
+          kind: "powder",
+          structure: req.structure,
+          pattern: req.pattern,
+          parameters: req.parameters,
+          bindings: req.bindings,
+          ...(req.restraints ? { restraints: req.restraints } : {}),
+          shape: req.shape,
+          ...(req.eta !== undefined ? { eta: req.eta } : {}),
+          ...(req.lorentz !== undefined ? { lorentz: req.lorentz } : {}),
+          ...(req.backgroundType !== undefined ? { backgroundType: req.backgroundType } : {}),
+          ...(req.fitRange ? { fitRange: req.fitRange } : {}),
+        };
+    if (req.staged && req.staged.length > 0) {
+      // Staged sequence with every stage's Jacobian on the pool. One init
+      // serves all stages: replicas evaluate from the full values record, so
+      // stage-local fixed flags and carried values never touch them.
+      return this.runStagedParallel(spec, req.staged, req.options ?? {}, req.pattern.points.length, onProgress);
+    }
     return this.runParallel(spec, req.options ?? {}, req.pattern.points.length, onProgress);
+  }
+
+  private async runStagedParallel(
+    spec: EvaluatorSpec,
+    staged: RefinePowderRequest["staged"] & object,
+    options: Partial<RefinementOptions>,
+    patternLen: number,
+    onProgress?: PowderProgress,
+  ): Promise<RefinementResult> {
+    const pool = new EvaluatorPool(this.poolSize());
+    this.activePool = pool;
+    try {
+      await pool.init(spec);
+      const onIteration = onProgress
+        ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
+            onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
+        : undefined;
+      const opts = { ...options, ...(onIteration ? { onIteration } : {}) };
+      const out = await refineStagedAsync(
+        spec.parameters,
+        (params) => buildProblemForSpec({ ...spec, parameters: [...params] }),
+        stagesFromKindGroups(staged),
+        opts,
+        (problem, o) => refineParallel(problem, o, pool),
+      );
+      if (!out.final) throw new Error("staged refinement unlocked no parameters");
+      return out.final;
+    } finally {
+      pool.dispose();
+      if (this.activePool === pool) this.activePool = null;
+    }
   }
 
   /** Nuclear + magnetic powder co-refinement through the evaluator pool. */

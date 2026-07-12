@@ -13,7 +13,7 @@ import type { ProfilePeak, ProfileOptions, PeakShape } from "@/core/diffraction/
 import { weightsFromSigma } from "@/core/refinement/factors";
 import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters } from "@/core/workflow/apply";
-import { buildPeaks } from "@/core/workflow/powder";
+import { buildPeaks, createPeakBuilder } from "@/core/workflow/powder";
 import { synthesizePattern } from "@/core/diffraction/profile";
 
 export interface PowderPhase {
@@ -85,9 +85,29 @@ export function buildMultiPhasePowderProblem(
   const weights = weightsFromSigma(
     pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1)),
   );
+  // Per-phase cached peak builders (see createPeakBuilder): each phase's
+  // structure factors are reused whenever none of ITS geometry parameters
+  // moved — a derivative column for phase A's cell leaves phase B's peaks
+  // cached, and profile/scale/background columns reuse both.
+  const phaseBuilders = phases.map((phase) => {
+    const phaseBindings = phaseBindingsFor(bindings, phase.id);
+    return { phase, phaseBindings, peaksFor: createPeakBuilder(pattern, phaseBindings, true) };
+  });
   const calculate = (values: Readonly<Record<string, number>>): Float64Array => {
     const resolved = resolveTies(parameters, values);
-    return computePattern(phases, pattern, bindings, resolved, xValues, profile);
+    const allPeaks: ProfilePeak[] = [];
+    let background: number[] = [];
+    for (const b of phaseBuilders) {
+      const applied = applyParameters(b.phase.structure, b.phaseBindings, resolved);
+      allPeaks.push(...b.peaksFor(applied, resolved));
+      if (applied.background.length) background = applied.background;
+    }
+    const opts: ProfileOptions = {
+      shape: profile.shape,
+      ...(profile.eta !== undefined ? { eta: profile.eta } : {}),
+      ...(background.length ? { background } : {}),
+    };
+    return synthesizePattern(xValues, allPeaks, opts);
   };
   return { parameters, observations, weights, calculate };
 }

@@ -102,3 +102,53 @@ function emptyStage(): RefinementResult {
     message: "Stage unlocked no new parameters.",
   };
 }
+
+
+/** A refinement runner: the serial `refine` or a parallel/pooled variant. */
+export type StagedRefiner = (
+  problem: RefinementProblem,
+  options: Partial<RefinementOptions>,
+) => RefinementResult | Promise<RefinementResult>;
+
+/**
+ * `refineStaged` with an injectable (possibly async) refiner, so the staged
+ * sequence can run each stage through the parallel evaluator pool. The loop
+ * body mirrors `refineStaged` exactly — `staged.test.ts` pins the two to
+ * identical results when given the serial refiner.
+ */
+export async function refineStagedAsync(
+  parameters: readonly RefinementParameter[],
+  buildProblem: (params: readonly RefinementParameter[]) => RefinementProblem,
+  stages: readonly RefinementStage[],
+  options: Partial<RefinementOptions> = {},
+  refiner: StagedRefiner = refine,
+): Promise<StagedRefinementResult> {
+  const work: RefinementParameter[] = parameters.map((p) => ({ ...p }));
+  const lockedByCaller = new Set(parameters.filter((p) => p.fixed).map((p) => p.id));
+  const freed = new Set<string>();
+  const stageResults: StageResult[] = [];
+  let final: RefinementResult | undefined;
+
+  for (const stage of stages) {
+    for (const p of work) {
+      if (!lockedByCaller.has(p.id) && stage.select(p)) freed.add(p.id);
+    }
+    const freeIds = work.filter((p) => freed.has(p.id)).map((p) => p.id);
+    if (freeIds.length === 0) {
+      stageResults.push({ name: stage.name, freeIds: [], result: emptyStage() });
+      continue;
+    }
+    for (const p of work) p.fixed = !freed.has(p.id);
+    const result = await refiner(buildProblem(work), options);
+    for (const p of work) {
+      const v = result.parameters[p.id];
+      if (v !== undefined) p.value = v;
+      const e = result.esd[p.id];
+      if (e !== undefined) p.esd = e;
+    }
+    stageResults.push({ name: stage.name, freeIds, result });
+    final = result;
+  }
+
+  return { parameters: work, stages: stageResults, ...(final !== undefined ? { final } : {}) };
+}
