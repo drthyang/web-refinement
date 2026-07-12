@@ -308,14 +308,57 @@ export function synthesizePattern(
     }
   }
   for (let i = 0; i < xValues.length; i++) {
-    const x = xValues[i]!;
-    let sum = evaluateBackground(x, opts.background, bgType, xMin, xMax);
-    for (const peak of peaks) {
-      // Skip peaks far outside their effective support for efficiency.
-      if (Math.abs(x - peak.center) > 20 * peak.fwhm) continue;
-      sum += peak.intensity * shapeAt(x, peak, opts);
+    y[i] = evaluateBackground(xValues[i]!, opts.background, bgType, xMin, xMax);
+  }
+
+  // Each peak contributes only within ±20 FWHM of its center. On a monotonic
+  // grid (every real diffractogram) that support window is found by binary
+  // search, making the cost Σ(window widths) instead of points × peaks — the
+  // point-major loop with a per-pair distance test was >90% of every
+  // refinement evaluation on synchrotron-scale data (20k points × 5k peaks).
+  const n = xValues.length;
+  const ascending = n < 2 || xValues[0]! <= xValues[n - 1]!;
+  let monotonic = true;
+  for (let i = 1; i < n; i++) {
+    if (ascending ? xValues[i]! < xValues[i - 1]! : xValues[i]! > xValues[i - 1]!) {
+      monotonic = false;
+      break;
     }
-    y[i] = sum;
+  }
+
+  if (monotonic) {
+    // First index whose x is inside the window approaching from the low side.
+    const lowerBound = (v: number): number => {
+      let lo = 0;
+      let hi = n;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (ascending ? xValues[mid]! < v : xValues[mid]! > v) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    for (const peak of peaks) {
+      const half = 20 * peak.fwhm;
+      const start = lowerBound(ascending ? peak.center - half : peak.center + half);
+      for (let i = start; i < n; i++) {
+        const x = xValues[i]!;
+        if (ascending ? x > peak.center + half : x < peak.center - half) break;
+        y[i] = y[i]! + peak.intensity * shapeAt(x, peak, opts);
+      }
+    }
+  } else {
+    // Non-monotonic grid: fall back to the point-major loop (the parsers never
+    // produce one, but synthetic callers might).
+    for (let i = 0; i < n; i++) {
+      const x = xValues[i]!;
+      let sum = 0;
+      for (const peak of peaks) {
+        if (Math.abs(x - peak.center) > 20 * peak.fwhm) continue;
+        sum += peak.intensity * shapeAt(x, peak, opts);
+      }
+      y[i] = y[i]! + sum;
+    }
   }
   return y;
 }
