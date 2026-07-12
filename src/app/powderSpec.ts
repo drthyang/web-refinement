@@ -13,6 +13,8 @@ import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
+import { estimateBackground, evaluateBackground } from "@/core/diffraction/background";
+import { estimateZeroShift } from "@/core/workflow/startingValues";
 import { buildStructureRefinement } from "@/core/workflow/structureRefinement";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import { optimalScale } from "@/app/loadData";
@@ -93,6 +95,72 @@ export interface SiteTies {
  */
 export type MustrainModel = "isotropic" | "uniaxial" | "generalized";
 
+
+/**
+ * Robust automatic starting values (roadmap F1.3): background from the data's
+ * lower envelope, THEN the scale against the background-subtracted counts,
+ * plus (CW only) a zero-shift sanity check by cross-correlation. Seeding the
+ * background before the scale prevents the classic false basin where the
+ * auto-scale absorbs the background level into the peaks.
+ */
+function seedStartingValues(
+  structure: StructureModel,
+  pattern: PowderPattern,
+  seedParams: readonly RefinementParameter[],
+  seedBindings: readonly ParameterBinding[],
+  profile: PowderProfile,
+  backgroundTerms: number,
+  checkZero: boolean,
+): { background: number[]; scale: number; zeroDelta: number } {
+  const xs = pattern.points.map((pt) => pt.x);
+  const yObs = pattern.points.map((pt) => pt.yObs);
+  const bkgType = profile.backgroundType ?? "chebyshev";
+  const background = estimateBackground(xs, yObs, bkgType, backgroundTerms);
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  for (const x of xs) {
+    if (x < xMin) xMin = x;
+    if (x > xMax) xMax = x;
+  }
+  const net = yObs.map((y, i) => y - evaluateBackground(xs[i]!, background, bkgType, xMin, xMax));
+
+  // Peaks-only calculated curve (zero background) at unit scale.
+  const peaksOnly = seedParams.map((pp) => (pp.kind === "background" ? { ...pp, value: 0 } : pp));
+  let curves = powderCurves(structure, pattern, peaksOnly, seedBindings, profile);
+
+  // Zero-shift sanity (2θ only): apply only a significant, sane shift.
+  let zeroDelta = 0;
+  if (checkZero && xs.length > 32) {
+    const { shift, gain } = estimateZeroShift(xs, net, [...curves.yCalc]);
+    const dx = (xMax - xMin) / (xs.length - 1);
+    if (gain > 0.05 && Math.abs(shift) > 2 * dx) {
+      zeroDelta = shift;
+      const shifted = peaksOnly.map((pp) => (pp.kind === "zeroShift" ? { ...pp, value: pp.value + shift } : pp));
+      curves = powderCurves(structure, pattern, shifted, seedBindings, profile);
+    }
+  }
+  const scale = optimalScale(net.map((v) => (v > 0 ? v : 0)), curves.yCalc);
+  return { background, scale, zeroDelta };
+}
+
+/** Overlay seeded background/zero values onto a freshly built parameter set. */
+function applySeeds(
+  params: readonly RefinementParameter[],
+  seeds: { background: number[]; zeroDelta: number },
+): RefinementParameter[] {
+  let bkgIdx = 0;
+  return params.map((pp) => {
+    if (pp.kind === "background") {
+      const v = seeds.background[bkgIdx++] ?? 0;
+      return { ...pp, value: v, initialValue: v };
+    }
+    if (pp.kind === "zeroShift" && seeds.zeroDelta !== 0) {
+      return { ...pp, value: pp.value + seeds.zeroDelta, initialValue: pp.initialValue + seeds.zeroDelta };
+    }
+    return pp;
+  });
+}
+
 export function buildPowderSpec(
   structure: StructureModel,
   pattern: PowderPattern,
@@ -145,10 +213,9 @@ export function buildPowderSpec(
     const zero = instrument.zero ?? 0;
     const profile: PowderProfile = { shape: "tof" };
     const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, tof, ...microOpt, refineOccupancy: true, ...tieOpts });
-    const seedCurves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
-    const s = optimalScale(seedCurves.yObs.map((y) => (y > 0 ? y : 0)), seedCurves.yCalc);
-    const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, tof, ...microOpt, refineOccupancy: true, ...tieOpts });
-    const params = spec.params.map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
+    const seeds = seedStartingValues(structure, pattern, seed.params, seed.bindings, profile, backgroundTerms, false);
+    const spec = buildStructureRefinement(structure, pattern, { scale: seeds.scale, backgroundTerms, zero, tof, ...microOpt, refineOccupancy: true, ...tieOpts });
+    const params = applySeeds(spec.params, seeds).map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
     return { params, bindings: spec.bindings, profile };
   }
 
@@ -171,10 +238,10 @@ export function buildPowderSpec(
   // stage. Only fall back to X=1 when the file gives no Lorentzian at all.
   // (Seeding 11-BM's real X≈0.17 vs the old placeholder X=1 takes wR 52%→~19%.)
   const profOpt = caglioti ? { caglioti, lorentzian: { x: cw?.x ?? 1, y: cw?.y ?? 0 } } : {};
-  // Seed the scale from the data with a unit-scale evaluation.
+  // Seed background (lower envelope) → zero sanity → scale, in that order.
   const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, ...profOpt, refineOccupancy: true, ...tieOpts });
-  const curves = powderCurves(structure, pattern, seed.params, seed.bindings, profile);
-  const s = optimalScale(curves.yObs.map((y) => (y > 0 ? y : 0)), curves.yCalc);
+  const seeds = seedStartingValues(structure, pattern, seed.params, seed.bindings, profile, backgroundTerms, pattern.xUnit === "twoTheta");
+  const s = seeds.scale;
 
   // Stephens (1999) anisotropic microstrain: one S-parameter per symmetry-allowed
   // quartic invariant, adding hkl-dependent Gaussian broadening. 2θ CW only, and
@@ -186,7 +253,7 @@ export function buildPowderSpec(
     : caglioti && mustrain === "uniaxial" ? { uniaxialStrain: { axis: [0, 0, 1] as [number, number, number] } }
     : {};
   const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, ...microOpt, refineOccupancy: true, ...tieOpts });
-  const params = spec.params.map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
+  const params = applySeeds(spec.params, seeds).map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
   return { params, bindings: spec.bindings, profile };
 }
 

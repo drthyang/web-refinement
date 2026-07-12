@@ -22,7 +22,7 @@ import { dataExists, readData } from "@/testSupport/data";
  * background. Skips when the git-ignored data/ folder is absent.
  */
 
-const DIR = "GaNb4Se8_XRD_28ID";
+const DIR = "GaNb4Se8_XRD";
 const CIF = `${DIR}/GaNb4Se8_100K.cif`;
 const DAT = `${DIR}/GaNb4Se8_799_T_298.8K_gsas.dat`;
 const INSTPRM = `${DIR}/xrd_instrum.instprm`;

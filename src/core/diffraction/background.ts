@@ -189,3 +189,107 @@ export function evaluateBackground(
       return polynomialBackground(x, coeffs);
   }
 }
+
+/**
+ * Estimate background coefficients from the data's LOWER ENVELOPE — the robust
+ * automatic starting value (roadmap F1.3). Peaks only ever add intensity, so a
+ * low percentile of the observed counts inside each of ~2n windows tracks the
+ * background; the chosen basis is then least-squares fitted to those envelope
+ * points. Interpolation bases take the envelope heights directly.
+ *
+ * Seeding the background BEFORE the scale matters: with a zero background
+ * seed, the auto-scale absorbs the background level into the peaks and the
+ * refinement starts in a false basin (the classic over-scaled start).
+ */
+export function estimateBackground(
+  xValues: readonly number[],
+  yObs: readonly number[],
+  type: BackgroundType,
+  nTerms: number,
+): number[] {
+  const n = Math.min(xValues.length, yObs.length);
+  if (n === 0 || nTerms <= 0) return new Array<number>(Math.max(nTerms, 0)).fill(0);
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = xValues[i]!;
+    if (x < xMin) xMin = x;
+    if (x > xMax) xMax = x;
+  }
+
+  // Lower-envelope anchors: the 10th percentile of each window (min is too
+  // noise-sensitive; a low percentile is robust to a few undershooting points).
+  const nWindows = Math.max(8, 2 * nTerms + 4);
+  const anchors: { x: number; y: number }[] = [];
+  const perWindow = Math.max(4, Math.floor(n / nWindows));
+  for (let w = 0; w < nWindows; w++) {
+    const start = Math.floor((w * n) / nWindows);
+    const end = Math.min(n, Math.max(start + perWindow, Math.floor(((w + 1) * n) / nWindows)));
+    if (end <= start) continue;
+    const ys: number[] = [];
+    let xSum = 0;
+    for (let i = start; i < end; i++) {
+      ys.push(yObs[i]!);
+      xSum += xValues[i]!;
+    }
+    ys.sort((a, b) => a - b);
+    anchors.push({ x: xSum / (end - start), y: ys[Math.floor(ys.length * 0.1)]! });
+  }
+  if (anchors.length === 0) return new Array<number>(nTerms).fill(0);
+
+  if (type === "linInterpolate" || type === "logInterpolate") {
+    // Interpolation coefficients ARE background heights at n equidistant
+    // anchor points: read the envelope at those positions directly.
+    const out: number[] = [];
+    for (let k = 0; k < nTerms; k++) {
+      const xk = nTerms === 1 ? (xMin + xMax) / 2 : xMin + (k * (xMax - xMin)) / (nTerms - 1);
+      let best = anchors[0]!;
+      for (const a of anchors) if (Math.abs(a.x - xk) < Math.abs(best.x - xk)) best = a;
+      out.push(type === "logInterpolate" ? Math.max(best.y, 1e-6) : best.y);
+    }
+    return out;
+  }
+
+  // Least-squares fit of the basis to the envelope anchors: normal equations
+  // over the per-term basis functions (evaluate each term via a unit vector).
+  const m = anchors.length;
+  const design: number[][] = anchors.map((a) =>
+    Array.from({ length: nTerms }, (_, t) => {
+      const unit = new Array<number>(nTerms).fill(0);
+      unit[t] = 1;
+      return evaluateBackground(a.x, unit, type, xMin, xMax);
+    }),
+  );
+  const ata: number[][] = Array.from({ length: nTerms }, () => new Array<number>(nTerms).fill(0));
+  const atb = new Array<number>(nTerms).fill(0);
+  for (let i = 0; i < m; i++) {
+    for (let a = 0; a < nTerms; a++) {
+      atb[a]! += design[i]![a]! * anchors[i]!.y;
+      for (let b = a; b < nTerms; b++) ata[a]![b]! += design[i]![a]! * design[i]![b]!;
+    }
+  }
+  for (let a = 0; a < nTerms; a++) for (let b = 0; b < a; b++) ata[a]![b] = ata[b]![a]!;
+  // Tiny ridge for stability on short patterns; Gaussian elimination.
+  for (let a = 0; a < nTerms; a++) ata[a]![a]! += 1e-9 * (ata[a]![a]! || 1);
+  const coeffs = solveDense(ata, atb);
+  return coeffs ?? new Array<number>(nTerms).fill(0);
+}
+
+/** Solve A·x = b (dense, symmetric positive-ish) by Gaussian elimination with
+ *  partial pivoting; null when singular. Small n only (background terms). */
+function solveDense(A: number[][], b: number[]): number[] | null {
+  const n = b.length;
+  const M = A.map((row, i) => [...row, b[i]!]);
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(M[r]![col]!) > Math.abs(M[piv]![col]!)) piv = r;
+    if (Math.abs(M[piv]![col]!) < 1e-14) return null;
+    [M[col], M[piv]] = [M[piv]!, M[col]!];
+    for (let r = 0; r < n; r++) {
+      if (r === col) continue;
+      const f = M[r]![col]! / M[col]![col]!;
+      for (let c = col; c <= n; c++) M[r]![c]! -= f * M[col]![c]!;
+    }
+  }
+  return M.map((row, i) => row[n]! / M[i]![i]!);
+}

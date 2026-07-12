@@ -97,13 +97,19 @@ describe("powderReflectionObsCalc — near-absent reflections excluded", () => {
 
   it("keeps genuinely weak-but-present reflections", () => {
     // The dataset has real weak reflections (F_calc ~ 0.4–0.8) well above the
-    // near-absence floor; the filter must not remove them.
+    // near-absence floor; the filter must not remove them. With the background
+    // seeded from the data's lower envelope (F1.3) the apportioned F_obs is no
+    // longer inflated by background counts, so a few noise-level rows may
+    // legitimately come out ≈0 or slightly negative — exactly as Rietveld
+    // F_obs extraction reports them — but the population must stay present and
+    // overwhelmingly positive.
     const weakReal = rows.filter((r) => {
       const fc = Math.sqrt(Math.max(r.iCalc, 0));
       return fc > 0.2 && fc < 2;
     });
     expect(weakReal.length).toBeGreaterThan(0);
-    expect(weakReal.every((r) => Math.sqrt(Math.max(r.iObs, 0)) > 0)).toBe(true);
+    const positive = weakReal.filter((r) => r.iObs > 0).length;
+    expect(positive / weakReal.length).toBeGreaterThan(0.9);
   });
 });
 

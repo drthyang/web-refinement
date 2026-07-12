@@ -151,7 +151,7 @@ describe("discovery helpers", () => {
 
 // Golden validation against real International Tables data: the built F-4̄3m must
 // reproduce the GaNb₄Se₈ CIF's 96 operations exactly (as a set, mod lattice).
-const CIF = "GaNb4Se8_XRD_28ID/GaNb4Se8_100K.cif";
+const CIF = "GaNb4Se8_XRD/GaNb4Se8_100K.cif";
 describe.skipIf(!dataExists(CIF))("golden: F-4̄3m vs GaNb₄Se₈ CIF", () => {
   it("generators reproduce the CIF operation set exactly", () => {
     const parsed = parseCif(readData(CIF));

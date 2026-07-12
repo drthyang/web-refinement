@@ -14,7 +14,7 @@ import { dataExists, readData } from "@/testSupport/data";
  * the git-ignored data/ folder is absent.
  */
 
-const DIR = "GaNb4Se8_XRD_28ID";
+const DIR = "GaNb4Se8_XRD";
 const CIF = `${DIR}/GaNb4Se8_100K.cif`;
 const REFL = `${DIR}/gsas_reflections.csv`;
 const has = dataExists(CIF) && dataExists(REFL);

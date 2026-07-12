@@ -23,7 +23,7 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
  * (roadmap M1). Skips when the git-ignored data/ folder is absent.
  */
 
-const DIR = "GaNb4Se8_XRD_28ID";
+const DIR = "GaNb4Se8_XRD";
 const CIF = `${DIR}/GaNb4Se8_100K.cif`;
 const REF = `${DIR}/GaNb4Se8_goodfit_298K.csv`;
 const has = dataExists(CIF) && dataExists(REF);
