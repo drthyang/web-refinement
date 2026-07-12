@@ -140,6 +140,49 @@ export function nuclearStructureFactor(
   return f;
 }
 
+/**
+ * The nuclear structure factor together with its PER-SITE decomposition —
+ * the shared ingredient of the analytic occupancy and B_iso derivatives
+ * (roadmap F1.1):  F = Σ_j occ_j·b_j·DW_j·(Σ_ops e^{iφ}), so
+ *   ∂F/∂occ_j = unitSite_j            (occupancy excluded from unitSite)
+ *   ∂F/∂B_j   = −s²·occ_j·unitSite_j  (isotropic sites only)
+ * and ∂|F|²/∂p = 2·Re(conj(F)·∂F/∂p). Costs the same as one F evaluation.
+ */
+export function nuclearStructureFactorPartials(
+  model: StructureModel,
+  radiation: Radiation,
+  h: number,
+  k: number,
+  l: number,
+  table: ScatteringTable = scatteringTableFor(radiation),
+): {
+  f: Complex;
+  s: number;
+  perSite: { label: string; unitSite: Complex; occupancy: number; isotropic: boolean }[];
+} {
+  const d = dSpacing(model.cell, h, k, l);
+  const s = d === Infinity ? 0 : 1 / (2 * d);
+  let f = ZERO;
+  const perSite: { label: string; unitSite: Complex; occupancy: number; isotropic: boolean }[] = [];
+  for (const site of model.sites) {
+    const b = table.factor(site.element, s, site.isotope);
+    const dw =
+      site.adp.kind === "isotropic"
+        ? debyeWaller(site.adp.bIso, s)
+        : anisotropicDebyeWaller(model.cell, site.adp.uAniso, h, k, l);
+    let sum = ZERO;
+    for (const op of distinctSiteOps(model.spaceGroup.operations, site.position)) {
+      const p = applyOperation(op, site.position);
+      const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
+      sum = add(sum, expι(phase));
+    }
+    const unitSite = scale(sum, b * dw);
+    perSite.push({ label: site.label, unitSite, occupancy: site.occupancy, isotropic: site.adp.kind === "isotropic" });
+    f = add(f, scale(unitSite, site.occupancy));
+  }
+  return { f, s, perSite };
+}
+
 /** |F_N|². */
 export function nuclearStructureFactorSquared(
   model: StructureModel,

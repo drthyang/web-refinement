@@ -32,6 +32,22 @@ export interface RefinementProblem {
   readonly observations: Float64Array;
   readonly weights: Float64Array;
   readonly calculate: (values: Readonly<Record<string, number>>) => Float64Array;
+  /**
+   * Optional analytic derivatives (roadmap F1.1). Given the current free
+   * parameters and their values, return ∂calc/∂p (in *calculated-pattern* space,
+   * length = observations.length) for each free parameter the problem can
+   * differentiate in closed form, or `null` for the ones it cannot — those fall
+   * back to the finite-difference column. The engine folds in the −√w residual
+   * factor, so a provider returns the raw model derivative and never has to know
+   * the weighting or sign convention. An analytic column contributes NO
+   * evaluation batch, so it is free of finite-difference truncation error and
+   * costs the parallel evaluator nothing. Every analytic kind is kept honest by
+   * an analytic-vs-finite-difference agreement test (analyticJacobian.test.ts).
+   */
+  readonly analyticColumns?: (
+    freeParams: readonly RefinementParameter[],
+    freeValues: readonly number[],
+  ) => (Float64Array | null)[];
 }
 
 const DEFAULT_OPTIONS: RefinementOptions = {
@@ -156,6 +172,12 @@ interface JacobianColumnPlan {
   readonly forward: number;
   /** Index of the backward evaluation (central difference), −1 for linear. */
   readonly backward: number;
+  /**
+   * Closed-form ∂calc/∂p for this column (roadmap F1.1). When present the column
+   * needs no evaluation batch — `forward`/`backward` are −1 and `assembleJacobian`
+   * folds in the −√w factor directly.
+   */
+  readonly analytic?: Float64Array;
 }
 
 /**
@@ -173,8 +195,18 @@ function jacobianPlan(
   const freeIds = freeParams.map((p) => p.id);
   const sets: Record<string, number>[] = [];
   const plan: JacobianColumnPlan[] = [];
+  // Ask the problem for closed-form columns up front (roadmap F1.1); each entry
+  // is either an exact ∂calc/∂p (no evaluation batch needed) or null → finite
+  // difference below. Providing analytic columns is purely additive: an unaware
+  // problem leaves `analyticColumns` undefined and every column stays FD.
+  const analytic = problem.analyticColumns?.(freeParams, freeValues);
   for (let j = 0; j < freeValues.length; j++) {
     const base = freeValues[j]!;
+    const analyticCol = analytic?.[j];
+    if (analyticCol) {
+      plan.push({ j, linear: false, h: 0, forward: -1, backward: -1, analytic: analyticCol });
+      continue;
+    }
     if (isLinear(freeParams[j]!)) {
       const h = Math.max(1, Math.abs(base));
       const forward = [...freeValues];
@@ -224,7 +256,13 @@ function assembleJacobian(
   for (let i = 0; i < m; i++) sqrtW[i] = Math.sqrt(problem.weights[i]!);
 
   for (const col of plan) {
-    if (col.linear) {
+    if (col.analytic) {
+      // Closed-form ∂calc/∂p (roadmap F1.1); apply the same −√w residual factor
+      // the finite-difference branches do, so analytic and FD columns are
+      // interchangeable in the assembled Jacobian.
+      const d = col.analytic;
+      for (let i = 0; i < m; i++) jac[i]![col.j] = -sqrtW[i]! * d[i]!;
+    } else if (col.linear) {
       const yF = results[col.forward]!;
       for (let i = 0; i < m; i++) {
         // r = √w·(obs − calc) ⇒ ∂r/∂p = −√w·∂calc/∂p.

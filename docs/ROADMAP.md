@@ -90,33 +90,47 @@ solid before the milestones can be trusted.
 
 The engine is capable but still fragile on hard real data. Close these, in order:
 
-1. **Analytic derivatives for the crystallographic model** ⬜ — the single
-   biggest stability + speed win. Today every non-linear parameter uses a central
-   finite difference (2 model evaluations/column). Add exact columns for
-   coordinates, occupancies, B_iso, cell, profile width, zero-shift, and moment
-   components (analytic where practical, validated against finite differences).
-2. **Reflection-window evaluation + dependency caching** ⬜ — accumulate each
-   reflection only over its local `±n·FWHM` window, and invalidate caches by
-   dependency (cell → d-spacings; positions → structure factors; scale → reuse
-   everything). Turns dense global sums into sparse local ones; prerequisite for
-   larger problems and for analytic Jacobian columns.
-3. **Robust automatic starting values** ⬜ — auto-scale (✅), plus
-   auto-background from the data's lower envelope and a zero-shift/peak-position
-   sanity check, so refinement does not start in a false basin.
-4. **Dual convergence + automated staged controller** 🚧 — converge on *both*
-   Δχ² and max parameter shift; the staged controller exists
-   ([`refinement/staged.ts`](../src/core/refinement/staged.ts)) but should reject
-   parameter additions that raise esds or blow up correlations.
-5. **Automated next-parameter diagnostic** ⬜ — rank inactive parameter groups by
-   expected χ² improvement (perturb ±δ, measure residual sensitivity). This is
-   also the **first agent-in-the-loop hook** (see §5).
+1. **Analytic derivatives for the crystallographic model** 🚧 — the single
+   biggest stability + speed win. The framework is in
+   ([`RefinementProblem.analyticColumns`](../src/core/refinement/engine.ts)):
+   `jacobianPlan` consults it per free parameter and falls back to the central
+   finite difference for any column the problem does not supply — so analytic
+   columns are purely additive, cost the parallel evaluator nothing, and every
+   kind is gated by an analytic-vs-FD agreement test
+   ([`analyticJacobian.test.ts`](../src/core/workflow/analyticJacobian.test.ts)).
+   Validated kinds: **site occupancy and isotropic B_iso** (coupling-free — the
+   derivative flows only through `|F|²`, so the shared profile spreads the
+   derivative intensities). Remaining as follow-ups behind the same gate:
+   coordinates, cell, profile width, zero-shift (couples to width via Caglioti),
+   and moment components.
+2. **Reflection-window evaluation + dependency caching** ✅ — each reflection is
+   accumulated only over its local `±20·FWHM` window (binary-searched on the
+   monotonic grid), and the structure-factor stage is reused whenever no
+   geometry parameter moved (single-entry geometry cache in
+   [`workflow/powder.ts`](../src/core/workflow/powder.ts), scale multiplied last
+   for bit-identity). Dense global sums became sparse local ones.
+3. **Robust automatic starting values** ✅ — auto-scale, plus auto-background
+   from the data's lower envelope and a zero-shift/peak-position sanity check
+   ([`workflow/startingValues.ts`](../src/core/workflow/startingValues.ts)), so
+   refinement does not start in a false basin.
+4. **Dual convergence + automated staged controller** ✅ — converges on *both*
+   Δχ² and max parameter shift; the staged controller
+   ([`refinement/staged.ts`](../src/core/refinement/staged.ts)) now re-fixes
+   parameter additions that turn singular or raise esds/correlations, keeping the
+   stage's other gains ([`stagedGuards.test.ts`](../src/core/refinement/stagedGuards.test.ts)).
+5. **Automated next-parameter diagnostic** ✅ — ranks inactive parameter groups
+   by expected χ² improvement (Gauss–Newton drop from the probed columns)
+   ([`workflow/nextParameters.ts`](../src/core/workflow/nextParameters.ts)),
+   exposed as the `rank_next_parameters` MCP tool. This is the **first
+   agent-in-the-loop hook** (see §5).
 6. **Optional global search for starting models** ⬜ — Monte Carlo / simulated
    annealing, *only* to generate candidates (bad initial model, magnetic
    sign/phase ambiguity), never as the main engine. Feeds M2 and M4.
 
-*Validation gate:* the GaNb₄Se₈ regression tightens toward the GSAS-II wR;
-analytic-vs-finite-difference Jacobian agreement test; SVD duplicate-parameter
-suppression test.
+*Validation gate:* the GaNb₄Se₈ regression tightens toward the GSAS-II wR (✅
+staged wR 5.8% vs GSAS-II 7.34%); analytic-vs-finite-difference Jacobian
+agreement test (✅ occupancy, B_iso); SVD duplicate-parameter suppression test
+(✅ [`engine.test.ts`](../src/core/refinement/engine.test.ts)).
 
 ### F2 — Symmetry-constrained parameterization
 

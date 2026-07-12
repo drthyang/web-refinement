@@ -16,7 +16,8 @@ import { weightsFromSigma, excludedPointMask, applyExclusionMask, fitRangeMask }
 import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters, type AppliedModel } from "@/core/workflow/apply";
 import { generateReflections } from "@/core/diffraction/reflections";
-import { powderPeakIntensities, cylinderAbsorption } from "@/core/diffraction/intensity";
+import { powderPeakIntensities, cylinderAbsorption, lorentzPolarization, marchDollase } from "@/core/diffraction/intensity";
+import { nuclearStructureFactorPartials } from "@/core/diffraction/structureFactor";
 import { braggTheta } from "@/core/crystal/unitCell";
 import { dFromTof } from "@/core/diffraction/instrument";
 import { synthesizePattern, cagliotiFwhm, lorentzianFwhm, tchPseudoVoigt, fcjSubPeaks, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
@@ -296,6 +297,50 @@ export function placePeaks(
   return peaks;
 }
 
+/**
+ * Per-reflection ∂(integrated intensity)/∂p for one nuclear structural
+ * parameter — the occupancy or isotropic B_iso of a single site (roadmap F1.1).
+ * The derivative flows only through |F|²; peak positions and widths do not
+ * depend on occupancy or B_iso, so the caller spreads these derivative
+ * intensities with the ordinary profile to get ∂yCalc/∂p. The intensity
+ * prefactor (multiplicity·Lp·PO·scale) is rebuilt from the very same helpers
+ * `powderPeakIntensities` uses, so the analytic column is consistent with the
+ * forward model by construction — the analytic-vs-FD test just confirms it.
+ */
+function nuclearDerivativeIntensities(
+  applied: AppliedModel,
+  pattern: PowderPattern,
+  kind: "occupancy" | "bIso",
+  siteLabels: readonly string[],
+  applyLorentz: boolean,
+): { d: number; intensity: number; h: number; k: number; l: number }[] {
+  const { dMin, dMax } = reflectionDRange(pattern, applied);
+  const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax);
+  const radiation = pattern.radiation;
+  const labels = new Set(siteLabels);
+  const out: { d: number; intensity: number; h: number; k: number; l: number }[] = [];
+  for (const r of reflections) {
+    const { f, s, perSite } = nuclearStructureFactorPartials(applied.model, radiation, r.h, r.k, r.l);
+    // A parameter bound to several symmetry-equivalent sites (a shared-B ADP
+    // group) moves them together, so ∂|F|²/∂p sums the per-site contributions.
+    let dF2 = 0;
+    for (const site of perSite) {
+      if (!labels.has(site.label)) continue;
+      // Re(conj(F)·unitSite), with unitSite = ∂F/∂occ (occupancy pulled out).
+      const reDot = f.re * site.unitSite.re + f.im * site.unitSite.im;
+      // ∂|F|²/∂occ = 2·Re(conj F·unitSite);  ∂F/∂B = −s²·occ·unitSite (isotropic)
+      // ⇒ ∂|F|²/∂B = −2·s²·occ·Re(conj F·unitSite). Anisotropic sites ignore B_iso
+      // (apply.ts leaves them untouched), so they contribute zero — matching FD.
+      dF2 += kind === "occupancy" ? 2 * reDot : site.isotropic ? -2 * s * s * site.occupancy * reDot : 0;
+    }
+    const lp = applyLorentz ? lorentzPolarization(radiation, r.d) : 1;
+    const poFactor = applied.po ? marchDollase(applied.model.cell, applied.po.axis, r.h, r.k, r.l, applied.po.ratio) : 1;
+    const intensity = r.multiplicity * lp * poFactor * applied.scale * dF2;
+    out.push({ d: r.d, intensity, h: r.h, k: r.k, l: r.l });
+  }
+  return out;
+}
+
 export function buildPowderProblem(
   structure: StructureModel,
   pattern: PowderPattern,
@@ -347,7 +392,47 @@ export function buildPowderProblem(
     return withRestraints;
   };
 
-  return { parameters, observations, weights, calculate };
+  // Analytic Jacobian columns (roadmap F1.1) for the coupling-free nuclear
+  // structural kinds — site occupancy and isotropic B_iso — whose derivative
+  // flows purely through |F|² (peak centers and widths are unaffected). Offered
+  // only when there are no restraints (so a column's length is exactly the
+  // pattern) and only for a parameter driven by a single such binding — which
+  // makes the target site unambiguous and mirrors apply's last-write-wins site
+  // assignment exactly. Every other parameter returns null and stays on the
+  // finite-difference path.
+  const analyticColumns =
+    restraints.length === 0
+      ? (freeParams: readonly RefinementParameter[], freeValues: readonly number[]): (Float64Array | null)[] => {
+          const values: Record<string, number> = {};
+          for (const p of parameters) values[p.id] = p.value;
+          for (let j = 0; j < freeParams.length; j++) values[freeParams[j]!.id] = freeValues[j]!;
+          const resolved = resolveTies(parameters, values);
+          const applied = applyParameters(structure, bindings, resolved);
+          const opts: ProfileOptions = {
+            shape: profile.shape,
+            ...(profile.eta !== undefined ? { eta: profile.eta } : {}),
+            ...(profile.backgroundType !== undefined ? { backgroundType: profile.backgroundType } : {}),
+            // Background is independent of occupancy/B_iso, so it is deliberately
+            // omitted here: the derivative is the peaks-only synthesis.
+          };
+          return freeParams.map((p) => {
+            const bs = bindings.filter((b) => b.parameterId === p.id);
+            if (bs.length === 0) return null;
+            // A parameter is analytically differentiable only when every one of
+            // its bindings is the same coupling-free kind (occupancy or B_iso) on
+            // a named site — e.g. a shared-B ADP group. Any other/mixed kind falls
+            // back to finite differences.
+            const kind = bs[0]!.kind;
+            if (kind !== "occupancy" && kind !== "bIso") return null;
+            if (!bs.every((b) => b.kind === kind && b.targetKey)) return null;
+            const labels = bs.map((b) => b.targetKey!);
+            const derivPeaks = nuclearDerivativeIntensities(applied, pattern, kind, labels, applyLorentz);
+            return synthesizePattern(xValues, placePeaks(pattern, applied, derivPeaks), opts);
+          });
+        }
+      : undefined;
+
+  return { parameters, observations, weights, calculate, ...(analyticColumns ? { analyticColumns } : {}) };
 }
 
 export interface PowderCurves {
