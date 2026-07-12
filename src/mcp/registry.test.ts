@@ -119,6 +119,34 @@ Po1 Po 0 0 0 1.0
     simulate_pattern: { args: { structure, points: 200 }, keys: ["curves", "summary", "xUnit"] },
     reflection_list: { args: { structure, dMin: 1.5, dMax: 4 }, keys: ["count", "reflections"] },
     bond_geometry: { args: { structure, cutoff: 3.5 }, keys: ["bonds", "shortest"] },
+    find_unexplained_peaks: {
+      // A clean residual with one artificial 100-count peak at d = 2.5 Å.
+      args: {
+        residual: {
+          d: Array.from({ length: 60 }, (_, i) => 4 - i * 0.05),
+          yObs: Array.from({ length: 60 }, (_, i) => (i === 30 ? 105 : 5)),
+          yCalc: Array.from({ length: 60 }, () => 5),
+        },
+      },
+      keys: ["count", "peaks"],
+    },
+    search_propagation_vector: { args: { structure, peakD: [6.7, 3.35] }, keys: ["candidates"] },
+    list_magnetic_subgroups: { args: { structure, maxIndex: 4 }, keys: ["candidates"] },
+    allowed_moments: { args: { structure }, keys: ["sites"] },
+    build_magnetic_model: { args: { structure, ionLabels: ["Po1"] }, keys: ["activeSites", "bindings", "magnetic", "parameters"] },
+    refine_magnetic_powder: (() => {
+      const build = tools.build_magnetic_model({ structure, ionLabels: ["Po1"], moment: 0.5 });
+      return {
+        args: {
+          structure, magnetic: build.magnetic, pattern,
+          parameters: [...built.parameters, ...build.parameters],
+          bindings: [...built.bindings, ...build.bindings],
+          profile: built.profile,
+          maxIterations: 2,
+        },
+        keys: ["components", "magnetic", "observationCount", "result"],
+      };
+    })(),
   };
 
   it("every registry tool has a contract entry (add one when adding a tool)", () => {

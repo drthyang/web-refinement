@@ -14,6 +14,12 @@ import {
   simulate_pattern,
   reflection_list,
   bond_geometry,
+  find_unexplained_peaks,
+  search_propagation_vector,
+  list_magnetic_subgroups,
+  allowed_moments,
+  build_magnetic_model,
+  refine_magnetic_powder,
 } from "@/mcp/tools";
 import { exampleStructure } from "@/examples/mn3ga";
 import { exampleMagnetic, magneticParameters, magneticBindings } from "@/examples/mn3gaMagnetic";
@@ -125,6 +131,92 @@ describe("MCP analysis primitives (no data files needed)", () => {
     // Sorted ascending, and no physically absurd contact in this real structure.
     for (let i = 1; i < bonds.length; i++) expect(bonds[i]!.distance).toBeGreaterThanOrEqual(bonds[i - 1]!.distance);
     expect(shortest!.distance).toBeGreaterThan(1.5);
+  });
+
+  it("the magnetic solution loop closes: subgroups → allowed moments → build → refine recovers the truth", () => {
+    // 1. Candidate magnetic subgroups of the hexagonal Mn3Ga parent at k = 0.
+    const subs = list_magnetic_subgroups({ structure, k: [0, 0, 0], maxIndex: 6 });
+    expect(subs.candidates.length).toBeGreaterThan(2);
+    const cand = subs.candidates.find((c) => (c.bns ?? "").replace(/\s/g, "") === "Cm'cm'")!;
+    expect(cand).toBeDefined();
+
+    // 2. Site-symmetry analysis under that subgroup: Mn1 carries an in-plane
+    //    2-D allowed space (the golden-validated Cm'cm' result).
+    const am = allowed_moments({ structure, operations: cand.operations, siteLabels: ["Mn1"] });
+    expect(am.sites).toHaveLength(1);
+    expect(am.sites[0]!.dimension).toBe(2);
+
+    // 3. Build the symmetry-allowed model: 2 modes on orbit 1 + 1 on the split
+    //    orbit, first mode of each orbit seeded at 2 µ_B.
+    const truth = build_magnetic_model({ structure, ionLabels: ["Mn1"], operations: cand.operations, moment: 2 });
+    const modes = truth.parameters.filter((p) => p.kind === "momentMode");
+    expect(modes).toHaveLength(3);
+
+    // 4. Simulate the nuclear + magnetic truth and feed it back as data
+    //    (same neutron CW instrument on both sides — LP factors must match).
+    const neutron = { kind: "constantWavelength" as const, wavelength: 1.54, radiationKind: "neutron" as const };
+    const sim = simulate_pattern({ structure, magnetic: truth.magnetic, instrument: neutron, xMin: 15, xMax: 95, points: 1200 });
+    expect(Math.max(...(sim.curves.yMagnetic ?? [0]))).toBeGreaterThan(0);
+    const pattern = {
+      id: "p", name: "sim", xUnit: "twoTheta" as const,
+      radiation: { kind: "neutron" as const, wavelength: 1.54 },
+      points: sim.curves.x.map((x, i) => ({ x, yObs: (sim.curves.yCalc[i] ?? 0) + 5 })),
+    };
+
+    // 5. Refine from perturbed moment amplitudes (truth: 2 / 0 / 2).
+    const nuclear = build_refinement({ structure, pattern, instrument: neutron, backgroundTerms: 1 });
+    const startAmps: Record<string, number> = {};
+    truth.parameters.forEach((p, i) => { startAmps[p.id] = [1.0, 0.5, 1.0][i]!; });
+    // Nuclear parameters sit at the truth: hold everything except scale +
+    // background so the closed loop isolates the moment refinement.
+    const params = [
+      ...nuclear.parameters.map((p) => (["scale", "background"].includes(p.kind) ? p : { ...p, fixed: true })),
+      ...truth.parameters.map((p) => ({ ...p, value: startAmps[p.id]!, fixed: false })),
+    ];
+    const out = refine_magnetic_powder({
+      structure, magnetic: truth.magnetic, pattern,
+      parameters: params, bindings: [...nuclear.bindings, ...truth.bindings],
+      profile: nuclear.profile, maxIterations: 25,
+    });
+    const wR = 100 * (out.result.agreement.rWeighted ?? 1);
+    expect(wR).toBeLessThan(3);
+    // What this powder DETERMINES: the total magnetic scattering. The split of
+    // moment between the two interleaved in-plane sublattices sits in a broad,
+    // shallow valley (the classic hexagonal in-plane indeterminacy — the case
+    // where crystallographers impose an equal-|m| prior), so per-orbit |m| is
+    // deliberately NOT asserted here; the golden datasets cover determinable
+    // cases. The refined magnetic component must reproduce the truth's.
+    const c = out.components;
+    expect(Math.max(...c.yMagnetic)).toBeGreaterThan(0);
+    const truthMag = sim.curves.yMagnetic!;
+    const rms = (xs: number[]): number => Math.sqrt(xs.reduce((a, v) => a + v * v, 0) / xs.length);
+    const diffRms = rms(c.yMagnetic.map((v, i) => v - truthMag[i]!));
+    expect(diffRms).toBeLessThan(0.15 * rms(truthMag));
+
+    // Well-posed variant: hold all but ONE mode at truth — the pipeline must
+    // recover its amplitude exactly (truth 2 µ_B from a 1 µ_B start).
+    const oneFree = [
+      ...nuclear.parameters.map((p) => (["scale", "background"].includes(p.kind) ? p : { ...p, fixed: true })),
+      ...truth.parameters.map((p, i) => (i === 0 ? { ...p, value: 1.0, fixed: false } : { ...p, fixed: true })),
+    ];
+    const single = refine_magnetic_powder({
+      structure, magnetic: truth.magnetic, pattern,
+      parameters: oneFree, bindings: [...nuclear.bindings, ...truth.bindings],
+      profile: nuclear.profile, maxIterations: 25,
+    });
+    const recovered = Math.abs(single.result.parameters[truth.parameters[0]!.id] ?? 0);
+    expect(recovered).toBeGreaterThan(1.9);
+    expect(recovered).toBeLessThan(2.1);
+
+    // 6. The residual-hunting entry point works on the same loop: a
+    //    nuclear-only calc leaves the magnetic peaks as unexplained residual.
+    const nuclearOnly = evaluate_pattern({ structure, pattern, parameters: nuclear.parameters.map((p) => (p.kind === "scale" ? { ...p, value: 1 } : p.kind === "background" ? { ...p, value: 5 } : p)), bindings: nuclear.bindings, profile: nuclear.profile });
+    const dGrid = pattern.points.map((pt) => 1.54 / (2 * Math.sin(((pt.x / 2) * Math.PI) / 180)));
+    const peaks = find_unexplained_peaks({ residual: { d: dGrid, yObs: nuclearOnly.curves.yObs, yCalc: nuclearOnly.curves.yCalc } });
+    expect(peaks.count).toBeGreaterThan(0);
+    const ks = search_propagation_vector({ structure, peakD: peaks.peaks.map((p) => p.d) });
+    expect(ks.candidates.length).toBeGreaterThan(0);
+    expect(ks.candidates[0]!.score).toBeGreaterThanOrEqual(ks.candidates[ks.candidates.length - 1]!.score);
   });
 
   it("evaluate_pattern with a magnetic model separates nuclear and magnetic components", () => {

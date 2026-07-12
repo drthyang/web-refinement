@@ -31,6 +31,16 @@ import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { abscissaFromD } from "@/core/diffraction/instrument";
 import { bondLengths } from "@/core/crystal/geometry";
+import { detectExtraPeaks, type ExtraPeakOptions } from "@/core/magnetic/extraPeaks";
+import { searchPropagationVector, type KSearchOptions } from "@/core/magnetic/kSearch";
+import { magneticSubgroupLattice, latticeRepresentatives } from "@/core/magnetic/subgroupLattice";
+import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
+import { buildMagneticModel } from "@/core/magnetic/momentModel";
+import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
+import { applyMagneticMoments } from "@/core/workflow/magnetic";
+import { refine } from "@/core/refinement/engine";
+import type { SymmetryOperation } from "@/core/crystal/types";
+import type { Vec3 } from "@/core/math/types";
 import type { PeakShape } from "@/core/diffraction/profile";
 import {
   assessRefinement,
@@ -313,6 +323,166 @@ export function bond_geometry(args: { structure: StructureModel; cutoff?: number
 } {
   const bonds = bondLengths(args.structure, args.cutoff ?? 3.2);
   return { bonds, shortest: bonds[0] ?? null };
+}
+
+/**
+ * Find unexplained residual peaks (obs − calc) after a nuclear refinement —
+ * the "is there magnetic order / an impurity?" signal. Robust (MAD-based)
+ * thresholding; a handful of peaks suggests satellites, dozens mean the
+ * nuclear fit itself is poor.
+ */
+export function find_unexplained_peaks(args: {
+  residual: { d: number[]; yObs: number[]; yCalc: number[] };
+  options?: ExtraPeakOptions;
+}): { peaks: { d: number; height: number }[]; count: number } {
+  const peaks = detectExtraPeaks(args.residual.d, args.residual.yObs, args.residual.yCalc, args.options ?? {});
+  return { peaks: [...peaks], count: peaks.length };
+}
+
+/**
+ * Rank candidate propagation vectors k (commensurate, denominators 2/3/4/6)
+ * by how many unexplained peaks their satellites G ± k explain. The k-search
+ * step of magnetic structure solution.
+ */
+export function search_propagation_vector(args: {
+  structure: StructureModel;
+  peakD: number[];
+  options?: KSearchOptions;
+}): { candidates: { k: Vec3; label: string; matched: number; total: number; rmsd: number; score: number }[] } {
+  const candidates = searchPropagationVector(args.structure.cell, args.peakD, args.options ?? {});
+  return { candidates: candidates.map((c) => ({ ...c })) };
+}
+
+/**
+ * Enumerate the maximal magnetic subgroup candidates of the parent group for a
+ * propagation vector k — conjugacy-class representatives with their BNS
+ * identification, subgroup index, and domain count. The operations of the
+ * chosen candidate feed allowed_moments / build_magnetic_model.
+ */
+export function list_magnetic_subgroups(args: {
+  structure: StructureModel;
+  k?: Vec3;
+  maxIndex?: number;
+}): {
+  candidates: {
+    label: string;
+    bns: string | null;
+    index: number;
+    domainCount: number;
+    operations: SymmetryOperation[];
+  }[];
+} {
+  const reps = latticeRepresentatives(
+    magneticSubgroupLattice(args.structure.spaceGroup.operations, args.k ?? [0, 0, 0], { maxIndex: args.maxIndex ?? 8 }),
+  );
+  return {
+    candidates: reps.map((r) => ({
+      label: r.candidate.label,
+      bns: r.candidate.standard?.bnsSymbol ?? r.settingMatch?.identity.bnsSymbol ?? null,
+      index: r.index,
+      domainCount: r.domainCount,
+      operations: [...r.candidate.operations],
+    })),
+  };
+}
+
+/**
+ * The site-symmetry analysis: which moment directions the magnetic group
+ * allows on each site (the null space of the magnetic stabilizer). Dimension
+ * 0 means the moment is symmetry-forbidden there; the basis spans what a
+ * refinement may vary. Matches GSAS-II's per-site "site sym" moment rules.
+ */
+export function allowed_moments(args: {
+  structure: StructureModel;
+  operations?: SymmetryOperation[];
+  k?: Vec3;
+  siteLabels?: string[];
+}): { sites: { label: string; element: string; dimension: number; basis: Vec3[] }[] } {
+  const ops = args.operations ?? args.structure.spaceGroup.operations;
+  const wanted = args.siteLabels ? new Set(args.siteLabels) : null;
+  const sites = args.structure.sites
+    .filter((s) => !wanted || wanted.has(s.label))
+    .map((s) => {
+      const allowed = allowedMomentDirections(ops, s.position, args.k ?? [0, 0, 0]);
+      return { label: s.label, element: s.element, dimension: allowed.dimension, basis: allowed.basis.map((b) => [...b] as Vec3) };
+    });
+  return { sites };
+}
+
+/**
+ * Build the symmetry-allowed magnetic model for chosen ion sites under a
+ * magnetic subgroup: moment-mode amplitude parameters over the allowed
+ * directions only, co-located (occupancy-disorder) ions tied to one moment,
+ * split orbits handled as independent sublattices. The refinement cannot
+ * leave the symmetry-allowed space by construction.
+ */
+export function build_magnetic_model(args: {
+  structure: StructureModel;
+  ionLabels: string[];
+  operations?: SymmetryOperation[];
+  k?: Vec3;
+  moment?: number;
+  tieSameSite?: boolean;
+}): { magnetic: MagneticModel; parameters: RefinementParameter[]; bindings: ParameterBinding[]; activeSites: string[] } {
+  const build = buildMagneticModel(
+    args.structure,
+    args.k ?? [0, 0, 0],
+    args.ionLabels,
+    args.operations ?? args.structure.spaceGroup.operations,
+    {
+      ...(args.moment !== undefined ? { moment: args.moment } : {}),
+      ...(args.tieSameSite !== undefined ? { tieSameSite: args.tieSameSite } : {}),
+    },
+  );
+  return { magnetic: build.magnetic, parameters: build.params, bindings: build.bindings, activeSites: build.activeSites };
+}
+
+/**
+ * Co-refine nuclear + magnetic against a powder pattern. Staged by default —
+ * scale + background converge with moments and profile held, then everything
+ * requested is freed — because a flat co-refinement from a poor moment start
+ * can collapse the scale against exploding moments (the scale·|m|² valley;
+ * both golden datasets showed it). Returns the result, the refined magnetic
+ * model, and the separated nuclear/magnetic component curves.
+ */
+export function refine_magnetic_powder(args: {
+  structure: StructureModel;
+  magnetic: MagneticModel;
+  pattern: PowderPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  profile: PowderProfile;
+  staged?: boolean;
+  maxIterations?: number;
+}): {
+  result: RefinementResult;
+  magnetic: MagneticModel;
+  observationCount: number;
+  components: { x: number[]; yObs: number[]; yNuclear: number[]; yMagnetic: number[]; yCalc: number[] };
+} {
+  const prof = { shape: args.profile.shape, ...(args.profile.eta !== undefined ? { eta: args.profile.eta } : {}) };
+  const maxIterations = args.maxIterations ?? 25;
+  let params = args.parameters.map((p) => ({ ...p }));
+
+  if (args.staged ?? true) {
+    // Stage 1: scale + background only; hold moments, profile, microstructure.
+    const HOLD = new Set(["momentMode", "momentX", "momentY", "momentZ", "tofProfile", "mustrainIso", "peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY"]);
+    const pass1 = params.map((p) => (HOLD.has(p.kind) ? { ...p, fixed: true } : { ...p }));
+    const r1 = refine(buildMagneticPowderProblem(args.structure, args.magnetic, args.pattern, pass1, args.bindings, prof), { maxIterations: Math.min(maxIterations, 20) });
+    params = params.map((p) => ({ ...p, value: r1.parameters[p.id] ?? p.value }));
+  }
+
+  const result = refine(buildMagneticPowderProblem(args.structure, args.magnetic, args.pattern, params, args.bindings, prof), { maxIterations });
+  const refined = params.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value }));
+  const refinedMagnetic = applyMagneticMoments(args.magnetic, args.bindings, Object.fromEntries(refined.map((p) => [p.id, p.value])));
+  const c = magneticPowderComponents(args.structure, refinedMagnetic, args.pattern, refined, args.bindings, prof);
+  const excluded = excludedPointMask(c.yObs);
+  return {
+    result,
+    magnetic: refinedMagnetic,
+    observationCount: excluded.reduce((n, ex) => n + (ex ? 0 : 1), 0),
+    components: { x: c.x, yObs: c.yObs, yNuclear: c.yNuclear, yMagnetic: c.yMagnetic, yCalc: c.yCalc },
+  };
 }
 
 /**
