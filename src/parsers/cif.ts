@@ -154,7 +154,7 @@ function parseCell(items: Map<string, string>): UnitCell {
   };
 }
 
-function parseSpaceGroup(items: Map<string, string>, loops: Loop[]): SpaceGroup {
+function parseSpaceGroup(items: Map<string, string>, loops: Loop[], cell?: UnitCell): SpaceGroup {
   const symLoop = findLoop(loops, (h) =>
     h.some((k) => k.includes("space_group_symop_operation_xyz") || k.includes("symmetry_equiv_pos_as_xyz")),
   );
@@ -177,11 +177,14 @@ function parseSpaceGroup(items: Map<string, string>, loops: Loop[]): SpaceGroup 
   // (common for standard settings) — build it from the built-in table. Falls
   // back to P1 only when the group is genuinely unresolvable, so a symbol-only
   // header no longer silently collapses to identity (which broke |F|²).
-  const completed = completeSpaceGroup({
-    operations: explicitOps,
-    ...(hm !== undefined ? { hermannMauguin: hm } : {}),
-    ...(number !== undefined ? { number } : {}),
-  });
+  const completed = completeSpaceGroup(
+    {
+      operations: explicitOps,
+      ...(hm !== undefined ? { hermannMauguin: hm } : {}),
+      ...(number !== undefined ? { number } : {}),
+    },
+    cell,
+  );
   return completed.operations.length > 0
     ? completed
     : { ...completed, operations: [parseSymmetryOperation("x,y,z")] };
@@ -265,11 +268,12 @@ function parseSites(loops: Loop[]): AtomSite[] {
 export function parseCif(text: string, id = "structure"): StructureModel {
   const { items, loops } = parseCifBlocks(text);
   const name = items.get("_pd_phase_name")?.replace(/^["']|["']$/g, "") ?? "structure";
+  const cell = parseCell(items);
   return {
     id,
     name,
-    cell: parseCell(items),
-    spaceGroup: parseSpaceGroup(items, loops),
+    cell,
+    spaceGroup: parseSpaceGroup(items, loops, cell),
     sites: parseSites(loops),
   };
 }
@@ -333,11 +337,12 @@ export function parseMagneticCif(text: string, id = "structure"): MagneticCifRes
   const { items, loops } = parseCifBlocks(text);
   const name = items.get("_pd_phase_name")?.replace(/^["']|["']$/g, "") ?? "structure";
   const magSg = parseMagneticSpaceGroup(items, loops);
+  const cell = parseCell(items);
   const structure: StructureModel = {
     id,
     name,
-    cell: parseCell(items),
-    spaceGroup: magSg ?? parseSpaceGroup(items, loops),
+    cell,
+    spaceGroup: magSg ?? parseSpaceGroup(items, loops, cell),
     sites: parseSites(loops),
   };
   const moments = parseMoments(loops);

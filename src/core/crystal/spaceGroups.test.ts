@@ -15,6 +15,8 @@ import {
   siteMultiplicity,
 } from "@/core/crystal/symmetry";
 import { parseCif } from "@/parsers/cif";
+import { classifyPointGroup } from "@/core/crystal/pointGroup";
+import { exampleStructure } from "@/examples/mn3ga";
 import { dataExists, readData } from "@/testSupport/data";
 import type { SpaceGroup } from "@/core/crystal/types";
 
@@ -143,11 +145,15 @@ describe("completeSpaceGroup — integration hook", () => {
 });
 
 describe("discovery helpers", () => {
-  it("reports known groups", () => {
+  it("reports known groups (all 230)", () => {
     expect(isKnownSpaceGroup(216)).toBe(true);
     expect(isKnownSpaceGroup("Fm-3m")).toBe(true);
-    expect(isKnownSpaceGroup(230)).toBe(false);
-    expect(knownSpaceGroups().map((g) => g.number)).toContain(216);
+    expect(isKnownSpaceGroup(1)).toBe(true);
+    expect(isKnownSpaceGroup(230)).toBe(true); // Ia-3d — the full table now covers all 230
+    expect(isKnownSpaceGroup(0)).toBe(false);
+    expect(isKnownSpaceGroup(231)).toBe(false);
+    expect(isKnownSpaceGroup("Zz9")).toBe(false);
+    expect(knownSpaceGroups()).toHaveLength(230);
   });
 });
 
@@ -205,5 +211,79 @@ describe("lattice-centering completion (systematic-absence generation, F2.2)", (
     const full = buildSpaceGroup("F m -3 m"); // 192 ops, centring already present
     const again = completeSpaceGroup(full);
     expect(again.operations.length).toBe(full.operations.length);
+  });
+});
+
+describe("R-lattice centring is setting-aware (F2.4)", () => {
+  const identity = [parseSymmetryOperation("x,y,z")];
+  const hexCell = { a: 5, b: 5, c: 12, alpha: 90, beta: 90, gamma: 120 };
+  const rhombCell = { a: 5, b: 5, c: 5, alpha: 60, beta: 60, gamma: 60 };
+
+  it("adds obverse centring for an R group in the HEXAGONAL setting", () => {
+    const sg = completeSpaceGroup({ operations: identity, hermannMauguin: "R -3 m" }, hexCell);
+    expect(sg.operations.length).toBe(3); // identity + 2 obverse centrings
+    // Obverse rule: reflection present iff −h+k+l ≡ 0 (mod 3).
+    expect(isReflectionAbsent(sg.operations, 0, 0, 3)).toBe(false); // −0+0+3 = 3 → present
+    expect(isReflectionAbsent(sg.operations, 3, 0, 0)).toBe(false); // −3 → present
+    expect(isReflectionAbsent(sg.operations, 1, -2, 0)).toBe(false); // −1−2 = −3 → present
+    expect(isReflectionAbsent(sg.operations, 1, 0, 0)).toBe(true); // −1 → absent
+    expect(isReflectionAbsent(sg.operations, 0, 1, 0)).toBe(true); // +1 → absent
+    expect(isReflectionAbsent(sg.operations, 1, 1, 1)).toBe(true); // +1 → absent
+  });
+
+  it("adds NO centring for an R group in the primitive rhombohedral setting", () => {
+    const sg = completeSpaceGroup({ operations: identity, hermannMauguin: "R -3 m" }, rhombCell);
+    expect(sg.operations.length).toBe(1); // primitive → no centring
+    expect(isReflectionAbsent(sg.operations, 1, 0, 0)).toBe(false);
+  });
+});
+
+describe("full 230-group table (generated from gemmi, validated independently)", () => {
+  it("covers all 230 numbers and nothing outside 1–230", () => {
+    for (let n = 1; n <= 230; n++) expect(isKnownSpaceGroup(n), `SG${n}`).toBe(true);
+    expect(isKnownSpaceGroup(0)).toBe(false);
+    expect(isKnownSpaceGroup(231)).toBe(false);
+    expect(knownSpaceGroups()).toHaveLength(230);
+  });
+
+  it("every group's operations form a valid crystallographic point group", () => {
+    // A strong, gemmi-independent check: the rotation parts of a real space group
+    // must classify as one of the 32 crystallographic point groups.
+    for (let n = 1; n <= 230; n++) {
+      const sg = buildSpaceGroup(n);
+      expect(sg.operations.length, `SG${n}`).toBeGreaterThan(0);
+      expect(classifyPointGroup(sg.operations).symbol, `SG${n} point group`).not.toBeNull();
+    }
+  });
+
+  it("closure holds for a sample across all seven crystal systems", () => {
+    for (const n of [1, 2, 14, 19, 62, 88, 123, 141, 148, 166, 176, 194, 221, 227, 230]) {
+      expect(isClosed(buildSpaceGroup(n)), `SG${n}`).toBe(true);
+    }
+  });
+
+  it("general-position multiplicities match International Tables (hand-listed, independent of gemmi)", () => {
+    const ita: [number, number][] = [
+      [1, 1], [2, 2], [14, 4], [19, 4], [47, 8], [62, 8], [123, 16], [139, 32],
+      [148, 18], [166, 36], [176, 12], [191, 24], [194, 24], [221, 48],
+      [225, 192], [227, 192], [229, 96], [230, 96],
+    ];
+    for (const [n, mult] of ita) expect(buildSpaceGroup(n).operations.length, `SG${n}`).toBe(mult);
+  });
+
+  it("buildSpaceGroup(194) reproduces the demo's parsed P6₃/mmc operations exactly", () => {
+    expect(keySet(buildSpaceGroup(194))).toEqual(keySet(exampleStructure().spaceGroup));
+  });
+
+  it("resolves common Hermann–Mauguin spellings (full + compact + bar-dropped)", () => {
+    expect(buildSpaceGroup("P21/c").number).toBe(14);
+    expect(buildSpaceGroup("Fm-3m").number).toBe(225);
+    expect(buildSpaceGroup("Fm3m").number).toBe(225);
+    expect(buildSpaceGroup("Pnma").number).toBe(62);
+    expect(buildSpaceGroup("Fd-3m").number).toBe(227);
+    expect(buildSpaceGroup("P63/mmc").number).toBe(194);
+    // "P3" (143) and "P-3" (147) must not collide via bar-dropping.
+    expect(buildSpaceGroup("P3").number).toBe(143);
+    expect(buildSpaceGroup("P-3").number).toBe(147);
   });
 });

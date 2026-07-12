@@ -24,8 +24,9 @@
  * they build on.
  */
 
-import type { SpaceGroup, SymmetryOperation } from "@/core/crystal/types";
+import type { SpaceGroup, SymmetryOperation, UnitCell } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
+import { SPACE_GROUP_DATA, type SpaceGroupData } from "@/core/crystal/spaceGroupData";
 import { composeOperations, operationKey, parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { wrapFractional } from "@/core/math/vec3";
 
@@ -84,87 +85,37 @@ export function expandGenerators(
   return [...byKey.values()];
 }
 
-/** One entry in the built-in generator table. */
-interface SpaceGroupEntry {
-  readonly number: number;
-  readonly hermannMauguin: string;
-  /** Jones-Faithful generator strings (identity is implicit). Centring vectors
-   *  are included as pure-translation generators. */
-  readonly generators: readonly string[];
-  /** Extra lookup spellings (e.g. the compact "P21/c" for "P 1 21/c 1"). */
-  readonly aliases?: readonly string[];
-}
-
-/**
- * Verified generator table. Each entry is validated in `spaceGroups.test.ts` by
- * its known general-position multiplicity (the group order) and the closure
- * property; F-4̄3m is additionally matched operation-for-operation against the
- * real GaNb₄Se₈ CIF.
- *
- * Cubic generators: {2[001], 3[111]} → T (12); +σd(y,x,z) → T_d (24, no
- * inversion) for F-4̄3m; {4[001], 3[111]} → O (24); +1̄ → O_h (48) for Fm-3̄m;
- * each × the four F-centring cosets.
- */
-const ENTRIES: readonly SpaceGroupEntry[] = [
-  { number: 1, hermannMauguin: "P 1", generators: [] },
-  { number: 2, hermannMauguin: "P -1", generators: ["-x,-y,-z"] },
-  {
-    number: 14,
-    hermannMauguin: "P 1 21/c 1",
-    generators: ["-x,-y,-z", "-x,y+1/2,-z+1/2"],
-    aliases: ["P21/c", "P 21/c"],
-  },
-  {
-    number: 199,
-    hermannMauguin: "I 21 3",
-    generators: [
-      "-x+1/2,-y,z+1/2", // 2₁[001]
-      "z,x,y", // 3[111]
-      "x+1/2,y+1/2,z+1/2", // I-centring
-    ],
-    aliases: ["I213", "I2_13"],
-  },
-  {
-    number: 216,
-    hermannMauguin: "F -4 3 m",
-    generators: [
-      "-x,-y,z", // 2[001]
-      "z,x,y", // 3[111]
-      "y,x,z", // σd
-      "x,y+1/2,z+1/2", // F-centring
-      "x+1/2,y,z+1/2",
-      "x+1/2,y+1/2,z",
-    ],
-    aliases: ["F-43m"],
-  },
-  {
-    number: 225,
-    hermannMauguin: "F m -3 m",
-    generators: [
-      "-y,x,z", // 4[001]
-      "z,x,y", // 3[111]
-      "-x,-y,-z", // inversion
-      "x,y+1/2,z+1/2", // F-centring
-      "x+1/2,y,z+1/2",
-      "x+1/2,y+1/2,z",
-    ],
-    aliases: ["Fm-3m", "Fm3m"],
-  },
-];
-
+/** Normalize a symbol for lookup: drop whitespace, lowercase. */
 function normalizeSymbol(symbol: string): string {
   return symbol.replace(/\s+/g, "").toLowerCase();
 }
-
-const BY_NUMBER = new Map<number, SpaceGroupEntry>(ENTRIES.map((e) => [e.number, e]));
-const BY_SYMBOL = new Map<string, SpaceGroupEntry>();
-for (const entry of ENTRIES) {
-  BY_SYMBOL.set(normalizeSymbol(entry.hermannMauguin), entry);
-  for (const alias of entry.aliases ?? []) BY_SYMBOL.set(normalizeSymbol(alias), entry);
+/** Compact a full H-M symbol by dropping the "1" axis placeholders (so the full
+ *  monoclinic "P 1 21/c 1" also answers to the common short "P21/c"). */
+function compactSymbol(hm: string): string {
+  return hm.split(/\s+/).filter((t) => t !== "1").join("");
 }
 
-function lookupEntry(id: number | string): SpaceGroupEntry | undefined {
-  return typeof id === "number" ? BY_NUMBER.get(id) : BY_SYMBOL.get(normalizeSymbol(id));
+const BY_NUMBER = new Map<number, SpaceGroupData>(SPACE_GROUP_DATA.map((e) => [e.number, e]));
+const BY_SYMBOL = new Map<string, SpaceGroupData>();
+function addSymbol(key: string, data: SpaceGroupData): void {
+  if (key && !BY_SYMBOL.has(key)) BY_SYMBOL.set(key, data); // first wins → no alias clobbers a canonical symbol
+}
+// Exact spellings first, then bar-dropped fallbacks (e.g. "Fm3m" for "Fm-3m"),
+// added only where they do not collide with a canonical symbol (so "P3"/"P-3"
+// stay distinct).
+for (const e of SPACE_GROUP_DATA) {
+  addSymbol(normalizeSymbol(e.hm), e);
+  addSymbol(normalizeSymbol(compactSymbol(e.hm)), e);
+}
+for (const e of SPACE_GROUP_DATA) {
+  addSymbol(normalizeSymbol(e.hm).replace(/-/g, ""), e);
+  addSymbol(normalizeSymbol(compactSymbol(e.hm)).replace(/-/g, ""), e);
+}
+
+function lookupEntry(id: number | string): SpaceGroupData | undefined {
+  if (typeof id === "number") return BY_NUMBER.get(id);
+  const n = normalizeSymbol(id);
+  return BY_SYMBOL.get(n) ?? BY_SYMBOL.get(n.replace(/-/g, ""));
 }
 
 /** True if the space group (by number or symbol) is in the built-in table. */
@@ -174,23 +125,24 @@ export function isKnownSpaceGroup(id: number | string): boolean {
 
 /** The built-in table as `{ number, hermannMauguin }` (for pickers/discovery). */
 export function knownSpaceGroups(): { number: number; hermannMauguin: string }[] {
-  return ENTRIES.map((e) => ({ number: e.number, hermannMauguin: e.hermannMauguin }));
+  return SPACE_GROUP_DATA.map((e) => ({ number: e.number, hermannMauguin: e.hm }));
 }
 
 /**
- * Build a complete {@link SpaceGroup} from an International Tables number or a
- * Hermann–Mauguin symbol, by closing the tabulated generators. Throws if the
- * group is not in the built-in table.
+ * Build a {@link SpaceGroup} from an International Tables number or a
+ * Hermann–Mauguin symbol, using the generated 230-group table (standard
+ * settings). Throws if the symbol/number is not recognized.
  */
 export function buildSpaceGroup(id: number | string): SpaceGroup {
   const entry = lookupEntry(id);
   if (!entry) {
-    throw new Error(
-      `Unknown space group "${id}". Built-in groups: ${ENTRIES.map((e) => `${e.number} (${e.hermannMauguin})`).join(", ")}.`,
-    );
+    throw new Error(`Unknown space group "${id}". Expected an IT number 1–230 or a standard Hermann–Mauguin symbol.`);
   }
-  const operations = expandGenerators(entry.generators.map(parseSymmetryOperation));
-  return { number: entry.number, hermannMauguin: entry.hermannMauguin, operations };
+  return {
+    number: entry.number,
+    hermannMauguin: entry.hm,
+    operations: entry.ops.map(parseSymmetryOperation),
+  };
 }
 
 /**
@@ -230,6 +182,19 @@ function centeringOperations(hermannMauguin: string): SymmetryOperation[] {
 }
 
 /**
+ * Obverse R-centring operations, but ONLY when the cell is in the HEXAGONAL
+ * setting (a=b, α=β=90°, γ=120°). An R group in the primitive rhombohedral
+ * setting (a=b=c, α=β=γ) has no centring — which is why F2.2 could not add R
+ * centring from the symbol alone; the cell resolves the setting.
+ */
+function rhombohedralHexCenteringOps(hermannMauguin: string, cell: UnitCell): SymmetryOperation[] {
+  const letter = (hermannMauguin.trim().match(/[A-Za-z]/)?.[0] ?? "P").toUpperCase();
+  const hexSetting = Math.abs(cell.gamma - 120) < 1 && Math.abs(cell.alpha - 90) < 1 && Math.abs(cell.beta - 90) < 1;
+  if (letter !== "R" || !hexSetting) return [];
+  return ["x+2/3,y+1/3,z+1/3", "x+1/3,y+2/3,z+2/3"].map(parseSymmetryOperation);
+}
+
+/**
  * Ensure a space group has a complete operation list.
  *
  * - If it already carries operations, close them together with the centring
@@ -242,9 +207,14 @@ function centeringOperations(hermannMauguin: string): SymmetryOperation[] {
  * This never throws: an unknown symbol-only group is returned as-is. It is the
  * safe integration hook for the CIF parser and the structure builders.
  */
-export function completeSpaceGroup(sg: SpaceGroup): SpaceGroup {
+export function completeSpaceGroup(sg: SpaceGroup, cell?: UnitCell): SpaceGroup {
   if (sg.operations.length > 0) {
-    const centering = sg.hermannMauguin ? centeringOperations(sg.hermannMauguin) : [];
+    const centering = sg.hermannMauguin
+      ? [
+          ...centeringOperations(sg.hermannMauguin),
+          ...(cell ? rhombohedralHexCenteringOps(sg.hermannMauguin, cell) : []),
+        ]
+      : [];
     const closed = expandGenerators([...sg.operations, ...centering]);
     return closed.length === sg.operations.length ? sg : { ...sg, operations: closed };
   }

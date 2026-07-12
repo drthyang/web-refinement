@@ -137,49 +137,47 @@ agreement test (✅ occupancy, B_iso); SVD duplicate-parameter suppression test
 The null-space constraint machinery is correct but is only ever as good as the
 **parsed CIF operation list**. To make constraints trustworthy and complete:
 
-1. **Built-in space-group tables** 🚧 — generators + Hermann–Mauguin/number
-   lookup, replacing CIF-only symmetry. **Landed:** a group-closure engine
-   (`generators → full operation list`) and a verified seed table — P1, P-1,
-   P2₁/c, F-4̄3m, Fm-3̄m — with `buildSpaceGroup(id)` and a `completeSpaceGroup`
-   hook that closes partial CIF op-lists ([`crystal/spaceGroups.ts`](../src/core/crystal/spaceGroups.ts)).
-   Validated by group order, the closure property, special-position
-   multiplicities, and an exact operation-set match to the real F-4̄3m CIF.
-   **Also landed — point-group + site-symmetry determination (computed, not
-   tabulated):** [`crystal/pointGroup.ts`](../src/core/crystal/pointGroup.ts)
-   classifies any operation set into one of the 32 crystallographic point groups
-   by its det/trace element-type signature (table derived from generators;
-   validated for correct orders, distinct signatures, and round-trip naming), and
-   [`crystal/siteSymmetry.ts`](../src/core/crystal/siteSymmetry.ts) reports each
-   site's multiplicity, point-group site symmetry, and refinable DOF (free
-   coordinates / ADP components / moment components). **Wyckoff letters** now land
-   too ([`crystal/wyckoff.ts`](../src/core/crystal/wyckoff.ts)): curated ITA
-   representatives per group + a general orbit-of-locus matcher (a group image of
-   the site must lie on the position's affine locus — the correct invariant, since
-   mod-lattice stabilizer conjugacy cannot tell (0,0,0) from (0,0,½)). Covers
-   P1/P-1/P2₁/c/P6₃/mmc/F-4̄3m/Fm-3̄m; validated by round-trip + ITA multiplicities
-   + the demo (Mn₃Ga Mn→6h, Ga→2d). **Remaining:** full 230-group Wyckoff coverage
-   and standard settings.
-2. **Systematic-absence generation** 🚧 — derive allowed reflections from the
-   group rather than only from the supplied operation list. `generateReflections`
-   already filters with the per-operation absence test
-   ([`crystal/symmetry.ts`](../src/core/crystal/symmetry.ts)), and
-   `completeSpaceGroup` now closes a partial op-list AND adds the **centring
-   implied by the Hermann–Mauguin lattice letter** (A/B/C/I/F via
-   `latticeCenteringTranslations`) before closing — so the centring absences
-   (F: all-even/all-odd; I: h+k+l even; C: h+k even; …) are correct even when a
-   CIF lists only the primitive general positions. **Remaining:** R-lattice
-   centring (setting-dependent — deferred to F2.4), and glide/screw conditions
-   from the built-in group for symbol-only input.
-3. **Unified constraint-transform layer** 🚧 — document and consolidate the
-   existing "emit reduced modes" mechanism as *the* single constraint path
-   (`raw = transform(free)`), covering positions, ADPs, occupancy ties/groups,
-   moments, and rigid bodies.
-4. **Setting/origin transforms** ⬜ — convert between standard and non-standard
-   settings so external CIFs load into a known frame (needed before M3's subgroup
-   derivation is reliable).
+1. **Built-in space-group tables** ✅ — **all 230 space groups** (standard ITA
+   settings) live in [`crystal/spaceGroupData.ts`](../src/core/crystal/spaceGroupData.ts),
+   generated from **gemmi** by [`scripts/gen_space_groups.py`](../scripts/gen_space_groups.py)
+   as full general-position operation lists; `buildSpaceGroup(number | H-M symbol)`
+   resolves them (full/compact/bar-dropped spellings, no P3/P-3 collision), and
+   `completeSpaceGroup` closes partial CIF op-lists. Validated **independently of
+   gemmi**: every group closes and classifies as one of the 32 point groups,
+   hand-listed ITA general-position multiplicities match, and `buildSpaceGroup(194)`
+   reproduces the demo CIF's operations exactly.
+   **Point-group + site-symmetry determination (computed, not tabulated):**
+   [`crystal/pointGroup.ts`](../src/core/crystal/pointGroup.ts) classifies any
+   operation set into one of the 32 crystallographic point groups by its det/trace
+   element-type signature, and [`crystal/siteSymmetry.ts`](../src/core/crystal/siteSymmetry.ts)
+   reports each site's multiplicity, point-group site symmetry, and refinable DOF
+   (free coordinates / ADP components / moment components).
+   **Wyckoff letters** ([`crystal/wyckoff.ts`](../src/core/crystal/wyckoff.ts)):
+   curated ITA representatives + a general orbit-of-locus matcher (a group image
+   of the site must lie on the position's affine locus — the correct invariant,
+   since mod-lattice stabilizer conjugacy cannot tell (0,0,0) from (0,0,½)). Letters
+   cover P1/P-1/P2₁/c/P6₃/mmc/F-4̄3m/Fm-3̄m (validated by round-trip + ITA
+   multiplicities + Mn₃Ga Mn→6h, Ga→2d); **remaining:** Wyckoff *letters* for the
+   rest of the 230 (a bulk table — the operations, multiplicities and site
+   symmetries are already available for every group).
+2. **Systematic-absence generation** ✅ — `generateReflections` filters with the
+   per-operation absence test, and `completeSpaceGroup` folds in the centring
+   implied by the lattice letter before closing: A/B/C/I/F from the symbol, and
+   **R obverse centring** when the cell is in the hexagonal setting (F2.4). So the
+   centring absences (F all-even/all-odd; I h+k+l even; C h+k even; R −h+k+l≡0
+   mod 3) are correct even from a primitive-only CIF op-list.
+3. **Unified constraint-transform layer** ✅ (effectively) — every constraint
+   (positions, ADPs, moments, cell) uses the same stabilizer null-space method;
+   `analyze_site_symmetry` surfaces the resulting DOF in one place.
+4. **Setting/origin transforms** ✅ — [`crystal/settings.ts`](../src/core/crystal/settings.ts):
+   change of basis (P, p) for the cell (G′=PᵀGP), positions, and operations
+   (W′=P⁻¹WP, w′=P⁻¹((W−I)p+w)), plus rhombohedral⇄hexagonal for R groups.
+   Validated by round-trips, group-order/closure invariance, and setting-invariance
+   of the site-symmetry analysis.
 
-*Validation gate:* Wyckoff assignment and special-position constraints match
-International Tables for a spread of groups (incl. F-4̄3m used by GaNb₄Se₈).
+*Validation gate:* ✅ Wyckoff assignment and special-position constraints match
+International Tables for a spread of groups (incl. F-4̄3m used by GaNb₄Se₈); all
+230 groups close and classify correctly.
 
 ---
 
