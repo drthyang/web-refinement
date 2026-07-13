@@ -10,7 +10,8 @@ import type { PowderPattern } from "@/core/diffraction/types";
 import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
 import type { ProfilePeak, ProfileOptions, PeakShape } from "@/core/diffraction/profile";
-import { weightsFromSigma } from "@/core/refinement/factors";
+import { weightsFromSigma, applyExclusionMask, fitRangeMask } from "@/core/refinement/factors";
+import type { FitRange } from "@/core/workflow/powder";
 import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters } from "@/core/workflow/apply";
 import { buildPeaks, createPeakBuilder } from "@/core/workflow/powder";
@@ -79,11 +80,15 @@ export function buildMultiPhasePowderProblem(
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
   profile: { shape: PeakShape; eta?: number } = { shape: "gaussian" },
+  fitRange?: FitRange,
 ): RefinementProblem {
   const xValues = pattern.points.map((p) => p.x);
   const observations = Float64Array.from(pattern.points.map((p) => p.yObs));
-  const weights = weightsFromSigma(
-    pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1)),
+  // A fit range zeroes the weight of every point outside it, so a multi-phase
+  // refinement optimizes only the selected window.
+  const weights = applyExclusionMask(
+    weightsFromSigma(pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1))),
+    fitRangeMask(xValues, fitRange),
   );
   // Per-phase cached peak builders (see createPeakBuilder): each phase's
   // structure factors are reused whenever none of ITS geometry parameters

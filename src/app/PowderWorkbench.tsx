@@ -497,6 +497,7 @@ export function PowderWorkbench({
           structure, magnetic: session.magnetic, pattern, parameters: [...magParams], bindings: [...pBindings],
           shape: session.powderProfile.shape,
           ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+          ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         }, { maxIterations: guided ? 15 : 20 });
         const refinedMag = applyMagneticMoments(session.magnetic, pBindings, result.parameters);
         setSession((s) => ({

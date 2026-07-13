@@ -101,6 +101,7 @@ export type EvaluatorSpec =
       readonly bindings: ParameterBinding[];
       readonly shape: PeakShape;
       readonly eta?: number;
+      readonly fitRange?: { readonly min?: number; readonly max?: number };
     }
   | {
       readonly kind: "multiPhasePowder";
@@ -110,6 +111,7 @@ export type EvaluatorSpec =
       readonly bindings: ParameterBinding[];
       readonly shape: PeakShape;
       readonly eta?: number;
+      readonly fitRange?: { readonly min?: number; readonly max?: number };
     }
   | {
       readonly kind: "singleCrystal";

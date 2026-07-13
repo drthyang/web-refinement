@@ -277,6 +277,7 @@ export class ComputeClient {
           bindings: req.bindings,
           shape: req.shape,
           ...(req.eta !== undefined ? { eta: req.eta } : {}),
+          ...(req.fitRange ? { fitRange: req.fitRange } : {}),
         }
       : {
           kind: "powder",

@@ -44,4 +44,17 @@ describe("magnetic powder refinement (Phase 7)", () => {
     const result = refine(problem, { maxIterations: 25 });
     expect(result.parameters.scaleM).toBeCloseTo(1, 1);
   });
+
+  // Regression: the nuclear + magnetic co-refinement ignored the fit-range knobs.
+  it("a fit range zeroes the weight of out-of-range points (restricts the refinement)", () => {
+    const range = { min: 30, max: 70 };
+    const problem = buildMagneticPowderProblem(structure, magnetic, obs, withScales(1), bindings, { shape: "gaussian" }, range);
+    grid.forEach((x, i) => {
+      if (x < range.min || x > range.max) expect(problem.weights[i]).toBe(0);
+      else expect(problem.weights[i]).toBeGreaterThan(0);
+    });
+    // No range → nothing masked (every point keeps a positive weight).
+    const full = buildMagneticPowderProblem(structure, magnetic, obs, withScales(1), bindings);
+    expect(Array.from(full.weights).every((w) => w > 0)).toBe(true);
+  });
 });

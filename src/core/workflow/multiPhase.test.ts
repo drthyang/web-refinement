@@ -61,3 +61,45 @@ describe("multi-phase powder", () => {
     expect(result.agreement.rFactor).toBeLessThan(0.02);
   });
 });
+
+// Regression: the fit-range knobs were only honored for single-phase nuclear
+// refinement; a multi-phase (or magnetic) refine silently ignored them.
+describe("multi-phase powder — fit range restricts the refinement", () => {
+  const truthParams: RefinementParameter[] = [
+    { id: "scale1", label: "s1", kind: "scale", value: 60, initialValue: 60, fixed: false },
+    { id: "scale2", label: "s2", kind: "scale", value: 25, initialValue: 25, fixed: false },
+    { id: "width", label: "w", kind: "peakWidth", value: 0.5, initialValue: 0.5, fixed: true },
+  ];
+  const truth = multiPhaseCurves(phases, pattern(grid.map((x) => ({ x, yObs: 0 }))), truthParams, bindings);
+  const range = { min: 20, max: 60 };
+  const start = (): RefinementParameter[] => [
+    { id: "scale1", label: "s1", kind: "scale", value: 40, initialValue: 40, fixed: false },
+    { id: "scale2", label: "s2", kind: "scale", value: 40, initialValue: 40, fixed: false },
+    { id: "width", label: "w", kind: "peakWidth", value: 0.5, initialValue: 0.5, fixed: true },
+  ];
+
+  it("zeroes the weight of every point outside the fit range", () => {
+    const obs = pattern(grid.map((x, i) => ({ x, yObs: truth.yCalc[i]! })));
+    const problem = buildMultiPhasePowderProblem(phases, obs, truthParams, bindings, { shape: "gaussian" }, range);
+    grid.forEach((x, i) => {
+      if (x < range.min || x > range.max) expect(problem.weights[i]).toBe(0);
+      else expect(problem.weights[i]).toBeGreaterThan(0);
+    });
+  });
+
+  it("optimizes only the windowed data: junk outside the window can't bias the fit", () => {
+    // Corrupt observed intensities OUTSIDE the window (×3). A full-pattern fit
+    // chases that junk (scales biased high); the windowed fit ignores it and
+    // recovers the truth (60, 25).
+    const obs = pattern(grid.map((x, i) => ({ x, yObs: truth.yCalc[i]! * (x < range.min || x > range.max ? 3 : 1) })));
+    const full = refine(buildMultiPhasePowderProblem(phases, obs, start(), bindings), { maxIterations: 40 });
+    const windowed = refine(
+      buildMultiPhasePowderProblem(phases, obs, start(), bindings, { shape: "gaussian" }, range),
+      { maxIterations: 40 },
+    );
+    expect(windowed.parameters.scale1).toBeCloseTo(60, 0);
+    expect(windowed.parameters.scale2).toBeCloseTo(25, 0);
+    // The full-pattern fit is pulled distinctly higher by the ×3 out-of-window junk.
+    expect(full.parameters.scale1!).toBeGreaterThan(windowed.parameters.scale1! + 2);
+  });
+});
