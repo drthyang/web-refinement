@@ -27,15 +27,26 @@ export interface LeBailReflection {
   readonly intensity: number;
 }
 
+/** TOF diffractometer constants (GSAS-II µs): TOF = Zero + difC·d + difA·d² + difB/d. */
+export interface TofCalibration {
+  readonly difC: number;
+  readonly difA: number;
+  readonly difB: number;
+  readonly zero: number;
+}
+
 export interface LeBailOptions {
   readonly fwhm: number;
   readonly shape?: PeakShape;
   readonly eta?: number;
   readonly cycles?: number;
   readonly background?: number;
+  /** Required for a TOF (`xUnit === "tof"`) pattern: without it a reflection's
+   *  d-spacing cannot be mapped to a time-of-flight position. */
+  readonly tof?: TofCalibration;
 }
 
-function dToX(pattern: PowderPattern, d: number): number {
+function dToX(pattern: PowderPattern, d: number, tof?: TofCalibration): number {
   const wl = pattern.wavelength ?? (pattern.radiation.kind !== "neutron-tof" ? pattern.radiation.wavelength : undefined);
   switch (pattern.xUnit) {
     case "twoTheta": {
@@ -45,11 +56,12 @@ function dToX(pattern: PowderPattern, d: number): number {
     }
     case "dSpacing": return d;
     case "q": return (2 * Math.PI) / d;
-    case "tof": return NaN;
+    case "tof":
+      return tof ? tof.difC * d + tof.difA * d * d + tof.difB / d + tof.zero : NaN;
   }
 }
 
-function dRange(pattern: PowderPattern): { dMin: number; dMax: number } {
+function dRange(pattern: PowderPattern, tof?: TofCalibration): { dMin: number; dMax: number } {
   const xs = pattern.points.map((p) => p.x);
   const xMin = Math.min(...xs);
   const xMax = Math.max(...xs);
@@ -61,7 +73,18 @@ function dRange(pattern: PowderPattern): { dMin: number; dMax: number } {
     }
     case "dSpacing": return { dMin: xMin, dMax: xMax };
     case "q": return { dMin: (2 * Math.PI) / xMax, dMax: (2 * Math.PI) / xMin };
-    case "tof": return { dMin: 0.5, dMax: 5 };
+    case "tof": {
+      // Invert TOF≈difC·d+Zero (leading order) for the d bounds, widened 5% so a
+      // small difA/difB curvature can't clip real reflections — the per-point
+      // profile window drops any that fall outside the actual pattern anyway.
+      if (!tof || !(tof.difC > 0)) return { dMin: 0.5, dMax: 5 };
+      const dAt = (x: number) => (x - tof.zero) / tof.difC;
+      const lo = dAt(xMin);
+      const hi = dAt(xMax);
+      const dMin = Math.max(1e-3, Math.min(lo, hi) * 0.95);
+      const dMax = Math.max(lo, hi) * 1.05;
+      return { dMin, dMax };
+    }
   }
 }
 
@@ -78,7 +101,7 @@ export function leBailExtract(
   spaceGroup: SpaceGroup,
   options: LeBailOptions,
 ): LeBailResult {
-  const { dMin, dMax } = dRange(pattern);
+  const { dMin, dMax } = dRange(pattern, options.tof);
   const reflections = generateReflections(cell, spaceGroup, dMin, dMax);
   const shape = options.shape ?? "gaussian";
   const eta = options.eta ?? 0.5;
@@ -86,7 +109,7 @@ export function leBailExtract(
   const bkg = options.background ?? 0;
   const cycles = options.cycles ?? 8;
 
-  const centers = reflections.map((r) => dToX(pattern, r.d));
+  const centers = reflections.map((r) => dToX(pattern, r.d, options.tof));
   const valid = reflections.map((_, i) => Number.isFinite(centers[i]!));
   const x = pattern.points.map((p) => p.x);
   const yObs = pattern.points.map((p) => p.yObs);

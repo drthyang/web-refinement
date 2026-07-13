@@ -544,6 +544,70 @@ export function PowderWorkbench({
     }
   }
 
+  /**
+   * Thorough refine — the robust, local-minimum-resistant path, in two stages:
+   *  1. Le Bail cell pre-fit (single-phase): refine the cell against peak
+   *     positions with free intensities, so a wrong starting cell can't trap the
+   *     structural solve. Only the cell is seeded back.
+   *  2. Multi-start: one baseline fit plus perturbed restarts, keeping the
+   *     lowest-χ² result.
+   * Nuclear / multi-phase only (the magnetic co-refinement keeps the plain Refine).
+   */
+  async function runThorough(): Promise<void> {
+    setBusy(true);
+    try {
+      // Stage 1 — Le Bail cell pre-fit (single-phase, when a cell parameter is
+      // free). A TOF pattern also needs the diffractometer calibration (difC/A/B,
+      // Zero) to place reflections on the time axis; recover it from the current
+      // parameters and pass it through.
+      let workingParams = powderParams;
+      const isCell = (kind: string): boolean => kind === "cellLength" || kind === "cellAngle";
+      const applied = applyParameters(structure, pBindings, Object.fromEntries(powderParams.map((p) => [p.id, p.value])));
+      const tofCal = powderIsTof && applied.tof ? { ...applied.tof, zero: applied.zeroShift } : undefined;
+      const leBailReady = session.extraPhases.length === 0
+        && powderParams.some((p) => isCell(p.kind) && !p.fixed && !p.expression)
+        && (!powderIsTof || tofCal !== undefined);
+      if (leBailReady) {
+        setMessage("Le Bail pre-fit: refining the cell against peak positions (no structure)…");
+        await new Promise((r) => setTimeout(r, 0)); // let the message paint
+        const pre = await client.leBailPrefit({
+          structure, pattern,
+          cellParameters: powderParams.filter((p) => isCell(p.kind)),
+          cellBindings: pBindings.filter((b) => isCell(b.kind)),
+          shape: session.powderProfile.shape,
+          ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+          ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
+          ...(tofCal ? { tof: tofCal } : {}),
+        });
+        if (pre.refined) {
+          workingParams = powderParams.map((p) => (pre.cellValues[p.id] !== undefined ? { ...p, value: pre.cellValues[p.id]! } : p));
+        }
+      }
+      // Stage 2 — multi-start from the (cell-seeded) parameters.
+      const ms = await client.refinePowderMultiStart({
+        structure, pattern, parameters: workingParams, bindings: pBindings, ...profileReq(),
+        ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
+        ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
+        options: { maxIterations: 20 },
+      }, { restarts: 8 }, onPowderProgress);
+      setSession((s) => ({
+        ...s,
+        powderParams: s.powderParams.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value })),
+      }));
+      setPowderResult(ms.final);
+      const wr = (100 * (ms.final.agreement.rWeighted ?? 0)).toFixed(2);
+      setMessage(ms.improved
+        ? `Thorough refine: escaped a local minimum (restart ${ms.bestStartIndex} of ${ms.restartsRun}) — wR ${wr}%, best of ${ms.restartsRun + 1} starts.`
+        : `Thorough refine: the baseline was already best of ${ms.restartsRun + 1} starts — wR ${wr}%.`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(msg === CANCELLED ? "Refinement cancelled." : `Thorough refine failed: ${msg}`);
+    } finally {
+      livePreview.current = null;
+      setBusy(false);
+    }
+  }
+
   /** Abort the running refinement (worker path); the awaited promise rejects as
    *  cancelled, so runPowder's finally clears the busy state. */
   function cancelPowder(): void {
@@ -862,7 +926,11 @@ export function PowderWorkbench({
                 </div>
                 {plotMode === "structure" ? (() => {
                   // Multi-phase: a phase picker chooses which unit cell to show.
-                  const allPhases = [structure, ...session.extraPhases];
+                  // Use the REFINED phases (parameters applied: cell, positions,
+                  // ADPs) so the 3D model tracks the refinement — not the loaded
+                  // starting structure. refinedPhases matches [structure,
+                  // ...extraPhases] in order/id, so the phase picker is unchanged.
+                  const allPhases = refinedPhases;
                   const vIdx = Math.min(viewPhaseIdx, allPhases.length - 1);
                   const viewStructure = allPhases[vIdx]!;
                   const isPrimary = vIdx === 0;
@@ -975,6 +1043,9 @@ export function PowderWorkbench({
                 esd={powderResult?.esd}
                 onChange={patchPowder}
                 onRefine={() => runPowder(false)}
+                {...(session.magnetic && powderParams.some((p) => isMomentParameterKind(p.kind))
+                  ? {}
+                  : { onThorough: () => runThorough() })}
                 onCancel={cancelPowder}
                 onReset={resetPowderParams}
                 onMagnetic={() => {

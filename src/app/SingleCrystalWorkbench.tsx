@@ -29,6 +29,7 @@ import { isMomentParameterKind } from "@/core/refinement/types";
 import type { ParameterBinding } from "@/core/refinement/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import { applyMagneticMoments, magneticComparison } from "@/core/workflow/magnetic";
+import { applyParameters } from "@/core/workflow/apply";
 import { KSearchPanel, type MagneticFit } from "@/components/KSearchPanel";
 import { FobsFcalc, NormalProb } from "@/app/ui/QualityPlots";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
@@ -98,6 +99,14 @@ export function SingleCrystalWorkbench({ structure, dataset, client, step, onSte
   const spec = useMemo(() => buildSingleCrystalSpec(structure, probedDataset, { extinction: 0 }), [structure, probedDataset]);
   const bindings = spec.bindings;
   const [params, setParams] = useState(spec.params);
+  // The 3D model tracks the refinement: apply the current parameters (cell,
+  // positions, ADPs) to the structure so the viewer shows the refined cell, not
+  // the loaded starting structure.
+  const refinedStructure = useMemo(() => {
+    const values: Record<string, number> = {};
+    for (const p of params) values[p.id] = p.value;
+    return applyParameters(structure, bindings, values).model;
+  }, [structure, params, bindings]);
   const [result, setResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [plotKind, setPlotKind] = useState<"fobs" | "npp">("fobs");
@@ -373,7 +382,7 @@ export function SingleCrystalWorkbench({ structure, dataset, client, step, onSte
             <div>
               <div style={{ ...uppercaseLabel, marginBottom: 4 }}>Crystal structure — unit cell</div>
               <Suspense fallback={<div style={{ minHeight: 320, display: "grid", placeItems: "center", color: color.secondary, fontSize: 13 }}>Loading 3D viewer…</div>}>
-                <div style={{ minHeight: 320 }}><StructureView structure={structure} /></div>
+                <div style={{ minHeight: 320 }}><StructureView structure={refinedStructure} /></div>
               </Suspense>
             </div>
           </div>

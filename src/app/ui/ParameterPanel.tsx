@@ -60,6 +60,8 @@ interface Props {
   readonly esd?: Readonly<Record<string, number>> | undefined;
   readonly onChange: (id: string, patch: Partial<RefinementParameter>) => void;
   readonly onRefine: () => void;
+  /** Thorough (multi-start) refine — perturbed restarts to escape local minima. */
+  readonly onThorough?: () => void;
   /** Abort a running refinement; a Cancel button appears while `busy`. */
   readonly onCancel?: () => void;
   readonly onReset: () => void;
@@ -80,7 +82,7 @@ interface Props {
   readonly groupControls?: Partial<Record<string, ReactNode>> | undefined;
 }
 
-export function ParameterPanel({ params, esd, onChange, onRefine, onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls }: Props): JSX.Element {
+export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls }: Props): JSX.Element {
   const groups = useMemo(() => {
     const byGroup = new Map<string, RefinementParameter[]>();
     for (const p of params) {
@@ -122,6 +124,16 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onCancel, onRe
         >
           {busy ? <span className="wb-shimmer-text">Refining…</span> : "Refine"}
         </button>
+        {onThorough && (
+          <button
+            style={{ ...secondaryButton, padding: "11px 15px", fontSize: 13.5, ...(busy || disabled ? disabledStyle : {}) }}
+            disabled={busy || disabled}
+            onClick={onThorough}
+            title="Thorough refine: a Le Bail cell pre-fit then several restarts from perturbed starting points, keeping the best — escapes local minima when a plain Refine stalls"
+          >
+            Thorough ↻
+          </button>
+        )}
         {busy && onCancel && (
           <button style={cancelButton} onClick={onCancel} title="Abort the running refinement">
             Cancel

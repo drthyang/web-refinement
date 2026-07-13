@@ -16,18 +16,21 @@ import type {
   ComputeResponse,
   EvaluatorReady,
   EvaluatorSpec,
+  LeBailPrefitRequest,
   RefineMagneticRequest,
   RefinePowderRequest,
   RefineSingleCrystalRequest,
   WorkerMessage,
 } from "@/workers/protocol";
-import type { RefinementResult, RefinementOptions, AgreementFactors } from "@/core/refinement/types";
+import { leBailCellPrefit, type LeBailPrefitResult } from "@/core/workflow/leBailPrefit";
+import type { RefinementResult, RefinementOptions, AgreementFactors, RefinementParameter } from "@/core/refinement/types";
 import { refine, refineParallel, type BatchEvaluator } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
 import { runPowderRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
 import { refineStagedAsync } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
+import { refineMultiStart, type MultiStartOptions, type MultiStartResult } from "@/core/refinement/multiStart";
 
 type Pending = (response: ComputeResponse) => void;
 
@@ -47,6 +50,18 @@ function spawnWorker(): Worker {
  *  (same browser), used to decide whether to try the GPU |F|² evaluator. */
 function hasWebGpu(): boolean {
   return typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu;
+}
+
+/** Write a refinement result's converged values + esds back onto a copy of the
+ *  starting parameters (for the multi-start driver to perturb the next start). */
+function applyResultToParams(
+  start: readonly RefinementParameter[],
+  result: RefinementResult,
+): RefinementParameter[] {
+  return start.map((p) => {
+    const e = result.esd[p.id];
+    return { ...p, value: result.parameters[p.id] ?? p.value, ...(e !== undefined ? { esd: e } : {}) };
+  });
 }
 
 /**
@@ -245,6 +260,32 @@ export class ComputeClient {
     return this.run({ ...req, type: "refinePowder", requestId: this.nextId++ }, onProgress);
   }
 
+  /**
+   * Le Bail cell pre-fit off the main thread: refine the cell against peak
+   * positions with free intensities (no structure), returning the refined cell +
+   * free-cell values to seed a structural refinement. Runs inline only when no
+   * worker is available (node/tests).
+   */
+  leBailPrefit(req: Omit<LeBailPrefitRequest, "requestId" | "type">): Promise<LeBailPrefitResult> {
+    const worker = this.ensureWorker();
+    const full: LeBailPrefitRequest = { ...req, type: "leBailPrefit", requestId: this.nextId++ };
+    if (!worker) {
+      return Promise.resolve(leBailCellPrefit(req.structure, req.pattern, req.cellParameters, req.cellBindings, {
+        shape: req.shape,
+        ...(req.eta !== undefined ? { eta: req.eta } : {}),
+        ...(req.fitRange ? { fitRange: req.fitRange } : {}),
+        ...(req.tof ? { tof: req.tof } : {}),
+      }));
+    }
+    return new Promise<LeBailPrefitResult>((resolve, reject) => {
+      this.pending.set(full.requestId, (response) => {
+        if (response.ok && "leBail" in response) resolve(response.leBail);
+        else reject(new Error(response.ok ? "unexpected response" : response.error));
+      });
+      worker.postMessage(full);
+    });
+  }
+
   /** Pool size: leave one core for the UI/driver; 0 or 1 means "don't pool". */
   private poolSize(): number {
     if (typeof Worker === "undefined") return 0;
@@ -259,16 +300,10 @@ export class ComputeClient {
    * unavailable or the request needs paths the pool does not cover
    * (staged sequences, multi-phase).
    */
-  async refinePowderParallel(
-    req: Omit<RefinePowderRequest, "requestId" | "type">,
-    onProgress?: PowderProgress,
-  ): Promise<RefinementResult> {
-    const size = this.poolSize();
-    if (size < 2) {
-      return this.refinePowder(req, onProgress);
-    }
+  /** The evaluator spec for a powder request (single-phase or multi-phase). */
+  private powderSpec(req: Omit<RefinePowderRequest, "requestId" | "type">): EvaluatorSpec {
     const multiPhase = req.extraPhases && req.extraPhases.length > 0;
-    const spec: EvaluatorSpec = multiPhase
+    return multiPhase
       ? {
           kind: "multiPhasePowder",
           phases: [{ structure: req.structure, id: req.structure.id }, ...req.extraPhases!.map((st) => ({ structure: st, id: st.id }))],
@@ -292,6 +327,17 @@ export class ComputeClient {
           ...(req.backgroundType !== undefined ? { backgroundType: req.backgroundType } : {}),
           ...(req.fitRange ? { fitRange: req.fitRange } : {}),
         };
+  }
+
+  async refinePowderParallel(
+    req: Omit<RefinePowderRequest, "requestId" | "type">,
+    onProgress?: PowderProgress,
+  ): Promise<RefinementResult> {
+    const size = this.poolSize();
+    if (size < 2) {
+      return this.refinePowder(req, onProgress);
+    }
+    const spec = this.powderSpec(req);
     if (req.staged && req.staged.length > 0) {
       // Staged sequence with every stage's Jacobian on the pool. One init
       // serves all stages: replicas evaluate from the full values record, so
@@ -299,6 +345,51 @@ export class ComputeClient {
       return this.runStagedParallel(spec, req.staged, req.options ?? {}, req.pattern.points.length, onProgress);
     }
     return this.runParallel(spec, req.options ?? {}, req.pattern.points.length, onProgress, req.useGpu ?? false);
+  }
+
+  /**
+   * Multi-start powder refinement (escape local minima): one baseline refine
+   * plus `multiStart.restarts` perturbed restarts, keeping the lowest-χ² result.
+   * Every start is a full pool-parallel refine sharing ONE evaluator pool (init
+   * once, reuse across restarts), so the cost is ~(restarts+1)× a single refine
+   * without repeated worker spin-up. Works for single- and multi-phase powder.
+   */
+  async refinePowderMultiStart(
+    req: Omit<RefinePowderRequest, "requestId" | "type">,
+    multiStart: MultiStartOptions = {},
+    onProgress?: PowderProgress,
+  ): Promise<MultiStartResult> {
+    const spec = this.powderSpec(req);
+    const options = req.options ?? {};
+    const patternLen = req.pattern.points.length;
+
+    if (this.poolSize() < 2) {
+      // No pool: run each start in-thread through the serial engine.
+      const runOnce = (start: readonly RefinementParameter[]): { parameters: RefinementParameter[]; final: RefinementResult } => {
+        const result = refine(buildProblemForSpec({ ...spec, parameters: [...start] }), options);
+        return { parameters: applyResultToParams(start, result), final: result };
+      };
+      return refineMultiStart(spec.parameters, runOnce, multiStart);
+    }
+
+    const pool = new EvaluatorPool(this.poolSize());
+    this.activePool = pool;
+    try {
+      await pool.init(spec);
+      const onIteration = onProgress
+        ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
+            onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
+        : undefined;
+      const runOnce = async (start: readonly RefinementParameter[]): Promise<{ parameters: RefinementParameter[]; final: RefinementResult }> => {
+        const problem = buildProblemForSpec({ ...spec, parameters: [...start] });
+        const result = await refineParallel(problem, { ...options, ...(onIteration ? { onIteration } : {}) }, pool);
+        return { parameters: applyResultToParams(start, result), final: result };
+      };
+      return await refineMultiStart(spec.parameters, runOnce, multiStart);
+    } finally {
+      pool.dispose();
+      if (this.activePool === pool) this.activePool = null;
+    }
   }
 
   private async runStagedParallel(

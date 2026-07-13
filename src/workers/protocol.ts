@@ -16,6 +16,8 @@ import type {
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
 import type { StageKinds } from "@/core/workflow/structureRefinement";
+import type { LeBailPrefitResult } from "@/core/workflow/leBailPrefit";
+import type { TofCalibration } from "@/core/workflow/leBail";
 
 export interface RefinePowderRequest {
   readonly type: "refinePowder";
@@ -49,6 +51,22 @@ export interface RefinePowderRequest {
    * gpuPowderEvaluator); falls back to the CPU pool if WebGPU is unavailable.
    */
   readonly useGpu?: boolean;
+}
+
+/** Le Bail cell pre-fit (escape local minima): refine the cell against peak
+ *  positions with free intensities, off the main thread. See leBailPrefit.ts. */
+export interface LeBailPrefitRequest {
+  readonly type: "leBailPrefit";
+  readonly requestId: number;
+  readonly structure: StructureModel;
+  readonly pattern: PowderPattern;
+  readonly cellParameters: RefinementParameter[];
+  readonly cellBindings: ParameterBinding[];
+  readonly shape: PeakShape;
+  readonly eta?: number;
+  readonly fitRange?: { readonly min?: number; readonly max?: number };
+  /** TOF diffractometer calibration — required for a TOF pattern. */
+  readonly tof?: TofCalibration;
 }
 
 export interface RefineSingleCrystalRequest {
@@ -152,6 +170,7 @@ export type ComputeRequest =
   | RefinePowderRequest
   | RefineSingleCrystalRequest
   | RefineMagneticRequest
+  | LeBailPrefitRequest
   | InitEvaluatorRequest
   | EvaluateRequest;
 
@@ -183,7 +202,14 @@ export interface ComputeFailure {
   readonly error: string;
 }
 
-export type ComputeResponse = ComputeSuccess | EvaluatorReady | EvaluateSuccess | ComputeFailure;
+/** Result of a Le Bail cell pre-fit. */
+export interface LeBailPrefitSuccess {
+  readonly requestId: number;
+  readonly ok: true;
+  readonly leBail: LeBailPrefitResult;
+}
+
+export type ComputeResponse = ComputeSuccess | EvaluatorReady | EvaluateSuccess | LeBailPrefitSuccess | ComputeFailure;
 
 /** Per-cycle progress emitted during a powder refinement (before the final
  *  response), so the UI can animate the calculated curve as it converges. */

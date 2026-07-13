@@ -17,6 +17,7 @@ import { refine, type RefinementProblem } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
 import { runPowderRefinement, buildProblemForSpec } from "@/workers/runPowder";
+import { leBailCellPrefit } from "@/core/workflow/leBailPrefit";
 import { GpuStructureFactor } from "@/workers/gpuStructureFactor";
 import { evaluatePowderBatchOnGpu } from "@/workers/gpuPowderEvaluator";
 
@@ -57,6 +58,15 @@ async function handle(req: ComputeRequest): Promise<ComputeResponse> {
         post({ requestId: req.requestId, progress: { yCalc, rWeighted } }),
       );
       return { requestId: req.requestId, ok: true, result };
+    }
+    if (req.type === "leBailPrefit") {
+      const leBail = leBailCellPrefit(req.structure, req.pattern, req.cellParameters, req.cellBindings, {
+        shape: req.shape,
+        ...(req.eta !== undefined ? { eta: req.eta } : {}),
+        ...(req.fitRange ? { fitRange: req.fitRange } : {}),
+        ...(req.tof ? { tof: req.tof } : {}),
+      });
+      return { requestId: req.requestId, ok: true, leBail };
     }
     if (req.type === "refineMagnetic") {
       const problem = buildMagneticSingleCrystalProblem(
