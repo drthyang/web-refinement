@@ -560,8 +560,9 @@ export function KSearchPanel({
               Full subgroup enumeration: {reps.length} candidate class{reps.length === 1 ? "" : "es"} (every
               H ≤ G(k) with every θ: H → ±1), grouped by index in the grey group. Work top-down:
               the physical symmetry is usually a <strong>maximal</strong> subgroup (index 2) — descend to
-              higher index only when no maximal candidate fits. Within a group, candidates that allow a
-              moment on your sites are listed first. Click one to preview in step 5.
+              higher index only when no maximal candidate fits. Within an index, candidates follow the
+              Bilbao (BNS number) order; the moment DOF each allows on your sites is shown at right.
+              Click one to preview in step 5.
             </p>
             {(() => {
               const all = reps.map((r, i) => ({ r, i }));
@@ -576,15 +577,13 @@ export function KSearchPanel({
               return (
                 <div style={{ margin: "6px 0 0", display: "grid", gap: 3 }}>
                   {indices.map((idx) => {
+                    // Bilbao k-SUBGROUPSMAG order: BNS number ascending within
+                    // the index (matches the core lattice sort). The moment DOF
+                    // each group allows on your sites is shown per row, not used
+                    // to reorder.
                     const group = all
                       .filter(({ r }) => r.index === idx)
-                      .sort(
-                        (A, B) =>
-                          Number((repMomentDims[B.i] ?? 0) > 0) - Number((repMomentDims[A.i] ?? 0) > 0) ||
-                          Number(B.r.candidate.isTypeI) - Number(A.r.candidate.isTypeI) ||
-                          bnsKey(A) - bnsKey(B) ||
-                          A.r.classId - B.r.classId,
-                      );
+                      .sort((A, B) => bnsKey(A) - bnsKey(B) || A.r.classId - B.r.classId);
                     const open = openIndices.has(idx);
                     const allowing = group.filter(({ i }) => (repMomentDims[i] ?? 0) > 0).length;
                     const holdsSelection = selIdx != null && group.some(({ i }) => i === selIdx);

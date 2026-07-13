@@ -4,6 +4,7 @@ import { generateMagneticCandidates } from "@/core/magnetic/magneticGroups";
 import {
   magneticSubgroupLattice,
   latticeRepresentatives,
+  type LatticeCandidate,
 } from "@/core/magnetic/subgroupLattice";
 
 // P2/m general positions (co-group 2/m, order 4, abelian).
@@ -56,6 +57,28 @@ describe("full magnetic subgroup lattice (t-subgroups × θ homomorphisms)", () 
       const b = new Set(legacy.map((c) => sig([...c.operations])));
       expect(a).toEqual(b);
     }
+  });
+
+  it("lists candidates in Bilbao k-SUBGROUPSMAG order: index asc, then BNS number asc", () => {
+    const bnsKey = (c: LatticeCandidate): number => {
+      const n = c.candidate.standard?.bnsNumber ?? c.settingMatch?.identity.bnsNumber;
+      if (!n) return Number.MAX_SAFE_INTEGER;
+      const [p, s] = n.split(".").map(Number);
+      return (p ?? 999) * 100000 + (s ?? 0);
+    };
+    const reps = latticeRepresentatives(magneticSubgroupLattice(PMMM, K0));
+    for (let i = 1; i < reps.length; i++) {
+      // Index is non-decreasing (maximal / highest symmetry first)…
+      expect(reps[i]!.index).toBeGreaterThanOrEqual(reps[i - 1]!.index);
+      // …and within one index the BNS sort key is non-decreasing.
+      if (reps[i]!.index === reps[i - 1]!.index) {
+        expect(bnsKey(reps[i]!)).toBeGreaterThanOrEqual(bnsKey(reps[i - 1]!));
+      }
+    }
+    // The list opens with a maximal (index-2) group, and the type-I entry — the
+    // lowest BNS .number in that index — leads it.
+    expect(reps[0]!.index).toBe(2);
+    expect(reps[0]!.candidate.isTypeI).toBe(true);
   });
 
   it("every candidate is a closed group with homomorphic θ", () => {

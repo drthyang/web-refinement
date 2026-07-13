@@ -142,6 +142,15 @@ export function allSubgroups(ctx: CosetContext): number[][] {
   return [...found.values()].sort((a, b) => b.length - a.length);
 }
 
+/** Sortable key for a BNS number "P.S" (e.g. "194.265" → 19400265). Groups with
+ *  no standard-setting identification return +∞, so they sort last within their
+ *  index. Matches the render's key in KSearchPanel so UI and core agree. */
+function bnsSortKey(bnsNumber: string | null): number {
+  if (!bnsNumber) return Number.MAX_SAFE_INTEGER;
+  const [p, s] = bnsNumber.split(".").map(Number);
+  return (Number.isFinite(p) ? p! : 999) * 100000 + (Number.isFinite(s) ? s! : 0);
+}
+
 /** θ per coset index for a candidate, from its operations' timeReversal flags. */
 function thetaByCoset(
   cand: MagneticCandidate,
@@ -243,28 +252,38 @@ export function magneticSubgroupLattice(
     else classes.set(r.canonical, [r]);
   }
 
-  const ordered = [...classes.values()].sort((A, B) => {
-    const a = A[0]!;
-    const b = B[0]!;
-    return (
-      a.index - b.index ||
-      Number(b.cand.isTypeI) - Number(a.cand.isTypeI) ||
-      b.cand.unprimedCount - a.cand.unprimedCount ||
-      a.canonical.localeCompare(b.canonical)
-    );
+  // Resolve each class representative's BNS identity ONCE — the exact
+  // standard-setting match when there is one, else a setting-transformed match.
+  // This drives both the ordering (by BNS number within an index) and the
+  // emitted settingMatch, so identifyMagneticGroupAnySetting is not re-run below.
+  interface ClassInfo {
+    readonly members: Raw[];
+    readonly settingMatch: TransformedIdentification | null;
+    readonly bnsKey: number;
+  }
+  const infos: ClassInfo[] = [...classes.values()].map((members) => {
+    const rep = members[0]!;
+    const settingMatch = rep.cand.standard === null ? identifyMagneticGroupAnySetting(rep.cand.operations) : null;
+    const bnsNumber = rep.cand.standard?.bnsNumber ?? settingMatch?.identity.bnsNumber ?? null;
+    return { members, settingMatch, bnsKey: bnsSortKey(bnsNumber) };
   });
 
+  // Bilbao k-SUBGROUPSMAG order: by index (maximal / highest symmetry first),
+  // then by BNS number ascending within an index (a group's type-I entry has the
+  // lowest .number, so it leads; unidentified groups sort last), with a
+  // deterministic final tiebreak on the conjugacy-class signature.
+  infos.sort(
+    (A, B) =>
+      A.members[0]!.index - B.members[0]!.index ||
+      A.bnsKey - B.bnsKey ||
+      A.members[0]!.canonical.localeCompare(B.members[0]!.canonical),
+  );
+
   const out: LatticeCandidate[] = [];
-  ordered.forEach((members, classId) => {
+  infos.forEach(({ members, settingMatch }, classId) => {
     const domainCount = new Set(members.map((m) => m.self)).size;
     members.forEach((m, i) => {
       const isRep = i === 0;
-      // Setting search only for the representatives the UI lists, and only
-      // when the exact standard-setting identification failed.
-      const settingMatch =
-        isRep && m.cand.standard === null
-          ? identifyMagneticGroupAnySetting(m.cand.operations)
-          : null;
       out.push({
         candidate: m.cand,
         subgroupOrder: m.order,
@@ -272,7 +291,7 @@ export function magneticSubgroupLattice(
         classId,
         domainCount,
         classRepresentative: isRep,
-        ...(settingMatch ? { settingMatch } : {}),
+        ...(isRep && settingMatch ? { settingMatch } : {}),
       });
     });
   });
