@@ -554,17 +554,21 @@ export function PowderWorkbench({
    * Nuclear / multi-phase only (the magnetic co-refinement keeps the plain Refine).
    */
   async function runThorough(): Promise<void> {
+    // One engine, two faces: with no fit yet it's a "Prefit" (broad cold-start
+    // search + Le Bail); once a fit exists it's a light "Escape min" nudge.
+    const mode: "prefit" | "escape" = powderResult ? "escape" : "prefit";
     setBusy(true);
     try {
-      // Stage 1 — Le Bail cell pre-fit (single-phase, when a cell parameter is
-      // free). A TOF pattern also needs the diffractometer calibration (difC/A/B,
-      // Zero) to place reflections on the time axis; recover it from the current
-      // parameters and pass it through.
+      // Stage 1 — Le Bail cell pre-fit (prefit only; single-phase, when a cell
+      // parameter is free). A TOF pattern also needs the diffractometer
+      // calibration (difC/A/B, Zero) to place reflections on the time axis;
+      // recover it from the current parameters and pass it through.
       let workingParams = powderParams;
       const isCell = (kind: string): boolean => kind === "cellLength" || kind === "cellAngle";
       const applied = applyParameters(structure, pBindings, Object.fromEntries(powderParams.map((p) => [p.id, p.value])));
       const tofCal = powderIsTof && applied.tof ? { ...applied.tof, zero: applied.zeroShift } : undefined;
-      const leBailReady = session.extraPhases.length === 0
+      const leBailReady = mode === "prefit"
+        && session.extraPhases.length === 0
         && powderParams.some((p) => isCell(p.kind) && !p.fixed && !p.expression)
         && (!powderIsTof || tofCal !== undefined);
       if (leBailReady) {
@@ -583,25 +587,34 @@ export function PowderWorkbench({
           workingParams = powderParams.map((p) => (pre.cellValues[p.id] !== undefined ? { ...p, value: pre.cellValues[p.id]! } : p));
         }
       }
-      // Stage 2 — multi-start from the (cell-seeded) parameters.
+      // Stage 2 — multi-start from the (cell-seeded) parameters. Prefit casts a
+      // wide net from a cold start (many restarts, default ~4σ kick); Escape is a
+      // light nudge around an already-refined fit (few restarts, tight ~1.5σ kick).
+      const msOptions = mode === "prefit" ? { restarts: 8 } : { restarts: 3, escapeSigma: 1.5 };
       const ms = await client.refinePowderMultiStart({
         structure, pattern, parameters: workingParams, bindings: pBindings, ...profileReq(),
         ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
         ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         options: { maxIterations: 20 },
-      }, { restarts: 8 }, onPowderProgress);
+      }, msOptions, onPowderProgress);
       setSession((s) => ({
         ...s,
         powderParams: s.powderParams.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value })),
       }));
       setPowderResult(ms.final);
       const wr = (100 * (ms.final.agreement.rWeighted ?? 0)).toFixed(2);
-      setMessage(ms.improved
-        ? `Thorough refine: escaped a local minimum (restart ${ms.bestStartIndex} of ${ms.restartsRun}) — wR ${wr}%, best of ${ms.restartsRun + 1} starts.`
-        : `Thorough refine: the baseline was already best of ${ms.restartsRun + 1} starts — wR ${wr}%.`);
+      if (mode === "prefit") {
+        setMessage(ms.improved
+          ? `Prefit found a lower minimum (restart ${ms.bestStartIndex} of ${ms.restartsRun}) — wR ${wr}%, best of ${ms.restartsRun + 1} starts. Refine to polish.`
+          : `Prefit: the starting model was already best of ${ms.restartsRun + 1} starts — wR ${wr}%. Refine to polish.`);
+      } else {
+        setMessage(ms.improved
+          ? `Escaped a local minimum (restart ${ms.bestStartIndex} of ${ms.restartsRun}) — wR ${wr}%, best of ${ms.restartsRun + 1} starts.`
+          : `Already at the best minimum — the baseline beat all ${ms.restartsRun + 1} starts, wR ${wr}%.`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setMessage(msg === CANCELLED ? "Refinement cancelled." : `Thorough refine failed: ${msg}`);
+      setMessage(msg === CANCELLED ? "Refinement cancelled." : `${mode === "prefit" ? "Prefit" : "Escape min"} failed: ${msg}`);
     } finally {
       livePreview.current = null;
       setBusy(false);
@@ -1045,7 +1058,7 @@ export function PowderWorkbench({
                 onRefine={() => runPowder(false)}
                 {...(session.magnetic && powderParams.some((p) => isMomentParameterKind(p.kind))
                   ? {}
-                  : { onThorough: () => runThorough() })}
+                  : { onThorough: () => runThorough(), thoroughMode: powderResult ? "escape" as const : "prefit" as const })}
                 onCancel={cancelPowder}
                 onReset={resetPowderParams}
                 onMagnetic={() => {

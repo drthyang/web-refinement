@@ -60,8 +60,14 @@ interface Props {
   readonly esd?: Readonly<Record<string, number>> | undefined;
   readonly onChange: (id: string, patch: Partial<RefinementParameter>) => void;
   readonly onRefine: () => void;
-  /** Thorough (multi-start) refine — perturbed restarts to escape local minima. */
+  /** Multi-start refine — perturbed restarts to reach the global minimum. */
   readonly onThorough?: () => void;
+  /**
+   * Which face `onThorough` wears: "prefit" from a cold start (broad search,
+   * shown before any fit exists) or "escape" once a fit is in hand (light
+   * nudge out of a stalled minimum). Same engine, different tuning.
+   */
+  readonly thoroughMode?: "prefit" | "escape";
   /** Abort a running refinement; a Cancel button appears while `busy`. */
   readonly onCancel?: () => void;
   readonly onReset: () => void;
@@ -82,7 +88,7 @@ interface Props {
   readonly groupControls?: Partial<Record<string, ReactNode>> | undefined;
 }
 
-export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls }: Props): JSX.Element {
+export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, thoroughMode = "prefit", onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls }: Props): JSX.Element {
   const groups = useMemo(() => {
     const byGroup = new Map<string, RefinementParameter[]>();
     for (const p of params) {
@@ -116,24 +122,26 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, on
         </button>
       </div>
       <div style={actionBar}>
+        {onThorough && (
+          <button
+            style={{ ...secondaryButton, flex: "0 0 auto", padding: "10px 13px", fontSize: 13, fontWeight: 600, ...(busy || disabled ? disabledStyle : {}) }}
+            disabled={busy || disabled}
+            onClick={onThorough}
+            title={thoroughMode === "escape"
+              ? "Escape a local minimum: a few perturbed restarts around the current fit, keeping the best — use when a plain Refine has stalled"
+              : "Prefit from a cold start: a Le Bail cell pre-fit then a broad set of perturbed restarts, keeping the best — lands the structure in a good basin before you refine"}
+          >
+            {thoroughMode === "escape" ? "Escape min ↻" : "Prefit ↻"}
+          </button>
+        )}
         <button
-          style={{ ...primaryButton, flex: "1 1 auto", minWidth: 120, textAlign: "center", padding: "11px 18px", fontSize: 14.5, fontWeight: 650, ...(busy ? refiningStyle : disabled ? disabledStyle : {}) }}
+          style={{ ...primaryButton, flex: "1 1 auto", minWidth: 96, textAlign: "center", padding: "10px 16px", fontSize: 14, fontWeight: 650, ...(busy ? refiningStyle : disabled ? disabledStyle : {}) }}
           disabled={busy || disabled}
           onClick={onRefine}
           title="Refine the free parameters against the loaded data"
         >
           {busy ? <span className="wb-shimmer-text">Refining…</span> : "Refine"}
         </button>
-        {onThorough && (
-          <button
-            style={{ ...secondaryButton, padding: "11px 15px", fontSize: 13.5, ...(busy || disabled ? disabledStyle : {}) }}
-            disabled={busy || disabled}
-            onClick={onThorough}
-            title="Thorough refine: a Le Bail cell pre-fit then several restarts from perturbed starting points, keeping the best — escapes local minima when a plain Refine stalls"
-          >
-            Thorough ↻
-          </button>
-        )}
         {busy && onCancel && (
           <button style={cancelButton} onClick={onCancel} title="Abort the running refinement">
             Cancel
@@ -141,7 +149,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, on
         )}
         {onMagnetic && (
           <button
-            style={{ ...secondaryButton, padding: "11px 15px", fontSize: 13.5, ...(busy ? disabledStyle : {}) }}
+            style={{ ...secondaryButton, flex: "0 0 auto", padding: "10px 13px", fontSize: 13, ...(busy ? disabledStyle : {}) }}
             disabled={busy}
             onClick={onMagnetic}
             title="Open the magnetic symmetry analysis with the current refined structure (lattice, positions, occupancies)"
