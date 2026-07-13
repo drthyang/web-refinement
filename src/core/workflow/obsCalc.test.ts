@@ -49,6 +49,52 @@ describe("powderReflectionObsCalc (Rietveld decomposition)", () => {
     expect(rows.every((r) => r.kind === "nuclear")).toBe(true);
   });
 
+  // The Le Bail decomposition partitions the observed intensity by the peak
+  // SHAPES with free intensities — independent of the structure — whereas the
+  // Rietveld decomposition weights by I_calc and so shifts with the model.
+  describe("Le Bail decomposition — structure-independent F_obs", () => {
+    // Wide peaks ⇒ heavy overlap, where the two decompositions diverge most.
+    const wideSpec = buildStructureRefinement(structure, empty, {
+      scale: 100, backgroundTerms: 2, width: 8, refineAdp: false, refinePositions: false,
+    });
+    const wideCurves = powderCurves(structure, empty, wideSpec.params, wideSpec.bindings, profile);
+    const widePat: PowderPattern = { ...empty, points: grid.map((x, i) => ({ x, yObs: wideCurves.yCalc[i] ?? 0 })) };
+    // A "wrong" model: same cell/profile (⇒ identical peak shapes) but a drastic
+    // occupancy change, so |F_calc| — and its overlap ratios — differ.
+    const wrong = { ...structure, sites: structure.sites.map((s, i) => (i === 0 ? { ...s, occupancy: s.occupancy * 0.1 } : s)) };
+    const key = (r: { h: number; k: number; l: number }): string => `${r.h},${r.k},${r.l}`;
+    const normById = (rows: readonly { h: number; k: number; l: number; iObs: number }[]): Map<string, number> => {
+      const total = rows.reduce((a, r) => a + r.iObs, 0) || 1;
+      return new Map(rows.map((r) => [key(r), r.iObs / total]));
+    };
+
+    it("recovers I_obs ≈ I_calc for a self-consistent pattern", () => {
+      const rows = powderReflectionObsCalc(structure, widePat, wideSpec.params, wideSpec.bindings, profile, null, null, [], "leBail");
+      const sumObs = rows.reduce((a, r) => a + r.iObs, 0);
+      const sumCalc = rows.reduce((a, r) => a + r.iCalc, 0);
+      expect(Math.abs(sumObs / sumCalc - 1)).toBeLessThan(0.05);
+    });
+
+    it("Le Bail I_obs is invariant to the atoms; Rietveld I_obs is not", () => {
+      const lbTrue = normById(powderReflectionObsCalc(structure, widePat, wideSpec.params, wideSpec.bindings, profile, null, null, [], "leBail"));
+      const lbWrong = normById(powderReflectionObsCalc(wrong, widePat, wideSpec.params, wideSpec.bindings, profile, null, null, [], "leBail"));
+      const rtTrue = normById(powderReflectionObsCalc(structure, widePat, wideSpec.params, wideSpec.bindings, profile, null, null, [], "rietveld"));
+      const rtWrong = normById(powderReflectionObsCalc(wrong, widePat, wideSpec.params, wideSpec.bindings, profile, null, null, [], "rietveld"));
+
+      let maxLbDiff = 0;
+      let maxRtDiff = 0;
+      for (const id of lbTrue.keys()) {
+        if (lbWrong.has(id)) maxLbDiff = Math.max(maxLbDiff, Math.abs(lbTrue.get(id)! - lbWrong.get(id)!));
+        if (rtWrong.has(id)) maxRtDiff = Math.max(maxRtDiff, Math.abs(rtTrue.get(id)! - rtWrong.get(id)!));
+      }
+      // Le Bail: the normalized F_obs is unchanged by the wrong model (the
+      // partition uses only the peak shapes + data → invariant to machine ε).
+      expect(maxLbDiff).toBeLessThan(1e-6);
+      // Rietveld: the wrong model visibly drags overlapping reflections' F_obs.
+      expect(maxRtDiff).toBeGreaterThan(1e-2);
+    });
+  });
+
   it("hides reflections whose peak falls outside the fit range", () => {
     const twoThetaOf = (d: number): number => (2 * Math.asin(Math.min(1, 1.54 / (2 * d))) * 180) / Math.PI;
     const all = powderReflectionObsCalc(structure, pat, spec.params, spec.bindings, profile);

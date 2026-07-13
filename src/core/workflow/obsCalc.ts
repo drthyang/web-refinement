@@ -3,11 +3,22 @@
  * pattern (the data behind an F_obs vs F_calc plot).
  *
  * Powder intensities overlap, so |F_obs| is not measured directly — it is
- * *apportioned* from the observed profile by the calculated peak shapes (the
- * standard Rietveld decomposition):
- *   I_obs(k) = Σᵢ [ Sₖ(xᵢ)·I_calc(k) / Σⱼ Sⱼ(xᵢ)·I_calc(j) ] · (y_obs(i) − bkg(i)),
- * where Sₖ is the normalized peak profile. With a perfect fit (y_obs = y_calc)
- * this returns I_obs(k) = I_calc(k). Returns intensities; |F| ∝ √I.
+ * *apportioned* from the observed profile. Two decompositions are offered:
+ *
+ *  - **Rietveld** (default): weight the partition by the *calculated* peak
+ *    intensities, I_obs(k) = Σᵢ [ Sₖ·I_calc(k) / Σⱼ Sⱼ·I_calc(j) ]·(y_obs−bkg).
+ *    Exact and cheap, but model-BIASED: overlapping reflections are pulled onto
+ *    the F_obs = F_calc line (a perfect fit trivially gives I_obs = I_calc), so
+ *    the plot flatters the model.
+ *  - **Le Bail**: partition by the peak SHAPES with FREE intensities, seeded
+ *    EQUAL (not from I_calc) and iterated to self-consistency,
+ *    I_obs(k) ← Σᵢ [ Sₖ·I_obs(k) / Σⱼ Sⱼ·I_obs(j) ]·(y_obs−bkg). Structure-
+ *    INDEPENDENT, so a wrong |F_calc| shows up as a genuine off-diagonal point.
+ *    (Exactly coincident reflections still can't be separated — Le Bail splits
+ *    them by profile alone, which for identical profiles is an even split.)
+ *
+ * `Sₖ` is the model's own peak profile (accurate, d-dependent), not a simplified
+ * single-FWHM approximation. Returns intensities; |F| ∝ √I.
  */
 
 import type { StructureModel } from "@/core/crystal/types";
@@ -93,6 +104,9 @@ function peakCenter(sub: readonly ProfilePeak[]): number | undefined {
  * exactly as `computePattern` does), so the decomposition matches the real
  * multi-phase pattern.
  */
+/** Le Bail intensity-extraction cycles for the structure-independent F_obs. */
+const LEBAIL_CYCLES = 12;
+
 export function powderReflectionObsCalc(
   structure: StructureModel,
   pattern: PowderPattern,
@@ -102,6 +116,7 @@ export function powderReflectionObsCalc(
   magnetic: MagneticModel | null = null,
   fitRange: { readonly min: number; readonly max: number } | null = null,
   extraPhases: readonly StructureModel[] = [],
+  method: "rietveld" | "leBail" = "rietveld",
 ): ReflectionObsCalc[] {
   const values: Record<string, number> = {};
   for (const p of parameters) values[p.id] = p.value;
@@ -197,19 +212,80 @@ export function powderReflectionObsCalc(
     }
   }
 
-  // Total calculated peak intensity (background excluded) at each point.
+  // Calc profile Sₖ·I_calc per reflection, summed to the total calc intensity
+  // (background excluded) at each point. For the Le Bail decomposition also keep
+  // the unit-intensity SHAPE Sₖ(xᵢ) and its nonzero index span (the default
+  // Rietveld path never needs them, so they are only built when requested).
+  const buildShapes = method === "leBail";
   const total = new Float64Array(x.length);
+  const shapes: Float64Array[] = [];
+  const shapeSpan: [number, number][] = [];
   const contrib = components.map((cmp) => {
     const arr = new Float64Array(x.length);
+    const shp = buildShapes ? new Float64Array(x.length) : null;
+    let lo = x.length, hi = -1;
     for (let i = 0; i < x.length; i++) {
       let s = 0;
       for (const pk of cmp.sub) s += pk.intensity * peakValue(pk, x[i]!);
+      if (shp) {
+        shp[i] = s;
+        if (s > 0) { if (i < lo) lo = i; hi = i; }
+      }
       const c = s * cmp.iCalc;
       arr[i] = c;
       total[i]! += c;
     }
+    if (shp) {
+      shapes.push(shp);
+      shapeSpan.push([lo, hi]);
+    }
     return arr;
   });
+
+  // Le Bail free-intensity decomposition (structure-independent F_obs): partition
+  // (y_obs − bkg) among the SHAPES with intensities seeded EQUAL and iterated to
+  // self-consistency, then put on the iCalc scale with one global least-squares
+  // factor so the F_obs = F_calc diagonal stays meaningful.
+  const leBailIObs = new Float64Array(components.length);
+  if (method === "leBail" && components.length > 0) {
+    const yNet = x.map((_, i) => Math.max(yObs[i]! - bkg[i]!, 0));
+    const shapeSum = shapes.map((shp, ri) => {
+      const [lo, hi] = shapeSpan[ri]!;
+      let s = 0;
+      for (let i = lo; i <= hi; i++) s += shp[i]!;
+      return s;
+    });
+    let inten = new Float64Array(components.length).fill(1);
+    for (let cycle = 0; cycle < LEBAIL_CYCLES; cycle++) {
+      const yc = new Float64Array(x.length);
+      for (let ri = 0; ri < components.length; ri++) {
+        const shp = shapes[ri]!; const [lo, hi] = shapeSpan[ri]!;
+        for (let i = lo; i <= hi; i++) yc[i]! += inten[ri]! * shp[i]!;
+      }
+      const next = new Float64Array(components.length);
+      for (let ri = 0; ri < components.length; ri++) {
+        const shp = shapes[ri]!; const [lo, hi] = shapeSpan[ri]!;
+        let acc = 0;
+        for (let i = lo; i <= hi; i++) {
+          const denom = yc[i]!;
+          if (denom > 1e-12) acc += (inten[ri]! * shp[i]! / denom) * yNet[i]!;
+        }
+        next[ri] = Math.max(acc, 0);
+      }
+      inten = next;
+    }
+    // Integrated observed intensity per peak (I_k·∫Sₖ), matching the accumulated
+    // iCalc convention (Σᵢ Sₖ·I_calc = I_calc·∫Sₖ); one global scale to iCalc.
+    const raw = shapeSum.map((sum, ri) => inten[ri]! * sum);
+    let num = 0, den = 0;
+    for (let ri = 0; ri < components.length; ri++) {
+      const icInt = components[ri]!.iCalc * shapeSum[ri]!;
+      num += icInt * raw[ri]!;
+      den += raw[ri]! * raw[ri]!;
+    }
+    const gScale = den > 0 ? num / den : 1;
+    for (let ri = 0; ri < components.length; ri++) leBailIObs[ri] = gScale * raw[ri]!;
+  }
 
   // A reflection the model computes as (near-)absent — |F_calc|² a negligible
   // fraction of the strongest — cannot have its observed intensity recovered by
@@ -249,9 +325,10 @@ export function powderReflectionObsCalc(
       iCalc += c[i]!;
       if (t > 0) {
         inRange = true;
-        iObs += (c[i]! / t) * (yObs[i]! - bkg[i]!);
+        if (method === "rietveld") iObs += (c[i]! / t) * (yObs[i]! - bkg[i]!);
       }
     }
+    if (method === "leBail") iObs = leBailIObs[ri]!; // structure-independent (precomputed)
     if (!inRange || iCalc <= 0) return; // peak outside the measured range
     out.push({
       kind: cmp.kind, h: cmp.h, k: cmp.k, l: cmp.l, d: cmp.d, iObs, iCalc,
