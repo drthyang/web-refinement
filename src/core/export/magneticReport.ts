@@ -29,7 +29,7 @@ import {
   magneticSupercell,
   momentEntriesFrom,
   type CellAtom,
-} from "@/app/ui/cellModel";
+} from "@/core/crystal/cellExpansion";
 
 export interface MagneticReportGroup {
   /** Display symbol, e.g. "Cm′cm′" or "isotropy subgroup of Γ2 ⊕ Γ3". */

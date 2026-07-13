@@ -4,6 +4,7 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { parseCif, parseMagneticCif } from "@/parsers/cif";
 import { structureToCif, magneticStructureToMcif, formatWithEsd } from "@/core/export/cif";
+import { expandMagneticSupercell } from "@/core/crystal/cellExpansion";
 
 const structure: StructureModel = {
   id: "s",
@@ -189,6 +190,96 @@ describe("magneticStructureToMcif — round-trips through parseMagneticCif", () 
     const labels = back.magnetic!.moments.map((m) => m.siteLabel).sort();
     expect(labels).toEqual(["Fe1", "Fe1_o2"]);
     expect(back.structure.sites.map((s) => s.label)).toContain("Fe1_o2");
+  });
+});
+
+// The user's bug: a commensurate k ≠ 0 structure exported a 1×1×1 parent cell
+// with the moment unmodulated (k as a comment), so external tools — and the
+// numbers on the page — disagreed with the app's 3D view, which shows the k-phase
+// alternation across the magnetic supercell. The exporter now writes the magnetic
+// supercell (cell enlarged, atoms + moments expanded) through the SAME
+// θ·det(R)·cos(2π k·(L+n))·R·m expansion the viewer draws.
+describe("magneticStructureToMcif — commensurate k builds the magnetic supercell", () => {
+  const I3: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const afm: StructureModel = {
+    id: "sc", name: "AFM Test",
+    cell: { a: 4, b: 4, c: 5, alpha: 90, beta: 90, gamma: 90 },
+    spaceGroup: { number: 1, hermannMauguin: "P 1", operations: [{ rotation: I3, translation: [0, 0, 0], xyz: "x,y,z" }] },
+    sites: [{ label: "Mn1", element: "Mn", position: [0, 0, 0], occupancy: 1, adp: { kind: "isotropic", bIso: 0.3 } }],
+  };
+  const magK: MagneticModel = {
+    id: "mk", structureId: "sc", propagation: [[0, 0, 0.5]],
+    operations: [{ rotation: I3, translation: [0, 0, 0], xyz: "x,y,z", timeReversal: 1 }],
+    moments: [{ siteLabel: "Mn1", frame: "crystallographic", components: [0, 0, 3] }],
+  };
+
+  it("doubles the cell along the k-axis and records the parent + k provenance", () => {
+    const mcif = magneticStructureToMcif(afm, magK, {});
+    expect(mcif).toContain("_cell_length_c    10.00000"); // 5 × 2 (k = ½ along c)
+    expect(mcif).toContain("_cell_length_a    4.00000"); // a, b unchanged
+    expect(mcif).toContain("_parent_space_group.child_transform_Pp_abc  'a,b,2c;0,0,0'");
+    expect(mcif).toContain("_parent_propagation_vector.kxkykz");
+    expect(mcif).toContain("[0 0 1/2]");
+    expect(mcif).toContain('_parent_space_group.name_H-M_alt  "P 1"');
+  });
+
+  it("splits the atom across the two layers with opposite moments (AFM), matching the app", () => {
+    const mcif = magneticStructureToMcif(afm, magK, {});
+    const back = parseMagneticCif(mcif);
+    // Two Mn in the doubled cell: one at z = 0, one at z = ½.
+    const zs = back.structure.sites.map((s) => s.position[2]).sort();
+    expect(zs[0]).toBeCloseTo(0, 4);
+    expect(zs[1]).toBeCloseTo(0.5, 4);
+    // …carrying +3 and −3 µ_B (cos(2π·½·L): +1 at L=0, −1 at L=1).
+    const mz = back.magnetic!.moments.map((m) => m.components[2]).sort((p, q) => p - q);
+    expect(mz[0]).toBeCloseTo(-3, 3);
+    expect(mz[1]).toBeCloseTo(3, 3);
+  });
+
+  it("propagates BOTH the op rotation and the k-phase into the supercell moments", () => {
+    // A 2-fold about c (moment axial-rotated) AND k = (0,0,½): the four magnetic
+    // atoms exercise rotation × cell-phase together. Expansion is the app's.
+    const twofold: [[-1, 0, 0], [0, -1, 0], [0, 0, 1]] = [[-1, 0, 0], [0, -1, 0], [0, 0, 1]];
+    const ortho: StructureModel = {
+      id: "so", name: "rot",
+      cell: { a: 6, b: 7, c: 8, alpha: 90, beta: 90, gamma: 90 },
+      spaceGroup: {
+        number: 1,
+        operations: [
+          { rotation: I3, translation: [0, 0, 0], xyz: "x,y,z" },
+          { rotation: twofold, translation: [0, 0, 0], xyz: "-x,-y,z" },
+        ],
+      },
+      sites: [{ label: "Mn1", element: "Mn", position: [0.2, 0.1, 0], occupancy: 1, adp: { kind: "isotropic", bIso: 0.3 } }],
+    };
+    const mag: MagneticModel = {
+      id: "m2", structureId: "so", propagation: [[0, 0, 0.5]],
+      operations: [
+        { rotation: I3, translation: [0, 0, 0], xyz: "x,y,z", timeReversal: 1 },
+        { rotation: twofold, translation: [0, 0, 0], xyz: "-x,-y,z", timeReversal: 1 },
+      ],
+      moments: [{ siteLabel: "Mn1", frame: "crystallographic", components: [1, 2, 3] }],
+    };
+    const exp = expandMagneticSupercell(ortho, mag)!;
+    expect(exp.n).toEqual([1, 1, 2]);
+    // Key each expanded moment by its supercell position (rounded) for lookup.
+    const key = (p: readonly number[]): string => p.map((v) => v.toFixed(2)).join(",");
+    const byPos = new Map(exp.atoms.filter((a) => a.moment).map((a) => [key(a.site.position), a.moment!]));
+    const near = (pos: number[], want: number[]): void => {
+      const m = byPos.get(key(pos))!;
+      expect(m).toBeDefined();
+      want.forEach((w, i) => expect(m[i]).toBeCloseTo(w, 6));
+    };
+    // Identity orbit member: +m at layer 0, −m at layer ½ (k-phase).
+    near([0.2, 0.1, 0], [1, 2, 3]);
+    near([0.2, 0.1, 0.5], [-1, -2, -3]);
+    // 2-fold image (R·m = (−1,−2,3)): +R·m at layer 0, −R·m at layer ½.
+    near([0.8, 0.9, 0], [-1, -2, 3]);
+    near([0.8, 0.9, 0.5], [1, 2, -3]);
+  });
+
+  it("k = 0 keeps the 1×1×1 parent cell (no supercell)", () => {
+    expect(expandMagneticSupercell(afm, { ...magK, propagation: [[0, 0, 0]] })).toBeNull();
   });
 });
 

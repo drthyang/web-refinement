@@ -21,13 +21,14 @@
  * matching `_atom_site_moment.crystalaxis_x/y/z`.
  */
 
-import type { AtomSite, StructureModel, UnitCell } from "@/core/crystal/types";
+import type { AtomSite, StructureModel, SymmetryOperation, UnitCell } from "@/core/crystal/types";
 import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { orthogonalizationMatrix } from "@/core/crystal/unitCell";
 import { inverse, transpose } from "@/core/math/mat3";
 import { normalize } from "@/core/math/vec3";
 import type { Mat3, Vec3 } from "@/core/math/types";
+import { expandMagneticSupercell } from "@/core/crystal/cellExpansion";
 
 const EIGHT_PI2 = 8 * Math.PI * Math.PI;
 
@@ -338,11 +339,109 @@ function withOrbitSites(
   };
 }
 
+const IDENTITY_MAT: Mat3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+
+/** Format a value in [0,1) as a compact fraction ("0", "1/2", "1/3", …). */
+function fraction(v: number): string {
+  if (Math.abs(v - Math.round(v)) < 1e-6) return String(Math.round(v));
+  for (let d = 2; d <= 12; d++) {
+    const num = v * d;
+    if (Math.abs(num - Math.round(num)) < 1e-4) return `${Math.round(num)}/${d}`;
+  }
+  return v.toFixed(4);
+}
+
+/** The child (magnetic-cell) basis transform for a diagonal supercell N, e.g.
+ *  N = (1,1,2) → "a,b,2c". */
+function childTransform(n: readonly [number, number, number]): string {
+  return ["a", "b", "c"].map((ax, i) => (n[i] === 1 ? ax : `${n[i]}${ax}`)).join(",");
+}
+
+/**
+ * BCS-style provenance for a magnetic supercell: the parent (nuclear) space
+ * group, the propagation vector k as a `_parent_propagation_vector` loop, and
+ * the parent→child (supercell) basis transform. This records what the enlarged
+ * cell derives from, so the mCIF is not just an anonymous P1 supercell.
+ */
+function supercellProvenance(structure: StructureModel, k: Vec3, n: readonly [number, number, number]): string {
+  const lines: string[] = [];
+  if (structure.spaceGroup.hermannMauguin) {
+    lines.push(`_parent_space_group.name_H-M_alt  "${structure.spaceGroup.hermannMauguin}"`);
+  }
+  if (structure.spaceGroup.number !== undefined) {
+    lines.push(`_parent_space_group.IT_number     ${structure.spaceGroup.number}`);
+  }
+  lines.push(`_parent_space_group.child_transform_Pp_abc  '${childTransform(n)};0,0,0'`);
+  const kLoop = loop(
+    ["_parent_propagation_vector.id", "_parent_propagation_vector.kxkykz"],
+    [["k1", `[${fraction(k[0])} ${fraction(k[1])} ${fraction(k[2])}]`]],
+  );
+  return [...lines, kLoop].join("\n");
+}
+
+/**
+ * mCIF for a commensurate k ≠ 0 magnetic structure, written in its magnetic
+ * supercell (the smallest cell in which k is a reciprocal-lattice point). The
+ * atoms and moments are expanded explicitly and the moment field is static
+ * (k = 0 in the supercell), so external readers (VESTA, Bilbao, GSAS-II) and the
+ * app's 3D viewer render the identical structure — the enlarged cell and the
+ * per-atom moment directions match what the user sees on screen. The magnetic
+ * symmetry is written as P1 (all atoms explicit); the parent group + k are kept
+ * as provenance. See {@link magneticStructureToMcif}.
+ */
+function mcifSupercell(
+  structure: StructureModel,
+  magnetic: MagneticModel,
+  sup: NonNullable<ReturnType<typeof expandMagneticSupercell>>,
+  k: Vec3,
+  block: string,
+  opts: CifExportOptions,
+): string {
+  const noEsd = buildEsdMap([], []); // esds are on the parent params — not the derived supercell
+  const supStructure: StructureModel = {
+    ...structure,
+    cell: sup.cell,
+    sites: sup.atoms.map((a) => a.site),
+    spaceGroup: { number: 1, operations: [{ rotation: IDENTITY_MAT, translation: [0, 0, 0], xyz: "x,y,z" }] },
+  };
+  const identityMagn: SymmetryOperation = { rotation: IDENTITY_MAT, translation: [0, 0, 0], xyz: "x,y,z", timeReversal: 1 };
+  const supMagnetic: MagneticModel = {
+    ...magnetic,
+    propagation: [[0, 0, 0]],
+    operations: [identityMagn],
+    moments: sup.atoms
+      .filter((a) => a.moment)
+      .map((a) => ({
+        siteLabel: a.site.label,
+        frame: "crystallographic" as const,
+        components: a.moment!,
+        ...(a.formFactorId ? { formFactorId: a.formFactorId } : {}),
+      })),
+  };
+  const parts = [
+    HEADER,
+    `data_${block}`,
+    `_pd_phase_name  '${structure.name}'`,
+    supercellProvenance(structure, k, sup.n),
+    cellBlock(sup.cell, noEsd),
+    magneticSymopBlock(supStructure, supMagnetic, opts.magneticLabel),
+    refinementBlock(opts.refinement),
+    atomSiteBlocks(supStructure, noEsd),
+    momentLoop(supStructure, supMagnetic),
+  ].filter((s) => s.length > 0);
+  return parts.join("\n\n") + "\n";
+}
+
 /**
  * Serialize a refined `StructureModel` + `MagneticModel` to mCIF text: the CIF
  * core plus the magnetic (BNS) symmetry operations and the `_atom_site_moment`
- * loop (crystallographic frame, μ_B). The propagation vector is recorded as a
- * comment.
+ * loop (crystallographic frame, μ_B).
+ *
+ * For a commensurate propagation vector k ≠ 0 the structure is written in its
+ * magnetic supercell (e.g. 1×1×2 for k = (0,0,½)) with atoms and moments
+ * expanded explicitly — so the exported cell and moment directions match the
+ * app's 3D view instead of an unmodulated 1×1×1 parent cell. For k = 0 the
+ * parent cell is written directly, with the propagation vector as a comment.
  */
 export function magneticStructureToMcif(
   structure: StructureModel,
@@ -352,6 +451,10 @@ export function magneticStructureToMcif(
   const esd = buildEsdMap(opts.params ?? [], opts.bindings ?? []);
   const block = sanitizeBlock(opts.blockName ?? structure.name);
   const k = magnetic.propagation[0] ?? [0, 0, 0];
+
+  const sup = expandMagneticSupercell(structure, magnetic);
+  if (sup) return mcifSupercell(structure, magnetic, sup, k, block, opts);
+
   const aug = withOrbitSites(structure, magnetic);
   const parts = [
     HEADER,
