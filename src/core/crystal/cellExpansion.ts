@@ -57,6 +57,12 @@ export function momentEntriesFrom(magnetic: MagneticModel): MomentEntry[] {
   }));
 }
 
+/** One element's fractional share of a shared/doped crystallographic site. */
+export interface SiteFraction {
+  readonly element: string;
+  readonly occupancy: number;
+}
+
 /** One expanded atom: element, site label, Cartesian position (Å), placing op. */
 export interface CellAtom {
   readonly element: string;
@@ -67,6 +73,16 @@ export interface CellAtom {
   readonly mag?: MomentPlacing;
   /** Integer cell translation n of the atom's copy (for k-phase moment modulation). */
   readonly cellIndex: readonly [number, number, number];
+  /** Total site occupancy (summed over a shared/doped site's components). */
+  readonly occupancy: number;
+  /**
+   * Per-element occupancy composition for a **doped/mixed site** — several
+   * elements co-located on one crystallographic position, and/or partial
+   * occupancy (a vacancy remainder). Present only when the site is not a single
+   * fully-occupied element; the viewer draws it as occupancy-proportional sphere
+   * wedges instead of one solid colour. Ordered by descending occupancy.
+   */
+  readonly mixture?: readonly SiteFraction[];
 }
 
 /**
@@ -107,6 +123,57 @@ export function magneticSupercell(k: Vec3): [number, number, number] {
 const BOUNDARY_EPS = 0.02;
 /** Guardrail against a pathological cell/space-group producing runaway atoms. */
 const MAX_ATOMS = 4000;
+
+/** Occupancy composition the representative of a (possibly doped) site emits. */
+interface SiteDoping {
+  /** Total occupancy of the crystallographic position (Σ over co-located sites). */
+  readonly occupancy: number;
+  /** Per-element wedges for a mixed/partial site; absent when full single-element. */
+  readonly mixture?: readonly SiteFraction[];
+}
+
+/** Two asymmetric-unit sites share a crystallographic position (are "doped"). */
+function samePosition(a: Vec3, b: Vec3, tol = 1e-3): boolean {
+  return Math.abs(a[0]! - b[0]!) < tol && Math.abs(a[1]! - b[1]!) < tol && Math.abs(a[2]! - b[2]!) < tol;
+}
+
+/**
+ * Group the asymmetric-unit sites by shared crystallographic position and derive
+ * each group's occupancy composition. A group with more than one element (a
+ * doped/disordered site) or a single element with occupancy < 1 (a vacancy) gets
+ * a `mixture` the viewer renders as occupancy-proportional wedges. One
+ * representative per group (highest occupancy, ties by input order) draws the
+ * merged sphere; the others are returned in `skip`.
+ */
+function colocationDoping(sites: readonly AtomSite[]): {
+  skip: Set<AtomSite>;
+  dopingBySite: Map<AtomSite, SiteDoping>;
+} {
+  const groups: AtomSite[][] = [];
+  for (const s of sites) {
+    const g = groups.find((grp) => samePosition(grp[0]!.position, s.position));
+    if (g) g.push(s);
+    else groups.push([s]);
+  }
+  const skip = new Set<AtomSite>();
+  const dopingBySite = new Map<AtomSite, SiteDoping>();
+  for (const g of groups) {
+    const rep = g.reduce((best, s) => (s.occupancy > best.occupancy ? s : best), g[0]!);
+    const total = g.reduce((sum, s) => sum + s.occupancy, 0);
+    if (g.length > 1) {
+      for (const s of g) if (s !== rep) skip.add(s);
+      const mixture = g
+        .map((s) => ({ element: s.element, occupancy: s.occupancy }))
+        .sort((a, b) => b.occupancy - a.occupancy);
+      dopingBySite.set(rep, { occupancy: total, mixture });
+    } else {
+      dopingBySite.set(rep, rep.occupancy < 1 - 1e-3
+        ? { occupancy: rep.occupancy, mixture: [{ element: rep.element, occupancy: rep.occupancy }] }
+        : { occupancy: rep.occupancy });
+    }
+  }
+  return { skip, dopingBySite };
+}
 
 /**
  * A standard-setting cell to populate alongside the parent cell: columns of
@@ -224,14 +291,39 @@ export function buildCellAtoms(
   const ops = structure.spaceGroup.operations.length
     ? structure.spaceGroup.operations
     : [{ rotation: IDENTITY, translation: [0, 0, 0] as Vec3, xyz: "x,y,z" }];
+  // Doped/mixed sites: elements co-located on one crystallographic position (a
+  // shared site) and/or partial occupancy. Merge each co-located group into one
+  // representative that carries the full per-element composition (`mixture`), so
+  // the viewer draws occupancy-proportional wedges instead of stacking several
+  // opaque single-colour spheres at the same point. `skip` holds the non-rep
+  // members; `dopingBySite` the occupancy/mixture the representative emits.
+  const { skip, dopingBySite } = colocationDoping(structure.sites);
+
   const atoms: CellAtom[] = [];
   const seen = new Set<string>();
-  const push = (element: string, label: string, frac: Vec3, rot: Mat3, mag: MomentPlacing | undefined, cellIndex: [number, number, number]): void => {
+  const push = (
+    element: string,
+    label: string,
+    frac: Vec3,
+    rot: Mat3,
+    mag: MomentPlacing | undefined,
+    cellIndex: [number, number, number],
+    doping: SiteDoping,
+  ): void => {
     if (atoms.length >= MAX_ATOMS) return;
     const key = `${label}|${frac.map((v) => v.toFixed(3)).join(",")}`;
     if (seen.has(key)) return;
     seen.add(key);
-    atoms.push({ element, label, xyz: fractionalToCartesian(structure.cell, frac), rot, ...(mag ? { mag } : {}), cellIndex });
+    atoms.push({
+      element,
+      label,
+      xyz: fractionalToCartesian(structure.cell, frac),
+      rot,
+      ...(mag ? { mag } : {}),
+      cellIndex,
+      occupancy: doping.occupancy,
+      ...(doping.mixture ? { mixture: doping.mixture } : {}),
+    });
   };
 
   // Standard-region machinery: P⁻¹ (for the inside test) and the integer
@@ -278,6 +370,10 @@ export function buildCellAtoms(
   };
 
   for (const site of structure.sites) {
+    // A non-representative member of a co-located doped site — its composition is
+    // already carried by the representative's `mixture`, so draw nothing for it.
+    if (skip.has(site)) continue;
+    const doping = dopingBySite.get(site)!;
     // Distinct equivalent positions (wrapped), each with its placing rotation.
     const placed = distinctPlacedPositions(ops, site.position);
     // The anchors this site's arrows can derive from.
@@ -297,7 +393,7 @@ export function buildCellAtoms(
         for (const dx of axisImages[0]!) {
           for (const dy of axisImages[1]!) {
             for (const dz of axisImages[2]!) {
-              push(site.element, site.label, [frac[0]! + dx, frac[1]! + dy, frac[2]! + dz], rot, mag, [dx, dy, dz]);
+              push(site.element, site.label, [frac[0]! + dx, frac[1]! + dy, frac[2]! + dz], rot, mag, [dx, dy, dz], doping);
             }
           }
         }
@@ -306,7 +402,7 @@ export function buildCellAtoms(
         for (let i = 0; i < nx; i++) {
           for (let j = 0; j < ny; j++) {
             for (let k = 0; k < nz; k++) {
-              push(site.element, site.label, [frac[0]! + i, frac[1]! + j, frac[2]! + k], rot, mag, [i, j, k]);
+              push(site.element, site.label, [frac[0]! + i, frac[1]! + j, frac[2]! + k], rot, mag, [i, j, k], doping);
             }
           }
         }
@@ -325,7 +421,7 @@ export function buildCellAtoms(
                 c[1]! >= -BOUNDARY_EPS && c[1]! <= 1 + BOUNDARY_EPS &&
                 c[2]! >= -BOUNDARY_EPS && c[2]! <= 1 + BOUNDARY_EPS
               ) {
-                push(site.element, site.label, x, rot, mag, [tx, ty, tz]);
+                push(site.element, site.label, x, rot, mag, [tx, ty, tz], doping);
               }
             }
           }

@@ -292,23 +292,55 @@ export function StructureView({
     const centerV = new THREE.Vector3(center[0], center[1], center[2]);
     const labelH = span * 0.05; // world height of text sprites
 
-    // Atoms — ball-and-stick spheres, geometry cached per rounded radius.
+    // Atoms — ball-and-stick spheres, geometry cached per (radius, wedge).
+    // A doped/mixed site (at.mixture) is drawn as occupancy-proportional wedges
+    // — SphereGeometry phiStart/phiLength azimuthal slices, one colour per
+    // element plus a muted grey vacancy slice — so a shared site reads as split
+    // instead of the single colour of whichever sphere happened to draw last.
     const geoCache = new Map<string, THREE.SphereGeometry>();
-    const getGeo = (r: number): THREE.SphereGeometry => {
-      const key = r.toFixed(2);
+    const getGeo = (r: number, phiStart = 0, phiLength = Math.PI * 2): THREE.SphereGeometry => {
+      const key = `${r.toFixed(2)}|${phiStart.toFixed(3)}|${phiLength.toFixed(3)}`;
       let g = geoCache.get(key);
-      if (!g) { g = new THREE.SphereGeometry(r, 20, 20); geoCache.set(key, g); }
+      if (!g) {
+        // Segment the azimuth finely enough that a thin wedge is still smooth.
+        const wSeg = phiLength >= Math.PI * 2 ? 20 : Math.max(3, Math.round((20 * phiLength) / (Math.PI * 2)));
+        g = new THREE.SphereGeometry(r, wSeg, 16, phiStart, phiLength);
+        geoCache.set(key, g);
+      }
       return g;
     };
     const { shininess, specular } = FINISHES[finish];
+    const VACANCY_COLOR = 0xd1d5db; // muted grey slice for an unoccupied fraction
     atomMatsRef.current = [];
-    for (const at of atoms) {
-      const r = covalentRadius(at.element) * 0.38;
-      const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(elementColor(at.element)), shininess, specular });
+    const addSphere = (geo: THREE.SphereGeometry, color: THREE.ColorRepresentation, xyz: Vec3): void => {
+      const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(color), shininess, specular });
       atomMatsRef.current.push(mat);
-      const mesh = new THREE.Mesh(getGeo(r), mat);
-      mesh.position.set(at.xyz[0], at.xyz[1], at.xyz[2]);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(xyz[0], xyz[1], xyz[2]);
       scene.add(mesh);
+    };
+    for (const at of atoms) {
+      if (at.mixture && at.mixture.length > 0) {
+        // Occupancy-weighted radius; wedge azimuths ∝ occupancy out of 1, so a
+        // vacancy remainder (Σocc < 1) becomes a grey slice. Σocc slightly over 1
+        // (rounding) normalizes to fill exactly 2π with no vacancy.
+        let rNum = 0, rDen = 0;
+        for (const f of at.mixture) { rNum += covalentRadius(f.element) * f.occupancy; rDen += f.occupancy; }
+        const r = (rDen > 0 ? rNum / rDen : covalentRadius(at.element)) * 0.38;
+        const sumOcc = at.mixture.reduce((s, f) => s + f.occupancy, 0);
+        const denom = Math.max(1, sumOcc);
+        let phi = 0;
+        for (const f of at.mixture) {
+          const span = (Math.PI * 2 * f.occupancy) / denom;
+          if (span <= 1e-4) continue;
+          addSphere(getGeo(r, phi, span), elementColor(f.element), at.xyz);
+          phi += span;
+        }
+        const vacancy = 1 - Math.min(1, sumOcc);
+        if (vacancy > 1e-3) addSphere(getGeo(r, phi, (Math.PI * 2 * vacancy) / denom), VACANCY_COLOR, at.xyz);
+      } else {
+        addSphere(getGeo(covalentRadius(at.element) * 0.38), elementColor(at.element), at.xyz);
+      }
     }
 
     // Atom site labels, floated just above each sphere.

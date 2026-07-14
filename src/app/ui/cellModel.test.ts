@@ -155,6 +155,53 @@ describe("buildCellAtoms", () => {
   });
 });
 
+describe("buildCellAtoms — doped / mixed sites", () => {
+  it("full single-element site: occupancy 1, no mixture", () => {
+    const atoms = buildCellAtoms(cubicP1([
+      { label: "Fe1", element: "Fe", position: [0.25, 0.5, 0.75], occupancy: 1, adp: iso },
+    ]));
+    expect(atoms).toHaveLength(1);
+    expect(atoms[0]!.occupancy).toBe(1);
+    expect(atoms[0]!.mixture).toBeUndefined();
+  });
+
+  it("co-located elements merge into ONE atom carrying the mixture (desc. occupancy)", () => {
+    const atoms = buildCellAtoms(cubicP1([
+      { label: "Fe1", element: "Fe", position: [0.5, 0.5, 0.5], occupancy: 0.45, adp: iso },
+      { label: "Co1", element: "Co", position: [0.5, 0.5, 0.5], occupancy: 0.55, adp: iso },
+    ]));
+    // One sphere at the shared position, not two overlapping ones.
+    expect(atoms).toHaveLength(1);
+    const at = atoms[0]!;
+    expect(at.mixture).toBeDefined();
+    expect(at.mixture!.map((f) => f.element)).toEqual(["Co", "Fe"]); // higher occ first
+    expect(at.mixture!.map((f) => f.occupancy)).toEqual([0.55, 0.45]);
+    expect(at.occupancy).toBeCloseTo(1, 9);
+    // The representative (drawn) element is the dominant one.
+    expect(at.element).toBe("Co");
+  });
+
+  it("single partial-occupancy site: mixture with a vacancy remainder", () => {
+    const atoms = buildCellAtoms(cubicP1([
+      { label: "Na1", element: "Na", position: [0.2, 0.3, 0.3], occupancy: 0.6, adp: iso },
+    ]));
+    expect(atoms).toHaveLength(1);
+    expect(atoms[0]!.occupancy).toBeCloseTo(0.6, 9);
+    expect(atoms[0]!.mixture).toEqual([{ element: "Na", occupancy: 0.6 }]);
+  });
+
+  it("high-entropy 6-cation site collapses to a single 6-way split sphere", () => {
+    const p: Vec3 = [0.5, 0.66, 0.25];
+    const cations = ["Co", "Fe", "Ni", "Mn", "Cu", "Zn"].map((element, i) => ({
+      label: `${element}${i}`, element, position: p, occupancy: 1 / 6, adp: iso,
+    }));
+    const atoms = buildCellAtoms(cubicP1(cations));
+    expect(atoms).toHaveLength(1); // one sphere, not six overlapping
+    expect(atoms[0]!.mixture).toHaveLength(6);
+    expect(atoms[0]!.occupancy).toBeCloseTo(1, 6);
+  });
+});
+
 /** The arrows must match the structure factor: m′ = θ·det(R)·R·m with the k-phase. */
 describe("displayMoment — θ-signed arrows", () => {
   const close = (a: Vec3, b: Vec3): void => {
