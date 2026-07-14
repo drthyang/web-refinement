@@ -84,6 +84,28 @@ export function cylinderAbsorption(muR: number, twoThetaDeg: number): number {
 }
 
 /**
+ * Suortti flat-plate (Bragg–Brentano) surface-roughness correction, ported from
+ * GSAS-II's `SurfaceRough`:
+ *   C(θ) = [SRA + (1−SRA)·exp(−SRB/sinθ)] / [SRA + (1−SRA)·exp(−SRB)]
+ * normalized to 1 at θ = 90°. At grazing (low) angles the shallow-penetrating
+ * beam samples the rough/porous surface, so C < 1 there and rises to 1 at high
+ * angle — leaving low-angle intensity unsuppressed inflates B_iso and skews
+ * occupancies. SRA ∈ (0,1], SRB ≥ 0; SRA = 1 or SRB = 0 ⇒ C ≡ 1 (no roughness).
+ * Reference: Suortti, *J. Appl. Cryst.* 5 (1972) 325; GSAS-II `SurfaceRough`.
+ * This is a reflection-geometry effect only — irrelevant for capillary /
+ * cylindrical transmission, where `cylinderAbsorption` handles the low-angle
+ * intensity instead.
+ */
+export function surfaceRoughness(sra: number, srb: number, twoThetaDeg: number): number {
+  if (sra >= 1 || srb <= 0) return 1;
+  const sinTheta = Math.sin((twoThetaDeg / 2) * (Math.PI / 180));
+  if (sinTheta < 1e-9) return 1;
+  const t1 = Math.exp(-srb / sinTheta);
+  const t2 = sra + (1 - sra) * Math.exp(-srb);
+  return t2 > 0 ? (sra + (1 - sra) * t1) / t2 : 1;
+}
+
+/**
  * Lorentz(-polarization) factor for a powder experiment.
  *  - neutron (CW): L = 1 / (sin²θ · cosθ)
  *  - X-ray (CW):   Lp = [(1−P)·cos²2θ + P] / (sin²θ · cosθ), P = polarization

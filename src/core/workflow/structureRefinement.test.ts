@@ -151,11 +151,11 @@ describe("powder structure refinement", () => {
     const structure = exampleStructure();
     const pattern = syntheticPattern(structure, {
       scale: TRUE_SCALE, backgroundTerms: 1, refineAdp: false, refinePositions: false,
-      absorption: 1.2, refineAbsorption: true,
+      corrections: [{ id: "absorption", seeds: { absorption: 1.2 } }],
     });
     const spec = buildStructureRefinement(structure, pattern, {
       scale: 1, width: 0.1, backgroundTerms: 1, refineAdp: false, refinePositions: false,
-      absorption: 0.1, refineAbsorption: true,
+      corrections: [{ id: "absorption", seeds: { absorption: 0.1 } }],
     });
     const out = refinePowderStructure(structure, pattern, spec, PROFILE, { maxIterations: 50 });
     expect(out.parameters.find((p) => p.id === "absorption")!.value).toBeCloseTo(1.2, 1);

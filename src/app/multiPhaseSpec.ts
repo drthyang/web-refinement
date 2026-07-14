@@ -18,6 +18,7 @@ import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/cor
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { PowderPhase } from "@/core/workflow/multiPhase";
 import { buildPowderSpec, type SiteTies, type MustrainModel } from "@/app/powderSpec";
+import { SHARED_CORRECTION_KINDS } from "@/core/diffraction/corrections";
 
 /** Instrument rows shared across phases (one beam illuminates every phase). The
  *  isotropic size/strain (profileX/Y, tofProfile, isotropic TOF Mustrain) is
@@ -25,6 +26,8 @@ import { buildPowderSpec, type SiteTies, type MustrainModel } from "@/app/powder
 const SHARED_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "peakWidth", "background", "zeroShift", "profileU", "profileV", "profileW",
   "profileX", "profileY", "asymSL", "asymHL", "tofCalibration", "tofProfile", "mustrainIso",
+  // Sample-geometry corrections that are one-per-sample (registry-declared shared).
+  ...SHARED_CORRECTION_KINDS,
 ]);
 
 export interface MultiPhaseSpec {

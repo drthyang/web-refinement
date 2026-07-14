@@ -17,11 +17,14 @@ import { estimateBackground, evaluateBackground } from "@/core/diffraction/backg
 import { estimateZeroShift } from "@/core/workflow/startingValues";
 import { buildStructureRefinement } from "@/core/workflow/structureRefinement";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
+import { CORRECTION_KINDS } from "@/core/diffraction/corrections";
 import { optimalScale } from "@/app/loadData";
 
 /** Structural kinds held fixed on first load; freed via the table or guided. */
 const STRUCTURAL_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
-  "positionShift", "bIso", "uAniso", "occupancy", "poRatio", "absorption",
+  "positionShift", "bIso", "uAniso", "occupancy", "poRatio",
+  // Sample-geometry + intensity corrections (registry) are held fixed on load too.
+  ...CORRECTION_KINDS,
 ]);
 
 /**

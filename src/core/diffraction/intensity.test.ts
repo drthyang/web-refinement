@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cylinderAbsorption, marchDollase } from "@/core/diffraction/intensity";
+import { cylinderAbsorption, marchDollase, surfaceRoughness } from "@/core/diffraction/intensity";
 import type { UnitCell } from "@/core/crystal/types";
 
 describe("cylinderAbsorption (GSAS-II Debye–Scherrer)", () => {
@@ -25,6 +25,36 @@ describe("cylinderAbsorption (GSAS-II Debye–Scherrer)", () => {
 
   it("is angle-dependent (cylinder path length varies with 2θ)", () => {
     expect(cylinderAbsorption(1.5, 5)).not.toBeCloseTo(cylinderAbsorption(1.5, 60), 4);
+  });
+});
+
+describe("surfaceRoughness (Suortti flat-plate)", () => {
+  it("is the identity at SRA=1 or SRB=0 (no roughness)", () => {
+    expect(surfaceRoughness(1, 0.2, 20)).toBe(1);
+    expect(surfaceRoughness(0.8, 0, 20)).toBe(1);
+  });
+
+  it("normalizes to 1 at θ=90° (2θ=180°) and suppresses low-angle intensity", () => {
+    // GSAS-II SurfaceRough normalizes T2 so C=1 at back-scattering.
+    expect(surfaceRoughness(0.6, 0.15, 180)).toBeCloseTo(1, 6);
+    const low = surfaceRoughness(0.6, 0.15, 20);
+    expect(low).toBeLessThan(1);
+    expect(low).toBeGreaterThan(0);
+  });
+
+  it("increases monotonically from low to high angle", () => {
+    const c10 = surfaceRoughness(0.6, 0.15, 10);
+    const c40 = surfaceRoughness(0.6, 0.15, 40);
+    const c120 = surfaceRoughness(0.6, 0.15, 120);
+    expect(c10).toBeLessThan(c40);
+    expect(c40).toBeLessThan(c120);
+  });
+
+  it("matches the GSAS-II closed form C=[SRA+(1-SRA)e^(-SRB/sinθ)]/[SRA+(1-SRA)e^(-SRB)]", () => {
+    const sra = 0.7, srb = 0.2, twoTheta = 30;
+    const sinTheta = Math.sin((twoTheta / 2) * (Math.PI / 180));
+    const expected = (sra + (1 - sra) * Math.exp(-srb / sinTheta)) / (sra + (1 - sra) * Math.exp(-srb));
+    expect(surfaceRoughness(sra, srb, twoTheta)).toBeCloseTo(expected, 12);
   });
 });
 

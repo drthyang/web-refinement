@@ -24,6 +24,7 @@ import type {
   ParameterKind,
 } from "@/core/refinement/types";
 import { detectExtraPeaks } from "@/core/magnetic/extraPeaks";
+import { correctionCorrelation } from "@/core/diffraction/corrections";
 
 export type Severity = "info" | "note" | "warning" | "critical";
 
@@ -109,6 +110,10 @@ function correlationInsight(a: ParameterKind, b: ParameterKind): string | undefi
   if (has("cellLength", "zeroShift")) return "Cell length and zero shift both move peak positions; they separate only across a wide 2θ/TOF range. Refine the zero from a well-characterized standard, or fix it.";
   if (has("profileU", "profileV") || has("profileV", "profileW") || has("profileU", "profileW")) return "The Caglioti U/V/W are mutually correlated (they parameterize one FWHM(θ) curve). Free them together only with good angular coverage; otherwise refine W first.";
   if (has("mustrainPerp", "mustrainPar") || has("anisoSizePerp", "anisoSizePar")) return "Anisotropic microstructure components correlate along directions the data barely resolves. Free them only after the isotropic profile has converged.";
+  // Correction-owned correlations (displacement/transparency/roughness vs. cell,
+  // zero, scale, background) live on their registry descriptors.
+  const fromCorrection = correctionCorrelation(a, b);
+  if (fromCorrection) return fromCorrection;
   return undefined;
 }
 

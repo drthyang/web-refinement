@@ -7,6 +7,7 @@
 import type { AtomSite, StructureModel, UnitCell } from "@/core/crystal/types";
 import type { ParameterBinding } from "@/core/refinement/types";
 import type { UAniso } from "@/core/crystal/adpConstraints";
+import { isCorrectionKind, type CorrectionValues } from "@/core/diffraction/corrections";
 
 export interface AppliedModel {
   readonly model: StructureModel;
@@ -57,10 +58,17 @@ export interface AppliedModel {
   };
   /** Zero-point shift of the abscissa, in the pattern's x-unit. */
   readonly zeroShift: number;
+  /**
+   * Bound peak-correction values keyed by ParameterKind — the sample-geometry
+   * and intensity corrections (displacement, transparency, absorption μR, Suortti
+   * roughness). The forward model reads these through the correction registry
+   * (`core/diffraction/corrections`); an absent kind means the correction's
+   * identity (no-op). One bag replaces the former per-correction fields so a new
+   * correction is one registry descriptor, not another field + switch case here.
+   */
+  readonly corrections: CorrectionValues;
   /** March–Dollase preferred orientation (axis in hkl + ratio). Absent ⇒ none. */
   readonly po?: { readonly axis: [number, number, number]; readonly ratio: number };
-  /** Absorption coefficient μR (cylinder radius × linear absorption). 0 ⇒ none. */
-  readonly muR: number;
   /** Secondary-extinction parameter (SHELXL EXTI). 0 ⇒ none. */
   readonly extinction: number;
   /**
@@ -110,6 +118,7 @@ export function applyParameters(
   let momentScale = 1;
   let peakWidth = 0.1;
   let zeroShift = 0;
+  const corrections: CorrectionValues = {};
   let profileU: number | undefined;
   let profileV: number | undefined;
   let profileW: number | undefined;
@@ -117,7 +126,6 @@ export function applyParameters(
   let profileY: number | undefined;
   let asymSL: number | undefined;
   let asymHL: number | undefined;
-  let muR = 0;
   let extinction = 0;
   let po: { axis: [number, number, number]; ratio: number } | undefined;
   const stephensS = new Map<number, number>();
@@ -135,6 +143,13 @@ export function applyParameters(
   for (const binding of bindings) {
     const v = values[binding.parameterId];
     if (v === undefined) continue;
+
+    // Peak corrections (displacement, transparency, absorption, roughness) flow
+    // into one bag keyed by kind; the registry owns their forward-model math.
+    if (isCorrectionKind(binding.kind)) {
+      corrections[binding.kind] = v;
+      continue;
+    }
 
     switch (binding.kind) {
       case "scale":
@@ -238,9 +253,6 @@ export function applyParameters(
       case "poRatio":
         po = { axis: (binding.axis ? [...binding.axis] : [0, 0, 1]) as [number, number, number], ratio: v };
         break;
-      case "absorption":
-        muR = v;
-        break;
       case "extinction":
         extinction = v;
         break;
@@ -314,7 +326,7 @@ export function applyParameters(
     momentScale,
     peakWidth,
     zeroShift,
-    muR,
+    corrections,
     extinction,
     ...(stephensStrain ? { stephensStrain } : {}),
     ...(uniaxialSize ? { uniaxialSize } : {}),

@@ -16,7 +16,8 @@ import { weightsFromSigma, excludedPointMask, applyExclusionMask, fitRangeMask }
 import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters, type AppliedModel } from "@/core/workflow/apply";
 import { generateReflections } from "@/core/diffraction/reflections";
-import { powderPeakIntensities, cylinderAbsorption, lorentzPolarization, marchDollase } from "@/core/diffraction/intensity";
+import { powderPeakIntensities, lorentzPolarization, marchDollase } from "@/core/diffraction/intensity";
+import { correctionsForPattern } from "@/core/diffraction/corrections";
 import { nuclearStructureFactorPartials } from "@/core/diffraction/structureFactor";
 import { braggTheta } from "@/core/crystal/unitCell";
 import { dFromTof } from "@/core/diffraction/instrument";
@@ -261,7 +262,11 @@ export function placePeaks(
   // Finger–Cox–Jephcoat axial-divergence asymmetry: each peak is expanded into a
   // set of shifted sub-peaks with a low-angle tail (2θ patterns only).
   const useFcj = applied.axial !== undefined && pattern.xUnit === "twoTheta";
-  const applyAbsorption = applied.muR > 0 && pattern.xUnit === "twoTheta";
+  // Sample-geometry + intensity corrections (displacement, transparency,
+  // absorption, roughness) come from the registry: position shifts accumulate,
+  // intensity factors multiply — in registry order, identity values are exact
+  // no-ops, so an unused correction leaves the pattern bit-identical.
+  const corr = correctionsForPattern(pattern, applied.corrections);
   // Anisotropic microstructure (2θ CW only). Stephens strain adds to the Gaussian
   // width (variance add); uniaxial size adds to the Lorentzian (breadth add).
   const isCW = pattern.xUnit === "twoTheta" && pattern.radiation.kind !== "neutron-tof";
@@ -275,6 +280,14 @@ export function placePeaks(
   for (const p of intensities) {
     let center = dToX(pattern, p.d);
     if (Number.isNaN(center)) continue;
+    // Position corrections (displacement D·cosθ, transparency T·sin2θ) at the
+    // Bragg angle. Accumulated then added once (not folded into a single
+    // expression) to keep the exact float arithmetic of the pre-registry code.
+    if (corr.anyPositional) {
+      let shift = 0;
+      for (const c of corr.positional) shift += c.positionShift!(applied.corrections, center);
+      center += shift;
+    }
     center += applied.zeroShift;
     let gaussianFwhm = useCaglioti ? cagliotiFwhm(center, applied.caglioti!) / 100 : constWidth;
     const hasHkl = p.h !== undefined && p.k !== undefined && p.l !== undefined;
@@ -303,8 +316,10 @@ export function placePeaks(
     } else {
       fwhm = Math.max(gaussianFwhm, 1e-4);
     }
-    // GSAS-II cylinder absorption A(μR, 2θ) multiplies the calculated intensity.
-    const intensity = applyAbsorption ? p.intensity * cylinderAbsorption(applied.muR, center) : p.intensity;
+    // Intensity corrections that scale a peak (registry order: absorption then
+    // roughness); each returns 1 at identity, so multiplying is a no-op when off.
+    let intensity = p.intensity;
+    for (const c of corr.intensity) intensity *= c.intensityFactor!(applied.corrections, center);
     if (useFcj) {
       for (const sub of fcjSubPeaks(center, applied.axial!)) {
         const i = intensity * sub.weight;

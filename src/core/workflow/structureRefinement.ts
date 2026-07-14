@@ -22,6 +22,7 @@ import { allowedPositionShifts } from "@/core/crystal/siteConstraints";
 import { allowedAnisotropicAdpModes } from "@/core/crystal/adpConstraints";
 import { siteMultiplicity } from "@/core/crystal/symmetry";
 import { quarticStrainInvariants } from "@/core/diffraction/anisoStrain";
+import { correctionById, CORRECTION_KINDS, type CorrectionRequest } from "@/core/diffraction/corrections";
 
 export interface StructureRefinementOptions {
   /** Starting scale factor (seed with `optimalScale` for real data). Default 1. */
@@ -124,12 +125,16 @@ export interface StructureRefinementOptions {
    */
   readonly preferredOrientation?: { readonly axis: readonly [number, number, number]; readonly ratio?: number };
   /**
-   * Debye–Scherrer cylinder absorption: starting μR (linear absorption × capillary
-   * radius). Refined in the corrections stage when `refineAbsorption` is set.
+   * Peak corrections to emit (the sample-geometry + intensity family owned by the
+   * correction registry): "displacement" (Δ2θ=D·cosθ), "transparency"
+   * (Δ2θ=T·sin2θ), "absorption" (Debye–Scherrer μR), "roughness" (Suortti SRA/SRB).
+   * Each request enables one correction; `refine` (default true) frees it, and
+   * `seeds` overrides the descriptor's default starting values (keyed by kind).
+   * Only requests whose geometry matches the pattern are emitted. Adding a new
+   * correction to the registry makes it requestable here with no change to this
+   * type.
    */
-  readonly absorption?: number;
-  /** Refine μR. Default false (correlates strongly with scale and ADP). */
-  readonly refineAbsorption?: boolean;
+  readonly corrections?: readonly CorrectionRequest[];
   /**
    * Emit Stephens (1999) anisotropic-microstrain S parameters — one per
    * symmetry-allowed quartic invariant of the space group. Seeded at 0 (no
@@ -211,6 +216,36 @@ export interface OccupancyRestraint {
 }
 
 /**
+ * Emit the requested peak corrections' parameters + bindings from the registry.
+ * Each request names a descriptor ("displacement", "transparency", "absorption",
+ * "roughness"); the descriptor supplies the parameter ids/labels/bounds/seeds and
+ * the geometry gate, so adding a correction never touches this function. `refine`
+ * (default true) frees the params; `seeds` overrides the descriptor defaults by
+ * kind.
+ */
+function emitCorrections(
+  pattern: PowderPattern,
+  requests: readonly CorrectionRequest[],
+  params: RefinementParameter[],
+  bindings: ParameterBinding[],
+): void {
+  for (const req of requests) {
+    const desc = correctionById(req.id);
+    if (!desc || !desc.appliesTo(pattern)) continue;
+    const fixed = !(req.refine ?? true);
+    for (const ps of desc.params) {
+      const value = req.seeds?.[ps.kind] ?? ps.seed;
+      params.push({
+        id: ps.id, label: ps.label, kind: ps.kind, value, initialValue: value, fixed,
+        ...(ps.min !== undefined ? { min: ps.min } : {}),
+        ...(ps.max !== undefined ? { max: ps.max } : {}),
+      });
+      bindings.push({ parameterId: ps.id, kind: ps.kind, targetId: pattern.id });
+    }
+  }
+}
+
+/**
  * Build the parameter set, bindings, and staged plan for a powder structure
  * refinement of `structure` against `pattern`. All parameters start `fixed:
  * false`; the staged plan controls the unlock order, so a one-shot `refine` on
@@ -244,8 +279,7 @@ export function buildStructureRefinement(
     occupancyRestraints = [],
     positionBound = 0.2,
     preferredOrientation,
-    absorption,
-    refineAbsorption = false,
+    corrections = [],
     stephensStrain = false,
     uniaxialSize,
     uniaxialStrain,
@@ -365,6 +399,12 @@ export function buildStructureRefinement(
     bindings.push({ parameterId: "zero", kind: "zeroShift", targetId: pattern.id });
   }
 
+  // Peak corrections (sample-geometry displacement/transparency, Debye–Scherrer
+  // absorption, Suortti roughness) — emitted from the registry. Each request's
+  // descriptor supplies the parameter ids, labels, bounds, seeds and geometry
+  // gate, so this stays one loop no matter how many corrections exist.
+  emitCorrections(pattern, corrections, params, bindings);
+
   // Per-site ADP. Isotropic sites refine B_iso; anisotropic sites refine the
   // symmetry-adapted U tensor modes allowed by site symmetry.
   if (refineAdp) {
@@ -431,14 +471,12 @@ export function buildStructureRefinement(
     if (restrainSharedOccupancy) restraints.push(...sharedOccupancyRestraints(structure.sites, constrainOccupancyToUnity));
   }
 
-  // Corrections: preferred orientation (March–Dollase) and cylinder absorption.
+  // Preferred orientation (March–Dollase) stays on its own path (it is baked into
+  // the cached |F|²·m·Lp unit intensity, not a per-peak factor). Cylinder
+  // absorption is a registry correction, emitted above via `emitCorrections`.
   if (preferredOrientation) {
     params.push({ id: "po", label: "MD ratio", kind: "poRatio", value: preferredOrientation.ratio ?? 1, initialValue: preferredOrientation.ratio ?? 1, min: 0.2, max: 5, fixed: false });
     bindings.push({ parameterId: "po", kind: "poRatio", targetId: pattern.id, axis: [...preferredOrientation.axis] });
-  }
-  if (absorption !== undefined) {
-    params.push({ id: "absorption", label: "μR", kind: "absorption", value: absorption, initialValue: absorption, min: 0, max: 10, fixed: !refineAbsorption });
-    bindings.push({ parameterId: "absorption", kind: "absorption", targetId: pattern.id });
   }
 
   // Anisotropic microstrain (Stephens): one S parameter per symmetry-allowed
@@ -646,7 +684,7 @@ export const DEFAULT_STAGE_KINDS: readonly StageKinds[] = [
   { name: "positions", kinds: ["positionShift"] },
   { name: "occupancy", kinds: ["occupancy"] },
   { name: "microstructure", kinds: ["stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainPerp", "mustrainPar"] },
-  { name: "corrections", kinds: ["poRatio", "absorption"] },
+  { name: "corrections", kinds: ["poRatio", ...CORRECTION_KINDS] },
 ];
 
 /** Reconstruct predicate stages from the serializable kind-group plan. */

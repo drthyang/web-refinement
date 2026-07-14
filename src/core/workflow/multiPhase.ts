@@ -15,6 +15,7 @@ import type { FitRange } from "@/core/workflow/powder";
 import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters } from "@/core/workflow/apply";
 import { buildPeaks, createPeakBuilder } from "@/core/workflow/powder";
+import { SHARED_CORRECTION_KINDS } from "@/core/diffraction/corrections";
 import { synthesizePattern } from "@/core/diffraction/profile";
 
 export interface PowderPhase {
@@ -32,6 +33,8 @@ const SHARED_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "peakWidth", "background", "zeroShift",
   "profileU", "profileV", "profileW", "profileX", "profileY",
   "asymSL", "asymHL", "tofCalibration", "tofProfile", "mustrainIso",
+  // Sample-geometry corrections that are one-per-sample (registry-declared shared).
+  ...SHARED_CORRECTION_KINDS,
 ]);
 function isSharedBinding(b: ParameterBinding): boolean {
   return SHARED_KINDS.has(b.kind);
