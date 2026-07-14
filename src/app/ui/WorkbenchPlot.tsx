@@ -55,8 +55,9 @@ const BASE = 356; // main-region baseline
 const MAINH = BASE - TOP - 6; // intensity drawable height
 const X_LABEL_Y = 372; // x-axis tick labels (below the axis marks)
 const TICK_TOP = 382; // Bragg tick band (below the x-axis labels)
-const TICK_BOT = 391;
+const TICK_H = 9; // tick mark height at the default row spacing
 const TICK_ROW = 13; // vertical step per phase row (> tick height so rows never overlap)
+const TICK_MAX_BOT = 420; // tick band floor (just above the difference band)
 const DIFF_Y = 470; // difference-band zero line
 const DIFF_A = 46; // difference band half-height
 const CAP_Y = 522; // fit-handle caps, below the difference band
@@ -79,6 +80,23 @@ function formatX(v: number, span: number): string {
   if (span >= 200) return String(Math.round(v));
   if (span >= 5) return v.toFixed(1);
   return v.toFixed(2);
+}
+
+/**
+ * Display form of an hkl label: magnetic satellite indices are non-integer
+ * (G ± k), and a fractional k like 1/3 would print its full float — trim to
+ * 3 decimals for reading. Display only; matching still uses the raw string.
+ */
+function formatHkl(hkl: string): string {
+  return hkl
+    .split(" ")
+    .map((s) => {
+      const v = Number(s);
+      if (!Number.isFinite(v)) return s;
+      const r = Math.round(v);
+      return Math.abs(v - r) < 5e-4 ? String(r) : String(+v.toFixed(3));
+    })
+    .join(" ");
 }
 
 export function WorkbenchPlot({
@@ -234,6 +252,13 @@ export function WorkbenchPlot({
     return null;
   }, [highlightSel, phases]);
 
+  // Row geometry: at up to three phase rows the fixed spacing applies; more
+  // rows (e.g. two nuclear phases + the magnetic-analysis rows) compress the
+  // spacing and tick height so the band stays above the difference band.
+  const nRows = phases?.length ?? 0;
+  const tickStep = nRows > 3 ? Math.min(TICK_ROW, Math.floor((TICK_MAX_BOT - TICK_TOP - TICK_H) / (nRows - 1))) : TICK_ROW;
+  const tickH = tickStep < TICK_ROW ? Math.max(5, tickStep - 2) : TICK_H;
+
   // Bragg tick rows are also static during a refinement (positions depend on the
   // structure, not the fit) and there can be hundreds — memoize them too. A tick
   // click toggles the shared selection through `onHighlight`, exactly like an
@@ -241,8 +266,8 @@ export function WorkbenchPlot({
   const braggTicks = useMemo(() => {
     const mx = (x: number): number => X0 + ((x - vlo) / vspan) * XW;
     return (phases ?? []).map((phase, row) => {
-      const y1 = TICK_TOP + row * TICK_ROW;
-      const y2 = TICK_BOT + row * TICK_ROW;
+      const y1 = TICK_TOP + row * tickStep;
+      const y2 = y1 + tickH;
       return (
         <g key={phase.id} stroke={phase.color}>
           {phase.ticks.map((t, i) => {
@@ -259,7 +284,7 @@ export function WorkbenchPlot({
                   {...(picked ? { style: { strokeWidth: 2.6, strokeOpacity: 1 } } : {})}
                 />
                 <line x1={mx(t.x)} y1={y1 - 4} x2={mx(t.x)} y2={y2 + 4} stroke="transparent" strokeWidth={9}>
-                  <title>{`${phase.label}  (${t.hkl})  d ${t.d.toFixed(3)} Å`}</title>
+                  <title>{`${phase.label}  (${formatHkl(t.hkl)})  d ${t.d.toFixed(3)} Å`}</title>
                 </line>
               </g>
             );
@@ -267,7 +292,7 @@ export function WorkbenchPlot({
         </g>
       );
     });
-  }, [phases, vlo, vhi, vspan, XW, highlight, onHighlight]);
+  }, [phases, vlo, vhi, vspan, XW, highlight, onHighlight, tickStep, tickH]);
 
   // Pan to reveal a freshly-spotlighted peak when it sits outside the zoom
   // window — keyed on the pick only, so re-zooming/panning doesn't fight the user.
@@ -430,7 +455,7 @@ export function WorkbenchPlot({
             peak. (Off-screen picks are panned into view by the effect above.) */}
         {highlight && highlight.x >= vlo && highlight.x <= vhi && (() => {
           const hx = sx(highlight.x);
-          const tickY2 = TICK_BOT + highlight.row * TICK_ROW + 3;
+          const tickY2 = TICK_TOP + highlight.row * tickStep + tickH + 3;
           const right = hx > (X0 + X1) / 2;
           return (
             <g pointerEvents="none">
@@ -438,7 +463,7 @@ export function WorkbenchPlot({
                   reads over the blue calc curve; matches the scatter's pick ring. */}
               <line x1={hx} y1={TOP + 12} x2={hx} y2={tickY2} stroke={color.ink} strokeWidth={1.1} strokeDasharray="3 3" opacity={0.55} />
               <path d={`M ${hx - 5} ${TOP} L ${hx + 5} ${TOP} L ${hx} ${TOP + 11} Z`} fill={color.ink} />
-              <line x1={hx} y1={TICK_TOP + highlight.row * TICK_ROW - 3} x2={hx} y2={tickY2} stroke={highlight.color} strokeWidth={2.6} />
+              <line x1={hx} y1={TICK_TOP + highlight.row * tickStep - 3} x2={hx} y2={tickY2} stroke={highlight.color} strokeWidth={2.6} />
               <text
                 x={right ? hx - 8 : hx + 8}
                 y={TOP + 26}
@@ -451,7 +476,7 @@ export function WorkbenchPlot({
                 strokeWidth={3}
                 paintOrder="stroke"
               >
-                {highlight.hkl}
+                {formatHkl(highlight.hkl)}
               </text>
             </g>
           );
@@ -505,7 +530,8 @@ export function WorkbenchPlot({
           />
         )}
 
-        {/* legend */}
+        {/* legend: the series, then one vertical-tick entry per phase row (the
+            phase legend) — or a generic "hkl" entry when no rows are supplied. */}
         <g fontSize={11} fill={color.secondary} fontFamily={mono}>
           <circle cx={X0 + 6} cy={24} r={2} fill={color.obs} />
           <text x={X0 + 13} y={27}>obs</text>
@@ -515,8 +541,22 @@ export function WorkbenchPlot({
           <text x={X0 + 108} y={27}>diff</text>
           <line x1={X0 + 134} y1={24} x2={X0 + 150} y2={24} stroke={color.bkg} strokeWidth={1.6} strokeDasharray="5 3" />
           <text x={X0 + 154} y={27}>bkg</text>
-          <line x1={X0 + 182} y1={20} x2={X0 + 182} y2={28} stroke={color.hkl} strokeWidth={1.4} />
-          <text x={X0 + 188} y={27}>hkl</text>
+          {(() => {
+            const entries = phases && phases.length > 0
+              ? phases.map((p) => ({ color: p.color, label: p.label }))
+              : [{ color: color.hkl, label: "hkl" }];
+            let x = X0 + 182;
+            return entries.map((e, i) => {
+              const gx = x;
+              x += 10 + e.label.length * 6.6 + 16;
+              return (
+                <g key={i}>
+                  <line x1={gx} y1={19} x2={gx} y2={29} stroke={e.color} strokeWidth={2} />
+                  <text x={gx + 7} y={27}>{e.label}</text>
+                </g>
+              );
+            });
+          })()}
         </g>
       </svg>
       {/* corner overlays (HTML on top of the SVG). wR lives in the
@@ -525,7 +565,7 @@ export function WorkbenchPlot({
         <div style={tickPickOverlay} onClick={() => onHighlight?.(null)} title="Click to dismiss (or click the tick again)">
           <span style={{ width: 9, height: 9, borderRadius: 2, background: highlight.color, display: "inline-block" }} />
           <span style={{ fontFamily: mono, fontSize: 12, color: color.ink }}>
-            ({highlight.hkl}) · d {highlight.d.toFixed(4)} Å
+            ({formatHkl(highlight.hkl)}) · d {highlight.d.toFixed(4)} Å
           </span>
           <span style={{ fontSize: 11, color: color.secondary }}>{highlight.label}</span>
         </div>

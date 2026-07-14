@@ -11,7 +11,7 @@
  * this is presentation only.
  */
 
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
 import type { PowderPattern } from "@/core/diffraction/types";
@@ -35,7 +35,14 @@ import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import type { MagneticModel } from "@/core/magnetic/types";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { refine } from "@/core/refinement/engine";
-import type { PowderProfile } from "@/core/workflow/powder";
+import type { PowderCurves, PowderProfile } from "@/core/workflow/powder";
+import {
+  magneticPhaseTicks,
+  satellitePositionTicks,
+  MAGNETIC_COLOR,
+  type PhaseTicks,
+} from "@/visualization/reflectionTicks";
+import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
 import { magneticReportHtml, type MagneticReportGroup } from "@/core/export/magneticReport";
 import { downloadText } from "@/app/download";
@@ -121,10 +128,38 @@ export interface MagneticFit {
   agreementLabel: string;
 }
 
+/**
+ * Everything the powder-pattern preview needs, prepared by the powder
+ * workbench (which owns the axis conversions and the refined session state).
+ * It is the refinement plot's own view — refined curves in the current
+ * display unit, fit-range window, unit toggle, and the per-phase Bragg-tick
+ * rows — so the magnetic page shows exactly the pattern being refined; this
+ * panel adds the satellite / allowed / residual rows on top.
+ */
+export interface MagneticPatternView {
+  /** Refined obs/calc/background curves in the CURRENT display unit. */
+  readonly curves: PowderCurves;
+  readonly xLabel: string;
+  /** d-spacing (Å) → current display unit. */
+  readonly dToX: (d: number) => number;
+  /** d-window of the pattern (floored against tiny-d tick explosions). */
+  readonly dRange: { readonly min: number; readonly max: number };
+  /** One Bragg-tick row per crystallographic phase (refined cells), so
+   *  impurity peaks index against their own phase. */
+  readonly nuclearTicks: readonly PhaseTicks[];
+  /** Fit-range window in display space (same draggable handles as the
+   *  refinement plot when `onFitRangeChange` is present). */
+  readonly fitRange?: FitRangeSelection;
+  readonly onFitRangeChange?: (r: FitRangeSelection) => void;
+  /** Axis-unit segmented control, sharing the refinement page's unit state. */
+  readonly unitToggle?: ReactNode;
+}
+
 export function KSearchPanel({
   structure,
   autoPeaks = [],
   pattern,
+  patternView,
   nuclearParams,
   nuclearBindings,
   profile,
@@ -137,6 +172,10 @@ export function KSearchPanel({
   autoPeaks?: readonly number[];
   /** The observed pattern + refined nuclear model, for running a moment refinement. */
   pattern?: PowderPattern;
+  /** Curves + d→x mapping for the pattern preview with satellite/allowed tick
+   *  rows — the visual check that the chosen k and magnetic space group can
+   *  explain the unindexed peaks. Absent in single-crystal mode. */
+  patternView?: MagneticPatternView;
   nuclearParams?: readonly RefinementParameter[];
   nuclearBindings?: readonly ParameterBinding[];
   profile?: PowderProfile;
@@ -292,12 +331,60 @@ export function KSearchPanel({
     setAmps(init);
   }, [magBuild]);
 
+  // The candidate magnetic model with the current amplitudes applied — feeds
+  // both the 3D moment arrows and the allowed-reflection tick row.
+  const appliedMagnetic = useMemo(
+    () => (magBuild ? applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps) : null),
+    [magBuild, amps],
+  );
+
   // Moment entries for the 3D view (one per site — or per split orbit when the
   // magnetic group splits a site's crystallographic orbit), with amps applied.
-  const momentEntries = useMemo(() => {
-    if (!magBuild) return undefined;
-    return momentEntriesFrom(applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps));
-  }, [magBuild, amps]);
+  const momentEntries = useMemo(
+    () => (appliedMagnetic ? momentEntriesFrom(appliedMagnetic) : undefined),
+    [appliedMagnetic],
+  );
+
+  // Tick rows for the pattern preview: every crystallographic phase (from the
+  // refinement page, so impurity peaks index correctly), then where this k CAN
+  // put magnetic intensity (satellite positions G ± k), where the selected
+  // group actually DOES (|F_M|² > 0 with the current amplitudes), and where
+  // the nuclear fit leaves unexplained intensity — the visual test of the k
+  // and group choices.
+  const previewTicks = useMemo<PhaseTicks[]>(() => {
+    if (!patternView) return [];
+    const { dRange, dToX } = patternView;
+    const rows: PhaseTicks[] = [
+      ...patternView.nuclearTicks,
+      satellitePositionTicks(structure, k, dRange.min, dRange.max, dToX, {
+        id: "k-positions",
+        label: "G ± k",
+        color: theme.faint,
+      }),
+    ];
+    if (appliedMagnetic) {
+      rows.push(
+        magneticPhaseTicks(structure, appliedMagnetic, dRange.min, dRange.max, dToX, {
+          id: "allowed",
+          label: "allowed",
+          color: MAGNETIC_COLOR,
+        }),
+      );
+    }
+    if (autoPeaks.length > 0) {
+      const ticks = autoPeaks
+        .filter((d) => d >= dRange.min && d <= dRange.max)
+        .map((d) => ({ x: dToX(d), hkl: "—", d }))
+        .filter((t) => Number.isFinite(t.x));
+      rows.push({ id: "residual", label: "residual", color: theme.obs, kind: "magnetic", ticks });
+    }
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patternView, structure, k[0], k[1], k[2], appliedMagnetic, autoPeaks]);
+
+  // Tick-click spotlight in the pattern preview (same interaction as the
+  // refinement plot, local to this page).
+  const [patternPick, setPatternPick] = useState<{ hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null>(null);
 
   // Optional moment refinement against the loaded pattern: nuclear model held
   // fixed (the handoff convention), moment-mode amplitudes freed, shared scale.
@@ -403,10 +490,48 @@ export function KSearchPanel({
 
   return (
     <div className="wb-mag2">
-      {/* Left panel: the 3D model, always visible. Defaults to the magnetic
-          (super)cell whenever k defines one; arrows appear once a magnetic
-          group is selected on the right. */}
-      <section style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", position: "sticky", top: 12, alignSelf: "start", height: "clamp(480px, 78vh, 900px)" }}>
+      {/* Left rail (sticky): in powder mode the refined pattern first — the
+          judging tool while clicking candidate groups on the right — then the
+          3D model (magnetic (super)cell; arrows once a group is selected). */}
+      <div className="wb-mag2-left">
+      {/* Pattern check: is the k / magnetic-space-group choice consistent
+          with where the unexplained intensity actually sits? The same view as
+          the refinement plot (refined curves, fit range, unit toggle), plus
+          the satellite / allowed / residual tick rows. */}
+      {patternView && (
+        <section style={{ ...themeCard, padding: "12px 16px 10px", display: "flex", flexDirection: "column" }}>
+          <div style={{ ...themeLabel, marginBottom: 6, display: "flex", alignItems: "center", gap: 10 }}>
+            <span>
+              Powder pattern — magnetic reflection check
+              {magBuild && <span style={{ color: theme.secondary, textTransform: "none", letterSpacing: 0 }}> · ticks follow the selected group</span>}
+            </span>
+            <span style={{ marginLeft: "auto" }}>{patternView.unitToggle}</span>
+          </div>
+          <div style={{ height: "clamp(320px, 36vh, 440px)", display: "flex", flexDirection: "column" }}>
+            <WorkbenchPlot
+              curves={patternView.curves}
+              xLabel={patternView.xLabel}
+              phases={previewTicks}
+              highlight={patternPick}
+              onHighlight={setPatternPick}
+              {...(patternView.fitRange ? { fitRange: patternView.fitRange } : {})}
+              {...(patternView.onFitRangeChange ? { onFitRangeChange: patternView.onFitRangeChange } : {})}
+            />
+          </div>
+          <p
+            style={{ ...help, maxWidth: "none" }}
+            title="Grey G ± k ticks mark every position this k allows; the magenta row marks the reflections the selected magnetic space group keeps (|F_M|² > 0 with the current moments); orange ticks are residual peaks the nuclear fit leaves unexplained. Drag to zoom, drag the blue handles to set the fit range, hover or click a tick for its indices."
+          >
+            A plausible k puts a <span style={{ color: theme.ink }}>G ± k</span> tick under every{" "}
+            <span style={{ color: theme.ink }}>residual</span> peak
+            {magBuild
+              ? <>; a plausible group keeps those peaks in the <span style={{ color: theme.ink }}>allowed</span> row.</>
+              : " — pick a group in step 4 to see which of those positions it allows."}
+          </p>
+        </section>
+      )}
+
+      <section style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", ...(patternView ? {} : { height: "clamp(480px, 78vh, 900px)" }) }}>
         <div style={{ ...themeLabel, marginBottom: 8 }}>
           3D model — {magBuild ? "moment preview" : "refined structure"}
           <span style={{ color: theme.secondary, textTransform: "none", letterSpacing: 0 }}>
@@ -422,12 +547,18 @@ export function KSearchPanel({
             {...(standardCell ? { standardCell } : {})}
           />
         </Suspense>
-        <p style={{ ...help, maxWidth: "none" }}>
+        <p
+          style={{ ...help, maxWidth: "none" }}
+          {...(magBuild
+            ? { title: "Absolute arrow magnitude carries a convention factor to cross-check vs GSAS-II; directions and relative sizes are well defined." }
+            : {})}
+        >
           {magBuild
-            ? "Red arrows are the ordered moments (axial vectors) on the magnetic sites, shown over the magnetic unit cell. Atoms without an arrow have a symmetry-forbidden moment under the selected group. Absolute magnitude carries a convention factor to cross-check vs GSAS-II; directions and relative sizes are well defined."
+            ? "Red arrows: the ordered moments over the magnetic unit cell — atoms without an arrow have a symmetry-forbidden moment under this group."
             : "Refined nuclear structure. Pick a magnetic space group in step 4 to preview its symmetry-allowed moments here."}
         </p>
       </section>
+      </div>
 
       {/* Right panel: the workflow controls (steps 1–5). */}
       <div style={{ ...themeCard, padding: 16, display: "grid", gap: 18, alignContent: "start", minWidth: 0 }}>

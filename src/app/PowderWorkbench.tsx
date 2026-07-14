@@ -40,7 +40,7 @@ import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from 
 import { isMomentParameterKind } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
 import { CANCELLED } from "@/workers/computeClient";
-import { KSearchPanel } from "@/components/KSearchPanel";
+import { KSearchPanel, type MagneticPatternView } from "@/components/KSearchPanel";
 import { withAdpModel } from "@/core/crystal/adp";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
 import { detectExtraPeaks } from "@/core/magnetic/extraPeaks";
@@ -256,8 +256,10 @@ export function PowderWorkbench({
     () => convertInterval(effectiveFitRange, pattern.xUnit, effectiveUnit, axisCtx),
     [effectiveFitRange, pattern.xUnit, effectiveUnit, axisCtx],
   );
-  const setFitRangeFromDisplay = (r: FitRangeSelection): void =>
-    setFitRange(convertInterval(r, effectiveUnit, pattern.xUnit, axisCtx));
+  const setFitRangeFromDisplay = useCallback(
+    (r: FitRangeSelection): void => setFitRange(convertInterval(r, effectiveUnit, pattern.xUnit, axisCtx)),
+    [effectiveUnit, pattern.xUnit, axisCtx],
+  );
 
   // Bragg reflection ticks (in the current display unit). Nuclear phase always;
   // a magnetic row appears when the session carries a magnetic model. The d-range
@@ -288,6 +290,30 @@ export function PowderWorkbench({
     }
     return phases;
   }, [refinedPhases, structure, session.extraPhases, session.magnetic, patternExtent, pattern.xUnit, effectiveUnit, axisCtx]);
+
+  // Pattern preview for the Magnetic tab — the SAME view as the refinement
+  // plot: refined curves in the current display unit, the fit-range window,
+  // the axis-unit toggle, and every crystallographic phase's Bragg-tick row
+  // (so an impurity peak indexes against its own phase, not a bogus G ± k of
+  // the primary). The k-search page adds its satellite / allowed / residual
+  // rows on top via `dToX`.
+  const magneticPatternView = useMemo<MagneticPatternView | undefined>(() => {
+    if (pattern.points.length === 0 || !displayUnits.includes("dSpacing")) return undefined;
+    const dA = convertAxisValue(patternExtent.min, pattern.xUnit, "dSpacing", axisCtx);
+    const dB = convertAxisValue(patternExtent.max, pattern.xUnit, "dSpacing", axisCtx);
+    if (!Number.isFinite(dA) || !Number.isFinite(dB)) return undefined;
+    return {
+      curves: displayCurves,
+      xLabel: displayXLabel,
+      dToX: (d: number): number => convertAxisValue(d, "dSpacing", effectiveUnit, axisCtx),
+      // Same tiny-d floor as the refinement plot's tick rows.
+      dRange: { min: Math.max(Math.min(dA, dB), 0.4), max: Math.max(dA, dB) },
+      nuclearTicks: phaseTicks.filter((p) => p.kind === "nuclear"),
+      fitRange: displayFitRange,
+      ...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay }),
+      unitToggle: <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />,
+    };
+  }, [pattern.points.length, pattern.xUnit, displayUnits, displayCurves, displayXLabel, phaseTicks, displayFitRange, setFitRangeFromDisplay, tofViewOnly, effectiveUnit, axisCtx, patternExtent]);
 
   // Refined moment entries (per site / split orbit) for the 3D structure view.
   const sessionMoments = useMemo(
@@ -1126,6 +1152,7 @@ export function PowderWorkbench({
               structure={refinedStructure}
               autoPeaks={magneticPeakD}
               pattern={pattern}
+              {...(magneticPatternView ? { patternView: magneticPatternView } : {})}
               nuclearParams={powderParams}
               nuclearBindings={pBindings}
               profile={session.powderProfile}

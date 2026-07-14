@@ -113,22 +113,32 @@
   }
 }
 
-/* Magnetic page: 3D model (left) | workflow controls (right). */
+/* Magnetic page: pattern check + 3D model (left rail) | workflow controls (right). */
 .wb-mag2 {
   display: grid;
-  grid-template-columns: minmax(360px, 5fr) minmax(380px, 6fr);
+  grid-template-columns: minmax(400px, 6fr) minmax(380px, 5fr);
   gap: clamp(12px, 1vw, 20px);
   align-items: start;
 }
 
-/* Narrow: stack, model first (it is the sticky orientation anchor when wide). */
+/* The left rail sticks as one unit while the workflow steps scroll, keeping
+   the pattern check visible while candidate groups are clicked on the right. */
+.wb-mag2-left {
+  position: sticky;
+  top: 12px;
+  align-self: start;
+  display: grid;
+  gap: clamp(12px, 1vw, 20px);
+  min-width: 0;
+}
+
+/* Narrow: stack, pattern check first (cards auto-size; nothing sticks). */
 @media (max-width: 1120px) {
   .wb-mag2 {
     grid-template-columns: 1fr;
   }
-  .wb-mag2 > section {
-    position: static !important;
-    height: clamp(420px, 60vh, 640px) !important;
+  .wb-mag2-left {
+    position: static;
   }
 }
 

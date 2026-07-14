@@ -25,10 +25,9 @@ import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters } from "@/core/workflow/apply";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { createPeakBuilder, placePeaks, reflectionDRange } from "@/core/workflow/powder";
-import { generateReflections } from "@/core/diffraction/reflections";
+import { magneticSatellites } from "@/core/magnetic/satellites";
 import { lorentzPolarization } from "@/core/diffraction/intensity";
 import { magneticStructureFactor } from "@/core/magnetic/structureFactor";
-import { dSpacing } from "@/core/crystal/unitCell";
 import { synthesizePattern } from "@/core/diffraction/profile";
 
 export interface MagneticPowderComponents {
@@ -97,31 +96,18 @@ function createCombinedPeakBuilder(
     if (key !== lastKey) {
       const appliedMag = applyMagneticMoments(magnetic, bindings, values);
       const kVec = appliedMag.propagation[0] ?? [0, 0, 0];
-      const isK0 = kVec.every((v) => Math.abs(v) < 1e-9);
 
-      // Magnetic satellites at G ± k (single commensurate k). k = 0 → the
-      // nuclear position (the ±k satellites coincide, so emit once). |F_M|²
-      // evaluated at the non-integer satellite indices carries the k-phase
-      // automatically. Parent nuclear multiplicity approximates the exact
-      // star-of-k satellite multiplicity. Nuclear systematic absences do NOT
-      // apply to the magnetic structure factor (`absences: false`): AFM
-      // structures put their satellites exactly at nuclear-extinct positions —
-      // a gray anti-translation lattice (BNS P_c…) even makes the (0,0,½)′ op
-      // look like a centring, and filtering would delete every magnetic peak.
-      // |F_M|² itself decides what is absent.
-      const reflections = generateReflections(applied.model.cell, applied.model.spaceGroup, dMin, dMax, { absences: false });
+      // Magnetic satellites at G ± k (single commensurate k), including the
+      // pure (000)±k satellite and nuclear-extinct parents — see the shared
+      // enumerator (core/magnetic/satellites) for the physics. |F_M|² evaluated
+      // at the non-integer satellite indices carries the k-phase automatically;
+      // parent nuclear multiplicity approximates the exact star-of-k satellite
+      // multiplicity, and |F_M|² itself decides what is absent.
       unitMagIntensities = [];
-      for (const r of reflections) {
-        const sats: [number, number, number][] = isK0
-          ? [[r.h, r.k, r.l]]
-          : [[r.h + kVec[0]!, r.k + kVec[1]!, r.l + kVec[2]!], [r.h - kVec[0]!, r.k - kVec[1]!, r.l - kVec[2]!]];
-        for (const [mh, mk, ml] of sats) {
-          const dSat = dSpacing(applied.model.cell, mh, mk, ml);
-          if (!Number.isFinite(dSat) || dSat <= 0 || dSat < dMin || dSat > dMax) continue;
-          const fm2 = magneticStructureFactor(applied.model, appliedMag, mh, mk, ml).squared;
-          const lp = lorentzPolarization(pattern.radiation, dSat);
-          unitMagIntensities.push({ d: dSat, intensity: r.multiplicity * lp * fm2 });
-        }
+      for (const s of magneticSatellites(applied.model.cell, applied.model.spaceGroup, kVec, dMin, dMax)) {
+        const fm2 = magneticStructureFactor(applied.model, appliedMag, s.h, s.k, s.l).squared;
+        const lp = lorentzPolarization(pattern.radiation, s.d);
+        unitMagIntensities.push({ d: s.d, intensity: s.multiplicity * lp * fm2 });
       }
       lastKey = key;
     }

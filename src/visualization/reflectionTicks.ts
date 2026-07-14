@@ -7,14 +7,16 @@
  *
  * Magnetic ticks cover the commensurate single-k case: satellites at G ± k
  * (k = 0 → nuclear positions), restricted to those carrying a non-negligible
- * magnetic structure factor.
+ * magnetic structure factor — or, for `satellitePositionTicks`, unrestricted
+ * (every position the k allows, the magnetic-analysis position check).
  */
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { MagneticModel } from "@/core/magnetic/types";
+import type { Vec3 } from "@/core/math/types";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { magneticStructureFactor } from "@/core/magnetic/structureFactor";
-import { dSpacing } from "@/core/crystal/unitCell";
+import { magneticSatellites } from "@/core/magnetic/satellites";
 
 export interface ReflectionTick {
   /** Position in the plot's current display unit. */
@@ -65,9 +67,11 @@ export function nuclearPhaseTicks(
 }
 
 /**
- * Magnetic (k = 0) reflection ticks: nuclear reflections whose magnetic
- * structure factor is non-negligible, relative to the strongest. A magnetic
- * structure with all-zero moments (or a paramagnetic model) yields no ticks.
+ * Magnetic reflection ticks: satellite positions G ± k (from the shared
+ * enumerator — nuclear-extinct parents and the pure (000)±k satellite
+ * included) whose magnetic structure factor is non-negligible, relative to the
+ * strongest. A magnetic structure with all-zero moments (or a paramagnetic
+ * model) yields no ticks.
  */
 export function magneticPhaseTicks(
   structure: StructureModel,
@@ -77,22 +81,11 @@ export function magneticPhaseTicks(
   toX: (d: number) => number,
   meta: PhaseMeta,
 ): PhaseTicks {
-  // Magnetic satellites at G ± k for the (single, commensurate) propagation
-  // vector. k = 0 → the nuclear positions (the ±k satellites coincide).
   const k = magnetic.propagation[0] ?? [0, 0, 0];
-  const isK0 = k.every((v) => Math.abs(v) < 1e-9);
-  const reflections = generateReflections(structure.cell, structure.spaceGroup, dMin, dMax);
-  const sat: { h: number; k: number; l: number; d: number; sq: number }[] = [];
-  for (const r of reflections) {
-    const images: [number, number, number][] = isK0
-      ? [[r.h, r.k, r.l]]
-      : [[r.h + k[0]!, r.k + k[1]!, r.l + k[2]!], [r.h - k[0]!, r.k - k[1]!, r.l - k[2]!]];
-    for (const [mh, mk, ml] of images) {
-      const d = dSpacing(structure.cell, mh, mk, ml);
-      if (!Number.isFinite(d) || d < dMin || d > dMax) continue;
-      sat.push({ h: mh, k: mk, l: ml, d, sq: magneticStructureFactor(structure, magnetic, mh, mk, ml).squared });
-    }
-  }
+  const sat = magneticSatellites(structure.cell, structure.spaceGroup, k, dMin, dMax).map((s) => ({
+    ...s,
+    sq: magneticStructureFactor(structure, magnetic, s.h, s.k, s.l).squared,
+  }));
   const maxSq = sat.reduce((m, s) => (s.sq > m ? s.sq : m), 0);
   const ticks: ReflectionTick[] = [];
   if (maxSq > 0) {
@@ -102,6 +95,32 @@ export function magneticPhaseTicks(
       const x = toX(r.d);
       if (Number.isFinite(x)) ticks.push({ x, hkl: hklLabel(r.h, r.k, r.l), d: r.d });
     }
+  }
+  return { ...meta, kind: "magnetic", ticks };
+}
+
+/**
+ * Position-only satellite ticks: every place magnetic intensity CAN appear for
+ * a propagation vector — G ± k over the full reciprocal lattice, no structure
+ * factor involved. This is the k-selection check on the pattern: a viable k
+ * puts a position tick under every unexplained peak. Coincident positions
+ * (e.g. the ±k arms of one G, or different G sharing a d) collapse to one tick.
+ */
+export function satellitePositionTicks(
+  structure: StructureModel,
+  k: Vec3,
+  dMin: number,
+  dMax: number,
+  toX: (d: number) => number,
+  meta: PhaseMeta,
+): PhaseTicks {
+  const sat = [...magneticSatellites(structure.cell, structure.spaceGroup, k, dMin, dMax)].sort((a, b) => b.d - a.d);
+  const ticks: ReflectionTick[] = [];
+  for (const s of sat) {
+    const prev = ticks[ticks.length - 1];
+    if (prev && Math.abs(prev.d - s.d) < 1e-6 * s.d) continue;
+    const x = toX(s.d);
+    if (Number.isFinite(x)) ticks.push({ x, hkl: hklLabel(s.h, s.k, s.l), d: s.d });
   }
   return { ...meta, kind: "magnetic", ticks };
 }

@@ -33,7 +33,7 @@ import { phaseBindingsFor } from "@/core/workflow/multiPhase";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { powderPeakIntensities, lorentzPolarization } from "@/core/diffraction/intensity";
 import { magneticStructureFactor } from "@/core/magnetic/structureFactor";
-import { dSpacing } from "@/core/crystal/unitCell";
+import { magneticSatellites } from "@/core/magnetic/satellites";
 import { evaluateBackground } from "@/core/diffraction/background";
 import { gaussian, pseudoVoigt, tofBackToBack, type ProfilePeak } from "@/core/diffraction/profile";
 
@@ -181,29 +181,20 @@ export function powderReflectionObsCalc(
     const magFactor = magScaleBinding ? resolved[magScaleBinding.parameterId] ?? 1 : 1;
     const magScale = appliedPrimary.scale * magFactor;
     const kVec = appliedMag.propagation[0] ?? [0, 0, 0];
-    const isK0 = kVec.every((v) => Math.abs(v) < 1e-9);
-    const primaryReflections = generateReflections(appliedPrimary.model.cell, appliedPrimary.model.spaceGroup, dMin, dMax);
     const mags: Component[] = [];
-    for (const r of primaryReflections) {
-      const sats: [number, number, number][] = isK0
-        ? [[r.h, r.k, r.l]]
-        : [[r.h + kVec[0]!, r.k + kVec[1]!, r.l + kVec[2]!], [r.h - kVec[0]!, r.k - kVec[1]!, r.l - kVec[2]!]];
-      for (const [mh, mk, ml] of sats) {
-        const dSat = dSpacing(appliedPrimary.model.cell, mh, mk, ml);
-        if (!Number.isFinite(dSat) || dSat <= 0 || dSat < dMin || dSat > dMax) continue;
-        const fm2 = magneticStructureFactor(appliedPrimary.model, appliedMag, mh, mk, ml).squared;
-        const lp = lorentzPolarization(pattern.radiation, dSat);
-        mags.push({
-          kind: "magnetic", h: mh, k: mk, l: ml, d: dSat,
-          iCalc: magScale * r.multiplicity * lp * fm2,
-          // No hkl here on purpose: the real magnetic satellites in
-          // `buildCombinedPeaks` are also placed without hkl (no anisotropic
-          // strain on satellites), so the decomposition must match that to stay
-          // on the F_obs = F_calc line.
-          sub: placePeaks(pattern, appliedPrimary, [{ d: dSat, intensity: 1 }]),
-          phaseIndex: 0, phaseId: "magnetic", phaseLabel: "magnetic",
-        });
-      }
+    for (const s of magneticSatellites(appliedPrimary.model.cell, appliedPrimary.model.spaceGroup, kVec, dMin, dMax)) {
+      const fm2 = magneticStructureFactor(appliedPrimary.model, appliedMag, s.h, s.k, s.l).squared;
+      const lp = lorentzPolarization(pattern.radiation, s.d);
+      mags.push({
+        kind: "magnetic", h: s.h, k: s.k, l: s.l, d: s.d,
+        iCalc: magScale * s.multiplicity * lp * fm2,
+        // No hkl here on purpose: the real magnetic satellites in
+        // `buildCombinedPeaks` are also placed without hkl (no anisotropic
+        // strain on satellites), so the decomposition must match that to stay
+        // on the F_obs = F_calc line.
+        sub: placePeaks(pattern, appliedPrimary, [{ d: s.d, intensity: 1 }]),
+        phaseIndex: 0, phaseId: "magnetic", phaseLabel: "magnetic",
+      });
     }
     const maxMag = mags.reduce((m, c) => (c.iCalc > m ? c.iCalc : m), 0);
     if (maxMag > 0) {
