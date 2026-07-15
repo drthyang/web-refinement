@@ -15,7 +15,7 @@ import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import type { RefinementParameter, ParameterBinding } from "@/core/refinement/types";
 import type { ZipEntry } from "@/core/export/zip";
 import { structureToCif, type CifRefinementMeta } from "@/core/export/cif";
-import { structureToPcr } from "@/core/export/fullprof";
+import { structureToPcr, type PcrExportOptions } from "@/core/export/fullprof";
 import { instrumentToInstprm, buildGpxScript } from "@/core/export/gsas2";
 import { powderDataXye, singleCrystalHkl, singleCrystalInt, radiationWavelength } from "@/core/export/data";
 
@@ -42,6 +42,31 @@ export interface BundleOptions {
 
 function isSingleCrystal(dataset: DiffractionDataset): dataset is Extract<DiffractionDataset, { reflections: unknown }> {
   return "reflections" in dataset;
+}
+
+/** Pull the refined TOF peak-shape coefficients out of the parameter list so the
+ *  `.pcr` carries the fitted profile rather than a generic seed. The refinement
+ *  ids are `tof_<key>` (see buildStructureRefinement). When an isotropic TOF
+ *  Mustrain was refined instead of σ₁², fold its σ_T² ≈ (difC·ε)²·d² contribution
+ *  back into Sig-1 (ε = mustrainIso × 10⁻⁶) so the exported width isn't missing
+ *  the sample-broadening the fit put there. */
+function tofShapeFromParams(
+  params: readonly RefinementParameter[] | undefined,
+  instrument: InstrumentParameters | undefined,
+): PcrExportOptions["tofShape"] | undefined {
+  if (!params || !params.some((p) => p.id.startsWith("tof_") || p.id === "mustrainIso")) return undefined;
+  const val = (id: string): number | undefined => params.find((p) => p.id === id)?.value;
+  const shape: Record<string, number> = {};
+  for (const key of ["sig0", "sig1", "sig2", "sigQ", "alpha0", "alpha1", "beta0", "beta1", "betaQ"] as const) {
+    const v = val(`tof_${key}`);
+    if (v !== undefined) shape[key] = v;
+  }
+  const mustrain = val("mustrainIso");
+  if (mustrain !== undefined && mustrain > 0 && instrument?.kind === "tof") {
+    const eps = mustrain * 1e-6;
+    shape.sig1 = (shape.sig1 ?? 0) + (instrument.difC * eps) ** 2;
+  }
+  return Object.keys(shape).length > 0 ? shape : undefined;
 }
 
 /** Filesystem-safe base name. */
@@ -80,12 +105,14 @@ export function fullprofBundle(structure: StructureModel, dataset: DiffractionDa
   const data = isSingleCrystal(dataset) ? singleCrystalInt(dataset) : powderDataXye(dataset);
   const wl = radiationWavelength(dataset.radiation);
   const powderRange = !sc ? powderDataRange(dataset as Extract<DiffractionDataset, { points: unknown }>) : undefined;
+  const tofShape = tofShapeFromParams(opts.params, opts.instrument);
   const pcr = structureToPcr(structure, {
     title: name,
     datFile: dataName,
     ...(wl ? { wavelength: wl } : {}),
     ...(opts.instrument ? { instrument: opts.instrument } : {}),
     ...(powderRange ? { dataRange: powderRange.range, background: powderRange.background } : {}),
+    ...(tofShape ? { tofShape } : {}),
   });
   const entries: ZipEntry[] = [
     { name: `${name}.pcr`, data: pcr },

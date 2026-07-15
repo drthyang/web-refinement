@@ -109,4 +109,42 @@ describe("structureToPcr — TOF", () => {
     expect(vals[0]).toBeCloseTo(14300, 0);
     expect(vals[1]).toBeCloseTo(282000, 0);
   });
+
+  // Regression: a TOF .pcr with every Sig/alph/beta coefficient at 0 and no
+  // resolution file makes FullProf refuse to load it ("Zero half-width
+  // parameters ... and NO resolution-file provided"). With no shape info, the
+  // export must fall back to loadable, non-zero seeds instead of zeros.
+  it("never emits all-zero half-widths when no shape is known", () => {
+    const sigIdx = lines.findIndex((l) => l.includes("sigma^2 = Sig-2"));
+    const sig = lines[sigIdx + 1]!.trim().split(/\s+/).map(Number);
+    // Sig-1 (index 1) is seeded from (difC·Δd/d)² — must be > 0.
+    expect(sig[1]).toBeGreaterThan(0);
+    const bbIdx = lines.findIndex((l) => l.includes("alpha = alph0 + alph1/d"));
+    const bb = lines[bbIdx + 1]!.trim().split(/\s+/).map(Number);
+    // Row is Pref1 Pref2 alph0 beta0 alph1 beta1 alphQ betaQ — beta0 (index 3)
+    // and alph1 (index 4) are seeded to moderator-scale defaults.
+    expect(bb[3]).toBeGreaterThan(0);
+    expect(bb[4]).toBeGreaterThan(0);
+  });
+
+  it("writes the refined TOF shape coefficients when supplied", () => {
+    const withShape = structureToPcr(structure, {
+      title: "MnO_TOF",
+      instrument: { kind: "tof", difC: 22585.8 },
+      dataRange: [14300, 282000],
+      tofShape: { sig0: 12.5, sig1: 340.2, sig2: 1.1, alpha0: 0.3, alpha1: 2.1, beta0: 0.031, beta1: 5.5 },
+    }).split("\n");
+    const sigIdx = withShape.findIndex((l) => l.includes("sigma^2 = Sig-2"));
+    const sig = withShape[sigIdx + 1]!.trim().split(/\s+/).map(Number);
+    expect(sig[0]).toBeCloseTo(1.1, 4); // Sig-2
+    expect(sig[1]).toBeCloseTo(340.2, 4); // Sig-1
+    expect(sig[2]).toBeCloseTo(12.5, 4); // Sig-0
+    const bbIdx = withShape.findIndex((l) => l.includes("alpha = alph0 + alph1/d"));
+    const bb = withShape[bbIdx + 1]!.trim().split(/\s+/).map(Number);
+    // Pref1 Pref2 alph0 beta0 alph1 beta1 alphQ betaQ
+    expect(bb[2]).toBeCloseTo(0.3, 4); // alph0
+    expect(bb[3]).toBeCloseTo(0.031, 4); // beta0
+    expect(bb[4]).toBeCloseTo(2.1, 4); // alph1
+    expect(bb[5]).toBeCloseTo(5.5, 4); // beta1
+  });
 });

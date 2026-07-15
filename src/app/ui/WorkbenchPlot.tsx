@@ -42,6 +42,12 @@ interface Props {
    * the tick's hkl + phase kind + phase id, or null to clear.
    */
   readonly onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null) => void;
+  /**
+   * Called on a plain click in the data area (a press-and-release without the
+   * drag that starts a rubber zoom, and not on a Bragg tick), with the clicked
+   * x in data units — e.g. the magnetic page's "add a residual peak here".
+   */
+  readonly onPlotClick?: (x: number) => void;
 }
 
 // Fixed plot geometry (SVG user units); the SVG stretches to its container.
@@ -110,6 +116,7 @@ export function WorkbenchPlot({
   focusPeakToken = 0,
   highlight: highlightSel = null,
   onHighlight,
+  onPlotClick,
 }: Props): JSX.Element {
   const svgRef = useRef<SVGSVGElement>(null);
   const draggingGrip = useRef(false);
@@ -361,6 +368,9 @@ export function WorkbenchPlot({
 
   const startZoom = (e: React.PointerEvent): void => {
     if (draggingGrip.current) return;
+    // A press on a Bragg tick is that tick's own click (spotlight toggle) — it
+    // must not double as a data-area click.
+    const onTick = (e.target as Element).closest?.(".wb-tick") != null;
     const x0 = clientToX(e.clientX);
     setRubber({ x0, x1: x0 });
     const move = (ev: PointerEvent): void => setRubber({ x0, x1: clientToX(ev.clientX) });
@@ -371,7 +381,12 @@ export function WorkbenchPlot({
       const lo = Math.min(x0, x1);
       const hi = Math.max(x0, x1);
       setRubber(null);
-      if (hi - lo > vspan * 0.02) setView({ min: Math.max(lo, fullMin), max: Math.min(hi, fullMax) });
+      if (hi - lo > vspan * 0.02) {
+        setView({ min: Math.max(lo, fullMin), max: Math.min(hi, fullMax) });
+      } else if (!onTick && x1 >= vlo && x1 <= vhi) {
+        // Press-and-release without a drag: a plain click in the data area.
+        onPlotClick?.(x1);
+      }
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);

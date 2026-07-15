@@ -13,10 +13,14 @@
  *
  * Pure string producer — file saving and bundling are UI concerns. Refined
  * *values* are written; refinement *codes* are left at 0 (a reproducible model,
- * ready to re-refine in FullProf). The TOF peak-shape coefficients (Sig/Gam/
- * alph/beta) are the one thing the workbench's instrument model does not carry,
- * so they are emitted as 0 placeholders — set them from your .irf, or ship the
- * original instrument file verbatim (the export bundle does exactly that).
+ * ready to re-refine in FullProf). The TOF peak-shape coefficients (Sig/alph/
+ * beta) come from `tofShape` (the refined profile — the export bundle passes
+ * it) or the instrument's own calibration; when neither is known, the same
+ * ballpark seeds the workbench refines from are written instead of zeros,
+ * because FullProf refuses to load a `.pcr` whose half-widths are all zero
+ * with no resolution file ("Zero half-width parameters ... and NO
+ * resolution-file provided"). Gam stays 0 — the workbench's TOF profile is
+ * Gaussian ⊗ back-to-back exponentials, with no Lorentzian part.
  */
 
 import type { StructureModel } from "@/core/crystal/types";
@@ -42,6 +46,21 @@ export interface PcrExportOptions {
   /** Observed abscissa span [min, max] (2θ° or TOF μs) — sets Thmin/Thmax and
    *  the plot range. Falls back to sensible CW defaults when omitted. */
   readonly dataRange?: readonly [number, number];
+  /** TOF peak-shape coefficients (FullProf Npr 9 / GSAS-II conventions, µs):
+   *  σ² = sig2·d⁴ + sig1·d² + sig0 + sigQ/d² (µs²), α = alpha0 + alpha1/d,
+   *  β = beta0 + beta1/d⁴ + betaQ/d². Takes precedence over the instrument's
+   *  own calibration — pass the *refined* profile here. TOF only. */
+  readonly tofShape?: {
+    readonly sig0?: number;
+    readonly sig1?: number;
+    readonly sig2?: number;
+    readonly sigQ?: number;
+    readonly alpha0?: number;
+    readonly alpha1?: number;
+    readonly beta0?: number;
+    readonly beta1?: number;
+    readonly betaQ?: number;
+  };
 }
 
 /** Fixed-decimal number, right-padded to a column width. */
@@ -159,6 +178,24 @@ function tofPcr(structure: StructureModel, opts: PcrExportOptions, inst: Extract
   const dtt2 = inst.difA ?? 0;
   const dtt1overd = inst.difB ?? 0;
   const twoThetaBank = 90.0; // POWGEN-style backscattering default; not carried by the model.
+  // Peak shape: refined profile (tofShape) → instrument calibration → loadable
+  // seeds. FullProf refuses a .pcr whose half-widths are all zero when Res=0,
+  // and α=β=0 degenerates the back-to-back exponentials, so unknown
+  // coefficients get the same ballparks the workbench refines from
+  // (σ₁² = (difC·Δd/d)² with Δd/d ≈ 0.0015; moderator-scale α/β).
+  const shape = opts.tofShape;
+  const sig0 = shape?.sig0 ?? inst.sig0 ?? 0;
+  const sig2 = shape?.sig2 ?? inst.sig2 ?? 0;
+  const sigQ = shape?.sigQ ?? inst.sigQ ?? 0;
+  let sig1 = shape?.sig1 ?? inst.sig1 ?? 0;
+  if (sig0 === 0 && sig1 === 0 && sig2 === 0 && sigQ === 0) sig1 = (inst.difC * 0.0015) ** 2;
+  const alpha0 = shape?.alpha0 ?? 0;
+  let alpha1 = shape?.alpha1 ?? inst.alpha ?? 0;
+  if (alpha0 === 0 && alpha1 === 0) alpha1 = 1.5;
+  const beta1 = shape?.beta1 ?? inst.beta1 ?? 0;
+  const betaQ = shape?.betaQ ?? inst.betaQ ?? 0;
+  let beta0 = shape?.beta0 ?? inst.beta0 ?? 0;
+  if (beta0 === 0 && beta1 === 0 && betaQ === 0) beta0 = 0.02;
   const background = opts.background ?? [
     [tMin, 0], [tMin + (tMax - tMin) * 0.2, 0], [tMin + (tMax - tMin) * 0.4, 0],
     [tMin + (tMax - tMin) * 0.6, 0], [tMin + (tMax - tMin) * 0.8, 0], [tMax, 0],
@@ -198,19 +235,19 @@ function tofPcr(structure: StructureModel, opts: PcrExportOptions, inst: Extract
   lines.push(`  ${num(scale, 5, 9)}       0.0000   0.0000   0.0000   0.0000   0.0000       0`);
   lines.push(`       0.00000     0.00     0.00     0.00     0.00     0.00`);
   lines.push(`!      Sig-2       Sig-1       Sig-0       Sig-Q     G-Strain     G-Size        Z0  Size-Model`);
-  lines.push(`!  Peak-shape (Sigma) coefficients — set from your .irf or refine; 0 = placeholder.`);
-  lines.push(`      0.0000      0.0000      0.0000      0.0000      0.0000      0.0000      0.0000   0`);
+  lines.push(`!  Gaussian variance sigma^2 = Sig-2*d^4 + Sig-1*d^2 + Sig-0 + Sig-Q/d^2 (us^2).`);
+  lines.push(`${num(sig2, 4, 12)}${num(sig1, 4, 12)}${num(sig0, 4, 12)}${num(sigQ, 4, 12)}${num(0, 4, 12)}${num(0, 4, 12)}${num(0, 4, 12)}   0`);
   lines.push(`        0.00        0.00        0.00        0.00        0.00        0.00        0.00`);
   lines.push(`!      Gam-2       Gam-1       Gam-0        LStr        LSiz`);
-  lines.push(`!  Peak-shape (Gamma) coefficients — set from your .irf or refine; 0 = placeholder.`);
+  lines.push(`!  Lorentzian (Gamma) coefficients: the exported profile is Gaussian-only; refine if needed.`);
   lines.push(`      0.0000      0.0000      0.0000      0.0000      0.0000`);
   lines.push(`        0.00        0.00        0.00        0.00        0.00`);
   lines.push(`!     a          b         c        alpha      beta       gamma      #Cell Info`);
   lines.push(`  ${num(cell.a, 6, 9)} ${num(cell.b, 6, 10)} ${num(cell.c, 6, 10)} ${num(cell.alpha, 6, 10)} ${num(cell.beta, 6, 10)} ${num(cell.gamma, 6, 10)}`);
   lines.push(`    0.00000    0.00000    0.00000    0.00000    0.00000    0.00000`);
   lines.push(`!      Pref1      Pref2        alph0       beta0       alph1       beta1      alphQ     betaQ`);
-  lines.push(`!  Back-to-back exponential (alpha/beta) coefficients — set from your .irf or refine.`);
-  lines.push(`    0.000000    0.000000    0.000000    0.000000    0.000000    0.000000    0.000000    0.000000`);
+  lines.push(`!  Back-to-back exponentials: alpha = alph0 + alph1/d, beta = beta0 + beta1/d^4 + betaQ/d^2.`);
+  lines.push(`${num(0, 6, 12)}${num(0, 6, 12)}${num(alpha0, 6, 12)}${num(beta0, 6, 12)}${num(alpha1, 6, 12)}${num(beta1, 6, 12)}${num(0, 6, 12)}${num(betaQ, 6, 12)}`);
   lines.push(`        0.00        0.00        0.00        0.00        0.00        0.00        0.00        0.00`);
   lines.push(`!Absorption correction parameters`);
   lines.push(`   0.00000    0.00   0.00000    0.00            ABS: ABSCOR1  ABSCOR2`);

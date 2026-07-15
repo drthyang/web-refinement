@@ -16,6 +16,51 @@ export interface ExtraPeak {
   readonly d: number;
   /** Residual height at the apex (obs − calc, arb. units). */
   readonly height: number;
+  /** Statistical significance height/σᵢ at the apex (when `pointSigma` given) —
+   *  the quantitative "is this real" criterion shown to the user. */
+  readonly significance?: number;
+}
+
+/** An extra peak annotated against the nuclear reflections of every phase. */
+export interface AnnotatedExtraPeak extends ExtraPeak {
+  /**
+   * Nearest nuclear reflection (any phase) within the relative-d tolerance,
+   * if any. A residual apex at a nuclear position is usually profile misfit
+   * (e.g. an impurity-phase shoulder), not a magnetic satellite — flagged so
+   * the k-search can exclude it by default while the user can still opt in
+   * (k = 0 orderings do put magnetic intensity on nuclear positions).
+   */
+  readonly nearNuclear?: {
+    readonly phaseLabel: string;
+    readonly hkl: string;
+    readonly d: number;
+    /** |d_peak − d_ref| / d_ref. */
+    readonly relDelta: number;
+  };
+}
+
+/**
+ * Annotate detected peaks with the nearest nuclear reflection of any phase
+ * (within `relTolerance`, relative |Δd|/d). Pure position matching — pass the
+ * reflection lists of the *refined* cells so shoulders index against the same
+ * positions the plot's tick rows show.
+ */
+export function annotateExtraPeaks(
+  peaks: readonly ExtraPeak[],
+  nuclear: readonly { readonly d: number; readonly hkl: string; readonly phaseLabel: string }[],
+  relTolerance = 0.01,
+): AnnotatedExtraPeak[] {
+  return peaks.map((p) => {
+    let best: AnnotatedExtraPeak["nearNuclear"] | undefined;
+    for (const r of nuclear) {
+      if (!(r.d > 0)) continue;
+      const relDelta = Math.abs(p.d - r.d) / r.d;
+      if (relDelta <= relTolerance && (best === undefined || relDelta < best.relDelta)) {
+        best = { phaseLabel: r.phaseLabel, hkl: r.hkl, d: r.d, relDelta };
+      }
+    }
+    return best ? { ...p, nearNuclear: best } : p;
+  });
 }
 
 export interface ExtraPeakOptions {
@@ -33,6 +78,15 @@ export interface ExtraPeakOptions {
    * is poor (residual dominated by nuclear misfit, not magnetism). Default 40.
    */
   readonly limit?: number;
+  /**
+   * Per-point observation σ (parallel to `d`). When given, an apex must also be
+   * statistically significant — height ≥ `minSignificance`·σᵢ — so counting-
+   * noise wiggles in low-precision regions (where the global MAD underestimates
+   * the local noise) are not reported as magnetic peaks.
+   */
+  readonly pointSigma?: readonly number[];
+  /** Significance threshold (height/σᵢ) when `pointSigma` is given. Default 5. */
+  readonly minSignificance?: number;
 }
 
 /** Robust noise scale from the residual: 1.4826 · median(|r − median r|). */
@@ -58,7 +112,7 @@ export function detectExtraPeaks(
   yCalc: readonly number[],
   options: ExtraPeakOptions = {},
 ): ExtraPeak[] {
-  const { sigma = 8, minFraction = 0.08, window = 2, mergeD = 0.02, limit = 40 } = options;
+  const { sigma = 8, minFraction = 0.08, window = 2, mergeD = 0.02, limit = 40, pointSigma, minSignificance = 5 } = options;
   const n = Math.min(d.length, yObs.length, yCalc.length);
   if (n === 0) return [];
 
@@ -71,11 +125,16 @@ export function detectExtraPeaks(
   const found: ExtraPeak[] = [];
   for (let i = 0; i < n; i++) {
     if (res[i]! <= threshold) continue;
+    const si = pointSigma?.[i];
+    const hasSigma = si !== undefined && Number.isFinite(si) && si > 0;
+    if (hasSigma && res[i]! < minSignificance * si) continue;
     let isApex = true;
     for (let j = Math.max(0, i - window); j <= Math.min(n - 1, i + window); j++) {
       if (res[j]! > res[i]!) { isApex = false; break; }
     }
-    if (isApex && Number.isFinite(d[i]!) && d[i]! > 0) found.push({ d: d[i]!, height: res[i]! });
+    if (isApex && Number.isFinite(d[i]!) && d[i]! > 0) {
+      found.push({ d: d[i]!, height: res[i]!, ...(hasSigma ? { significance: res[i]! / si } : {}) });
+    }
   }
 
   // Merge near-coincident apices (a flat top can trip several points).

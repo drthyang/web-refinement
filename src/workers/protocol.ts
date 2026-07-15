@@ -117,6 +117,9 @@ export type EvaluatorSpec =
       readonly pattern: PowderPattern;
       readonly parameters: RefinementParameter[];
       readonly bindings: ParameterBinding[];
+      /** Additional (non-magnetic) crystallographic phases: their nuclear peaks
+       *  join the profile, and their bindings are routed away from the primary. */
+      readonly extraPhases?: readonly { readonly structure: StructureModel; readonly id: string }[];
       readonly shape: PeakShape;
       readonly eta?: number;
       readonly fitRange?: { readonly min?: number; readonly max?: number };
