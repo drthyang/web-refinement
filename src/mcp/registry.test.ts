@@ -163,6 +163,14 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
     },
     keys: ["reflections", "text"],
   },
+  expand_structure_supercell: {
+    args: { structure, k: [0.5, 0, 0] },
+    keys: ["atoms", "kInteger", "multiplicity", "replicas", "structure"],
+  },
+  build_modulated_moment_model: {
+    args: { structure, k: [0.5, 0, 0], ions: [{ site: "Po1", direction: [0, 0, 1] }] },
+    keys: ["bindings", "magnetic", "multiplicity", "parameters", "structure"],
+  },
   merge_magnetic_supercell: {
     args: {
       nuclearDataset: { id: "nuc", name: "n", radiation: { kind: "neutron", wavelength: 1 }, reflections: [{ h: -4, k: -10, l: 1, iObs: 0.04, sigma: 0.02 }] },

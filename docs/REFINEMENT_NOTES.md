@@ -199,10 +199,36 @@ the ⟨j0⟩ form factor and the 2.695 fm/µ_B prefactor (§2), on the same fm s
 the nuclear scattering length, so a single k is dimensionally correct.
 
 **Setting for refinement.** The merged reflections are in the supercell, so the
-**structure must be described in the supercell** (as FullProf's `.pcr` does) — a
-nuclear-cell structure would score the satellites against a spurious nuclear |F|².
-MATERIA provides the merge and the refinement; the supercell structure is the
-user's model input.
+structure must be described in the supercell (as FullProf's `.pcr` does).
+`expandStructureToSupercell` produces it as an **exact geometric regrouping** —
+no physical change: every site's full crystallographic orbit is
+made explicit and replicated over the N = n₁n₂n₃ cell offsets at ((r+L)ᵢ/nᵢ),
+positions/occupancies/ADPs verbatim, expressed in P1. The magnetic ions sit
+exactly where the nuclear structure has them, and the nuclear scaffold stays
+frozen during the magnetic refinement — the two-phase practice (nuclear phase +
+magnetic phase, no nuclear refinement in the magnetic step). Validated on the
+Eu₃In₂As₄ refined Pnnm CIF: |F_super(4h,k,4l)|² = 256·|F_base(h,k,l)|² at all 50
+measured fundamentals, and the nuclear supercell structure factor **vanishes at
+all 148 measured satellite positions** (< 10⁻⁸ of the strongest fundamental) —
+the purely-magnetic-supercell precondition proven on real data.
+
+**Scale under the setting change.** Since F_super = N·F_base at fundamentals, the
+refined supercell scale is k_super = k_base/N² — verified numerically on the real
+data (k_super·256 = k_base to 10⁻⁶, with identical R1/wR2 in both settings). The
+SAME factor N multiplies the magnetic structure factor (the supercell moment sum
+is the base-cell k-Fourier sum regrouped), so the single shared nuclear+magnetic
+scale survives the setting change: only its numerical value rescales, uniformly.
+No relative nuclear/magnetic correction appears.
+
+**Modulated moment parametrization.** In the P1 supercell the replicas of one
+magnetic site must NOT refine independently — they are tied by the k-modulation
+m(L) = m₀·d̂·cos(2πk·L + φ). `buildModulatedMomentModel` encodes exactly this
+through the existing `momentBasis` binding machinery: ONE amplitude parameter per
+sublattice drives every replica with the per-replica basis d̂·cos(2πk·L + φ), so
+the refinable parameter count stays that of the base-cell description (for k = ¼:
+φ = 0 is the node pattern +,0,−,0; φ = π/4 the equal-moment +,+,−,−). Moment
+crystal components are along the *normalized* axes (â,b̂,ĉ), which the
+axis-diagonal supercell leaves unchanged, so directions carry over verbatim.
 
 **Optimizer.** `refineMagneticSingleCrystalMultiStart` is the single-dataset
 sibling of the powder/joint escape-min paths (§4): freeze the nuclear scaffold,
@@ -212,14 +238,15 @@ freed set (the caller's options threaded through), canonicalize the global ±m s
 and report the data-limited moment directions (§5).
 
 **Acceptance.** The reflection merge is validated byte-exactly against the real
-golden (above). The refinement is validated on a synthetic AFM supercell
-(`magneticSupercellRefine.test.ts`): a cell doubled along a with antiparallel
-moments where even-h reflections are purely nuclear and odd-h purely magnetic (like
-a merged file), recovering the moments and the shared scale from a bad cold start,
-deterministically (same seed ⇒ identical parameters and per-start costs). The
-FullProf `.int` reader/writer round-trips (`fullprofInt.test.ts`) cover the plain
-and propagation-vector variants. No regression: the full existing suite and
-`npm run typecheck` are clean.
+golden (above); the expansion and scale relation numerically against the refined
+Eu₃In₂As₄ CIF (`magneticSupercell.test.ts`, data-gated). The refinement is
+validated on synthetic supercells (`magneticSupercellRefine.test.ts`): an
+explicit-moment AFM and a k = ¼ modulated model (one amplitude driving four
+replicas), each recovering the moments/amplitude and the shared scale from a bad
+cold start, deterministically (same seed ⇒ identical parameters and per-start
+costs). The FullProf `.int` reader/writer round-trips (`fullprofInt.test.ts`)
+cover the plain and propagation-vector variants. No regression: the full existing
+suite and `npm run typecheck` are clean.
 
 **Not modelled** (deliberately): a *tunable relative scale/weight* between nuclear
 and magnetic reflections — physically unmotivated for one measurement, so the

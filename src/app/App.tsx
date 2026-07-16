@@ -287,8 +287,13 @@ export function App(): JSX.Element {
 
   // Phase 3: merge the loaded nuclear + magnetic reflection pair into the magnetic
   // SUPERCELL (single-k FullProf convention), replacing the active dataset with
-  // the merged supercell reflections. Refining it needs the structure in that
-  // supercell setting (load the supercell CIF), exactly as FullProf's .pcr does.
+  // the merged supercell reflections — the standard combined FullProf `.int`,
+  // ready to export or refine. The magnetic refinement of the merged data (the
+  // exact P1 supercell expansion `expandStructureToSupercell` + the k-tied
+  // modulated moment model `buildModulatedMomentModel`, nuclear scaffold frozen)
+  // is the validated core/MCP workflow — the browser magnetic-analysis page
+  // (k-search on the base cell) is not the path for a pre-merged supercell, so
+  // the structure is NOT auto-expanded here to avoid a misleading in-UI state.
   function onMergeSupercell(k: Vec3): void {
     if (!scDataset || !scMagneticDataset) { setMessage("Load both a nuclear and a magnetic reflection file before merging."); return; }
     try {
@@ -296,7 +301,8 @@ export function App(): JSX.Element {
       setScNuclearDataset(dataset); // becomes the active dataset; clears the companion
       setMessage(
         `Merged into the magnetic supercell (${supercell.multiplicity.join("×")}, k→[${supercell.kInteger.join(",")}]) · ` +
-        `${dataset.reflections.length} reflections. Load the supercell structure to refine the magnetic model against it.`,
+        `${dataset.reflections.length} reflections — export the combined .int, or run the supercell magnetic refinement ` +
+        `(expand + modulated moments) via the analysis tools.`,
       );
     } catch (e) {
       setMessage(`Supercell merge failed: ${e instanceof Error ? e.message : String(e)}`);

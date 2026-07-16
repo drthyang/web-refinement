@@ -155,12 +155,25 @@ What differs is only the **observable and its corrections**, isolated in
   interference); `magneticScale` is tied to the nuclear `scale` so k_M = k_N (else
   the moments come out wrong by √k). |F_M⊥|² is the Halpern–Johnson M⊥Q projection
   with the ⟨j0⟩ form factor and 2.695 fm/µ_B prefactor, on the nuclear fm scale.
+- **`expandStructureToSupercell` + `buildModulatedMomentModel`** — the supercell
+  structure is generated automatically on merge as an exact geometric regrouping
+  (full orbits explicit, replicated, P1; positions/occupancies/ADPs verbatim), so
+  the magnetic ions sit exactly at the nuclear positions and the nuclear scaffold
+  stays frozen (two-phase practice). Replica moments are tied by the k-modulation
+  cos(2πk·L + φ) through one amplitude per sublattice — base-cell parameter count.
+  **Scale**: k_super = k_base/N², identically for nuclear and magnetic intensities
+  (validated numerically on the Eu₃In₂As₄ CIF + data).
 - **`refineMagneticSingleCrystalMultiStart`** (computeClient) — the single-dataset
   escape-min sibling of the powder path: freeze nuclear → seeded moment multi-start
   → final LM → ±m canonicalize + degeneracy report. MCP:
-  `parse_single_crystal_data`, `merge_magnetic_supercell`, `write_single_crystal_data`.
-  UI: the "Merge to magnetic supercell" card in `SingleCrystalWorkbench`, then the
-  magnetic-analysis moment fit (refine against the supercell structure).
+  `parse_single_crystal_data`, `merge_magnetic_supercell`,
+  `expand_structure_supercell`, `build_modulated_moment_model`,
+  `write_single_crystal_data`. UI: the "Merge to magnetic supercell" card in
+  `SingleCrystalWorkbench` produces/exports the combined `.int`; the supercell
+  magnetic refinement (expand + modulated moments) is currently the core/MCP
+  workflow (the browser k-search analysis targets the base cell, so the UI does
+  not auto-expand into a pre-merged supercell — a dedicated modulated-moment UI
+  panel is the follow-up).
 - Validated (synthetic AFM supercell): moment + shared-scale recovery from a bad
   cold start, determinism, and the even-h-nuclear / odd-h-magnetic separation of a
   merged file ([`magneticSupercellRefine.test.ts`](../src/workers/magneticSupercellRefine.test.ts)).

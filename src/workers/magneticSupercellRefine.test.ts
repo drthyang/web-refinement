@@ -5,6 +5,7 @@ import type { Vec3 } from "@/core/math/types";
 import type { RefinementParameter, ParameterBinding } from "@/core/refinement/types";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
+import { expandStructureToSupercell, buildModulatedMomentModel } from "@/core/magnetic/magneticSupercell";
 import { applyMagneticMoments, magneticComparison } from "@/core/workflow/magnetic";
 import { ComputeClient } from "@/workers/computeClient";
 
@@ -118,6 +119,78 @@ describe("refineMagneticSingleCrystalMultiStart — merged supercell AFM", () =>
     const b = await client.refineMagneticSingleCrystalMultiStart(...args);
     expect(b.final.parameters).toEqual(a.final.parameters);
     expect(b.costByStart).toEqual(a.costByStart);
+    client.dispose();
+  });
+});
+
+/**
+ * End-to-end through the CAREFUL two-phase parametrization: the base structure
+ * is expanded to the supercell (positions exact, nuclear frozen), and ONE
+ * amplitude parameter drives all replica moments through the k-modulation
+ * cos(2πk·L + φ) — the parameter count of the base-cell description. k = (¼,0,0),
+ * φ = π/4 ⇒ the equal-moment (+,+,−,−) pattern; satellites sit at (4h±1, k, l).
+ */
+describe("modulated moment model — supercell refinement (k = 1/4)", () => {
+  const base: StructureModel = {
+    id: "mod",
+    name: "modulated base",
+    cell: { a: 4, b: 4, c: 5, alpha: 90, beta: 90, gamma: 90 },
+    spaceGroup: { hermannMauguin: "P 1", operations: [parseSymmetryOperation("x,y,z")] },
+    sites: [{ label: "Fe1", element: "Fe", oxidationState: 3, position: [0, 0, 0], occupancy: 1, adp: { kind: "isotropic", bIso: 0.3 } }],
+  };
+  const k: Vec3 = [0.25, 0, 0];
+  const expansion = expandStructureToSupercell(base, k);
+  const superS = expansion.structure;
+  const TRUE_AMP = 2.5;
+  const mod = buildModulatedMomentModel(expansion, k, [{ site: "Fe1", direction: [0, 0, 1], phase: Math.PI / 4 }]);
+  const AMP_ID = mod.params[0]!.id;
+
+  // Merged-style supercell reflections: fundamentals (4h, k, l) + satellites (4h±1, k, l).
+  const hklList: readonly [number, number, number][] = [
+    [4, 0, 0], [4, 1, 0], [8, 0, 1], [4, 1, 1], [8, 1, 0], // fundamentals (nuclear)
+    [1, 0, 0], [3, 0, 0], [5, 0, 0], [1, 1, 0], [3, 1, 0], [5, 1, 0], [1, 0, 1], [3, 0, 1], // satellites (magnetic)
+  ];
+  function dataset(iObs: number[], sigma?: number[]): SingleCrystalDataset {
+    return {
+      id: "merged-mod", name: "merged modulated", radiation: { kind: "neutron", wavelength: 1.4 },
+      reflections: hklList.map(([h, kk, l], i) => ({ h, k: kk, l, iObs: iObs[i] ?? 0, ...(sigma ? { sigma: sigma[i]! } : {}) })),
+    };
+  }
+  function scene(scale: number, amp: number): { params: RefinementParameter[]; bindings: ParameterBinding[] } {
+    const params: RefinementParameter[] = [
+      { id: "scale", label: "s", kind: "scale", value: scale, initialValue: scale, fixed: false, min: 0 },
+      { id: "mscale", label: "ms", kind: "magneticScale", value: scale, initialValue: scale, fixed: true, expression: "= scale" },
+      ...mod.params.map((p) => ({ ...p, value: amp, initialValue: amp, fixed: false })),
+    ];
+    const bindings: ParameterBinding[] = [
+      { parameterId: "scale", kind: "scale", targetId: "merged-mod" },
+      { parameterId: "mscale", kind: "magneticScale", targetId: "merged-mod" },
+      ...mod.bindings,
+    ];
+    return { params, bindings };
+  }
+  const TRUTH = scene(3, TRUE_AMP);
+  const truthRows = magneticComparison(superS, mod.magnetic, dataset([]), TRUTH.params, TRUTH.bindings);
+  const obs = truthRows.map((r) => r.iTotal);
+  const merged = dataset(obs, obs.map((v) => Math.sqrt(Math.max(v, 1)) + 1));
+
+  it("fundamentals are nuclear-only and satellites magnetic-only", () => {
+    truthRows.forEach((r, i) => {
+      const satellite = i >= 5;
+      if (satellite) { expect(r.iMagnetic).toBeGreaterThan(0); expect(r.iNuclear).toBeCloseTo(0, 6); }
+      else { expect(r.iNuclear).toBeGreaterThan(0); expect(r.iMagnetic).toBeCloseTo(0, 6); }
+    });
+  });
+
+  it("recovers the modulation amplitude and shared scale from a bad cold start", async () => {
+    const client = new ComputeClient();
+    const ms = await client.refineMagneticSingleCrystalMultiStart(
+      { structure: superS, magnetic: mod.magnetic, dataset: merged, parameters: scene(1, 0.3).params, bindings: TRUTH.bindings },
+      { restarts: 8, seed: 5 }, { maxIterations: 40 },
+    );
+    expect(Math.abs(ms.final.parameters[AMP_ID]!)).toBeCloseTo(TRUE_AMP, 1);
+    expect(ms.final.parameters["scale"]).toBeCloseTo(3, 1);
+    expect(ms.final.agreement.rWeighted ?? 1).toBeLessThan(0.02);
     client.dispose();
   });
 });
