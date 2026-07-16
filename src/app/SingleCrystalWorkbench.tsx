@@ -266,10 +266,15 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   const [modSeed, setModSeed] = useState(1);
   const [modRestarts, setModRestarts] = useState(8);
   const [modBusy, setModBusy] = useState(false);
+  const [modError, setModError] = useState<string | null>(null);
   const [modResult, setModResult] = useState<{
     amplitudes: { site: string; amp: number }[]; multiplicity: readonly [number, number, number];
     atoms: number; r1: number | null; degeneracies: MomentDegeneracy[];
   } | null>(null);
+  const selectedIonCount = magIons.filter((c) => ionOf(c.siteLabel).on).length;
+  // A new structure (CIF load) keeps this workbench mounted (keyed on the dataset
+  // id), so clear the stale magnetic hypothesis + results/error for the old cell.
+  useEffect(() => { setIonState({}); setModResult(null); setModError(null); }, [structure]);
 
   /** One-pass linear least-squares scale from the nuclear reflections (satellites
    *  carry ~0 nuclear |F|², so they don't bias it): k = Σ Fo²Fc² / Σ (Fc²)². */
@@ -290,7 +295,12 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
         const s = ionOf(c.siteLabel);
         return { site: c.siteLabel, direction: [parseKComponent(s.dir[0]), parseKComponent(s.dir[1]), parseKComponent(s.dir[2])] as Vec3, phase: parseKComponent(s.phase) * Math.PI };
       });
-    if (ions.length === 0) return;
+    // Validate before spinning: surface the reason in the panel (App status only
+    // logs to the console) instead of a silent no-op or a swallowed throw.
+    if (ions.length === 0) { setModError("Tick at least one magnetic ion to carry a moment."); return; }
+    if (k.every((c) => c === 0)) { setModError("Enter a non-zero propagation vector k (e.g. 1/4)."); return; }
+    if (ions.some((ion) => ion.direction.every((c) => c === 0))) { setModError("Give each selected ion a non-zero moment direction."); return; }
+    setModError(null);
     setModBusy(true);
     try {
       const expansion = expandStructureToSupercell(structure, k);
@@ -320,7 +330,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
         degeneracies: ms.degeneracies,
       });
     } catch (e) {
-      console.error(`[status] Magnetic supercell refinement failed: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[status] Magnetic supercell refinement failed: ${msg}`);
+      setModError(msg);
     } finally {
       setModBusy(false);
     }
@@ -330,9 +342,14 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   function downloadCombinedInt(): void {
     if (!magneticDataset) return;
     const k = [parseKComponent(kText[0]), parseKComponent(kText[1]), parseKComponent(kText[2])] as Vec3;
-    const wl = "wavelength" in effectiveRadiation ? effectiveRadiation.wavelength : 0;
-    const { dataset: merged } = mergeToMagneticSupercell(probedDataset, { ...magneticDataset, radiation: effectiveRadiation }, k);
-    downloadText(`${structure.id}_ALL_magcell.int`, writeFullProfInt(merged.reflections, { title: structure.name || structure.id, wavelength: wl }), "text/plain");
+    try {
+      const wl = "wavelength" in effectiveRadiation ? effectiveRadiation.wavelength : 0;
+      const { dataset: merged } = mergeToMagneticSupercell(probedDataset, { ...magneticDataset, radiation: effectiveRadiation }, k);
+      downloadText(`${structure.id}_ALL_magcell.int`, writeFullProfInt(merged.reflections, { title: structure.name || structure.id, wavelength: wl }), "text/plain");
+      setModError(null);
+    } catch (e) {
+      setModError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   // Apply a magnetic model from the symmetry step to the workbench: keep its
@@ -645,8 +662,8 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
                   <span style={{ fontFamily: mono }}>seed</span>
                   <input type="number" value={modSeed} step={1} onChange={(e) => setModSeed(Math.round(Number(e.target.value)))} style={numInput} />
                 </label>
-                <button style={{ ...secondaryButton, padding: "7px 13px", ...(modBusy ? disabledStyle : {}) }} disabled={modBusy} onClick={runModulated}
-                  title="Expand to the supercell, merge, and refine the k-modulated moment amplitudes (one per sublattice) + shared scale">
+                <button style={{ ...secondaryButton, padding: "7px 13px", ...(modBusy || selectedIonCount === 0 ? disabledStyle : {}) }} disabled={modBusy || selectedIonCount === 0} onClick={runModulated}
+                  title={selectedIonCount === 0 ? "Tick at least one magnetic ion above" : "Expand to the supercell, merge, and refine the k-modulated moment amplitudes (one per sublattice) + shared scale"}>
                   {modBusy ? "Refining…" : "Refine magnetic supercell ↻"}
                 </button>
                 <button style={{ ...secondaryButton, padding: "7px 13px" }} onClick={downloadCombinedInt}
@@ -654,6 +671,10 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
                   Download combined .int
                 </button>
               </div>
+
+              {modError && (
+                <span style={{ fontSize: fz.small, color: color.warnInk }}>⚠ {modError}</span>
+              )}
 
               {modResult && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: `1px solid ${color.subtle}`, paddingTop: 10 }}>
