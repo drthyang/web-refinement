@@ -444,7 +444,6 @@ export function SingleCrystalWorkbench({ structure, dataset, client, step, onSte
         <KSearchPanel
           structure={structure}
           magneticFit={magneticFit}
-          onApply={(m) => applyMagneticModel(m)}
           onContinue={(m, mp, mb) => { applyMagneticModel(m, mp, mb); onStep?.(0); }}
         />
       </div>

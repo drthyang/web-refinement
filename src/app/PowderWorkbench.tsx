@@ -325,17 +325,6 @@ export function PowderWorkbench({
     setSession((s) => ({ ...s, powderParams: s.powderParams.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   }
 
-  /** Apply the magnetic model built in the Magnetic tab onto the session so the
-   *  refinement plot shows the magnetic pattern + satellite ticks. null clears it. */
-  function applyMagneticToSession(magnetic: MagneticModel | null): void {
-    setSession((s) => {
-      const next = { ...s };
-      if (magnetic) next.magnetic = magnetic; else delete next.magnetic;
-      return next;
-    });
-    setMessage(magnetic ? `Magnetic model applied — pattern now includes the magnetic contribution (${magnetic.moments.length} moment${magnetic.moments.length === 1 ? "" : "s"}).` : "Magnetic contribution cleared from the pattern.");
-  }
-
   /** Hand the magnetic model + moment parameters to the refinement page: add the
    *  (freed) moment-mode params + bindings to the powder set and switch to the
    *  Refinement tab, where "Refine" now fits nuclear + magnetic together. */
@@ -1186,7 +1175,6 @@ export function PowderWorkbench({
               nuclearParams={powderParams}
               nuclearBindings={pBindings}
               profile={session.powderProfile}
-              onApply={applyMagneticToSession}
               onContinue={continueRefinementWithMagnetic}
             />
           </div>
