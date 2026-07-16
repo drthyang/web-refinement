@@ -152,6 +152,41 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
       keys: ["components", "magnetic", "observationCount", "parallel", "result"],
     };
   })(),
+  parse_single_crystal_data: {
+    args: { text: "1 0 0 100 2\n1 1 0 50 2\n1 1 1 30 2\n", name: "sc", id: "nuc" },
+    keys: ["dataset", "dropped", "format", "kept"],
+  },
+  refine_joint_single_crystal: (() => {
+    const build = tools.build_magnetic_model({ structure, ionLabels: ["Po1"], moment: 0.5 });
+    // X-ray radiation: the shared Po fixture has X-ray form factors (no neutron
+    // scattering length); this is a shape test, so the magnetic block's Po form
+    // factor falls back to 1 — physics is exercised by jointSingleCrystal.test.ts.
+    const rad = { kind: "xray" as const, wavelength: 1.54 };
+    const nuclearDataset = {
+      id: "nuc", name: "n", radiation: rad,
+      reflections: [{ h: 1, k: 0, l: 0, iObs: 100, sigma: 2 }, { h: 1, k: 1, l: 0, iObs: 50, sigma: 2 }, { h: 1, k: 1, l: 1, iObs: 30, sigma: 2 }],
+    };
+    const magneticDataset = {
+      id: "mag", name: "m", radiation: rad,
+      reflections: [{ h: 0, k: 0, l: 1, iObs: 10, sigma: 1 }, { h: 0, k: 1, l: 0, iObs: 8, sigma: 1 }],
+    };
+    // Nuclear scale + magneticScale tied to it (shared scale) + freed moments.
+    const scaleP = { id: "scale", label: "s", kind: "scale" as const, value: 1, initialValue: 1, fixed: false, min: 0 };
+    const mscaleP = { id: "mscale", label: "ms", kind: "magneticScale" as const, value: 1, initialValue: 1, fixed: true, expression: "= scale" };
+    return {
+      args: {
+        structure, magnetic: build.magnetic, nuclearDataset, magneticDataset,
+        parameters: [scaleP, mscaleP, ...build.parameters.map((p) => ({ ...p, fixed: false }))],
+        bindings: [
+          { parameterId: "scale", kind: "scale", targetId: "nuc" },
+          { parameterId: "mscale", kind: "magneticScale", targetId: "mag" },
+          ...build.bindings,
+        ],
+        restarts: 1, seed: 1, maxIterations: 2,
+      },
+      keys: ["costByStart", "degeneracies", "magnetic", "magneticAgreement", "nuclearAgreement", "parallel", "result", "sigmaCoverage"],
+    };
+  })(),
 };
 
 

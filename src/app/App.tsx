@@ -67,6 +67,15 @@ export function App(): JSX.Element {
   // then renders the single-crystal workbench instead of the powder panels.
   // Cleared when powder data is loaded (auto-switch back).
   const [scDataset, setScDataset] = useState<SingleCrystalDataset | null>(null);
+  // Phase 2: an optional companion magnetic .int paired with scDataset for joint
+  // nuclear+magnetic co-refinement. Set ONLY by onLoadMagneticData; every change
+  // to the nuclear dataset (below) routes through setScNuclearDataset, which
+  // clears this partner so a new nuclear load can never inherit a stale one.
+  const [scMagneticDataset, setScMagneticDataset] = useState<SingleCrystalDataset | null>(null);
+  const setScNuclearDataset = (next: SingleCrystalDataset | null): void => {
+    setScDataset(next);
+    setScMagneticDataset(null);
+  };
   const [step, setStep] = useState(0);
   const [instrument, setInstrument] = useState<InstrumentParameters>(DEFAULT_INSTRUMENT);
   const [instrumentLoaded, setInstrumentLoaded] = useState(false);
@@ -125,7 +134,7 @@ export function App(): JSX.Element {
     setInstrument(DEFAULT_INSTRUMENT);
     setInstrumentLoaded(false);
     setOwnStructure(false);
-    setScDataset(null);
+    setScNuclearDataset(null);
     setPowderResult(null);
     setDemoActive(false);
   }
@@ -148,7 +157,7 @@ export function App(): JSX.Element {
     setInstrument(ex.instrument);
     setInstrumentLoaded(true);
     setOwnStructure(false);
-    setScDataset(null);
+    setScNuclearDataset(null);
     setPowderResult(null);
     setDemoActive(true);
     setMessage("Loaded the bundled Mn₃Ga + MnO POWGEN demo (two-phase TOF, converged fit).");
@@ -230,17 +239,37 @@ export function App(): JSX.Element {
         if (fmt.dataType === "single-crystal") {
           const loaded = loadReflectionDataset(text, structure, `${structure.id}-hkl`, file.name);
           if (loaded.kept < 1) throw new Error("no usable reflections in the file");
-          setScDataset(loaded.dataset);
+          setScNuclearDataset(loaded.dataset);
           setMessage(
             `Loaded single-crystal “${file.name}” · ${loaded.kept} reflections [${loaded.format}]` +
             `${loaded.dropped > 0 ? ` (${loaded.dropped} dropped)` : ""}. Merge report + F² refinement ready.`,
           );
           return;
         }
-        setScDataset(null); // powder data → leave single-crystal mode
+        setScNuclearDataset(null); // powder data → leave single-crystal mode
         applyPowder(text, file.name, fmt, tag);
       } catch (e) {
         setMessage(`Data load failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    });
+  }
+
+  // Phase 2: load a COMPANION magnetic reflection file (.int/.hkl) to co-refine
+  // with the already-loaded nuclear dataset. Kept separate from onLoadData (which
+  // would replace the nuclear dataset); this only pairs a second file.
+  function onLoadMagneticData(file: File): void {
+    if (!scDataset) { setMessage("Load the nuclear reflections first, then add the magnetic file."); return; }
+    file.text().then((text) => {
+      try {
+        const loaded = loadReflectionDataset(text, structure, `${structure.id}-mag-hkl`, file.name);
+        if (loaded.kept < 1) throw new Error("no usable reflections in the magnetic file");
+        setScMagneticDataset(loaded.dataset);
+        setMessage(
+          `Loaded magnetic “${file.name}” · ${loaded.kept} reflections [${loaded.format}]` +
+          `${loaded.dropped > 0 ? ` (${loaded.dropped} dropped)` : ""}. Joint nuclear + magnetic co-refinement ready.`,
+        );
+      } catch (e) {
+        setMessage(`Magnetic data load failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     });
   }
@@ -261,7 +290,7 @@ export function App(): JSX.Element {
       ...(cw ? { wavelength: cw.wavelength } : {}),
     });
     if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
-    setScDataset(null);
+    setScNuclearDataset(null);
     const wavelength = parsed.wavelength ?? cw?.wavelength ?? 2.5;
     const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
     const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
@@ -278,7 +307,7 @@ export function App(): JSX.Element {
     const wavelength = cw?.wavelength ?? 2.52; // D1B graphite λ
     const parsed = parseIllD1b(text, { id, name: filename, radiation: { kind: "neutron", wavelength }, wavelength });
     if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
-    setScDataset(null);
+    setScNuclearDataset(null);
     const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
     const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
     setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
@@ -451,7 +480,7 @@ export function App(): JSX.Element {
         // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
         // the dataset id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <SingleCrystalWorkbench key={scDataset.id} structure={structure} dataset={scDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadCif={onLoadCif} />
+          <SingleCrystalWorkbench key={scDataset.id} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} />
         </main>
       )}
       <footer style={copyrightBar}>

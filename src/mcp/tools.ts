@@ -42,7 +42,20 @@ import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { rankNextParameterGroups } from "@/core/workflow/nextParameters";
 import { buildPowderProblem } from "@/core/workflow/powder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
+import {
+  buildJointSingleCrystalProblem,
+  jointSingleCrystalComparison,
+  type HklTransform,
+  type JointSingleCrystalOptions,
+} from "@/core/workflow/jointSingleCrystal";
 import { refine, refineParallel } from "@/core/refinement/engine";
+import { refineMultiStart } from "@/core/refinement/multiStart";
+import { isMomentParameterKind } from "@/core/refinement/types";
+import { canonicalizeMomentValues, momentDegeneracies, type MomentDegeneracy } from "@/core/magnetic/canonicalize";
+import type { SingleCrystalDataset } from "@/core/diffraction/types";
+import type { SingleCrystalAgreement } from "@/core/diffraction/singleCrystalFactors";
+import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
+import { parseHkl } from "@/parsers/hkl";
 import { createNodeEvaluatorPool } from "@/mcp/nodeEvaluator";
 import { buildProblemForSpec } from "@/workers/runPowder";
 import type { EvaluatorSpec } from "@/workers/protocol";
@@ -567,6 +580,147 @@ export async function refine_magnetic_powder(args: {
   } finally {
     await pool?.dispose();
   }
+}
+
+/**
+ * Parse single-crystal integrated intensities (FullProf `.int` h k l I σ, or a
+ * SHELX HKLF4 `.hkl`) into a SingleCrystalDataset — the entry point for the
+ * single-crystal and joint co-refinement paths. Detection is by content; GSAS
+ * reflection lists (which need a cell to d-filter) are out of scope here.
+ */
+export function parse_single_crystal_data(args: { text: string; name?: string; id?: string }): {
+  dataset: SingleCrystalDataset;
+  kept: number;
+  dropped: number;
+  format: "fullprof" | "shelx";
+} {
+  const id = args.id ?? "sc-hkl";
+  const name = args.name ?? "single crystal";
+  if (looksLikeFullProfInt(args.text)) {
+    const parsed = parseFullProfInt(args.text);
+    return {
+      dataset: { id, name, radiation: { kind: "neutron", wavelength: parsed.wavelength ?? 1.0 }, reflections: parsed.reflections },
+      kept: parsed.reflections.length,
+      dropped: parsed.skipped,
+      format: "fullprof",
+    };
+  }
+  const reflections = parseHkl(args.text);
+  return {
+    dataset: { id, name, radiation: { kind: "neutron", wavelength: 1.54 }, reflections },
+    kept: reflections.length,
+    dropped: 0,
+    format: "shelx",
+  };
+}
+
+/**
+ * Joint nuclear + magnetic single-crystal co-refinement (Phase 2): fit one
+ * structure + magnetic model against TWO integrated-intensity datasets with the
+ * weighted objective χ²_total = w_N·χ²_N + w_M·χ²_M. Local-minimum-resistant like
+ * refine_magnetic_powder: the moment subspace is searched from a seeded
+ * multi-start with the nuclear scaffold frozen, then one final joint LM frees the
+ * caller's whole set; the global ±m sign is canonicalized and flat moment
+ * directions reported. Weights, the Lorentz toggle, and per-dataset index maps
+ * (base↔supercell) are named inputs. Combine build_refinement's nuclear
+ * parameters with build_magnetic_model's moment set; add a magneticScale param
+ * (tie it to the nuclear scale to share one scale). Returns the result, the
+ * canonicalized magnetic model, per-block R-factors, σ-coverage, the degeneracy
+ * report, and per-start costs.
+ */
+export async function refine_joint_single_crystal(args: {
+  structure: StructureModel;
+  magnetic: MagneticModel;
+  nuclearDataset: SingleCrystalDataset;
+  magneticDataset: SingleCrystalDataset;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  weightNuclear?: number;
+  weightMagnetic?: number;
+  lorentz?: boolean;
+  nuclearHklTransform?: HklTransform;
+  magneticHklTransform?: HklTransform;
+  restarts?: number;
+  seed?: number;
+  maxIterations?: number;
+}): Promise<{
+  result: RefinementResult;
+  magnetic: MagneticModel;
+  nuclearAgreement: SingleCrystalAgreement;
+  magneticAgreement: SingleCrystalAgreement;
+  sigmaCoverage: { nuclear: number; magnetic: number };
+  degeneracies: MomentDegeneracy[];
+  costByStart: number[];
+  parallel: { workers: number } | null;
+}> {
+  const maxIterations = args.maxIterations ?? 25;
+  const jointOpts: JointSingleCrystalOptions = {
+    ...(args.weightNuclear !== undefined ? { weightNuclear: args.weightNuclear } : {}),
+    ...(args.weightMagnetic !== undefined ? { weightMagnetic: args.weightMagnetic } : {}),
+    ...(args.lorentz !== undefined ? { lorentz: args.lorentz } : {}),
+    ...(args.nuclearHklTransform ? { nuclearHklTransform: args.nuclearHklTransform } : {}),
+    ...(args.magneticHklTransform ? { magneticHklTransform: args.magneticHklTransform } : {}),
+  };
+  const params = args.parameters.map((p) => ({ ...p }));
+  const isMoment = (p: RefinementParameter): boolean => isMomentParameterKind(p.kind);
+  const buildProblem = (ps: readonly RefinementParameter[]) =>
+    buildJointSingleCrystalProblem(args.structure, args.magnetic, args.nuclearDataset, args.magneticDataset, ps, args.bindings, jointOpts);
+  const writeBack = (start: readonly RefinementParameter[], r: RefinementResult): RefinementParameter[] =>
+    start.map((p) => ({ ...p, value: r.parameters[p.id] ?? p.value, ...(r.esd[p.id] !== undefined ? { esd: r.esd[p.id] } : {}) }));
+
+  // (1) Freeze the nuclear scaffold; seeded moment-only multi-start (in-thread).
+  const frozenNuclear = params.map((p) => (!isMoment(p) && !p.fixed && !p.expression ? { ...p, fixed: true } : { ...p }));
+  const runOnce = (start: readonly RefinementParameter[]): { parameters: RefinementParameter[]; final: RefinementResult } => {
+    const r = refine(buildProblem(start), { maxIterations });
+    return { parameters: writeBack(start, r), final: r };
+  };
+  const ms = await refineMultiStart(frozenNuclear, runOnce, {
+    escapeSigma: 6,
+    relFraction: 1,
+    restarts: args.restarts ?? 8,
+    ...(args.seed !== undefined ? { seed: args.seed } : {}),
+    shouldPerturb: isMoment,
+  });
+
+  // (2) Final joint LM over the full freed set from the best moment partition,
+  // node-pooled when available (bit-identical to the serial path either way).
+  const jointStart = params.map((p) => {
+    const best = ms.parameters.find((q) => q.id === p.id);
+    return isMoment(p) && best ? { ...p, value: best.value } : { ...p };
+  });
+  const spec: EvaluatorSpec = {
+    kind: "jointSingleCrystal",
+    structure: args.structure, magnetic: args.magnetic,
+    nuclearDataset: args.nuclearDataset, magneticDataset: args.magneticDataset,
+    parameters: jointStart, bindings: args.bindings,
+    ...jointOpts,
+  };
+  const pool = await createNodeEvaluatorPool(spec);
+  const parallel = pool ? { workers: pool.size } : null;
+  let joint: RefinementResult;
+  try {
+    const problem = buildProblem(jointStart);
+    joint = pool ? await refineParallel(problem, { maxIterations }, pool) : refine(problem, { maxIterations });
+  } finally {
+    await pool?.dispose();
+  }
+
+  // (3) Canonicalize the ±m sign; report per-block agreement + degeneracies.
+  const refinedMag = applyMagneticMoments(args.magnetic, args.bindings, joint.parameters);
+  const canonValues = canonicalizeMomentValues(joint.parameters, refinedMag, args.structure.cell, params);
+  const finalResult: RefinementResult = { ...joint, parameters: canonValues };
+  const refinedParams = params.map((p) => ({ ...p, value: canonValues[p.id] ?? p.value }));
+  const cmp = jointSingleCrystalComparison(args.structure, args.magnetic, args.nuclearDataset, args.magneticDataset, refinedParams, args.bindings, jointOpts);
+  return {
+    result: finalResult,
+    magnetic: applyMagneticMoments(args.magnetic, args.bindings, canonValues),
+    nuclearAgreement: cmp.nuclear.agreement,
+    magneticAgreement: cmp.magnetic.agreement,
+    sigmaCoverage: { nuclear: cmp.nuclear.sigmaCoverage, magnetic: cmp.magnetic.sigmaCoverage },
+    degeneracies: momentDegeneracies(joint.diagnostics, params),
+    costByStart: ms.costByStart,
+    parallel,
+  };
 }
 
 /**

@@ -223,18 +223,25 @@ export function guidedSingleCrystalParams(params: readonly RefinementParameter[]
   return params.map((p) => (unlock.has(p.kind) ? { ...p, fixed: false } : { ...p }));
 }
 
-/** I_calc for one reflection: k·L·P·y_ext·|F|². */
-function reflectionIntensity(
+/**
+ * I_calc for one reflection: k·L·P·y_ext·|F|². Exported for the joint
+ * nuclear+magnetic co-refinement (Phase 2), whose nuclear block must be
+ * byte-identical to the single-dataset path. `lorentz=false` skips the L·P
+ * geometry for files holding already-corrected F² (e.g. FullProf DataRed
+ * output); extinction is angle-driven but independent of L·P and still applies.
+ */
+export function reflectionIntensity(
   applied: ReturnType<typeof applyParameters>,
   dataset: SingleCrystalDataset,
   h: number,
   k: number,
   l: number,
+  lorentz = true,
 ): number {
   const model = applied.model;
   const d = dSpacing(model.cell, h, k, l);
   const f2 = nuclearStructureFactorSquared(model, dataset.radiation, h, k, l);
-  const lp = singleCrystalLorentz(dataset.radiation, d) * polarizationFactor(dataset.radiation, d);
+  const lp = lorentz ? singleCrystalLorentz(dataset.radiation, d) * polarizationFactor(dataset.radiation, d) : 1;
   const y = extinctionFactor(applied.extinction, f2, dataset.radiation, d);
   return applied.scale * lp * y * f2;
 }

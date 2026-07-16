@@ -92,6 +92,25 @@ What differs is only the **observable and its corrections**, isolated in
   wR2/R1 → ~0, residual reporting
   ([`singleCrystalRefinement.test.ts`](../src/core/workflow/singleCrystalRefinement.test.ts)).
 
+### Joint nuclear + magnetic co-refinement ✅ — `core/workflow/jointSingleCrystal.ts` (Phase 2)
+- **`buildJointSingleCrystalProblem`** — two datasets (nuclear `.int` + magnetic
+  `.int`) as one objective χ²_total = w_N·χ²_N + w_M·χ²_M; blocks concatenated,
+  per-block weights folded in. Nuclear block `k_N·L·P·y·|F_N|²`, magnetic block
+  `k_M·L·P·|F_M⊥|²` from ONE `applyParameters` pass; named `lorentz` toggle for
+  pre-corrected F²; optional integer `HklTransform` per dataset (base↔supercell).
+- **`jointSingleCrystalComparison`** — per-block R1/wR2/GooF + σ-coverage.
+- **`refineJointSingleCrystalMultiStart`** (computeClient) — the Phase-1
+  freeze-nuclear → seeded moment multi-start → joint LM → ±m canonicalize stack on
+  F². MCP: `parse_single_crystal_data`, `refine_joint_single_crystal`. UI: the
+  joint panel in `SingleCrystalWorkbench` (named w_N/w_M/seed/restarts, shared vs
+  independent magnetic scale, per-block R-factors, degeneracy report).
+- Validated (optimizer, synthetic golden): moment + shared-scale recovery from a
+  bad cold start, determinism, per-reflection magnetic-block value, legacy
+  cross-consistency ([`jointSingleCrystal.test.ts`](../src/core/workflow/jointSingleCrystal.test.ts),
+  [`jointMultiStart.test.ts`](../src/workers/jointMultiStart.test.ts)). Methods:
+  [`REFINEMENT_NOTES.md`](REFINEMENT_NOTES.md) §8. Real-data acceptance
+  (`data/Eu324_fullprof/Str/`) pending external data.
+
 ### Still needed for M7 to be "done"
 - ⬜ **UI page** mirroring the powder one (load HKL → confirm space group → merge
   report → free params → refine → Fo vs Fc, R1/wR2/GooF, outlier list).

@@ -1,6 +1,9 @@
 # Improvement Plan — Magnetic Refinement Stability + Single-Crystal Co-Refinement
 
-> **Status:** Phase 1 in progress (2026-07-16).
+> **Status:** Phase 1 complete; Phase 2 implemented (2026-07-16) — real-data
+> acceptance pending the `data/Eu324_fullprof/Str/` goldens (absent on this
+> machine; see Phase 2 notes and [REFINEMENT_NOTES.md](REFINEMENT_NOTES.md) §8).
+> Phase 3 (FullProf `.int` k-vector reader/writer) not started.
 > This is a focused improvement milestone, **separate from [ROADMAP.md](ROADMAP.md)** —
 > it hardens what exists before the next roadmap milestone. Do not fold these items
 > into the roadmap tracks.
