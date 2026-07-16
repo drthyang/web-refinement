@@ -16,6 +16,8 @@ import { APP_VERSION } from "@/app/constants";
 import type { RefinementResult } from "@/core/refinement/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
+import type { Vec3 } from "@/core/math/types";
+import { mergeToMagneticSupercell } from "@/core/magnetic/magneticSupercell";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { buildPowderSpec } from "@/app/powderSpec";
 import { parseMagneticCif, parseCif } from "@/parsers/cif";
@@ -283,6 +285,24 @@ export function App(): JSX.Element {
     });
   }
 
+  // Phase 3: merge the loaded nuclear + magnetic reflection pair into the magnetic
+  // SUPERCELL (single-k FullProf convention), replacing the active dataset with
+  // the merged supercell reflections. Refining it needs the structure in that
+  // supercell setting (load the supercell CIF), exactly as FullProf's .pcr does.
+  function onMergeSupercell(k: Vec3): void {
+    if (!scDataset || !scMagneticDataset) { setMessage("Load both a nuclear and a magnetic reflection file before merging."); return; }
+    try {
+      const { dataset, supercell } = mergeToMagneticSupercell(scDataset, scMagneticDataset, k);
+      setScNuclearDataset(dataset); // becomes the active dataset; clears the companion
+      setMessage(
+        `Merged into the magnetic supercell (${supercell.multiplicity.join("×")}, k→[${supercell.kInteger.join(",")}]) · ` +
+        `${dataset.reflections.length} reflections. Load the supercell structure to refine the magnetic model against it.`,
+      );
+    } catch (e) {
+      setMessage(`Supercell merge failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   // ILL D1B/D20 constant-wavelength neutron powder (numor format). Uses the
   // loaded CW instrument (e.g. the D1B .irf → λ + Caglioti U/V/W) when present;
   // otherwise a neutron default at the D1B wavelength, and loading the .irf
@@ -492,7 +512,7 @@ export function App(): JSX.Element {
         // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
         // the dataset id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <SingleCrystalWorkbench key={scDataset.id} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} />
+          <SingleCrystalWorkbench key={scDataset.id} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onMergeSupercell={onMergeSupercell} onLoadCif={onLoadCif} />
         </main>
       )}
       <footer style={copyrightBar}>

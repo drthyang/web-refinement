@@ -11,7 +11,6 @@ import { buildPowderProblem, type PowderProfile } from "@/core/workflow/powder";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
-import { buildJointSingleCrystalProblem } from "@/core/workflow/jointSingleCrystal";
 import { buildMultiPhasePowderProblem } from "@/core/workflow/multiPhase";
 import { refineStaged } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
@@ -34,15 +33,6 @@ export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
   }
   if (spec.kind === "magneticSingleCrystal") {
     return buildMagneticSingleCrystalProblem(spec.structure, spec.magnetic, spec.dataset, spec.parameters, spec.bindings);
-  }
-  if (spec.kind === "jointSingleCrystal") {
-    return buildJointSingleCrystalProblem(spec.structure, spec.magnetic, spec.nuclearDataset, spec.magneticDataset, spec.parameters, spec.bindings, {
-      ...(spec.weightNuclear !== undefined ? { weightNuclear: spec.weightNuclear } : {}),
-      ...(spec.weightMagnetic !== undefined ? { weightMagnetic: spec.weightMagnetic } : {}),
-      ...(spec.lorentz !== undefined ? { lorentz: spec.lorentz } : {}),
-      ...(spec.nuclearHklTransform ? { nuclearHklTransform: spec.nuclearHklTransform } : {}),
-      ...(spec.magneticHklTransform ? { magneticHklTransform: spec.magneticHklTransform } : {}),
-    });
   }
   if (spec.kind === "magneticPowder") {
     return buildMagneticPowderProblem(spec.structure, spec.magnetic, spec.pattern, spec.parameters, spec.bindings, {

@@ -15,7 +15,6 @@ import type {
 } from "@/core/refinement/types";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
-import type { HklTransform } from "@/core/workflow/jointSingleCrystal";
 import type { StageKinds } from "@/core/workflow/structureRefinement";
 import type { LeBailPrefitResult } from "@/core/workflow/leBailPrefit";
 import type { TofCalibration } from "@/core/workflow/leBail";
@@ -146,26 +145,6 @@ export type EvaluatorSpec =
       readonly dataset: SingleCrystalDataset;
       readonly parameters: RefinementParameter[];
       readonly bindings: ParameterBinding[];
-    }
-  | {
-      readonly kind: "jointSingleCrystal";
-      readonly structure: StructureModel;
-      readonly magnetic: MagneticModel;
-      /** Nuclear integrated-intensity dataset (block 1 of the joint objective). */
-      readonly nuclearDataset: SingleCrystalDataset;
-      /** Magnetic integrated-intensity dataset (block 2). */
-      readonly magneticDataset: SingleCrystalDataset;
-      readonly parameters: RefinementParameter[];
-      readonly bindings: ParameterBinding[];
-      /** Relative block weights: χ²_total = w_N·χ²_N + w_M·χ²_M. Default 1 each. */
-      readonly weightNuclear?: number;
-      readonly weightMagnetic?: number;
-      /** Apply single-crystal Lorentz–polarization to both blocks (default true;
-       *  false for files already reduced to corrected F²). */
-      readonly lorentz?: boolean;
-      /** Integer index maps into the model setting (identity when omitted). */
-      readonly nuclearHklTransform?: HklTransform;
-      readonly magneticHklTransform?: HklTransform;
     };
 
 export interface InitEvaluatorRequest {

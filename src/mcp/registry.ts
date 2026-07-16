@@ -256,7 +256,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "parse_single_crystal_data",
     title: "Parse single-crystal reflections",
-    description: "Parse single-crystal integrated intensities — a FullProf .int (h k l I σ) or a SHELX HKLF4 .hkl — into a SingleCrystalDataset. The entry point for refine_joint_single_crystal; parse the nuclear and magnetic files with two calls.",
+    description: "Parse single-crystal integrated intensities — a FullProf .int (h k l I σ) or a SHELX HKLF4 .hkl — into a SingleCrystalDataset. Parse the nuclear and magnetic files, then merge_magnetic_supercell into one dataset for the magnetic refinement.",
     inputSchema: {
       text: z.string().describe("FullProf .int or SHELX .hkl file text"),
       name: z.string().optional(),
@@ -287,25 +287,5 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       k: z.array(z.number()).length(3).describe("Propagation vector, e.g. [0.25, 0, 0.25]"),
     },
     handler: tools.merge_magnetic_supercell,
-  },
-  {
-    name: "refine_joint_single_crystal",
-    title: "Joint nuclear + magnetic (single crystal)",
-    description: "Co-refine one structure + magnetic model against TWO single-crystal datasets (nuclear .int + magnetic .int) with χ²_total = w_N·χ²_N + w_M·χ²_M. Local-minimum-resistant: seeded moment multi-start with the nuclear scaffold frozen, then one joint LM; ±m sign canonicalized, flat directions reported. weightNuclear/weightMagnetic, lorentz (false for pre-corrected F²), and per-dataset integer hkl transforms (base↔supercell) are named inputs. Combine build_refinement's nuclear set with build_magnetic_model's moments plus a magneticScale param (tie it to scale to share one scale). Returns the result, canonicalized magnetic model, per-block R-factors, σ-coverage, degeneracies, and per-start costs.",
-    inputSchema: {
-      structure: anyObj, magnetic: anyObj,
-      nuclearDataset: anyObj, magneticDataset: anyObj,
-      parameters: anyArr.describe("Nuclear + moment + scale/magneticScale parameters"),
-      bindings: anyArr,
-      weightNuclear: z.number().min(0).optional(),
-      weightMagnetic: z.number().min(0).optional(),
-      lorentz: z.boolean().optional().describe("Apply single-crystal L·P to both blocks (default true; false for corrected F²)"),
-      nuclearHklTransform: anyArr.optional().describe("Integer 3×3 map, nuclear file indices → model setting"),
-      magneticHklTransform: anyArr.optional().describe("Integer 3×3 map, magnetic file indices → model setting"),
-      restarts: z.number().int().min(0).max(64).optional(),
-      seed: z.number().int().optional(),
-      maxIterations: z.number().int().min(1).max(200).optional(),
-    },
-    handler: tools.refine_joint_single_crystal,
   },
 ];

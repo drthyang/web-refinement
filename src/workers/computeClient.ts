@@ -589,46 +589,40 @@ export class ComputeClient {
     return this.runParallel(spec, req.options ?? {}, req.dataset.reflections.length);
   }
 
-  /** Nuclear + magnetic single-crystal co-refinement over TWO datasets, Jacobian
-   *  on the evaluator pool. Mirrors refineMagneticPowderParallel (spec + shared
-   *  buildProblemForSpec fallback), NOT refineMagneticParallel — the size<2 path
-   *  is an in-thread refine of the same spec, needing no worker-message plumbing. */
-  async refineJointSingleCrystalParallel(
-    spec: Omit<Extract<EvaluatorSpec, { kind: "jointSingleCrystal" }>, "kind">,
-    options: Partial<RefinementOptions> = {},
-  ): Promise<RefinementResult> {
-    const full: EvaluatorSpec = { kind: "jointSingleCrystal", ...spec };
-    const patternLen = spec.nuclearDataset.reflections.length + spec.magneticDataset.reflections.length;
-    if (this.poolSize() < 2) return refine(buildProblemForSpec(full), options);
-    return this.runParallel(full, options, patternLen);
+  refineMagnetic(req: Omit<RefineMagneticRequest, "requestId" | "type">): Promise<RefinementResult> {
+    return this.run({ ...req, type: "refineMagnetic", requestId: this.nextId++ });
+  }
+
+  /** Magnetic single-crystal (nuclear + moments) through the evaluator pool. */
+  async refineMagneticParallel(req: Omit<RefineMagneticRequest, "requestId" | "type">): Promise<RefinementResult> {
+    if (this.poolSize() < 2) return this.refineMagnetic(req);
+    const spec: EvaluatorSpec = { kind: "magneticSingleCrystal", structure: req.structure, magnetic: req.magnetic, dataset: req.dataset, parameters: req.parameters, bindings: req.bindings };
+    return this.runParallel(spec, req.options ?? {}, req.dataset.reflections.length);
   }
 
   /**
-   * Local-minimum-resistant joint single-crystal co-refinement — the Phase-1
-   * multi-start stack transplanted onto the two-dataset F² objective (Phase 2).
-   * Same shape as refineMagneticPowderMultiStart: freeze the nuclear scaffold and
-   * search only the moment subspace with the seeded, in-thread multi-start; seed
-   * the best moment partition into ONE final joint LM over the caller's full freed
-   * set (pool-accelerated); canonicalize the global ±m sign and report the
-   * data-limited (flat) moment directions.
+   * Local-minimum-resistant magnetic single-crystal refinement — the "escape min"
+   * path for a single magnetic dataset (the merged magnetic-supercell `.int`,
+   * whose nuclear reflections and satellites live in ONE dataset). Same shape as
+   * the powder and joint siblings: freeze the nuclear scaffold, search the moment
+   * subspace from a seeded multi-start, seed the best partition into one final LM
+   * over the caller's full freed set, canonicalize the global ±m sign, and report
+   * the data-limited moment directions.
    */
-  async refineJointSingleCrystalMultiStart(
-    spec: Omit<Extract<EvaluatorSpec, { kind: "jointSingleCrystal" }>, "kind">,
+  async refineMagneticSingleCrystalMultiStart(
+    spec: Omit<Extract<EvaluatorSpec, { kind: "magneticSingleCrystal" }>, "kind">,
     multiStart: MultiStartOptions = {},
     options: Partial<RefinementOptions> = {},
   ): Promise<MagneticMultiStartResult> {
     const params = spec.parameters;
     const isMoment = (p: RefinementParameter): boolean => isMomentParameterKind(p.kind);
-    const specWith = (parameters: readonly RefinementParameter[]): Extract<EvaluatorSpec, { kind: "jointSingleCrystal" }> =>
-      ({ kind: "jointSingleCrystal", ...spec, parameters: [...parameters] });
+    const specWith = (parameters: readonly RefinementParameter[]): Extract<EvaluatorSpec, { kind: "magneticSingleCrystal" }> =>
+      ({ kind: "magneticSingleCrystal", ...spec, parameters: [...parameters] });
 
-    // (1) Freeze the nuclear scaffold; only the moment modes move in the search.
-    const frozenNuclear = params.map((p) =>
-      !isMoment(p) && !p.fixed && !p.expression ? { ...p, fixed: true } : { ...p },
-    );
+    const frozenNuclear = params.map((p) => (!isMoment(p) && !p.fixed && !p.expression ? { ...p, fixed: true } : { ...p }));
     const runOnce = (start: readonly RefinementParameter[]): { parameters: RefinementParameter[]; final: RefinementResult } => {
-      const result = refine(buildProblemForSpec(specWith(start)), options);
-      return { parameters: applyResultToParams(start, result), final: result };
+      const r = refine(buildProblemForSpec(specWith(start)), options);
+      return { parameters: applyResultToParams(start, r), final: r };
     };
     const ms = await refineMultiStart(frozenNuclear, runOnce, {
       escapeSigma: 6,
@@ -637,14 +631,15 @@ export class ComputeClient {
       shouldPerturb: isMoment,
     });
 
-    // (2) Final joint LM from the best moment partition over the full freed set.
     const jointStart = params.map((p) => {
       const best = ms.parameters.find((q) => q.id === p.id);
       return isMoment(p) && best ? { ...p, value: best.value } : { ...p };
     });
-    const joint = await this.refineJointSingleCrystalParallel(specWith(jointStart), options);
+    // Forward the caller's options to the FINAL LM (the solve that produces the
+    // reported values/e.s.d.s) — the powder/joint siblings do; without it this
+    // result-producing step silently runs at the engine defaults.
+    const joint = await this.refineMagneticParallel({ ...spec, parameters: jointStart, options });
 
-    // (3) Canonicalize the ±m sign; collect degeneracies from the final diagnostics.
     const refinedMag = applyMagneticMoments(spec.magnetic, spec.bindings, joint.parameters);
     const canonValues = canonicalizeMomentValues(joint.parameters, refinedMag, spec.structure.cell, params);
     const finalResult: RefinementResult = { ...joint, parameters: canonValues };
@@ -657,17 +652,6 @@ export class ComputeClient {
       costByStart: ms.costByStart,
       degeneracies: momentDegeneracies(joint.diagnostics, params),
     };
-  }
-
-  refineMagnetic(req: Omit<RefineMagneticRequest, "requestId" | "type">): Promise<RefinementResult> {
-    return this.run({ ...req, type: "refineMagnetic", requestId: this.nextId++ });
-  }
-
-  /** Magnetic single-crystal (nuclear + moments) through the evaluator pool. */
-  async refineMagneticParallel(req: Omit<RefineMagneticRequest, "requestId" | "type">): Promise<RefinementResult> {
-    if (this.poolSize() < 2) return this.refineMagnetic(req);
-    const spec: EvaluatorSpec = { kind: "magneticSingleCrystal", structure: req.structure, magnetic: req.magnetic, dataset: req.dataset, parameters: req.parameters, bindings: req.bindings };
-    return this.runParallel(spec, req.options ?? {}, req.dataset.reflections.length);
   }
 
   /** Abort any in-flight refinement: terminate the worker(s) (fresh ones are

@@ -14,6 +14,7 @@ import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { StructureModel } from "@/core/crystal/types";
 import type { Radiation, SingleCrystalDataset } from "@/core/diffraction/types";
+import type { Vec3 } from "@/core/math/types";
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
@@ -23,9 +24,6 @@ import {
   guidedSingleCrystalParams,
   singleCrystalRefinementComparison,
 } from "@/core/workflow/singleCrystalRefinement";
-import { jointSingleCrystalComparison } from "@/core/workflow/jointSingleCrystal";
-import type { SingleCrystalAgreement } from "@/core/diffraction/singleCrystalFactors";
-import type { MomentDegeneracy } from "@/core/magnetic/canonicalize";
 import { normalProbabilityPlot } from "@/core/refinement/diagnostics";
 import { dSpacing } from "@/core/crystal/unitCell";
 import { isMomentParameterKind } from "@/core/refinement/types";
@@ -49,6 +47,14 @@ const DATA_ACCEPT = ".xye,.xy,.dat,.txt,.gr,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,
 const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
 const noop = (): void => {};
 
+/** Parse one k component: a fraction ("1/4", "-1/3") or a decimal. */
+function parseKComponent(s: string): number {
+  const frac = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (frac) { const den = Number(frac[2]); return den === 0 ? 0 : Number(frac[1]) / den; }
+  const v = Number(s);
+  return Number.isFinite(v) ? v : 0;
+}
+
 /** R1 quality bands (fraction): <8 % good · <15 % mediocre · else poor. */
 function r1Ink(r1: number): string {
   if (!Number.isFinite(r1)) return color.ink;
@@ -65,7 +71,7 @@ type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: strin
  *  carry this, so the user picks it (seeded from the loaded instrument). */
 type Probe = "xray" | "neutron" | "neutron-tof";
 
-export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, client, step, onStep, instrumentProbe, exportsRef, onLoadData, onLoadMagneticData, onLoadCif }: {
+export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, client, step, onStep, instrumentProbe, exportsRef, onLoadData, onLoadMagneticData, onMergeSupercell, onLoadCif }: {
   structure: StructureModel;
   dataset: SingleCrystalDataset;
   /** Companion magnetic reflection file for joint co-refinement (Phase 2). When
@@ -89,6 +95,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   onLoadData?: (file: File) => void;
   /** Load a companion magnetic reflection file to pair with this nuclear dataset. */
   onLoadMagneticData?: (file: File) => void;
+  /** Merge the loaded nuclear + magnetic pair into the magnetic supercell (single-k
+   *  FullProf convention), replacing the active dataset with the merged reflections. */
+  onMergeSupercell?: (k: Vec3) => void;
   /** Load a different structure (CIF). */
   onLoadCif?: (file: File) => void;
 }): JSX.Element {
@@ -219,92 +228,33 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   const magneticFit: MagneticFit = {
     agreementLabel: "wR2",
     refine: async (mag, momentParams, mBindings) => {
+      // Local-minimum-resistant: seeded moment multi-start with the nuclear
+      // scaffold frozen, then a final LM + ±m canonicalization (the merged
+      // magnetic-supercell dataset and any single magnetic set benefit from it).
       const nuclearFixed = params.map((p) => ({ ...p, fixed: true }));
-      const res = await client.refineMagneticParallel({
-        structure, magnetic: mag, dataset: activeDataset,
-        parameters: [...nuclearFixed, ...momentParams], bindings: [...bindings, ...mBindings],
-        options: { maxIterations: 20 },
-      });
+      // ONE scale: nuclear and magnetic Bragg peaks are the same measurement, so
+      // the magnetic scale is tied to the nuclear scale (k_M = k_N). Without this
+      // the magnetic block would use the default k_M = 1 while nuclear uses the
+      // refined k, and the moments would come out wrong by √k. Tying it also pins
+      // the moment magnitude uniquely (no k_M·|m|² degeneracy).
+      const nuclearScale = params.find((p) => p.kind === "scale")?.value ?? 1;
+      const scaleTie: RefinementParameter = { id: "magScale", label: "magnetic scale (= nuclear)", kind: "magneticScale", value: nuclearScale, initialValue: nuclearScale, fixed: true, expression: "= scale" };
+      const scaleTieBinding: ParameterBinding = { parameterId: "magScale", kind: "magneticScale", targetId: activeDataset.id };
+      const ms = await client.refineMagneticSingleCrystalMultiStart(
+        { structure, magnetic: mag, dataset: activeDataset, parameters: [...nuclearFixed, scaleTie, ...momentParams], bindings: [...bindings, scaleTieBinding, ...mBindings] },
+        { restarts: 8 }, { maxIterations: 20 },
+      );
       const values: Record<string, number> = {};
-      for (const p of momentParams) values[p.id] = res.parameters[p.id] ?? p.value;
-      return { values, agreement: res.agreement.rWeighted ?? null };
+      for (const p of momentParams) values[p.id] = ms.final.parameters[p.id] ?? p.value;
+      return { values, agreement: ms.final.agreement.rWeighted ?? null };
     },
   };
 
-  // ── Joint nuclear + magnetic co-refinement (Phase 2) ─────────────────────────
-  // Named controls (GSAS-II parity): per-block weights, restart count, seed, and
-  // whether the magnetic scale is independent or shared with the nuclear scale.
-  const [weightNuclear, setWeightNuclear] = useState(1);
-  const [weightMagnetic, setWeightMagnetic] = useState(1);
-  const [jointRestarts, setJointRestarts] = useState(8);
-  const [jointSeed, setJointSeed] = useState(1);
-  const [separateMagScale, setSeparateMagScale] = useState(false);
-  // Refined independent magnetic scale (only when separateMagScale): persisted so
-  // it is surfaced and a re-run resumes from it rather than re-seeding off k_N.
-  const [magScaleValue, setMagScaleValue] = useState<number | null>(null);
-  const [jointReport, setJointReport] = useState<{
-    nuclear: SingleCrystalAgreement; magnetic: SingleCrystalAgreement;
-    coverage: { nuclear: number; magnetic: number }; degeneracies: MomentDegeneracy[];
-    magScale: number | null;
-  } | null>(null);
-  // The magnetic dataset measured with the chosen probe (same radiation as nuclear).
-  const probedMagneticDataset = useMemo(
-    () => (magneticDataset ? { ...magneticDataset, radiation: effectiveRadiation } : null),
-    [magneticDataset, effectiveRadiation],
-  );
-
-  async function runJoint(): Promise<void> {
-    if (!magnetic || !probedMagneticDataset) return;
-    setBusy(true);
-    try {
-      // Mint the magnetic scale k_M (never produced by the nuclear spec builder):
-      // shared with the nuclear scale by default (one crystal / one beam), which
-      // breaks the k_M·|m|² degeneracy; opt into an independent scale explicitly.
-      const nuclearScale = params.find((p) => p.kind === "scale")?.value ?? 1;
-      // Independent scale resumes from the last refined value; a tied scale always
-      // follows the nuclear scale (start value is cosmetic — the expression drives it).
-      const magStart = separateMagScale ? (magScaleValue ?? nuclearScale) : nuclearScale;
-      const magScaleParam: RefinementParameter = separateMagScale
-        ? { id: "magScale", label: "magnetic scale", kind: "magneticScale", value: magStart, initialValue: magStart, fixed: false, min: 0 }
-        : { id: "magScale", label: "magnetic scale (= nuclear)", kind: "magneticScale", value: magStart, initialValue: magStart, fixed: true, expression: "= scale" };
-      const magScaleBinding: ParameterBinding = { parameterId: "magScale", kind: "magneticScale", targetId: probedMagneticDataset.id };
-      const jointParams = [...guidedSingleCrystalParams(params), magScaleParam];
-      const jointBindings = [...bindings, ...momentBindings, magScaleBinding];
-      const ms = await client.refineJointSingleCrystalMultiStart(
-        {
-          structure, magnetic, nuclearDataset: activeDataset, magneticDataset: probedMagneticDataset,
-          parameters: jointParams, bindings: jointBindings,
-          weightNuclear, weightMagnetic,
-        },
-        { restarts: jointRestarts, seed: jointSeed },
-        { maxIterations: 25 },
-      );
-      // Preserve each parameter's refined fixed/free state (do NOT blanket-free):
-      // cell parameters stay fixed as they were during the fit, so the parameter
-      // panel and the per-block GooF dof both reflect what was actually refined.
-      const refinedParams = jointParams.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value }));
-      setParams(refinedParams.filter((p) => p.id !== "magScale"));
-      setResult(ms.final);
-      const refinedMag = applyMagneticMoments(magnetic, momentBindings, ms.final.parameters);
-      setMagnetic(refinedMag);
-      const refinedMagScale = separateMagScale ? (ms.final.parameters["magScale"] ?? magStart) : null;
-      setMagScaleValue(refinedMagScale);
-      const cmp = jointSingleCrystalComparison(
-        structure, magnetic, activeDataset, probedMagneticDataset, refinedParams, jointBindings,
-        { weightNuclear, weightMagnetic },
-      );
-      setJointReport({
-        nuclear: cmp.nuclear.agreement, magnetic: cmp.magnetic.agreement,
-        coverage: { nuclear: cmp.nuclear.sigmaCoverage, magnetic: cmp.magnetic.sigmaCoverage },
-        degeneracies: ms.degeneracies,
-        magScale: refinedMagScale,
-      });
-    } catch (e) {
-      console.error(`[status] Joint co-refinement failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
+  // k-vector text for the supercell merge (fractions like "1/4" accepted). Nuclear
+  // and magnetic Bragg peaks come from ONE measurement (one crystal, one beam),
+  // so they share a single scale — the merged supercell dataset is refined with
+  // one scale (magneticScale tied to the nuclear scale), not a tunable weighting.
+  const [kText, setKText] = useState<[string, string, string]>(["0", "0", "0"]);
 
   // Apply a magnetic model from the symmetry step to the workbench: keep its
   // bindings and merge the (freed) moment parameters into the F² parameter set
@@ -529,13 +479,14 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           extraActions={refineActions}
         />
 
-        {/* Joint nuclear + magnetic co-refinement (Phase 2). Appears once a
-            companion magnetic reflection file is paired; needs an applied
-            magnetic model (from the Magnetic tab) to co-refine. */}
-        <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Magnetic single-k workflow: load the companion magnetic reflections,
+            then merge both nuclear-cell files into the magnetic supercell and
+            refine that single dataset — nuclear + magnetic share ONE scale (one
+            crystal, one beam), so there is nothing to weight between them. */}
+        <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <span style={uppercaseLabel}>Joint nuclear + magnetic co-refinement</span>
-            <label style={{ ...secondaryButton, padding: "6px 12px", cursor: "pointer" }} title="Load a companion magnetic reflection file (.int/.hkl) to co-refine with this nuclear dataset">
+            <span style={uppercaseLabel}>Magnetic single-k · nuclear + magnetic supercell merge</span>
+            <label style={{ ...secondaryButton, padding: "6px 12px", cursor: "pointer" }} title="Load a companion magnetic reflection file (.int/.hkl), indexed in the nuclear cell">
               {magneticDataset ? "Replace magnetic file…" : "Load magnetic .int…"}
               <input
                 type="file" accept={DATA_ACCEPT} style={{ display: "none" }}
@@ -546,59 +497,37 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
 
           {!magneticDataset ? (
             <p style={{ fontSize: 13, color: color.secondary, margin: 0, lineHeight: 1.5 }}>
-              Load a second reflection file holding the <strong>magnetic</strong> intensities to co-refine the moment
-              against nuclear + magnetic data together (χ²<sub>total</sub> = w<sub>N</sub>·χ²<sub>N</sub> + w<sub>M</sub>·χ²<sub>M</sub>).
-            </p>
-          ) : !magnetic ? (
-            <p style={{ fontSize: 13, color: color.noteInk, margin: 0, lineHeight: 1.5 }}>
-              {magneticDataset.name} loaded ({magneticDataset.reflections.length} reflections). Build a magnetic model in the
-              <strong> Magnetic</strong> tab and “Continue” to enable the joint fit.
+              Load the <strong>magnetic</strong> reflection file (the satellites, indexed in the nuclear cell as the
+              fundamental h k l of hkl ± k). Both files are then merged into the magnetic supercell and refined as one
+              dataset — the standard FullProf single-k input.
             </p>
           ) : (
             <>
-              <div style={{ fontSize: 12.5, color: color.secondary }}>
-                {activeDataset.reflections.length} nuclear + {probedMagneticDataset!.reflections.length} magnetic reflections · {magneticDataset.name}
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
-                <NumField label="w_N" title="Relative weight on the nuclear block" value={weightNuclear} min={0} step={0.1} onChange={setWeightNuclear} />
-                <NumField label="w_M" title="Relative weight on the magnetic block" value={weightMagnetic} min={0} step={0.1} onChange={setWeightMagnetic} />
-                <NumField label="restarts" title="Seeded moment restarts (escape local minima)" value={jointRestarts} min={0} step={1} onChange={(v) => setJointRestarts(Math.round(v))} />
-                <NumField label="seed" title="Deterministic RNG seed (same seed ⇒ identical result)" value={jointSeed} step={1} onChange={(v) => setJointSeed(Math.round(v))} />
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: fz.small, color: color.secondary }} title="By default the magnetic scale is tied to the nuclear scale (one crystal / one beam). A free magnetic scale is degenerate with the moment magnitude — enable only if the two files have independent normalisations.">
-                  <input type="checkbox" checked={separateMagScale} onChange={(e) => setSeparateMagScale(e.target.checked)} style={{ accentColor: color.primary }} />
-                  separate magnetic scale
-                </label>
+              <p style={{ fontSize: 13, color: color.secondary, margin: 0, lineHeight: 1.5 }}>
+                {dataset.reflections.length} nuclear + {magneticDataset.reflections.length} magnetic reflections, both indexed in
+                the nuclear cell. Enter the propagation vector <strong>k</strong> to convert both into the magnetic supercell
+                (where k becomes an integer reflection) and merge into one dataset.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+                <span style={{ fontSize: fz.small, color: color.secondary, fontFamily: mono }}>k =</span>
+                {[0, 1, 2].map((i) => (
+                  <input
+                    key={i} value={kText[i]} onChange={(e) => setKText((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
+                    style={{ ...numInput, width: 56 }} title="Fractions like 1/4 or decimals" placeholder={["k₁", "k₂", "k₃"][i]}
+                  />
+                ))}
                 <button
-                  style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? disabledStyle : {}) }}
-                  disabled={busy}
-                  onClick={runJoint}
-                  title="Freeze the nuclear scaffold, search the moment subspace from seeded restarts, then one joint LM over all freed parameters"
+                  style={{ ...secondaryButton, padding: "7px 13px" }}
+                  onClick={() => onMergeSupercell?.([parseKComponent(kText[0]), parseKComponent(kText[1]), parseKComponent(kText[2])])}
+                  title="Convert both files into the magnetic supercell and merge into one dataset (replaces the active dataset). Refine it against the supercell structure."
                 >
-                  {busy ? "Refining…" : "Refine jointly ↻"}
+                  Merge to supercell →
                 </button>
               </div>
-
-              {jointReport && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: `1px solid ${color.subtle}`, paddingTop: 10 }}>
-                  <div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>
-                    <BlockStats title="Nuclear block" ag={jointReport.nuclear} coverage={jointReport.coverage.nuclear} />
-                    <BlockStats title="Magnetic block" ag={jointReport.magnetic} coverage={jointReport.coverage.magnetic} />
-                  </div>
-                  {jointReport.magScale !== null && (
-                    <div style={{ fontSize: fz.small, color: color.secondary, fontFamily: mono }}>
-                      independent magnetic scale k_M = {jointReport.magScale.toPrecision(4)}
-                    </div>
-                  )}
-                  {jointReport.degeneracies.length > 0 && (
-                    <div style={{ fontSize: fz.small, color: color.noteInk }}>
-                      <strong>Data-limited directions:</strong>
-                      <ul style={{ margin: "3px 0 0", paddingLeft: 18 }}>
-                        {jointReport.degeneracies.map((d, i) => <li key={i}>{d.message}</li>)}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
+              <span style={{ fontSize: fz.micro, color: color.faint }}>
+                After merging, load the <strong>supercell</strong> structure (as FullProf's .pcr defines it); the magnetic
+                model then refines against the merged reflections with a single shared scale.
+              </span>
             </>
           )}
         </div>
@@ -656,39 +585,6 @@ function ProbeToggle({ probe, onChange }: { probe: Probe; onChange: (p: Probe) =
           </button>
         ))}
       </span>
-    </div>
-  );
-}
-
-/** Compact labelled number input for the joint-refinement controls. */
-function NumField({ label, title, value, min, step, onChange }: { label: string; title?: string; value: number; min?: number; step?: number; onChange: (v: number) => void }): JSX.Element {
-  return (
-    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: fz.small, color: color.secondary }} title={title}>
-      <span style={{ fontFamily: mono }}>{label}</span>
-      <input
-        type="number" value={value} {...(min !== undefined ? { min } : {})} {...(step !== undefined ? { step } : {})}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={numInput}
-      />
-    </label>
-  );
-}
-
-/** Per-block R1/wR2/GooF with a σ-coverage warning when the block lacks σ. */
-function BlockStats({ title, ag, coverage }: { title: string; ag: SingleCrystalAgreement; coverage: number }): JSX.Element {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <span style={{ ...uppercaseLabel }}>{title}</span>
-      <div style={{ display: "flex", gap: 16 }}>
-        <Stat small value={pct(ag.r1)} label="R1" ink={r1Ink(ag.r1)} />
-        <Stat small value={pct(ag.wr2)} label="wR2" />
-        <Stat small value={ag.goof.toFixed(2)} label="GooF" />
-      </div>
-      {coverage < 1 && (
-        <span style={{ fontSize: fz.micro, color: color.warnInk }} title="Some reflections in this block carry no σ, so they fall back to unit weight — the block weight is not comparable to a fully σ-weighted block.">
-          ⚠ only {(coverage * 100).toFixed(0)}% carry σ — weight not comparable
-        </span>
-      )}
     </div>
   );
 }

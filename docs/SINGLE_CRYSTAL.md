@@ -98,12 +98,21 @@ What differs is only the **observable and its corrections**, isolated in
   magnetic **supercell**, where k is an integer reciprocal-lattice vector:
   nuclear `(h,k,l) → (n·h)`, magnetic `→ (n·h) + K` with `nᵢ` the denominators of
   k and `Kᵢ = nᵢ·kᵢ`. The merged single dataset is then refined against the
-  magnetic structure in the supercell. MCP: `merge_magnetic_supercell`.
+  magnetic structure in the supercell. MCP: `merge_magnetic_supercell`. **UI**: with
+  a `_nuc`/`_mag` pair loaded, the single-crystal page's "Merge to magnetic
+  supercell" card takes k and replaces the active dataset with the merged one — the
+  one magnetic co-refinement workflow (nuclear and magnetic peaks share ONE scale,
+  same measurement, so there is nothing to weight between them). **Requires** the
+  **supercell** structure loaded to refine (as FullProf's `.pcr` defines it) — a
+  nuclear-cell structure would score the satellites against spurious nuclear |F|².
+  Robustness: the moment fit uses `refineMagneticSingleCrystalMultiStart` (the
+  single-dataset sibling of the powder escape-min path — freeze nuclear → seeded
+  moment multi-start → final LM → ±m canonicalize), with the magnetic scale tied to
+  the nuclear scale, validated on a synthetic AFM supercell
+  ([`magneticSupercellRefine.test.ts`](../src/workers/magneticSupercellRefine.test.ts)).
 - Validated: nuclear + k-variant parse, `-0` normalisation, line-numbered
-  problems, strict rejection, writer round-trips, and a nuc+mag pair reproducing
-  the Phase-2 joint refinement
-  ([`fullprofInt.test.ts`](../src/parsers/fullprofInt.test.ts),
-  [`jointMultiStart.test.ts`](../src/workers/jointMultiStart.test.ts)). **Real-data
+  problems, strict rejection, writer round-trips
+  ([`fullprofInt.test.ts`](../src/parsers/fullprofInt.test.ts)). **Real-data
   golden (Eu₃In₂Te₄, k = (¼,0,¼))**: the reader parses the `_nuc`/`_mag`/`_ALL`
   HB-3A files with zero problems, and the merge reproduces the reference
   `_ALL_magcell.int` byte-exactly on every `(h,k,l,I,σ)`
@@ -134,24 +143,29 @@ What differs is only the **observable and its corrections**, isolated in
   wR2/R1 → ~0, residual reporting
   ([`singleCrystalRefinement.test.ts`](../src/core/workflow/singleCrystalRefinement.test.ts)).
 
-### Joint nuclear + magnetic co-refinement ✅ — `core/workflow/jointSingleCrystal.ts` (Phase 2)
-- **`buildJointSingleCrystalProblem`** — two datasets (nuclear `.int` + magnetic
-  `.int`) as one objective χ²_total = w_N·χ²_N + w_M·χ²_M; blocks concatenated,
-  per-block weights folded in. Nuclear block `k_N·L·P·y·|F_N|²`, magnetic block
-  `k_M·L·P·|F_M⊥|²` from ONE `applyParameters` pass; named `lorentz` toggle for
-  pre-corrected F²; optional integer `HklTransform` per dataset (base↔supercell).
-- **`jointSingleCrystalComparison`** — per-block R1/wR2/GooF + σ-coverage.
-- **`refineJointSingleCrystalMultiStart`** (computeClient) — the Phase-1
-  freeze-nuclear → seeded moment multi-start → joint LM → ±m canonicalize stack on
-  F². MCP: `parse_single_crystal_data`, `refine_joint_single_crystal`. UI: the
-  joint panel in `SingleCrystalWorkbench` (named w_N/w_M/seed/restarts, shared vs
-  independent magnetic scale, per-block R-factors, degeneracy report).
-- Validated (optimizer, synthetic golden): moment + shared-scale recovery from a
-  bad cold start, determinism, per-reflection magnetic-block value, legacy
-  cross-consistency ([`jointSingleCrystal.test.ts`](../src/core/workflow/jointSingleCrystal.test.ts),
-  [`jointMultiStart.test.ts`](../src/workers/jointMultiStart.test.ts)). Methods:
-  [`REFINEMENT_NOTES.md`](REFINEMENT_NOTES.md) §8. Real-data acceptance
-  (`data/Eu324_fullprof/Str/`) pending external data.
+### Magnetic single-crystal refinement ✅ — the single-k supercell merge
+- **One measurement, one scale.** Nuclear and magnetic Bragg peaks come from the
+  same crystal/beam/normalisation, so they share a single overall scale — there is
+  no relative scale or weight to tune between them. The commensurate single-k
+  structure is refined from ONE FullProf `.int` in the magnetic supercell, formed
+  by merging the `_nuc` + `_mag` nuclear-cell files (see the reader/writer entry
+  above and `core/magnetic/magneticSupercell.ts`).
+- **`buildMagneticSingleCrystalProblem`** (`core/workflow/magnetic.ts`) — the
+  single-dataset forward model `I = k·(|F_N|² + |F_M⊥|²)` (unpolarized ⇒ no
+  interference); `magneticScale` is tied to the nuclear `scale` so k_M = k_N (else
+  the moments come out wrong by √k). |F_M⊥|² is the Halpern–Johnson M⊥Q projection
+  with the ⟨j0⟩ form factor and 2.695 fm/µ_B prefactor, on the nuclear fm scale.
+- **`refineMagneticSingleCrystalMultiStart`** (computeClient) — the single-dataset
+  escape-min sibling of the powder path: freeze nuclear → seeded moment multi-start
+  → final LM → ±m canonicalize + degeneracy report. MCP:
+  `parse_single_crystal_data`, `merge_magnetic_supercell`, `write_single_crystal_data`.
+  UI: the "Merge to magnetic supercell" card in `SingleCrystalWorkbench`, then the
+  magnetic-analysis moment fit (refine against the supercell structure).
+- Validated (synthetic AFM supercell): moment + shared-scale recovery from a bad
+  cold start, determinism, and the even-h-nuclear / odd-h-magnetic separation of a
+  merged file ([`magneticSupercellRefine.test.ts`](../src/workers/magneticSupercellRefine.test.ts)).
+  Reflection merge validated byte-exactly against the real Eu₃In₂Te₄ golden (see
+  the reader/writer entry). Methods: [`REFINEMENT_NOTES.md`](REFINEMENT_NOTES.md) §8.
 
 ### Still needed for M7 to be "done"
 - ⬜ **UI page** mirroring the powder one (load HKL → confirm space group → merge
