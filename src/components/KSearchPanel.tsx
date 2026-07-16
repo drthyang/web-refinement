@@ -341,10 +341,11 @@ export function KSearchPanel({
 
   // Tick rows for the pattern preview: every crystallographic phase (from the
   // refinement page, so impurity peaks index correctly), then where this k CAN
-  // put magnetic intensity (satellite positions G ± k), where the selected
-  // group actually DOES (|F_M|² > 0 with the current amplitudes), and where
-  // the nuclear fit leaves unexplained intensity — the visual test of the k
-  // and group choices.
+  // put magnetic intensity (satellite positions G ± k), and where the selected
+  // group actually DOES (|F_M|² > 0 with the current amplitudes) — the visual
+  // test of the k and group choices. The auto-detected peaks the nuclear fit
+  // leaves unexplained are NOT a tick row: they are flagged with ▽ markers
+  // above the pattern (foundPeaks below) so they don't read as another phase.
   const previewTicks = useMemo<PhaseTicks[]>(() => {
     if (!patternView) return [];
     const { dRange, dToX } = patternView;
@@ -365,16 +366,22 @@ export function KSearchPanel({
         }),
       );
     }
-    if (autoPeaks.length > 0) {
-      const ticks = autoPeaks
-        .filter((d) => d >= dRange.min && d <= dRange.max)
-        .map((d) => ({ x: dToX(d), hkl: "—", d }))
-        .filter((t) => Number.isFinite(t.x));
-      rows.push({ id: "residual", label: "residual", color: theme.obs, kind: "magnetic", ticks });
-    }
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patternView, structure, k[0], k[1], k[2], appliedMagnetic, autoPeaks]);
+  }, [patternView, structure, k[0], k[1], k[2], appliedMagnetic]);
+
+  // The auto-detected "found" peaks (unexplained nuclear-fit residual), mapped
+  // into the plot's display abscissa — drawn as ▽ triangles above the pattern
+  // rather than as a Bragg-tick row, so they stay visually distinct from the
+  // indexed phases.
+  const foundPeaks = useMemo(() => {
+    if (!patternView || autoPeaks.length === 0) return [];
+    const { dRange, dToX } = patternView;
+    return autoPeaks
+      .filter((d) => d >= dRange.min && d <= dRange.max)
+      .map((d) => ({ x: dToX(d), d }))
+      .filter((p) => Number.isFinite(p.x));
+  }, [patternView, autoPeaks]);
 
   // Tick-click spotlight in the pattern preview (same interaction as the
   // refinement plot, local to this page).
@@ -469,6 +476,7 @@ export function KSearchPanel({
               curves={patternView.curves}
               xLabel={patternView.xLabel}
               phases={previewTicks}
+              foundPeaks={foundPeaks}
               highlight={patternPick}
               onHighlight={setPatternPick}
               {...(patternView.fitRange ? { fitRange: patternView.fitRange } : {})}
@@ -477,10 +485,10 @@ export function KSearchPanel({
           </div>
           <p
             style={{ ...help, maxWidth: "none" }}
-            title="Grey G ± k ticks mark every position this k allows; the magenta row marks the reflections the selected magnetic space group keeps (|F_M|² > 0 with the current moments); orange ticks are residual peaks the nuclear fit leaves unexplained. Drag to zoom, drag the blue handles to set the fit range, hover or click a tick for its indices."
+            title="Orange ▽ markers above the pattern flag the found peaks — intensity the nuclear fit leaves unexplained. Grey G ± k ticks mark every position this k allows; the magenta row marks the reflections the selected magnetic space group keeps (|F_M|² > 0 with the current moments). Drag to zoom, drag the blue handles to set the fit range, hover or click a tick for its indices."
           >
             A plausible k puts a <span style={{ color: theme.ink }}>G ± k</span> tick under every{" "}
-            <span style={{ color: theme.ink }}>residual</span> peak
+            <span style={{ color: theme.ink }}>found</span> peak (the ▽ markers above the pattern)
             {magBuild
               ? <>; a plausible group keeps those peaks in the <span style={{ color: theme.ink }}>allowed</span> row.</>
               : " — pick a group in step 4 to see which of those positions it allows."}
