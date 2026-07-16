@@ -265,6 +265,19 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     handler: tools.parse_single_crystal_data,
   },
   {
+    name: "write_single_crystal_data",
+    title: "Write single-crystal .int",
+    description: "Serialize a SingleCrystalDataset to a FullProf .int file (h k l F² σ cod through the declared Fortran format). Pass kVectors + per-reflection kIndex for the propagation-vector variant (satellite = H + k_nv; pending external FullProf validation). Round-trips with parse_single_crystal_data.",
+    inputSchema: {
+      dataset: anyObj,
+      wavelength: z.number().min(0).optional(),
+      title: z.string().optional(),
+      format: z.string().optional().describe("Fortran format, e.g. (3i4,2f8.2,i4)"),
+      kVectors: anyArr.optional().describe("Propagation vectors as [[k1,k2,k3],…]"),
+    },
+    handler: tools.write_single_crystal_data,
+  },
+  {
     name: "refine_joint_single_crystal",
     title: "Joint nuclear + magnetic (single crystal)",
     description: "Co-refine one structure + magnetic model against TWO single-crystal datasets (nuclear .int + magnetic .int) with χ²_total = w_N·χ²_N + w_M·χ²_M. Local-minimum-resistant: seeded moment multi-start with the nuclear scaffold frozen, then one joint LM; ±m sign canonicalized, flat directions reported. weightNuclear/weightMagnetic, lorentz (false for pre-corrected F²), and per-dataset integer hkl transforms (base↔supercell) are named inputs. Combine build_refinement's nuclear set with build_magnetic_model's moments plus a magneticScale param (tie it to scale to share one scale). Returns the result, canonicalized magnetic model, per-block R-factors, σ-coverage, degeneracies, and per-start costs.",

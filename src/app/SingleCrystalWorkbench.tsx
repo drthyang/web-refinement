@@ -38,6 +38,7 @@ import { FobsFcalc, NormalProb } from "@/app/ui/QualityPlots";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { structureToCif, type CifRefinementMeta } from "@/core/export/cif";
+import { writeFullProfInt } from "@/parsers/fullprofInt";
 import { downloadText } from "@/app/download";
 import { card as themeCard, color, mono, fz, uppercaseLabel, secondaryButton } from "@/app/theme";
 
@@ -341,11 +342,26 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
     downloadText(`${structure.id}.cif`, structureToCif(structure, { params: withEsd, bindings, refinement: meta }), "chemical/x-cif");
   }
 
+  // Export the reflection data as FullProf `.int`. When a joint session is loaded
+  // the two files follow the pairing convention (`_nuc.int` + `_mag.int`) so they
+  // reload as one co-refinement session; otherwise a single `<id>.int`.
+  function exportInt(): void {
+    const wl = "wavelength" in effectiveRadiation ? effectiveRadiation.wavelength : 0;
+    const emit = (ds: SingleCrystalDataset, suffix: string): void =>
+      downloadText(`${structure.id}${suffix}.int`, writeFullProfInt(ds.reflections, { title: structure.name || structure.id, wavelength: wl }), "text/plain");
+    if (magneticDataset) {
+      emit(probedDataset, "_nuc");
+      emit({ ...magneticDataset, radiation: effectiveRadiation }, "_mag");
+    } else {
+      emit(probedDataset, "");
+    }
+  }
+
   // Publish the current exporter so the app header can drive it; clear on unmount
   // (switch back to powder) so the header never calls a stale single-crystal export.
   useEffect(() => {
     if (!exportsRef) return;
-    exportsRef.current = { cif: exportCif };
+    exportsRef.current = { cif: exportCif, scInt: exportInt };
     return () => { exportsRef.current = null; };
   });
 

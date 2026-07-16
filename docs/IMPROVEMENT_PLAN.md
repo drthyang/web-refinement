@@ -1,9 +1,11 @@
 # Improvement Plan — Magnetic Refinement Stability + Single-Crystal Co-Refinement
 
-> **Status:** Phase 1 complete; Phase 2 implemented (2026-07-16) — real-data
-> acceptance pending the `data/Eu324_fullprof/Str/` goldens (absent on this
-> machine; see Phase 2 notes and [REFINEMENT_NOTES.md](REFINEMENT_NOTES.md) §8).
-> Phase 3 (FullProf `.int` k-vector reader/writer) not started.
+> **Status:** Phases 1–3 implemented (2026-07-16). Two acceptance items remain
+> **pending external data/tools**, both gated so CI stays green: the Phase-2
+> real-data joint acceptance needs the `data/Eu324_fullprof/Str/` goldens (absent
+> here; see [REFINEMENT_NOTES.md](REFINEMENT_NOTES.md) §8), and the Phase-3
+> `.int` **k-vector header** path needs one exported file cross-checked in FullProf
+> itself (no golden exercises it; see [SINGLE_CRYSTAL.md](SINGLE_CRYSTAL.md) §2).
 > This is a focused improvement milestone, **separate from [ROADMAP.md](ROADMAP.md)** —
 > it hardens what exists before the next roadmap milestone. Do not fold these items
 > into the roadmap tracks.

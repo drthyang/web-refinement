@@ -72,6 +72,34 @@ What differs is only the **observable and its corrections**, isolated in
   ([`shelxHkl.test.ts`](../src/parsers/shelxHkl.test.ts)). The pre-existing
   free-form `parsers/hkl.ts` remains for the simple `h k l I σ` case.
 
+### FullProf `.int` reader + writer ✅ — `parsers/fullprofInt.ts` (Phase 3)
+- **Reader** (`parseFullProfInt`) for the `ABS(Irf)=4` integrated-intensity file:
+  title / declared Fortran format / `R_lambda Itypdata Ipow` header, then
+  fixed-width `h k l [nv] I σ [cod]` rows via the declared widths. **Propagation-
+  vector variant**: a four-integer format (`4i…`) signals an `nv` column; the
+  reader consumes the k-count + `nv k1 k2 k3` block and tags each reflection with
+  its 1-based `kIndex` (satellite = **H + k_nv**, the addition convention). The
+  writer's `-0` index artifact is normalised to `0`.
+- **Malformed-file rejection**: every skipped row is recorded as
+  `{line, expected, found}`; `{strict:true}` throws `line N: expected …, found …`
+  (used by the paired-load path).
+- **Writer** (`writeFullProfInt`) re-emits through the declared format —
+  byte-identical round-trip on writer output, semantic round-trip on real files;
+  throws when a value overflows its field. Used by the `.int` export and the MCP
+  `write_single_crystal_data` tool.
+- **Pairing convention**: a `<name>_mag.int` loaded while a nuclear dataset is
+  present routes to the magnetic partner (App `onLoadData`), so a `_nuc`/`_mag`
+  pair loads as one joint co-refinement session; the header **`.int` export**
+  writes the pair back with the same suffixes.
+- Validated: nuclear + k-variant parse, `-0` normalisation, line-numbered
+  problems, strict rejection, writer round-trips, and a nuc+mag pair reproducing
+  the Phase-2 joint refinement
+  ([`fullprofInt.test.ts`](../src/parsers/fullprofInt.test.ts),
+  [`jointMultiStart.test.ts`](../src/workers/jointMultiStart.test.ts)).
+- **Pending external validation:** no golden exercises the k-vector header
+  against FullProf itself — the k path follows the manual + a real HB-3A file;
+  export a k file and cross-check in FullProf before publication.
+
 ### Corrections & agreement — `core/diffraction/singleCrystalFactors.ts`
 - **Single-crystal Lorentz** `L = 1/sin2θ` (TOF → 1), **polarization**
   (X-ray, shared split with powder), and **secondary extinction** (SHELXL EXTI,

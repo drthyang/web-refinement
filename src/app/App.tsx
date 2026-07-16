@@ -237,6 +237,15 @@ export function App(): JSX.Element {
         const fmt = detectDataFormat({ text, filename: file.name, instrument: instrumentLoaded ? instrument : undefined });
         const tag = `[${fmt.source}/${fmt.confidence}]`;
         if (fmt.dataType === "single-crystal") {
+          // Pairing convention (Phase 3): a `<name>_mag.*` file loaded while a
+          // nuclear dataset is present is routed to the magnetic partner (for
+          // joint co-refinement) rather than replacing the nuclear set — so a
+          // `_nuc` + `_mag` pair loads as one session. A `_nuc`/plain file is the
+          // nuclear set (and clears any stale magnetic partner via the setter).
+          if (/_mag\.[^.]+$/i.test(file.name) && scDataset) {
+            onLoadMagneticData(file);
+            return;
+          }
           const loaded = loadReflectionDataset(text, structure, `${structure.id}-hkl`, file.name);
           if (loaded.kept < 1) throw new Error("no usable reflections in the file");
           setScNuclearDataset(loaded.dataset);
@@ -421,7 +430,10 @@ export function App(): JSX.Element {
   // CIF/mCIF + CSV + project JSON. Labels the shell can know (they depend only
   // on session state it owns); behavior lives in the engines.
   const headerExports: ExportAction[] = scDataset
-    ? [{ label: "CIF", onClick: () => scExports.current?.cif?.() }]
+    ? [
+        { label: "CIF", onClick: () => scExports.current?.cif?.() },
+        { label: ".int", onClick: () => scExports.current?.scInt?.() },
+      ]
     : [
         { label: session.magnetic && session.magnetic.moments.length > 0 ? "mCIF" : "CIF", onClick: () => powderExports.current?.cif?.() },
         { label: "CSV", onClick: () => powderExports.current?.csv?.() },

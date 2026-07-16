@@ -7,6 +7,7 @@ import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { buildJointSingleCrystalProblem } from "@/core/workflow/jointSingleCrystal";
+import { writeFullProfInt, parseFullProfInt } from "@/parsers/fullprofInt";
 import { ComputeClient } from "@/workers/computeClient";
 
 /**
@@ -116,6 +117,28 @@ describe("refineJointSingleCrystalMultiStart — synthetic FM", () => {
     expect(momentOf(pos.final.parameters)).toBeCloseTo(TRUE_MOMENT, 1);
     expect(momentOf(neg.final.parameters)).toBeCloseTo(TRUE_MOMENT, 1);
     expect(Math.sign(neg.final.parameters[MOMENT_ID]!)).toBe(Math.sign(pos.final.parameters[MOMENT_ID]!));
+    client.dispose();
+  });
+
+  // Phase 3 acceptance: a nuc + mag .int PAIR, written and read back through the
+  // FullProf reader/writer, reproduces the Phase-2 joint result — ties the I/O
+  // round-trip to the co-refinement objective.
+  it("a written-then-parsed .int pair reproduces the joint refinement", async () => {
+    const nucInt = writeFullProfInt(nuc.reflections, { title: "nuc", wavelength: 1.8, format: "(3i4,2f10.2,i4)" });
+    const magInt = writeFullProfInt(mag.reflections, { title: "mag", wavelength: 1.8, format: "(3i4,2f10.2,i4)" });
+    const nucBack = parseFullProfInt(nucInt, { strict: true });
+    const magBack = parseFullProfInt(magInt, { strict: true });
+    const nucDs = { ...nuc, reflections: nucBack.reflections };
+    const magDs = { ...mag, reflections: magBack.reflections };
+
+    const client = new ComputeClient();
+    const ms = await client.refineJointSingleCrystalMultiStart(
+      { structure, magnetic: build.magnetic, nuclearDataset: nucDs, magneticDataset: magDs, parameters: scene(1, 0.3).params, bindings: TRUTH.bindings },
+      { restarts: 8, seed: 1 }, { maxIterations: 40 },
+    );
+    expect(momentOf(ms.final.parameters)).toBeCloseTo(TRUE_MOMENT, 1);
+    expect(ms.final.parameters["scale"]).toBeCloseTo(5, 1);
+    expect(ms.final.agreement.rWeighted ?? 1).toBeLessThan(0.03);
     client.dispose();
   });
 });

@@ -154,7 +154,14 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   })(),
   parse_single_crystal_data: {
     args: { text: "1 0 0 100 2\n1 1 0 50 2\n1 1 1 30 2\n", name: "sc", id: "nuc" },
-    keys: ["dataset", "dropped", "format", "kept"],
+    keys: ["dataset", "dropped", "format", "kVectors", "kept", "problems"],
+  },
+  write_single_crystal_data: {
+    args: {
+      dataset: { id: "nuc", name: "n", radiation: { kind: "neutron", wavelength: 1.54 }, reflections: [{ h: 1, k: 0, l: 0, iObs: 100, sigma: 2 }] },
+      wavelength: 1.54,
+    },
+    keys: ["reflections", "text"],
   },
   refine_joint_single_crystal: (() => {
     const build = tools.build_magnetic_model({ structure, ionLabels: ["Po1"], moment: 0.5 });

@@ -54,7 +54,7 @@ import { isMomentParameterKind } from "@/core/refinement/types";
 import { canonicalizeMomentValues, momentDegeneracies, type MomentDegeneracy } from "@/core/magnetic/canonicalize";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import type { SingleCrystalAgreement } from "@/core/diffraction/singleCrystalFactors";
-import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
+import { parseFullProfInt, looksLikeFullProfInt, writeFullProfInt } from "@/parsers/fullprofInt";
 import { parseHkl } from "@/parsers/hkl";
 import { createNodeEvaluatorPool } from "@/mcp/nodeEvaluator";
 import { buildProblemForSpec } from "@/workers/runPowder";
@@ -593,6 +593,10 @@ export function parse_single_crystal_data(args: { text: string; name?: string; i
   kept: number;
   dropped: number;
   format: "fullprof" | "shelx";
+  /** Propagation vectors declared in the file ([] for a plain nuclear file). */
+  kVectors: [number, number, number][];
+  /** Line-numbered {line, expected, found} diagnostics for skipped rows ([] when clean). */
+  problems: { line: number; expected: string; found: string }[];
 } {
   const id = args.id ?? "sc-hkl";
   const name = args.name ?? "single crystal";
@@ -603,6 +607,8 @@ export function parse_single_crystal_data(args: { text: string; name?: string; i
       kept: parsed.reflections.length,
       dropped: parsed.skipped,
       format: "fullprof",
+      kVectors: (parsed.kVectors ?? []).map((k) => [...k] as [number, number, number]),
+      problems: parsed.problems.map((p) => ({ ...p })),
     };
   }
   const reflections = parseHkl(args.text);
@@ -611,7 +617,33 @@ export function parse_single_crystal_data(args: { text: string; name?: string; i
     kept: reflections.length,
     dropped: 0,
     format: "shelx",
+    kVectors: [],
+    problems: [],
   };
+}
+
+/**
+ * Serialize a single-crystal dataset to a FullProf `.int` file (Phase 3). Writes
+ * the plain nuclear variant (h k l F² σ cod) through the declared Fortran format;
+ * pass `kVectors` + per-reflection `kIndex` for the propagation-vector variant
+ * (satellite = H + k_nv). The k path is pending external FullProf validation.
+ */
+export function write_single_crystal_data(args: {
+  dataset: SingleCrystalDataset;
+  wavelength?: number;
+  title?: string;
+  format?: string;
+  kVectors?: [number, number, number][];
+}): { text: string; reflections: number } {
+  const rad = args.dataset.radiation;
+  const wavelength = args.wavelength ?? (rad.kind === "neutron-tof" ? 0 : rad.wavelength);
+  const text = writeFullProfInt(args.dataset.reflections, {
+    ...(args.title !== undefined ? { title: args.title } : {}),
+    wavelength,
+    ...(args.format !== undefined ? { format: args.format } : {}),
+    ...(args.kVectors ? { kVectors: args.kVectors } : {}),
+  });
+  return { text, reflections: args.dataset.reflections.length };
 }
 
 /**
