@@ -27,7 +27,7 @@ import type { RefinementParameter, RefinementResult, ParameterBinding } from "@/
 import type { ProjectFile } from "@/core/project/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
-import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
+import { magneticComponentCurve } from "@/core/workflow/magneticPowder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
@@ -40,10 +40,10 @@ import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from 
 import { isMomentParameterKind } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
 import { CANCELLED } from "@/workers/computeClient";
-import { KSearchPanel, type MagneticPatternView } from "@/components/KSearchPanel";
+import { KSearchPanel, type MagneticPatternView, type ResidualPeak } from "@/components/KSearchPanel";
 import { withAdpModel } from "@/core/crystal/adp";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
-import { detectExtraPeaks } from "@/core/magnetic/extraPeaks";
+import { detectExtraPeaks, annotateExtraPeaks, type ExtraPeak } from "@/core/magnetic/extraPeaks";
 import { powderReflectionObsCalc, type ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import { normalProbabilityPlot, weightedResiduals } from "@/core/refinement/diagnostics";
 import { QualityPlots } from "@/app/ui/QualityPlots";
@@ -65,6 +65,7 @@ import {
   MAGNETIC_COLOR,
 } from "@/visualization/reflectionTicks";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
+import { InfoBadge } from "@/app/ui/InfoBadge";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono, fz } from "@/app/theme";
@@ -194,17 +195,30 @@ export function PowderWorkbench({
     // Multi-phase: sum every phase's contribution (shared instrument profile).
     if (session.extraPhases.length > 0) {
       const phases = [{ structure, id: structure.id }, ...session.extraPhases.map((s) => ({ structure: s, id: s.id }))];
-      return multiPhaseCurves(phases, pattern, powderParams, pBindings, session.powderProfile);
+      const base = multiPhaseCurves(phases, pattern, powderParams, pBindings, session.powderProfile);
+      // An applied magnetic model rides the primary phase: add its satellite
+      // component on top of the summed nuclear phases. magneticComponentCurve
+      // routes bindings so the impurity phases' cells can't graft onto the
+      // primary, and skips the (already computed) nuclear synthesis.
+      if (session.magnetic && session.magnetic.moments.length > 0) {
+        const yMagnetic = magneticComponentCurve(structure, session.magnetic, pattern, powderParams, pBindings, {
+          shape: session.powderProfile.shape,
+          ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+        }, session.extraPhases.map((s) => ({ structure: s, id: s.id })));
+        const yCalc = base.yCalc.map((v, i) => v + (yMagnetic[i] ?? 0));
+        return { ...base, yCalc, diff: base.yObs.map((o, i) => o - (yCalc[i] ?? 0)) };
+      }
+      return base;
     }
     const nuclear = powderCurves(structure, pattern, powderParams, pBindings, session.powderProfile);
     // When a magnetic model has been applied, add its contribution (satellites at
     // G ± k) on top of the nuclear calc so the refinement plot shows the total.
     if (session.magnetic && session.magnetic.moments.length > 0) {
-      const comp = magneticPowderComponents(structure, session.magnetic, pattern, powderParams, pBindings, {
+      const yMagnetic = magneticComponentCurve(structure, session.magnetic, pattern, powderParams, pBindings, {
         shape: session.powderProfile.shape,
         ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
       });
-      const yCalc = nuclear.yCalc.map((v, i) => v + (comp.yMagnetic[i] ?? 0));
+      const yCalc = nuclear.yCalc.map((v, i) => v + (yMagnetic[i] ?? 0));
       return { ...nuclear, yCalc, diff: nuclear.yObs.map((o, i) => o - (yCalc[i] ?? 0)) };
     }
     return nuclear;
@@ -230,13 +244,25 @@ export function PowderWorkbench({
   // Candidate magnetic peaks = positive residual the nuclear model can't explain,
   // as d-spacings, ready for the k-search (so the user needn't read them off the
   // plot). Requires a d-convertible axis; assumes the nuclear fit is refined.
-  const magneticPeakD = useMemo<number[]>(() => {
+  const residualPeakD = useMemo<ExtraPeak[]>(() => {
     if (!displayUnits.includes("dSpacing")) return [];
     const dArr = pattern.xUnit === "dSpacing"
       ? curves.x
       : convertAxisArray(curves.x, pattern.xUnit, "dSpacing", axisCtx);
-    return detectExtraPeaks(dArr, curves.yObs, curves.yCalc).map((p) => p.d);
-  }, [curves, pattern.xUnit, axisCtx, displayUnits]);
+    // Per-point σ so low-precision regions don't spray noise "peaks" into the
+    // k-search once the nuclear fit has converged — but only when the data
+    // actually carries uncertainties. Fabricating √yObs is valid for raw counts
+    // only; on a normalized pattern (max ≈ 1) it exceeds any possible residual
+    // and would silently disable detection altogether. The base cut is a
+    // permissive 3σ: the k-panel's own criteria (user-adjustable) decide which
+    // detections feed the search.
+    const hasSigma = pattern.points.length > 0 && pattern.points.every((p) => p.sigma !== undefined);
+    const pointSigma = hasSigma ? pattern.points.map((p) => p.sigma!) : undefined;
+    return detectExtraPeaks(dArr, curves.yObs, curves.yCalc, {
+      ...(pointSigma ? { pointSigma, minSignificance: 3 } : {}),
+      limit: 24,
+    });
+  }, [curves, pattern.points, pattern.xUnit, axisCtx, displayUnits]);
   const effectiveUnit: DisplayUnit = displayUnit ?? pattern.xUnit;
   const displayCurves = useMemo(
     () => (effectiveUnit === pattern.xUnit ? curves : { ...curves, x: convertAxisArray(curves.x, pattern.xUnit, effectiveUnit, axisCtx) }),
@@ -291,29 +317,58 @@ export function PowderWorkbench({
     return phases;
   }, [refinedPhases, structure, session.extraPhases, session.magnetic, patternExtent, pattern.xUnit, effectiveUnit, axisCtx]);
 
-  // Pattern preview for the Magnetic tab — the SAME view as the refinement
-  // plot: refined curves in the current display unit, the fit-range window,
-  // the axis-unit toggle, and every crystallographic phase's Bragg-tick row
-  // (so an impurity peak indexes against its own phase, not a bogus G ± k of
-  // the primary). The k-search page adds its satellite / allowed / residual
-  // rows on top via `dToX`.
-  const magneticPatternView = useMemo<MagneticPatternView | undefined>(() => {
-    if (pattern.points.length === 0 || !displayUnits.includes("dSpacing")) return undefined;
-    const dA = convertAxisValue(patternExtent.min, pattern.xUnit, "dSpacing", axisCtx);
-    const dB = convertAxisValue(patternExtent.max, pattern.xUnit, "dSpacing", axisCtx);
-    if (!Number.isFinite(dA) || !Number.isFinite(dB)) return undefined;
-    return {
-      curves: displayCurves,
-      xLabel: displayXLabel,
-      dToX: (d: number): number => convertAxisValue(d, "dSpacing", effectiveUnit, axisCtx),
-      // Same tiny-d floor as the refinement plot's tick rows.
-      dRange: { min: Math.max(Math.min(dA, dB), 0.4), max: Math.max(dA, dB) },
-      nuclearTicks: phaseTicks.filter((p) => p.kind === "nuclear"),
-      fitRange: displayFitRange,
-      ...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay }),
-      unitToggle: <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />,
-    };
-  }, [pattern.points.length, pattern.xUnit, displayUnits, displayCurves, displayXLabel, phaseTicks, displayFitRange, setFitRangeFromDisplay, tofViewOnly, effectiveUnit, axisCtx, patternExtent]);
+  // Manually added residual peaks (clicked on the magnetic page's pattern):
+  // stored as d-spacings; height/significance are sampled from the residual at
+  // the nearest data point so a hand-picked peak carries the same quantitative
+  // columns as a detected one. Dropped when the observed pattern changes.
+  const [manualPeakD, setManualPeakD] = useState<number[]>([]);
+  useEffect(() => {
+    setManualPeakD([]);
+  }, [pattern]);
+  const addManualPeak = useCallback((d: number): void => {
+    if (!Number.isFinite(d) || d <= 0) return;
+    setManualPeakD((list) => (list.some((v) => Math.abs(v - d) < 0.005) ? list : [...list, d]));
+  }, []);
+  const removeManualPeak = useCallback((d: number): void => {
+    setManualPeakD((list) => list.filter((v) => Math.abs(v - d) > 1e-9));
+  }, []);
+  const manualResidualPeaks = useMemo<ExtraPeak[]>(() => {
+    if (manualPeakD.length === 0 || !displayUnits.includes("dSpacing")) return [];
+    const dArr = pattern.xUnit === "dSpacing"
+      ? curves.x
+      : convertAxisArray(curves.x, pattern.xUnit, "dSpacing", axisCtx);
+    const hasSigma = pattern.points.length > 0 && pattern.points.every((p) => p.sigma !== undefined);
+    return manualPeakD.map((d) => {
+      let bi = 0;
+      let bestErr = Infinity;
+      for (let i = 0; i < dArr.length; i++) {
+        const e = Math.abs(dArr[i]! - d);
+        if (e < bestErr) { bestErr = e; bi = i; }
+      }
+      const height = (curves.yObs[bi] ?? 0) - (curves.yCalc[bi] ?? 0);
+      const si = hasSigma ? pattern.points[bi]!.sigma! : undefined;
+      return { d, height, ...(si !== undefined && si > 0 ? { significance: height / si } : {}) };
+    });
+  }, [manualPeakD, curves, pattern.points, pattern.xUnit, axisCtx, displayUnits]);
+
+  // Detected + manual residual peaks annotated against every phase's nuclear
+  // reflections (refined cells, from the tick rows): a residual apex on a
+  // nuclear position is usually profile misfit (e.g. an impurity shoulder),
+  // not magnetic — the k-panel shows the flag and excludes such peaks from the
+  // search by default. Manual picks are flagged so the panel can mark and
+  // remove them (and include them regardless of the criteria).
+  const residualPeaks = useMemo<ResidualPeak[]>(() => {
+    // A manual pick right on a detected apex is the same peak — don't list twice.
+    const manual = manualResidualPeaks.filter((m) => !residualPeakD.some((p) => Math.abs(p.d - m.d) < 0.01));
+    if (residualPeakD.length + manual.length === 0) return [];
+    const nuclearRefs = phaseTicks
+      .filter((p) => p.kind === "nuclear")
+      .flatMap((p) => p.ticks.map((t) => ({ d: t.d, hkl: t.hkl, phaseLabel: p.label })));
+    return [
+      ...annotateExtraPeaks(residualPeakD, nuclearRefs),
+      ...annotateExtraPeaks(manual, nuclearRefs).map((p) => ({ ...p, manual: true as const })),
+    ];
+  }, [residualPeakD, manualResidualPeaks, phaseTicks]);
 
   // Refined moment entries (per site / split orbit) for the 3D structure view.
   const sessionMoments = useMemo(
@@ -510,6 +565,7 @@ export function PowderWorkbench({
         const magParams = guided ? guidedPowderParams(powderParams) : powderParams;
         const result = await client.refineMagneticPowderParallel({
           structure, magnetic: session.magnetic, pattern, parameters: [...magParams], bindings: [...pBindings],
+          ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
           shape: session.powderProfile.shape,
           ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
           ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
@@ -720,6 +776,54 @@ export function PowderWorkbench({
   const rExp = powderResult?.agreement.rExpected;
   const liveGof = rExp && rExp > 0 ? Number(liveWr) / (100 * rExp) : null;
   const refinedGof = powderResult ? (powderResult.agreement.goodnessOfFit ?? null) : null;
+
+  // Pattern preview for the Magnetic tab — the SAME view as the refinement
+  // plot: refined curves in the current display unit, the fit-range window,
+  // the axis-unit toggle, and every crystallographic phase's Bragg-tick row
+  // (so an impurity peak indexes against its own phase, not a bogus G ± k of
+  // the primary). The k-search page adds its satellite / allowed / residual
+  // rows on top via `dToX`. (Declared after the wR/GoF readouts it embeds.)
+  const magneticPatternView = useMemo<MagneticPatternView | undefined>(() => {
+    if (pattern.points.length === 0 || !displayUnits.includes("dSpacing")) return undefined;
+    const dA = convertAxisValue(patternExtent.min, pattern.xUnit, "dSpacing", axisCtx);
+    const dB = convertAxisValue(patternExtent.max, pattern.xUnit, "dSpacing", axisCtx);
+    if (!Number.isFinite(dA) || !Number.isFinite(dB)) return undefined;
+    return {
+      curves: displayCurves,
+      xLabel: displayXLabel,
+      dToX: (d: number): number => convertAxisValue(d, "dSpacing", effectiveUnit, axisCtx),
+      xToD: (x: number): number => convertAxisValue(x, effectiveUnit, "dSpacing", axisCtx),
+      // Same tiny-d floor as the refinement plot's tick rows.
+      dRange: { min: Math.max(Math.min(dA, dB), 0.4), max: Math.max(dA, dB) },
+      nuclearTicks: phaseTicks.filter((p) => p.kind === "nuclear"),
+      fitRange: displayFitRange,
+      ...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay }),
+      unitToggle: <AxisUnitToggle units={displayUnits} value={effectiveUnit} onChange={setDisplayUnit} />,
+    };
+  }, [pattern.points.length, pattern.xUnit, displayUnits, displayCurves, displayXLabel, phaseTicks, displayFitRange, setFitRangeFromDisplay, tofViewOnly, effectiveUnit, axisCtx, patternExtent]);
+
+  // The magnetic pattern card's live toolbar pieces, passed OUTSIDE the memoized
+  // view object: the wR chip changes every live-refinement flush (~60 ms), and
+  // baking it into `magneticPatternView` would re-mint the view identity each
+  // tick — cascading into the k-panel's satellite-tick recomputation. Same
+  // toolbar vocabulary as the refinement plot; one shared focus token, so either
+  // page's "optimize view" zooms both plots onto the fit range.
+  const magneticQuality = (
+    <span style={{ display: "flex", gap: 14, fontFamily: themeMono, fontSize: 12.5 }}>
+      <span style={{ color: theme.secondary }} title="Weighted profile R for the current parameters, colored by wR/R_exp (Toby 2006)">
+        wR <b style={{ color: qualityInk(liveGof) }}>{liveWr}%</b>
+      </span>
+      <span style={{ color: theme.secondary }} title="Goodness of fit = wR/R_exp at the last refinement; ≈1 = consistent with the data uncertainties">
+        GoF <b style={{ color: qualityInk(refinedGof) }}>{refinedGof !== null ? refinedGof.toFixed(2) : "—"}</b>
+      </span>
+    </span>
+  );
+  const magneticFitChip = fitRangeActive && !tofViewOnly
+    ? {
+        label: `${displayFitRange.min.toFixed(2)}–${displayFitRange.max.toFixed(2)} ${axisShortLabel(effectiveUnit)}`,
+        onReset: () => setFitRange(null),
+      }
+    : undefined;
 
   function exportCsv(): void {
     downloadText(`${pattern.id}.csv`, powderPatternCsv(curves), "text/csv");
@@ -1158,20 +1262,33 @@ export function PowderWorkbench({
         );
       case 1:
         return (
-          <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ ...themeCard, padding: "14px 16px" }}>
-              <h2 style={{ ...h2, marginBottom: 4 }}>Magnetic symmetry analysis ({structure.name})</h2>
-              <p style={{ ...stepHelp, marginBottom: 0 }}>
-                Commensurate single-k workflow, on the refined atomic structure:
-                magnetic ions → propagation vector k → symmetry framework → magnetic space group → preview &amp; refine → back to refinement.
-                The 3D model (left) shows the magnetic unit cell with the selected group&rsquo;s moments.
-              </p>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "2px 4px 0" }}>
+              <h2 style={{ ...h2, margin: 0, fontSize: 15 }}>Magnetic symmetry analysis</h2>
+              <span style={{ fontSize: 12.5, color: theme.secondary, fontFamily: themeMono }}>
+                {structure.name || "structure"}
+                {structure.spaceGroup.hermannMauguin ? ` · ${structure.spaceGroup.hermannMauguin}` : ""}
+                {" · refined values"}
+              </span>
+              <InfoBadge
+                width={320}
+                text="Commensurate single-k workflow on the refined atomic structure: pick the magnetic ion(s), set or search the propagation vector k, choose a symmetry framework, select a magnetic space group, then preview and refine its symmetry-allowed moments. “Continue in refinement page” fits nuclear + magnetic together. The pattern and 3D model on the left update live as you click candidates."
+              />
             </div>
             <KSearchPanel
               structure={refinedStructure}
-              autoPeaks={magneticPeakD}
+              fitStructure={structure}
+              extraPhases={session.extraPhases.map((s) => ({ structure: s, id: s.id }))}
+              residualPeaks={residualPeaks}
+              onAddManualPeak={addManualPeak}
+              onRemoveManualPeak={removeManualPeak}
               pattern={pattern}
+              {...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {})}
               {...(magneticPatternView ? { patternView: magneticPatternView } : {})}
+              patternQuality={magneticQuality}
+              {...(magneticFitChip ? { patternFitChip: magneticFitChip } : {})}
+              {...(tofViewOnly ? {} : { onFocusFit: () => setFocusFitToken((t) => t + 1) })}
+              focusFitToken={focusFitToken}
               nuclearParams={powderParams}
               nuclearBindings={pBindings}
               profile={session.powderProfile}
@@ -1338,7 +1455,6 @@ function ViewModeToggle({
 }
 
 const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 700, color: theme.ink };
-const stepHelp: React.CSSProperties = { fontSize: 13, color: theme.secondary, marginTop: 0 };
 const toolbarBtn: React.CSSProperties = { border: `1px solid ${theme.primary}`, background: "#fff", color: theme.primary, borderRadius: 8, padding: "3px 11px", fontSize: 11, fontWeight: 600, fontFamily: themeMono, cursor: "pointer" };
 const resetRangeBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "1px 9px", fontSize: 11, fontFamily: themeMono, color: theme.secondary, cursor: "pointer" };
 const clearStructuresBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "3px 10px", fontSize: 11.5, color: theme.secondary, cursor: "pointer" };

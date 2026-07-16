@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern, SingleCrystalDataset } from "@/core/diffraction/types";
+import type { RefinementParameter } from "@/core/refinement/types";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { powderDataXye, singleCrystalHkl, singleCrystalInt } from "@/core/export/data";
 import { fullprofBundle, gsas2Bundle } from "@/core/export/bundle";
@@ -111,5 +112,40 @@ describe("verbatim original files", () => {
     expect(dat.map((x) => x.name)).toEqual(["MnO.dat", "original_MnO.dat"]);
     // Generated MnO.dat is the portable XYE, the verbatim keeps its content.
     expect(e.find((x) => x.name === "original_MnO.dat")!.data).toBe(collide.text);
+  });
+});
+
+describe("FullProf TOF peak-shape carries the refined profile", () => {
+  const tofPowder: PowderPattern = {
+    id: "p", name: "MnO", xUnit: "tof", radiation: { kind: "neutron-tof" },
+    points: [{ x: 14300, yObs: 100 }, { x: 20000, yObs: 120, sigma: 11 }, { x: 30000, yObs: 90 }],
+  };
+  const instrument = { kind: "tof", difC: 22585.8 } as const;
+  const param = (id: string, value: number): RefinementParameter =>
+    ({ id, label: id, kind: "tofProfile", value, initialValue: value, fixed: false });
+
+  it("writes the refined tof_* coefficients into the .pcr Sig/alph/beta rows", () => {
+    const params: RefinementParameter[] = [
+      param("tof_sig0", 8.0), param("tof_sig1", 512.3), param("tof_alpha1", 1.9), param("tof_beta0", 0.028),
+    ];
+    const e = fullprofBundle(structure, tofPowder, { instrument, params });
+    const pcr = (e.find((x) => x.name === "MnO.pcr")!.data as string).split("\n");
+    const sig = pcr[pcr.findIndex((l) => l.includes("sigma^2 = Sig-2")) + 1]!.trim().split(/\s+/).map(Number);
+    expect(sig[1]).toBeCloseTo(512.3, 3); // Sig-1 = refined value, not a seed
+    expect(sig[2]).toBeCloseTo(8.0, 3); // Sig-0
+    const bb = pcr[pcr.findIndex((l) => l.includes("alpha = alph0 + alph1/d")) + 1]!.trim().split(/\s+/).map(Number);
+    expect(bb[3]).toBeCloseTo(0.028, 4); // beta0
+    expect(bb[4]).toBeCloseTo(1.9, 4); // alph1
+  });
+
+  it("folds a refined isotropic TOF Mustrain into Sig-1", () => {
+    // ε = 3000 µstrain → σ_T² adds (difC·ε)²·d² = (22585.8·3e-3)² to Sig-1.
+    const params: RefinementParameter[] = [
+      { id: "mustrainIso", label: "mustrain", kind: "mustrainIso", value: 3000, initialValue: 0, fixed: false },
+    ];
+    const e = fullprofBundle(structure, tofPowder, { instrument, params });
+    const pcr = (e.find((x) => x.name === "MnO.pcr")!.data as string).split("\n");
+    const sig = pcr[pcr.findIndex((l) => l.includes("sigma^2 = Sig-2")) + 1]!.trim().split(/\s+/).map(Number);
+    expect(sig[1]).toBeCloseTo((22585.8 * 3000e-6) ** 2, 1);
   });
 });

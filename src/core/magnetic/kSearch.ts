@@ -37,6 +37,9 @@ export interface KCandidate {
   readonly rmsd: number;
   /** Ranking score (higher is better): matched fraction penalised by RMSD. */
   readonly score: number;
+  /** WHICH peaks this k explains: index into the caller's `observedD` list plus
+   *  the |Δd| (Å) to the matching satellite — the per-candidate evidence. */
+  readonly matches: readonly { readonly index: number; readonly delta: number }[];
 }
 
 export interface KSearchOptions {
@@ -55,6 +58,13 @@ export interface KSearchOptions {
    * (≈ d > 1.05 Å). Set 0 or Infinity to disable.
    */
   readonly maxQ?: number;
+  /**
+   * Optional per-peak weights, parallel to `observedD` (e.g. each peak's
+   * statistical significance): the matched fraction in the ranking becomes
+   * weight-weighted, so explaining a strong, certain peak counts for more than
+   * explaining a marginal one. The reported `matched`/`total` stay plain counts.
+   */
+  readonly weights?: readonly number[];
 }
 
 const FRAC_LABEL: ReadonlyMap<string, string> = new Map([
@@ -121,33 +131,45 @@ export function searchPropagationVector(
   observedD: readonly number[],
   options: KSearchOptions = {},
 ): KCandidate[] {
-  const { tolerance = 0.02, denominators = [2, 3, 4, 6], hklRange = 4, limit = 12, maxQ = 6 } = options;
+  const { tolerance = 0.02, denominators = [2, 3, 4, 6], hklRange = 4, limit = 12, maxQ = 6, weights } = options;
   // Q = 2π/d; keep only low-Q peaks (large d), where magnetic scattering lives.
+  // Weights stay parallel through the filter.
   const dMinQ = maxQ > 0 && Number.isFinite(maxQ) ? (2 * Math.PI) / maxQ : 0;
-  const obs = observedD.filter((d) => Number.isFinite(d) && d > 0 && d >= dMinQ);
+  const obs: { d: number; w: number; index: number }[] = [];
+  observedD.forEach((d, i) => {
+    if (!Number.isFinite(d) || d <= 0 || d < dMinQ) return;
+    const w = weights?.[i];
+    obs.push({ d, w: w !== undefined && Number.isFinite(w) && w > 0 ? w : 1, index: i });
+  });
   if (obs.length === 0) return [];
-  const dMax = Math.max(...obs) * 1.05;
-  const dMin = Math.min(...obs) * 0.95;
+  const dMax = Math.max(...obs.map((o) => o.d)) * 1.05;
+  const dMin = Math.min(...obs.map((o) => o.d)) * 0.95;
+  const totalW = obs.reduce((s, o) => s + o.w, 0);
 
-  const candidates: KCandidate[] = candidateKVectors(denominators).map((k) => {
+  const candidates: (KCandidate & { matchedW: number })[] = candidateKVectors(denominators).map((k) => {
     const predicted = predictedSatelliteD(cell, k, hklRange, dMin, dMax);
     let matched = 0;
+    let matchedW = 0;
     let sumSq = 0;
-    for (const d of obs) {
+    const matches: { index: number; delta: number }[] = [];
+    for (const o of obs) {
       let best = Infinity;
       for (const p of predicted) {
-        const e = Math.abs(p - d);
+        const e = Math.abs(p - o.d);
         if (e < best) best = e;
       }
       if (best <= tolerance) {
         matched++;
+        matchedW += o.w;
         sumSq += best * best;
+        matches.push({ index: o.index, delta: best });
       }
     }
     const rmsd = matched > 0 ? Math.sqrt(sumSq / matched) : Infinity;
-    // Score: fraction explained, minus a small RMSD penalty (Å → fraction of tol).
-    const score = matched / obs.length - (matched > 0 ? (rmsd / tolerance) * 0.05 : 0);
-    return { k, label: kLabel(k), matched, total: obs.length, rmsd, score };
+    // Score: (weighted) fraction explained, minus a small RMSD penalty
+    // (Å → fraction of tol). With no weights this is the plain matched fraction.
+    const score = matchedW / totalW - (matched > 0 ? (rmsd / tolerance) * 0.05 : 0);
+    return { k, label: kLabel(k), matched, total: obs.length, rmsd, score, matches, matchedW };
   });
 
   // Prefer simpler k (smaller denominators) among peaks that match equally well.
@@ -155,12 +177,41 @@ export function searchPropagationVector(
     k.reduce((acc, v) => acc + (v === 0 ? 0 : minDenominator(v)), 0);
 
   candidates.sort((a, b) =>
-    b.matched - a.matched ||
+    b.matchedW - a.matchedW ||
     a.rmsd - b.rmsd ||
     denomComplexity(a.k) - denomComplexity(b.k) ||
     a.k.reduce((s, v) => s + v, 0) - b.k.reduce((s, v) => s + v, 0),
   );
-  return candidates.slice(0, limit);
+  return candidates.slice(0, limit).map(({ matchedW: _w, ...c }) => c);
+}
+
+/**
+ * For each observed peak, the |Δd| (Å) to the nearest satellite G ± k of the
+ * given propagation vector — the per-peak quantitative check of the CURRENT k
+ * (the search above reports only aggregate matched counts). Infinity when no
+ * satellite falls in the peaks' d-window.
+ */
+export function satelliteMatchDeltas(
+  cell: UnitCell,
+  k: Vec3,
+  observedD: readonly number[],
+  options: Pick<KSearchOptions, "hklRange"> = {},
+): number[] {
+  const { hklRange = 4 } = options;
+  const valid = observedD.filter((d) => Number.isFinite(d) && d > 0);
+  if (valid.length === 0) return observedD.map(() => Infinity);
+  const dMax = Math.max(...valid) * 1.05;
+  const dMin = Math.min(...valid) * 0.95;
+  const predicted = predictedSatelliteD(cell, k, hklRange, dMin, dMax);
+  return observedD.map((d) => {
+    if (!Number.isFinite(d) || d <= 0) return Infinity;
+    let best = Infinity;
+    for (const p of predicted) {
+      const e = Math.abs(p - d);
+      if (e < best) best = e;
+    }
+    return best;
+  });
 }
 
 /** Smallest denominator n such that value ≈ m/n (for complexity tie-breaking). */

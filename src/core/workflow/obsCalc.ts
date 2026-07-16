@@ -30,6 +30,7 @@ import { applyParameters } from "@/core/workflow/apply";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { placePeaks, reflectionDRange, type PowderProfile } from "@/core/workflow/powder";
 import { phaseBindingsFor } from "@/core/workflow/multiPhase";
+import { magneticPhaseBindings } from "@/core/workflow/magneticPowder";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { powderPeakIntensities, lorentzPolarization } from "@/core/diffraction/intensity";
 import { magneticStructureFactor } from "@/core/magnetic/structureFactor";
@@ -176,8 +177,13 @@ export function powderReflectionObsCalc(
   // magneticPowder.ts. Only reflections carrying a non-negligible |F_M|² are
   // kept, matching the magnetic Bragg tick row.
   if (magnetic && magnetic.moments.length > 0) {
-    const appliedMag = applyMagneticMoments(magnetic, bindingsFor(structure.id), resolved);
-    const magScaleBinding = bindings.find((b) => b.kind === "magneticScale");
+    // Moment bindings target the derived `<structure.id>-mag` id, so the plain
+    // per-phase routing above would drop them all in multi-phase mode and the
+    // decomposition would render baked moments instead of the live parameter
+    // values. Route through the magnetic-aware set (magneticPowder.ts) instead.
+    const magBindings = multiPhase ? magneticPhaseBindings(bindings, structure.id) : bindings;
+    const appliedMag = applyMagneticMoments(magnetic, magBindings, resolved);
+    const magScaleBinding = magBindings.find((b) => b.kind === "magneticScale");
     const magFactor = magScaleBinding ? resolved[magScaleBinding.parameterId] ?? 1 : 1;
     const magScale = appliedPrimary.scale * magFactor;
     const kVec = appliedMag.propagation[0] ?? [0, 0, 0];
