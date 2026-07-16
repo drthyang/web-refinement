@@ -71,6 +71,59 @@ export interface PowderPattern {
   readonly wavelength?: number;
 }
 
+/**
+ * Total-scattering probe for a pair distribution function. Unlike {@link Radiation}
+ * there is no single wavelength (the PDF is already reduced from S(Q)); only the
+ * weighting regime differs — neutron uses the constant coherent scattering length
+ * `b`, X-ray uses the electron-count `Z = f(0)` per PDFfit2 (see PDF_MPDF_ROADMAP §3).
+ */
+export type PdfScatteringType = "neutron" | "xray";
+
+/** A single point of an observed reduced PDF, `G(r) = 4πr[ρ(r) − ρ₀]` (Å⁻²). */
+export interface PdfPoint {
+  /** Radial distance r in Å. */
+  readonly r: number;
+  /** Observed reduced PDF G(r) (Å⁻²). May be negative — G(r) oscillates about 0. */
+  readonly gObs: number;
+  /**
+   * Standard uncertainty on `gObs`, when the reduction wrote one. Informational:
+   * G(r) points are strongly correlated (finite-Q sine transform), so the fit
+   * uses uniform weights and Rw, not `1/σ²` (see PDF_MPDF_ROADMAP §8).
+   */
+  readonly sigma?: number;
+}
+
+/**
+ * An observed reduced pair distribution function `G(r)` — the observable a PDF /
+ * mPDF refinement fits. A fundamentally different observable from a diffraction
+ * pattern (real-space abscissa, signed ordinate), so it is its own type rather
+ * than a {@link PowderPattern} with an added x-unit. The total-scattering
+ * metadata is read from the `.gr` header and consumed by the real-space
+ * calculator (Qmax termination, Qdamp/Qbroad envelopes, composition normalization).
+ */
+export interface PdfPattern {
+  readonly id: string;
+  readonly name: string;
+  readonly scatteringType: PdfScatteringType;
+  readonly points: readonly PdfPoint[];
+  /** Fourier-termination Qmax used in the reduction (Å⁻¹); drives the sinc ripple. */
+  readonly qmax?: number;
+  /** Lower Fourier limit Qmin (Å⁻¹); a nonzero value biases low-r. */
+  readonly qmin?: number;
+  /** Instrument Qmax over which input intensities were meaningful (Å⁻¹). */
+  readonly qmaxInst?: number;
+  /** Gaussian PDF resolution-dampening coefficient Qdamp (Å⁻¹), if calibrated. */
+  readonly qdamp?: number;
+  /** r-dependent PDF peak-broadening coefficient Qbroad (Å⁻¹), if calibrated. */
+  readonly qbroad?: number;
+  /** Ad-hoc-correction low-r validity limit r_poly (Å) from PDFgetX3. */
+  readonly rpoly?: number;
+  /** Grid step Δr in Å (redundant with the points, kept from the header). */
+  readonly rstep?: number;
+  /** Sample composition string as written in the header, e.g. "Ga Nb4 Se8". */
+  readonly composition?: string;
+}
+
 /** Any diffraction dataset the engine can refine against. */
 export type DiffractionDataset = SingleCrystalDataset | PowderPattern;
 
