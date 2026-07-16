@@ -194,3 +194,72 @@ describe("modulated moment model — supercell refinement (k = 1/4)", () => {
     client.dispose();
   });
 });
+
+/**
+ * Data-gated: the UI panel's EXACT pipeline (expand → merge → modulated model →
+ * auto-scale → multi-start) on the real Eu₃In₂As₄/Eu₃In₂Te₄ files (k = ¼,0,¼).
+ * A smoke test of the whole path on real data — the published moment direction
+ * isn't encoded here, so it asserts the pipeline runs, yields a finite amplitude,
+ * fits the nuclear block well, and is deterministic (not a moment-accuracy claim).
+ */
+import { parseCif } from "@/parsers/cif";
+import { parseFullProfInt } from "@/parsers/fullprofInt";
+import { mergeToMagneticSupercell } from "@/core/magnetic/magneticSupercell";
+import { singleCrystalRefinementComparison } from "@/core/workflow/singleCrystalRefinement";
+import { dataExists, readData } from "@/testSupport/data";
+
+const D = "fullprof_int_handles";
+const CIF = `${D}/Eu3In2As4_1p5K_Nuc_Refined.cif`;
+const NUCF = `${D}/Eu3In2Te4_1p5K0T_nuc.int`;
+const MAGF = `${D}/Eu3In2Te4_1p5K0T_mag.int`;
+const hasReal = dataExists(CIF) && dataExists(NUCF) && dataExists(MAGF);
+
+describe.skipIf(!hasReal)("modulated supercell panel pipeline — Eu₃In₂ real data (k = ¼,0,¼)", () => {
+  const kv: Vec3 = [0.25, 0, 0.25];
+  const rad = { kind: "neutron" as const, wavelength: 1.0 };
+  const ds = (rel: string, id: string): SingleCrystalDataset => ({ id, name: id, radiation: rad, reflections: parseFullProfInt(readData(rel), { strict: true }).reflections });
+
+  async function run(seed: number) {
+    const base = parseCif(readData(CIF), "eu324");
+    const nuc = ds(NUCF, "nuc"); const mag = ds(MAGF, "mag");
+    const expansion = expandStructureToSupercell(base, kv);
+    const superS = expansion.structure;
+    const { dataset: merged } = mergeToMagneticSupercell(nuc, mag, kv, "eu-magcell");
+    const mod = buildModulatedMomentModel(expansion, kv, [{ site: "Eu1", direction: [0, 0, 1], phase: Math.PI / 4 }, { site: "Eu2", direction: [0, 0, 1], phase: Math.PI / 4 }], 1);
+    // Auto-scale (one-pass) from the nuclear reflections.
+    const sp: RefinementParameter = { id: "scale", label: "s", kind: "scale", value: 1, initialValue: 1, fixed: false, min: 0 };
+    const cmp = singleCrystalRefinementComparison(superS, merged, [sp], [{ parameterId: "scale", kind: "scale", targetId: merged.id }]);
+    let num = 0, den = 0; for (const r of cmp.rows) { num += r.foSq * r.fcSq; den += r.fcSq * r.fcSq; }
+    const scale0 = den > 0 && num > 0 ? num / den : 1;
+    const scaleP: RefinementParameter = { id: "scale", label: "s", kind: "scale", value: scale0, initialValue: scale0, fixed: false, min: 0 };
+    const mscaleP: RefinementParameter = { id: "magScale", label: "ms", kind: "magneticScale", value: scale0, initialValue: scale0, fixed: true, expression: "= scale" };
+    const client = new ComputeClient();
+    const ms = await client.refineMagneticSingleCrystalMultiStart(
+      {
+        structure: superS, magnetic: mod.magnetic, dataset: merged,
+        parameters: [scaleP, mscaleP, ...mod.params.map((p) => ({ ...p, fixed: false }))],
+        bindings: [{ parameterId: "scale", kind: "scale", targetId: merged.id }, { parameterId: "magScale", kind: "magneticScale", targetId: merged.id }, ...mod.bindings],
+      },
+      { restarts: 6, seed }, { maxIterations: 30 },
+    );
+    client.dispose();
+    return { ms, mod, superS };
+  }
+
+  it("runs the full pipeline and yields finite amplitudes with a sensible fit", async () => {
+    const { ms, mod, superS } = await run(1);
+    expect(superS.spaceGroup.hermannMauguin).toBe("P 1");
+    expect(superS.sites.length).toBe(288);
+    for (const p of mod.params) {
+      const v = ms.final.parameters[p.id];
+      expect(Number.isFinite(v)).toBe(true);
+    }
+    expect(ms.final.agreement.rWeighted).toBeGreaterThanOrEqual(0);
+    expect(ms.final.agreement.rWeighted).toBeLessThan(1); // a real fit, not diverged
+  }, 120000);
+
+  it("is deterministic — same seed ⇒ identical converged parameters", async () => {
+    const a = await run(3); const b = await run(3);
+    expect(b.ms.final.parameters).toEqual(a.ms.final.parameters);
+  }, 180000);
+});
