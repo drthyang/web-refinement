@@ -42,6 +42,12 @@ export interface MultiStartOptions {
   readonly relFraction?: number;
   /** Seed for the deterministic RNG (reproducible restarts/tests). Default set. */
   readonly seed?: number;
+  /** Restrict the perturbation to a parameter subspace: when set, only free
+   *  parameters for which this returns true are kicked between restarts (the
+   *  rest keep their baseline value). Used by the magnetic path to perturb only
+   *  the moment modes and leave the (frozen) nuclear scaffold alone. Default:
+   *  perturb every free parameter. */
+  readonly shouldPerturb?: (parameter: RefinementParameter) => boolean;
   /** Relative χ² drop below the baseline needed to report `improved`. Default 1e-4. */
   readonly minImprovement?: number;
   /** Called after each start with its 0-based index (0 = baseline), its χ² cost,
@@ -98,10 +104,11 @@ export function perturbParameters(
   base: readonly RefinementParameter[],
   esd: Readonly<Record<string, number>>,
   rng: () => number,
-  opts: { escapeSigma: number; relFraction: number },
+  opts: { escapeSigma: number; relFraction: number; shouldPerturb?: (p: RefinementParameter) => boolean },
 ): RefinementParameter[] {
   return base.map((p) => {
     if (p.fixed || p.expression) return { ...p };
+    if (opts.shouldPerturb && !opts.shouldPerturb(p)) return { ...p };
     const e = esd[p.id];
     let scale = Math.max(e !== undefined && e > 0 ? e * opts.escapeSigma : 0, Math.abs(p.value) * opts.relFraction);
     if (p.min !== undefined && p.max !== undefined && p.max > p.min) {
@@ -142,7 +149,11 @@ export async function refineMultiStart(
   let bestStartIndex = 0;
 
   for (let k = 1; k <= restarts; k++) {
-    const perturbed = perturbParameters(base.parameters, base.final.esd, rng, { escapeSigma, relFraction });
+    const perturbed = perturbParameters(base.parameters, base.final.esd, rng, {
+      escapeSigma,
+      relFraction,
+      ...(options.shouldPerturb ? { shouldPerturb: options.shouldPerturb } : {}),
+    });
     const cand = await runOnce(perturbed);
     const cost = refinementCost(cand.final);
     costByStart.push(cost);

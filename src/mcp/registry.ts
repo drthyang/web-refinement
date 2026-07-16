@@ -253,4 +253,61 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     },
     handler: tools.refine_magnetic_powder,
   },
+  {
+    name: "parse_single_crystal_data",
+    title: "Parse single-crystal reflections",
+    description: "Parse single-crystal integrated intensities — a FullProf .int (h k l I σ) or a SHELX HKLF4 .hkl — into a SingleCrystalDataset. Parse the nuclear and magnetic files, then merge_magnetic_supercell into one dataset for the magnetic refinement.",
+    inputSchema: {
+      text: z.string().describe("FullProf .int or SHELX .hkl file text"),
+      name: z.string().optional(),
+      id: z.string().optional().describe("Dataset id (bind a scale to it)"),
+    },
+    handler: tools.parse_single_crystal_data,
+  },
+  {
+    name: "write_single_crystal_data",
+    title: "Write single-crystal .int",
+    description: "Serialize a SingleCrystalDataset to a FullProf .int file (h k l F² σ cod through the declared Fortran format). Pass kVectors + per-reflection kIndex for the propagation-vector variant (satellite = H + k_nv; pending external FullProf validation). Round-trips with parse_single_crystal_data.",
+    inputSchema: {
+      dataset: anyObj,
+      wavelength: z.number().min(0).optional(),
+      title: z.string().optional(),
+      format: z.string().optional().describe("Fortran format, e.g. (3i4,2f8.2,i4)"),
+      kVectors: anyArr.optional().describe("Propagation vectors as [[k1,k2,k3],…]"),
+    },
+    handler: tools.write_single_crystal_data,
+  },
+  {
+    name: "expand_structure_supercell",
+    title: "Expand structure to magnetic supercell",
+    description: "Expand a nuclear structure into the magnetic supercell of a commensurate k — an exact geometric regrouping (full orbits explicit, replicated per cell, P1; positions/occupancies/ADPs verbatim). Pair with merge_magnetic_supercell: the merged reflections refine against this structure with the nuclear scaffold frozen. The refined scale becomes k_base/N² (N = cells per supercell), identically for nuclear and magnetic intensities.",
+    inputSchema: {
+      structure: anyObj,
+      k: z.array(z.number()).length(3).describe("Propagation vector, e.g. [0.25, 0, 0.25]"),
+    },
+    handler: tools.expand_structure_supercell,
+  },
+  {
+    name: "build_modulated_moment_model",
+    title: "Build k-modulated supercell moments",
+    description: "Build the k-modulated magnetic model on the expanded supercell: one amplitude per sublattice drives every replica of its parent site through cos(2πk·L + φ), so replica moments are tied by the modulation and magnetic ions sit exactly at the nuclear positions. Returns the expanded structure + magnetic model + parameters/bindings; add a scale and a magneticScale tied to it, then refine against the merged supercell dataset.",
+    inputSchema: {
+      structure: anyObj,
+      k: z.array(z.number()).length(3).describe("Propagation vector, e.g. [0.25, 0, 0.25]"),
+      ions: anyArr.describe("[{site, direction:[da,db,dc], phase?}] — base-cell site label, crystal-axis direction, modulation phase (rad)"),
+      moment: z.number().optional().describe("Starting amplitude (µB). Default 1."),
+    },
+    handler: tools.build_modulated_moment_model,
+  },
+  {
+    name: "merge_magnetic_supercell",
+    title: "Merge nuclear + magnetic to supercell",
+    description: "Merge a nuclear + magnetic single-crystal reflection pair (both indexed in the nuclear cell, the FullProf single-k convention where the magnetic file's h k l is the fundamental of a satellite at hkl+k) into one dataset in the magnetic supercell, where k becomes an integer reciprocal-lattice vector. Feed the result to a magnetic structure refinement. k must be commensurate and axis-diagonal.",
+    inputSchema: {
+      nuclearDataset: anyObj,
+      magneticDataset: anyObj,
+      k: z.array(z.number()).length(3).describe("Propagation vector, e.g. [0.25, 0, 0.25]"),
+    },
+    handler: tools.merge_magnetic_supercell,
+  },
 ];

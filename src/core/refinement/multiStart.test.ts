@@ -69,6 +69,21 @@ describe("perturbParameters", () => {
     // d: scale = min(max(1*4, 0.045), 0.5) = 0.5; kick = +0.25 ⇒ 1.15 → clamped to max 1
     expect(out.find((p) => p.id === "d")!.value).toBe(1);
   });
+
+  it("shouldPerturb restricts kicks to the chosen subspace (moment modes only)", () => {
+    const params: RefinementParameter[] = [
+      freeParam("mom_A", 0, { kind: "momentMode", esd: 1 }),
+      freeParam("scale", 2, { esd: 0.1 }),
+    ];
+    const out = perturbParameters(params, { mom_A: 1, scale: 0.1 }, rng, {
+      escapeSigma: 4,
+      relFraction: 0.5,
+      shouldPerturb: (p) => p.kind === "momentMode",
+    });
+    // mom_A moves; scale (excluded) stays put even though it is free with an esd.
+    expect(out.find((p) => p.id === "mom_A")!.value).not.toBe(0);
+    expect(out.find((p) => p.id === "scale")!.value).toBe(2);
+  });
 });
 
 describe("refineMultiStart — real LM engine on a tilted double well", () => {

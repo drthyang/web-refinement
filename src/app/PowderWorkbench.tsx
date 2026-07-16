@@ -380,17 +380,6 @@ export function PowderWorkbench({
     setSession((s) => ({ ...s, powderParams: s.powderParams.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
   }
 
-  /** Apply the magnetic model built in the Magnetic tab onto the session so the
-   *  refinement plot shows the magnetic pattern + satellite ticks. null clears it. */
-  function applyMagneticToSession(magnetic: MagneticModel | null): void {
-    setSession((s) => {
-      const next = { ...s };
-      if (magnetic) next.magnetic = magnetic; else delete next.magnetic;
-      return next;
-    });
-    setMessage(magnetic ? `Magnetic model applied — pattern now includes the magnetic contribution (${magnetic.moments.length} moment${magnetic.moments.length === 1 ? "" : "s"}).` : "Magnetic contribution cleared from the pattern.");
-  }
-
   /** Hand the magnetic model + moment parameters to the refinement page: add the
    *  (freed) moment-mode params + bindings to the powder set and switch to the
    *  Refinement tab, where "Refine" now fits nuclear + magnetic together. */
@@ -641,6 +630,37 @@ export function PowderWorkbench({
     const mode: "prefit" | "escape" = powderResult ? "escape" : "prefit";
     setBusy(true);
     try {
+      // Magnetic branch — moment-subspace multi-start (GAP #1): freeze the
+      // nuclear scaffold, search the moment modes from several seeded starts,
+      // then one joint LM; the global ±m sign is canonicalized and the
+      // data-limited (flat) moment directions are reported. Prefit casts a wide
+      // net (more restarts); Escape is a lighter nudge around a converged fit.
+      if (session.magnetic && powderParams.some((p) => isMomentParameterKind(p.kind))) {
+        await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
+        const msOptions = mode === "prefit" ? { restarts: 12 } : { restarts: 6, escapeSigma: 3 };
+        const ms = await client.refineMagneticPowderMultiStart({
+          structure, magnetic: session.magnetic, pattern, parameters: [...powderParams], bindings: [...pBindings],
+          shape: session.powderProfile.shape,
+          ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+          ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
+        }, msOptions, { maxIterations: 20 }, onPowderProgress);
+        const refinedMag = applyMagneticMoments(session.magnetic, pBindings, ms.final.parameters);
+        setSession((s) => ({
+          ...s,
+          magnetic: refinedMag,
+          powderParams: s.powderParams.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value })),
+        }));
+        setPowderResult(ms.final);
+        const wr = (100 * (ms.final.agreement.rWeighted ?? 0)).toFixed(2);
+        const degNote = ms.degeneracies.length > 0
+          ? ` Data-limited: ${ms.degeneracies[0]!.message}`
+          : "";
+        const bestNote = ms.improved
+          ? `found a lower minimum (start ${ms.bestStartIndex} of ${ms.restartsRun})`
+          : `baseline held over ${ms.restartsRun + 1} starts`;
+        setMessage(`Magnetic ${mode === "prefit" ? "prefit" : "escape"}: ${bestNote} — wR ${wr}%.${degNote}`);
+        return;
+      }
       // Stage 1 — Le Bail cell pre-fit (prefit only; single-phase, when a cell
       // parameter is free). A TOF pattern also needs the diffractometer
       // calibration (difC/A/B, Zero) to place reflections on the time axis;
@@ -1186,9 +1206,8 @@ export function PowderWorkbench({
                 esd={powderResult?.esd}
                 onChange={patchPowder}
                 onRefine={() => runPowder(false)}
-                {...(session.magnetic && powderParams.some((p) => isMomentParameterKind(p.kind))
-                  ? {}
-                  : { onThorough: () => runThorough(), thoroughMode: powderResult ? "escape" as const : "prefit" as const })}
+                onThorough={() => runThorough()}
+                thoroughMode={powderResult ? "escape" as const : "prefit" as const}
                 onCancel={cancelPowder}
                 onReset={resetPowderParams}
                 onMagnetic={() => {
@@ -1273,7 +1292,6 @@ export function PowderWorkbench({
               nuclearParams={powderParams}
               nuclearBindings={pBindings}
               profile={session.powderProfile}
-              onApply={applyMagneticToSession}
               onContinue={continueRefinementWithMagnetic}
             />
           </div>

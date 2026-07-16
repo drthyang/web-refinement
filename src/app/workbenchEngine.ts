@@ -31,6 +31,9 @@ import type { MutableRefObject } from "react";
 export interface WorkbenchExports {
   /** Refined structure as CIF/mCIF, with esds + agreement in the engine's own convention. */
   cif?: () => void;
+  /** Single-crystal reflection data as FullProf `.int` (nuclear, plus the paired
+   *  magnetic set as `_mag.int` when a joint session is loaded). */
+  scInt?: () => void;
   /** Observed/calculated curves as CSV (powder). */
   csv?: () => void;
   /** Whole-session project JSON (powder). */

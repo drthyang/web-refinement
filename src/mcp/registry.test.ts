@@ -152,6 +152,33 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
       keys: ["components", "magnetic", "observationCount", "parallel", "result"],
     };
   })(),
+  parse_single_crystal_data: {
+    args: { text: "1 0 0 100 2\n1 1 0 50 2\n1 1 1 30 2\n", name: "sc", id: "nuc" },
+    keys: ["dataset", "dropped", "format", "kVectors", "kept", "problems"],
+  },
+  write_single_crystal_data: {
+    args: {
+      dataset: { id: "nuc", name: "n", radiation: { kind: "neutron", wavelength: 1.54 }, reflections: [{ h: 1, k: 0, l: 0, iObs: 100, sigma: 2 }] },
+      wavelength: 1.54,
+    },
+    keys: ["reflections", "text"],
+  },
+  expand_structure_supercell: {
+    args: { structure, k: [0.5, 0, 0] },
+    keys: ["atoms", "kInteger", "multiplicity", "replicas", "structure"],
+  },
+  build_modulated_moment_model: {
+    args: { structure, k: [0.5, 0, 0], ions: [{ site: "Po1", direction: [0, 0, 1] }] },
+    keys: ["bindings", "magnetic", "multiplicity", "parameters", "structure"],
+  },
+  merge_magnetic_supercell: {
+    args: {
+      nuclearDataset: { id: "nuc", name: "n", radiation: { kind: "neutron", wavelength: 1 }, reflections: [{ h: -4, k: -10, l: 1, iObs: 0.04, sigma: 0.02 }] },
+      magneticDataset: { id: "mag", name: "m", radiation: { kind: "neutron", wavelength: 1 }, reflections: [{ h: -3, k: -11, l: 1, iObs: 0.03, sigma: 0.02 }] },
+      k: [0.25, 0, 0.25],
+    },
+    keys: ["dataset", "kInteger", "multiplicity", "reflections"],
+  },
 };
 
 

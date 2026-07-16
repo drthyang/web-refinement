@@ -14,6 +14,7 @@ import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { StructureModel } from "@/core/crystal/types";
 import type { Radiation, SingleCrystalDataset } from "@/core/diffraction/types";
+import type { Vec3 } from "@/core/math/types";
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
@@ -35,6 +36,10 @@ import { FobsFcalc, NormalProb } from "@/app/ui/QualityPlots";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { structureToCif, type CifRefinementMeta } from "@/core/export/cif";
+import { writeFullProfInt } from "@/parsers/fullprofInt";
+import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
+import { expandStructureToSupercell, buildModulatedMomentModel, mergeToMagneticSupercell, type ModulatedIon } from "@/core/magnetic/magneticSupercell";
+import type { MomentDegeneracy } from "@/core/magnetic/canonicalize";
 import { downloadText } from "@/app/download";
 import { card as themeCard, color, mono, fz, uppercaseLabel, secondaryButton } from "@/app/theme";
 
@@ -44,6 +49,14 @@ const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({
 const DATA_ACCEPT = ".xye,.xy,.dat,.txt,.gr,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,text/plain";
 const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
 const noop = (): void => {};
+
+/** Parse one k component: a fraction ("1/4", "-1/3") or a decimal. */
+function parseKComponent(s: string): number {
+  const frac = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (frac) { const den = Number(frac[2]); return den === 0 ? 0 : Number(frac[1]) / den; }
+  const v = Number(s);
+  return Number.isFinite(v) ? v : 0;
+}
 
 /** R1 quality bands (fraction): <8 % good · <15 % mediocre · else poor. */
 function r1Ink(r1: number): string {
@@ -61,9 +74,13 @@ type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: strin
  *  carry this, so the user picks it (seeded from the loaded instrument). */
 type Probe = "xray" | "neutron" | "neutron-tof";
 
-export function SingleCrystalWorkbench({ structure, dataset, client, step, onStep, instrumentProbe, exportsRef, onLoadData, onLoadCif }: {
+export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, client, step, onStep, instrumentProbe, exportsRef, onLoadData, onLoadMagneticData, onLoadCif }: {
   structure: StructureModel;
   dataset: SingleCrystalDataset;
+  /** Companion magnetic reflection file for joint co-refinement (Phase 2). When
+   *  present alongside an applied magnetic model, the joint panel co-refines the
+   *  nuclear + magnetic datasets with χ²_total = w_N·χ²_N + w_M·χ²_M. */
+  magneticDataset?: SingleCrystalDataset | null;
   /** Shared compute worker — refinement runs off the main thread, as in powder. */
   client: ComputeClient;
   /** Active workflow step (0 = F² refinement, 1 = magnetic symmetry analysis). */
@@ -79,6 +96,8 @@ export function SingleCrystalWorkbench({ structure, dataset, client, step, onSte
   exportsRef?: EngineExportsRef;
   /** Load a different dataset — powder here switches the app back to powder mode. */
   onLoadData?: (file: File) => void;
+  /** Load a companion magnetic reflection file to pair with this nuclear dataset. */
+  onLoadMagneticData?: (file: File) => void;
   /** Load a different structure (CIF). */
   onLoadCif?: (file: File) => void;
 }): JSX.Element {
@@ -209,17 +228,129 @@ export function SingleCrystalWorkbench({ structure, dataset, client, step, onSte
   const magneticFit: MagneticFit = {
     agreementLabel: "wR2",
     refine: async (mag, momentParams, mBindings) => {
+      // Local-minimum-resistant: seeded moment multi-start with the nuclear
+      // scaffold frozen, then a final LM + ±m canonicalization (the merged
+      // magnetic-supercell dataset and any single magnetic set benefit from it).
       const nuclearFixed = params.map((p) => ({ ...p, fixed: true }));
-      const res = await client.refineMagneticParallel({
-        structure, magnetic: mag, dataset: activeDataset,
-        parameters: [...nuclearFixed, ...momentParams], bindings: [...bindings, ...mBindings],
-        options: { maxIterations: 20 },
-      });
+      // ONE scale: nuclear and magnetic Bragg peaks are the same measurement, so
+      // the magnetic scale is tied to the nuclear scale (k_M = k_N). Without this
+      // the magnetic block would use the default k_M = 1 while nuclear uses the
+      // refined k, and the moments would come out wrong by √k. Tying it also pins
+      // the moment magnitude uniquely (no k_M·|m|² degeneracy).
+      const nuclearScale = params.find((p) => p.kind === "scale")?.value ?? 1;
+      const scaleTie: RefinementParameter = { id: "magScale", label: "magnetic scale (= nuclear)", kind: "magneticScale", value: nuclearScale, initialValue: nuclearScale, fixed: true, expression: "= scale" };
+      const scaleTieBinding: ParameterBinding = { parameterId: "magScale", kind: "magneticScale", targetId: activeDataset.id };
+      const ms = await client.refineMagneticSingleCrystalMultiStart(
+        { structure, magnetic: mag, dataset: activeDataset, parameters: [...nuclearFixed, scaleTie, ...momentParams], bindings: [...bindings, scaleTieBinding, ...mBindings] },
+        { restarts: 8 }, { maxIterations: 20 },
+      );
       const values: Record<string, number> = {};
-      for (const p of momentParams) values[p.id] = res.parameters[p.id] ?? p.value;
-      return { values, agreement: res.agreement.rWeighted ?? null };
+      for (const p of momentParams) values[p.id] = ms.final.parameters[p.id] ?? p.value;
+      return { values, agreement: ms.final.agreement.rWeighted ?? null };
     },
   };
+
+  // ── Magnetic single-k supercell refinement (modulated moments) ───────────────
+  // Self-contained: works from the BASE structure + the nuclear (`dataset`) and
+  // magnetic (`magneticDataset`) reflection files, and on refine internally
+  // expands the structure, merges the reflections, builds the k-tied modulated
+  // moment model, and runs the single-dataset magnetic multi-start — WITHOUT
+  // mutating App state (the shared structure/3D view stay in the base cell).
+  const [kText, setKText] = useState<[string, string, string]>(["1/4", "0", "1/4"]);
+  const magIons = useMemo(() => magneticIonCandidates(structure), [structure]);
+  // Per-candidate hypothesis: whether it carries a moment, its direction (crystal
+  // axes), and the modulation phase (0 = node pattern, π/4 = equal-moment).
+  const [ionState, setIonState] = useState<Record<string, { on: boolean; dir: [string, string, string]; phase: string }>>({});
+  const ionOf = (label: string) => ionState[label] ?? { on: magIons.length === 1, dir: ["0", "0", "1"] as [string, string, string], phase: "1/4" };
+  const [modMoment, setModMoment] = useState(1);
+  const [modSeed, setModSeed] = useState(1);
+  const [modRestarts, setModRestarts] = useState(8);
+  const [modBusy, setModBusy] = useState(false);
+  const [modError, setModError] = useState<string | null>(null);
+  const [modResult, setModResult] = useState<{
+    amplitudes: { site: string; amp: number }[]; multiplicity: readonly [number, number, number];
+    atoms: number; r1: number | null; degeneracies: MomentDegeneracy[];
+  } | null>(null);
+  const selectedIonCount = magIons.filter((c) => ionOf(c.siteLabel).on).length;
+  // A new structure (CIF load) keeps this workbench mounted (keyed on the dataset
+  // id), so clear the stale magnetic hypothesis + results/error for the old cell.
+  useEffect(() => { setIonState({}); setModResult(null); setModError(null); }, [structure]);
+
+  /** One-pass linear least-squares scale from the nuclear reflections (satellites
+   *  carry ~0 nuclear |F|², so they don't bias it): k = Σ Fo²Fc² / Σ (Fc²)². */
+  function estimateScale(struct: StructureModel, ds: SingleCrystalDataset): number {
+    const sp: RefinementParameter = { id: "scale", label: "s", kind: "scale", value: 1, initialValue: 1, fixed: false, min: 0 };
+    const cmp = singleCrystalRefinementComparison(struct, ds, [sp], [{ parameterId: "scale", kind: "scale", targetId: ds.id }]);
+    let num = 0, den = 0;
+    for (const r of cmp.rows) { num += r.foSq * r.fcSq; den += r.fcSq * r.fcSq; }
+    return den > 0 && num > 0 ? num / den : 1;
+  }
+
+  async function runModulated(): Promise<void> {
+    if (!magneticDataset) return;
+    const k = [parseKComponent(kText[0]), parseKComponent(kText[1]), parseKComponent(kText[2])] as Vec3;
+    const ions: ModulatedIon[] = magIons
+      .filter((c) => ionOf(c.siteLabel).on)
+      .map((c) => {
+        const s = ionOf(c.siteLabel);
+        return { site: c.siteLabel, direction: [parseKComponent(s.dir[0]), parseKComponent(s.dir[1]), parseKComponent(s.dir[2])] as Vec3, phase: parseKComponent(s.phase) * Math.PI };
+      });
+    // Validate before spinning: surface the reason in the panel (App status only
+    // logs to the console) instead of a silent no-op or a swallowed throw.
+    if (ions.length === 0) { setModError("Tick at least one magnetic ion to carry a moment."); return; }
+    if (k.every((c) => c === 0)) { setModError("Enter a non-zero propagation vector k (e.g. 1/4)."); return; }
+    if (ions.some((ion) => ion.direction.every((c) => c === 0))) { setModError("Give each selected ion a non-zero moment direction."); return; }
+    setModError(null);
+    setModBusy(true);
+    try {
+      const expansion = expandStructureToSupercell(structure, k);
+      const superS = expansion.structure;
+      const { dataset: merged } = mergeToMagneticSupercell(probedDataset, { ...magneticDataset, radiation: effectiveRadiation }, k, `${dataset.id}-magcell`);
+      const mod = buildModulatedMomentModel(expansion, k, ions, modMoment);
+      const scaleStart = estimateScale(superS, merged);
+      // ONE scale: nuclear + magnetic share it (same measurement); magneticScale
+      // is tied to the (freed) nuclear scale, structure frozen (two-phase).
+      const scaleP: RefinementParameter = { id: "scale", label: "scale (OSF)", kind: "scale", value: scaleStart, initialValue: scaleStart, fixed: false, min: 0 };
+      const mscaleP: RefinementParameter = { id: "magScale", label: "magnetic scale (= nuclear)", kind: "magneticScale", value: scaleStart, initialValue: scaleStart, fixed: true, expression: "= scale" };
+      const scaleB: ParameterBinding = { parameterId: "scale", kind: "scale", targetId: merged.id };
+      const mscaleB: ParameterBinding = { parameterId: "magScale", kind: "magneticScale", targetId: merged.id };
+      const ms = await client.refineMagneticSingleCrystalMultiStart(
+        {
+          structure: superS, magnetic: mod.magnetic, dataset: merged,
+          parameters: [scaleP, mscaleP, ...mod.params.map((p) => ({ ...p, fixed: false }))],
+          bindings: [scaleB, mscaleB, ...mod.bindings],
+        },
+        { restarts: modRestarts, seed: modSeed }, { maxIterations: 30 },
+      );
+      setModResult({
+        amplitudes: ions.map((ion, i) => ({ site: ion.site, amp: Math.abs(ms.final.parameters[mod.params[i]!.id] ?? mod.params[i]!.value) })),
+        multiplicity: expansion.supercell.multiplicity,
+        atoms: superS.sites.length,
+        r1: ms.final.agreement.rWeighted ?? null,
+        degeneracies: ms.degeneracies,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[status] Magnetic supercell refinement failed: ${msg}`);
+      setModError(msg);
+    } finally {
+      setModBusy(false);
+    }
+  }
+
+  /** Download the combined magnetic-supercell `.int` (non-destructive). */
+  function downloadCombinedInt(): void {
+    if (!magneticDataset) return;
+    const k = [parseKComponent(kText[0]), parseKComponent(kText[1]), parseKComponent(kText[2])] as Vec3;
+    try {
+      const wl = "wavelength" in effectiveRadiation ? effectiveRadiation.wavelength : 0;
+      const { dataset: merged } = mergeToMagneticSupercell(probedDataset, { ...magneticDataset, radiation: effectiveRadiation }, k);
+      downloadText(`${structure.id}_ALL_magcell.int`, writeFullProfInt(merged.reflections, { title: structure.name || structure.id, wavelength: wl }), "text/plain");
+      setModError(null);
+    } catch (e) {
+      setModError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   // Apply a magnetic model from the symmetry step to the workbench: keep its
   // bindings and merge the (freed) moment parameters into the F² parameter set
@@ -257,11 +388,26 @@ export function SingleCrystalWorkbench({ structure, dataset, client, step, onSte
     downloadText(`${structure.id}.cif`, structureToCif(structure, { params: withEsd, bindings, refinement: meta }), "chemical/x-cif");
   }
 
+  // Export the reflection data as FullProf `.int`. When a joint session is loaded
+  // the two files follow the pairing convention (`_nuc.int` + `_mag.int`) so they
+  // reload as one co-refinement session; otherwise a single `<id>.int`.
+  function exportInt(): void {
+    const wl = "wavelength" in effectiveRadiation ? effectiveRadiation.wavelength : 0;
+    const emit = (ds: SingleCrystalDataset, suffix: string): void =>
+      downloadText(`${structure.id}${suffix}.int`, writeFullProfInt(ds.reflections, { title: structure.name || structure.id, wavelength: wl }), "text/plain");
+    if (magneticDataset) {
+      emit(probedDataset, "_nuc");
+      emit({ ...magneticDataset, radiation: effectiveRadiation }, "_mag");
+    } else {
+      emit(probedDataset, "");
+    }
+  }
+
   // Publish the current exporter so the app header can drive it; clear on unmount
   // (switch back to powder) so the header never calls a stale single-crystal export.
   useEffect(() => {
     if (!exportsRef) return;
-    exportsRef.current = { cif: exportCif };
+    exportsRef.current = { cif: exportCif, scInt: exportInt };
     return () => { exportsRef.current = null; };
   });
 
@@ -428,6 +574,136 @@ export function SingleCrystalWorkbench({ structure, dataset, client, step, onSte
           title="Single-crystal parameters"
           extraActions={refineActions}
         />
+
+        {/* Magnetic single-k supercell refinement. Self-contained: expands the
+            base structure, merges the nuclear + magnetic files into the
+            supercell, ties one modulated amplitude per magnetic sublattice, and
+            refines with ONE shared scale (nuclear + magnetic = one measurement).
+            Non-destructive: the shared structure/3D view stay in the base cell. */}
+        <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span style={uppercaseLabel}>Magnetic single-k · supercell refinement</span>
+            <label style={{ ...secondaryButton, padding: "6px 12px", cursor: "pointer" }} title="Load a companion magnetic reflection file (.int/.hkl): satellites indexed in the nuclear cell as the fundamental h k l of hkl ± k">
+              {magneticDataset ? "Replace magnetic file…" : "Load magnetic .int…"}
+              <input
+                type="file" accept={DATA_ACCEPT} style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) onLoadMagneticData?.(f); e.currentTarget.value = ""; }}
+              />
+            </label>
+          </div>
+
+          {!magneticDataset ? (
+            <p style={{ fontSize: 13, color: color.secondary, margin: 0, lineHeight: 1.5 }}>
+              Load the <strong>magnetic</strong> reflection file (the satellites, indexed in the nuclear cell as the
+              fundamental h k l of hkl ± k). This page then expands the structure into the magnetic supercell, merges both
+              files, and refines the k-modulated moments — the FullProf single-k workflow.
+            </p>
+          ) : magIons.length === 0 ? (
+            <p style={{ fontSize: 13, color: color.noteInk, margin: 0 }}>
+              No magnetic ion with a tabulated form factor in this structure — check the oxidation states / ion labels.
+            </p>
+          ) : (
+            <>
+              <p style={{ fontSize: 12.5, color: color.secondary, margin: 0 }}>
+                {dataset.reflections.length} nuclear + {magneticDataset.reflections.length} magnetic reflections. Enter k and
+                the moment hypothesis; the structure is expanded to the supercell (magnetic ions at the nuclear positions,
+                nuclear scaffold frozen) and the modulated amplitudes refine against the merged data.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+                <span style={{ fontSize: fz.small, color: color.secondary, fontFamily: mono }}>k =</span>
+                {[0, 1, 2].map((i) => (
+                  <input
+                    key={i} value={kText[i]} onChange={(e) => setKText((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
+                    style={{ ...numInput, width: 54 }} title="Fractions like 1/4 or decimals" placeholder={["k₁", "k₂", "k₃"][i]}
+                  />
+                ))}
+              </div>
+
+              {/* One row per magnetic-ion candidate: on/off, direction (crystal axes), phase. */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {magIons.map((c) => {
+                  const s = ionOf(c.siteLabel);
+                  const set = (patch: Partial<typeof s>) => setIonState((st) => ({ ...st, [c.siteLabel]: { ...s, ...patch } }));
+                  return (
+                    <div key={c.siteLabel} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: fz.small }}>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 92 }}>
+                        <input type="checkbox" checked={s.on} onChange={(e) => set({ on: e.target.checked })} style={{ accentColor: color.primary }} />
+                        <span style={{ fontFamily: mono }}>{c.siteLabel}</span>
+                        <span style={{ color: color.faint }}>{c.ionId}</span>
+                      </label>
+                      {s.on && (
+                        <>
+                          <span style={{ color: color.secondary }}>m ∥</span>
+                          {[0, 1, 2].map((i) => (
+                            <input key={i} value={s.dir[i]} onChange={(e) => { const d = [...s.dir] as [string, string, string]; d[i] = e.target.value; set({ dir: d }); }}
+                              style={{ ...numInput, width: 42 }} title="Moment direction, crystal axes (a,b,c)" placeholder={["a", "b", "c"][i]} />
+                          ))}
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 5, color: color.secondary }} title="Modulation phase φ (×π). 0 = node pattern (+,0,−,0); 0.25 = equal-moment (+,+,−,−)">
+                            φ/π
+                            <input value={s.phase} onChange={(e) => set({ phase: e.target.value })} style={{ ...numInput, width: 46 }} />
+                          </label>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: fz.small, color: color.secondary }} title="Starting modulation amplitude (µB)">
+                  <span style={{ fontFamily: mono }}>amp₀</span>
+                  <input type="number" value={modMoment} step={0.5} min={0} onChange={(e) => setModMoment(Number(e.target.value))} style={numInput} />
+                </label>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: fz.small, color: color.secondary }} title="Seeded moment restarts (escape local minima)">
+                  <span style={{ fontFamily: mono }}>restarts</span>
+                  <input type="number" value={modRestarts} step={1} min={0} onChange={(e) => setModRestarts(Math.round(Number(e.target.value)))} style={numInput} />
+                </label>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: fz.small, color: color.secondary }} title="Deterministic RNG seed">
+                  <span style={{ fontFamily: mono }}>seed</span>
+                  <input type="number" value={modSeed} step={1} onChange={(e) => setModSeed(Math.round(Number(e.target.value)))} style={numInput} />
+                </label>
+                <button style={{ ...secondaryButton, padding: "7px 13px", ...(modBusy || selectedIonCount === 0 ? disabledStyle : {}) }} disabled={modBusy || selectedIonCount === 0} onClick={runModulated}
+                  title={selectedIonCount === 0 ? "Tick at least one magnetic ion above" : "Expand to the supercell, merge, and refine the k-modulated moment amplitudes (one per sublattice) + shared scale"}>
+                  {modBusy ? "Refining…" : "Refine magnetic supercell ↻"}
+                </button>
+                <button style={{ ...secondaryButton, padding: "7px 13px" }} onClick={downloadCombinedInt}
+                  title="Download the combined supercell .int (FullProf single-k input) — non-destructive">
+                  Download combined .int
+                </button>
+              </div>
+
+              {modError && (
+                <span style={{ fontSize: fz.small, color: color.warnInk }}>⚠ {modError}</span>
+              )}
+
+              {modResult && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: `1px solid ${color.subtle}`, paddingTop: 10 }}>
+                  <div style={{ fontSize: 12.5, color: color.secondary }}>
+                    Supercell {modResult.multiplicity.join("×")} · {modResult.atoms} atoms (P1) ·{" "}
+                    {modResult.r1 != null ? <>wR = {(100 * modResult.r1).toFixed(1)}%</> : "—"}
+                  </div>
+                  <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontFamily: mono, fontSize: fz.small }}>
+                    {modResult.amplitudes.map((a) => (
+                      <span key={a.site} style={{ color: color.ink }}>{a.site}: amp {a.amp.toPrecision(3)} µ<sub>B</sub></span>
+                    ))}
+                  </div>
+                  <span style={{ fontSize: fz.micro, color: color.faint }}>
+                    Refined value is the modulation <em>amplitude</em>; the per-site moment is amp·cos(2πk·L+φ) — for the
+                    equal-moment φ = π/4 pattern that is amp/√2.
+                  </span>
+                  {modResult.degeneracies.length > 0 && (
+                    <div style={{ fontSize: fz.small, color: color.noteInk }}>
+                      <strong>Data-limited directions:</strong>
+                      <ul style={{ margin: "3px 0 0", paddingLeft: 18 }}>
+                        {modResult.degeneracies.map((d, i) => <li key={i}>{d.message}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Step 1 — magnetic symmetry analysis. The workflow itself is structure-
@@ -444,7 +720,6 @@ export function SingleCrystalWorkbench({ structure, dataset, client, step, onSte
         <KSearchPanel
           structure={structure}
           magneticFit={magneticFit}
-          onApply={(m) => applyMagneticModel(m)}
           onContinue={(m, mp, mb) => { applyMagneticModel(m, mp, mb); onStep?.(0); }}
         />
       </div>

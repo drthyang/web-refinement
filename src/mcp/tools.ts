@@ -43,6 +43,15 @@ import { rankNextParameterGroups } from "@/core/workflow/nextParameters";
 import { buildPowderProblem } from "@/core/workflow/powder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { refine, refineParallel } from "@/core/refinement/engine";
+import type { SingleCrystalDataset } from "@/core/diffraction/types";
+import { parseFullProfInt, looksLikeFullProfInt, writeFullProfInt } from "@/parsers/fullprofInt";
+import { parseHkl } from "@/parsers/hkl";
+import {
+  mergeToMagneticSupercell,
+  expandStructureToSupercell,
+  buildModulatedMomentModel,
+  type ModulatedIon,
+} from "@/core/magnetic/magneticSupercell";
 import { createNodeEvaluatorPool } from "@/mcp/nodeEvaluator";
 import { buildProblemForSpec } from "@/workers/runPowder";
 import type { EvaluatorSpec } from "@/workers/protocol";
@@ -567,6 +576,151 @@ export async function refine_magnetic_powder(args: {
   } finally {
     await pool?.dispose();
   }
+}
+
+/**
+ * Parse single-crystal integrated intensities (FullProf `.int` h k l I σ, or a
+ * SHELX HKLF4 `.hkl`) into a SingleCrystalDataset — the entry point for the
+ * single-crystal and joint co-refinement paths. Detection is by content; GSAS
+ * reflection lists (which need a cell to d-filter) are out of scope here.
+ */
+export function parse_single_crystal_data(args: { text: string; name?: string; id?: string }): {
+  dataset: SingleCrystalDataset;
+  kept: number;
+  dropped: number;
+  format: "fullprof" | "shelx";
+  /** Propagation vectors declared in the file ([] for a plain nuclear file). */
+  kVectors: [number, number, number][];
+  /** Line-numbered {line, expected, found} diagnostics for skipped rows ([] when clean). */
+  problems: { line: number; expected: string; found: string }[];
+} {
+  const id = args.id ?? "sc-hkl";
+  const name = args.name ?? "single crystal";
+  if (looksLikeFullProfInt(args.text)) {
+    const parsed = parseFullProfInt(args.text);
+    return {
+      dataset: { id, name, radiation: { kind: "neutron", wavelength: parsed.wavelength ?? 1.0 }, reflections: parsed.reflections },
+      kept: parsed.reflections.length,
+      dropped: parsed.skipped,
+      format: "fullprof",
+      kVectors: (parsed.kVectors ?? []).map((k) => [...k] as [number, number, number]),
+      problems: parsed.problems.map((p) => ({ ...p })),
+    };
+  }
+  const reflections = parseHkl(args.text);
+  return {
+    dataset: { id, name, radiation: { kind: "neutron", wavelength: 1.54 }, reflections },
+    kept: reflections.length,
+    dropped: 0,
+    format: "shelx",
+    kVectors: [],
+    problems: [],
+  };
+}
+
+/**
+ * Merge a nuclear + magnetic single-crystal reflection pair into the magnetic
+ * supercell (Phase 3), the FullProf single-k convention: both files are indexed
+ * in the nuclear cell (the magnetic file's `h k l` being the fundamental of a
+ * satellite at `hkl + k`); this converts both into the supercell where k is an
+ * integer reciprocal-lattice vector and concatenates them into one dataset ready
+ * for a magnetic structure refinement. k must be commensurate and axis-diagonal.
+ */
+export function merge_magnetic_supercell(args: {
+  nuclearDataset: SingleCrystalDataset;
+  magneticDataset: SingleCrystalDataset;
+  k: [number, number, number];
+}): { dataset: SingleCrystalDataset; multiplicity: [number, number, number]; kInteger: [number, number, number]; reflections: number } {
+  const { dataset, supercell } = mergeToMagneticSupercell(args.nuclearDataset, args.magneticDataset, args.k);
+  return {
+    dataset,
+    multiplicity: [...supercell.multiplicity] as [number, number, number],
+    kInteger: [...supercell.kInteger] as [number, number, number],
+    reflections: dataset.reflections.length,
+  };
+}
+
+/**
+ * Expand a nuclear structure into the magnetic supercell of a commensurate k —
+ * an exact geometric regrouping (full orbits explicit, replicated per cell
+ * offset, P1; positions/occupancies/ADPs verbatim). Pair with
+ * merge_magnetic_supercell: the merged reflections refine against this expanded
+ * structure with the nuclear scaffold frozen (two-phase practice). The refined
+ * scale in this setting is the base-cell scale divided by N² (N = cells per
+ * supercell), identically for nuclear and magnetic intensities.
+ */
+export function expand_structure_supercell(args: { structure: StructureModel; k: [number, number, number] }): {
+  structure: StructureModel;
+  multiplicity: [number, number, number];
+  kInteger: [number, number, number];
+  atoms: number;
+  replicas: { label: string; parent: string; offset: readonly [number, number, number] }[];
+} {
+  const { structure, supercell, replicas } = expandStructureToSupercell(args.structure, args.k);
+  return {
+    structure,
+    multiplicity: [...supercell.multiplicity] as [number, number, number],
+    kInteger: [...supercell.kInteger] as [number, number, number],
+    atoms: structure.sites.length,
+    replicas: replicas.map((r) => ({ ...r })),
+  };
+}
+
+/**
+ * Build the k-modulated moment model on an expanded supercell: one refinable
+ * amplitude per magnetic sublattice drives every replica of its parent site
+ * through cos(2πk·L + φ) — replica moments are tied by the modulation, so the
+ * parameter count stays that of the base-cell description and the magnetic ion
+ * positions are exactly the nuclear ones. Feed the returned parameters/bindings
+ * (with a scale + magneticScale tied to it) to the magnetic refinement of the
+ * merged supercell dataset. Directions are base-cell crystal-axis components;
+ * phase φ = 0 gives the node pattern for k = ¼, φ = π/4 the equal-moment one.
+ */
+export function build_modulated_moment_model(args: {
+  structure: StructureModel;
+  k: [number, number, number];
+  ions: { site: string; direction: [number, number, number]; phase?: number }[];
+  moment?: number;
+}): {
+  structure: StructureModel;
+  magnetic: MagneticModel;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  multiplicity: [number, number, number];
+} {
+  const expansion = expandStructureToSupercell(args.structure, args.k);
+  const build = buildModulatedMomentModel(expansion, args.k, args.ions as readonly ModulatedIon[], args.moment ?? 1);
+  return {
+    structure: expansion.structure,
+    magnetic: build.magnetic,
+    parameters: build.params,
+    bindings: build.bindings,
+    multiplicity: [...expansion.supercell.multiplicity] as [number, number, number],
+  };
+}
+
+/**
+ * Serialize a single-crystal dataset to a FullProf `.int` file (Phase 3). Writes
+ * the plain nuclear variant (h k l F² σ cod) through the declared Fortran format;
+ * pass `kVectors` + per-reflection `kIndex` for the propagation-vector variant
+ * (satellite = H + k_nv). The k path is pending external FullProf validation.
+ */
+export function write_single_crystal_data(args: {
+  dataset: SingleCrystalDataset;
+  wavelength?: number;
+  title?: string;
+  format?: string;
+  kVectors?: [number, number, number][];
+}): { text: string; reflections: number } {
+  const rad = args.dataset.radiation;
+  const wavelength = args.wavelength ?? (rad.kind === "neutron-tof" ? 0 : rad.wavelength);
+  const text = writeFullProfInt(args.dataset.reflections, {
+    ...(args.title !== undefined ? { title: args.title } : {}),
+    wavelength,
+    ...(args.format !== undefined ? { format: args.format } : {}),
+    ...(args.kVectors ? { kVectors: args.kVectors } : {}),
+  });
+  return { text, reflections: args.dataset.reflections.length };
 }
 
 /**

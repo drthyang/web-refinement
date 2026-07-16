@@ -16,12 +16,27 @@ export interface FitRangeSelection {
   readonly max: number;
 }
 
+/** A detected ("found") peak, flagged with a ▽ marker above the pattern. */
+export interface FoundPeak {
+  /** Position in the plot's current display unit (x-axis). */
+  readonly x: number;
+  /** d-spacing in Å (for the tooltip). */
+  readonly d: number;
+}
+
 interface Props {
   readonly curves: PowderCurves;
   readonly xLabel: string;
   readonly fitRange?: FitRangeSelection;
   readonly onFitRangeChange?: (range: FitRangeSelection) => void;
   readonly phases?: readonly PhaseTicks[];
+  /**
+   * Detected peaks to flag with downward ▽ triangles *above* the pattern — the
+   * magnetic-analysis "found peaks" (intensity the nuclear fit leaves
+   * unexplained). Deliberately a different mark from the Bragg-tick phase rows
+   * below, so found peaks don't read as another indexed phase.
+   */
+  readonly foundPeaks?: readonly FoundPeak[];
   readonly showBackground?: boolean;
   /** Increment to zoom the view onto the active fit range (no-op without one). */
   readonly focusFitToken?: number;
@@ -67,6 +82,11 @@ const TICK_MAX_BOT = 420; // tick band floor (just above the difference band)
 const DIFF_Y = 470; // difference-band zero line
 const DIFF_A = 46; // difference band half-height
 const CAP_Y = 522; // fit-handle caps, below the difference band
+// Found-peak (▽) markers: a row of downward triangles just below the legend,
+// above the intensity plot — a distinct mark from the Bragg tick rows below.
+const FOUND_TOP = 30; // flat top edge of the triangle
+const FOUND_H = 8; // triangle height (apex points down toward the peak x)
+const FOUND_W = 5; // triangle half-width
 
 function niceNum(x: number, round: boolean): number {
   if (x <= 0) return 1;
@@ -111,6 +131,7 @@ export function WorkbenchPlot({
   fitRange,
   onFitRangeChange,
   phases,
+  foundPeaks,
   showBackground = true,
   focusFitToken = 0,
   focusPeakToken = 0,
@@ -464,6 +485,32 @@ export function WorkbenchPlot({
         <style>{".wb-tick .wb-mark{stroke-opacity:.7}.wb-tick:hover .wb-mark{stroke-opacity:1;stroke-width:2}"}</style>
         {braggTicks}
 
+        {/* Found-peak markers: downward ▽ triangles above the pattern at each
+            detected (unexplained-residual) peak — a distinct mark from the
+            Bragg tick rows below, so they don't read as another indexed phase.
+            Magnetic-analysis only (absent elsewhere). */}
+        {foundPeaks && foundPeaks.length > 0 && (
+          <g>
+            {foundPeaks.map((p, i) => {
+              if (p.x < vlo || p.x > vhi) return null;
+              const px = sx(p.x);
+              return (
+                <g key={i}>
+                  <path
+                    d={`M ${(px - FOUND_W).toFixed(1)} ${FOUND_TOP} L ${(px + FOUND_W).toFixed(1)} ${FOUND_TOP} L ${px.toFixed(1)} ${FOUND_TOP + FOUND_H} Z`}
+                    fill={color.obs}
+                    stroke={color.raised}
+                    strokeWidth={0.8}
+                  />
+                  <rect x={px - 6} y={FOUND_TOP - 2} width={12} height={FOUND_H + 6} fill="transparent">
+                    <title>{`found peak · d ${p.d.toFixed(3)} Å`}</title>
+                  </rect>
+                </g>
+              );
+            })}
+          </g>
+        )}
+
         {/* Spotlight for a reflection picked in the F_obs/F_calc plot: an arrow
             at the top, a dashed guide through the intensity region, and a bold
             tick on the matching Bragg row — linking the scatter point to its
@@ -557,16 +604,27 @@ export function WorkbenchPlot({
           <line x1={X0 + 134} y1={24} x2={X0 + 150} y2={24} stroke={color.bkg} strokeWidth={1.6} strokeDasharray="5 3" />
           <text x={X0 + 154} y={27}>bkg</text>
           {(() => {
-            const entries = phases && phases.length > 0
-              ? phases.map((p) => ({ color: p.color, label: p.label }))
-              : [{ color: color.hkl, label: "hkl" }];
+            const phaseEntries = phases && phases.length > 0
+              ? phases.map((p) => ({ color: p.color, label: p.label, shape: "line" as const }))
+              : [{ color: color.hkl, label: "hkl", shape: "line" as const }];
+            // The ▽ "found" key leads the dynamic entries when found peaks exist.
+            const entries = [
+              ...(foundPeaks && foundPeaks.length > 0
+                ? [{ color: color.obs, label: "found", shape: "triangle" as const }]
+                : []),
+              ...phaseEntries,
+            ];
             let x = X0 + 182;
             return entries.map((e, i) => {
               const gx = x;
               x += 10 + e.label.length * 6.6 + 16;
               return (
                 <g key={i}>
-                  <line x1={gx} y1={19} x2={gx} y2={29} stroke={e.color} strokeWidth={2} />
+                  {e.shape === "triangle" ? (
+                    <path d={`M ${gx - 4} 20 L ${gx + 4} 20 L ${gx} 28 Z`} fill={e.color} />
+                  ) : (
+                    <line x1={gx} y1={19} x2={gx} y2={29} stroke={e.color} strokeWidth={2} />
+                  )}
                   <text x={gx + 7} y={27}>{e.label}</text>
                 </g>
               );

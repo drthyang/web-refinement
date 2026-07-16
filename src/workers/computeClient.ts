@@ -26,11 +26,13 @@ import { leBailCellPrefit, type LeBailPrefitResult } from "@/core/workflow/leBai
 import type { RefinementResult, RefinementOptions, AgreementFactors, RefinementParameter } from "@/core/refinement/types";
 import { refine, refineParallel, type BatchEvaluator } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
-import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
+import { buildMagneticSingleCrystalProblem, applyMagneticMoments } from "@/core/workflow/magnetic";
 import { runPowderRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
 import { refineStagedAsync } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
 import { refineMultiStart, type MultiStartOptions, type MultiStartResult } from "@/core/refinement/multiStart";
+import { isMomentParameterKind } from "@/core/refinement/types";
+import { canonicalizeMomentValues, momentDegeneracies, type MomentDegeneracy } from "@/core/magnetic/canonicalize";
 
 type Pending = (response: ComputeResponse) => void;
 
@@ -202,6 +204,13 @@ class EvaluatorPool implements BatchEvaluator {
     this.workers.length = 0;
     this.pending.clear();
   }
+}
+
+/** Result of {@link ComputeClient.refineMagneticPowderMultiStart}: the standard
+ *  multi-start report plus the magnetic degeneracies (flat directions / ±m sign)
+ *  detected at the final converged state. */
+export interface MagneticMultiStartResult extends MultiStartResult {
+  readonly degeneracies: MomentDegeneracy[];
 }
 
 export class ComputeClient {
@@ -438,6 +447,83 @@ export class ComputeClient {
     return this.runParallel(full, options, spec.pattern.points.length, onProgress);
   }
 
+  /**
+   * Local-minimum-resistant magnetic powder refinement — the "Escape min" path
+   * for magnetic structures (GAP #1). Phase 1a on Mn₃Ga showed the instability is
+   * NOT distinct deep minima but a near-flat "sublattice-partition" valley plus
+   * the global time-reversal (±m) degeneracy (docs/REFINEMENT_NOTES.md). So the
+   * strategy is, cheapest-sufficient-first:
+   *
+   *  1. FREEZE the nuclear scaffold and search ONLY the moment subspace with the
+   *     existing seeded multi-start — leaving the TOF profile free during the
+   *     moment search is exactly what let one 1a start diverge, and the
+   *     moment↔moment flat direction reads clean only with nuclear held.
+   *  2. Seed the best moment partition into ONE final joint LM over the caller's
+   *     full freed set; e.s.d.s and correlations are reported from that step only.
+   *  3. Canonicalize the global sign so ±m twins collapse to one deterministic
+   *     answer, and surface the data-limited (flat) directions as a degeneracy
+   *     report rather than pretending a unique partition.
+   *
+   * Basin hopping is intentionally NOT added: 1a found no discrete basins to hop
+   * between (23/24 starts within <1% of the same χ²).
+   */
+  async refineMagneticPowderMultiStart(
+    spec: Omit<Extract<EvaluatorSpec, { kind: "magneticPowder" }>, "kind">,
+    multiStart: MultiStartOptions = {},
+    options: Partial<RefinementOptions> = {},
+    onProgress?: PowderProgress,
+  ): Promise<MagneticMultiStartResult> {
+    const params = spec.parameters;
+    const isMoment = (p: RefinementParameter): boolean => isMomentParameterKind(p.kind);
+    const specWith = (parameters: readonly RefinementParameter[]): Extract<EvaluatorSpec, { kind: "magneticPowder" }> =>
+      ({ kind: "magneticPowder", ...spec, parameters: [...parameters] });
+
+    // (1) Freeze the nuclear scaffold for the restart search: only the moment
+    // modes move. Fixed/tied parameters are left as-is.
+    const frozenNuclear = params.map((p) =>
+      !isMoment(p) && !p.fixed && !p.expression ? { ...p, fixed: true } : { ...p },
+    );
+
+    // Each restart is a moment-only solve, run in-thread: the moment subspace is
+    // a handful of columns, so the parallel Jacobian would spend more on pool
+    // spin-up than it saves — and in-thread keeps the search bit-reproducible.
+    const runOnce = (start: readonly RefinementParameter[]): { parameters: RefinementParameter[]; final: RefinementResult } => {
+      const result = refine(buildProblemForSpec(specWith(start)), options);
+      return { parameters: applyResultToParams(start, result), final: result };
+    };
+    const ms = await refineMultiStart(frozenNuclear, runOnce, {
+      // Cold moment search: kick modes (often seeded at 0) by a µ_B-scale amount.
+      escapeSigma: 6,
+      relFraction: 1,
+      ...multiStart,
+      shouldPerturb: isMoment,
+    });
+
+    // (2) Final joint LM from the best moment partition over the caller's full
+    // freed set (nuclear un-frozen). Pool-accelerated when workers are present —
+    // this is the one solve with many nuclear columns.
+    const jointStart = params.map((p) => {
+      const best = ms.parameters.find((q) => q.id === p.id);
+      return isMoment(p) && best ? { ...p, value: best.value } : { ...p };
+    });
+    const joint = await this.refineMagneticPowderParallel(specWith(jointStart), options, onProgress);
+
+    // (3) Canonicalize the global sign and collect degeneracies from the final
+    // diagnostics (built on the engine's existing SVD/correlation output).
+    const refinedMag = applyMagneticMoments(spec.magnetic, spec.bindings, joint.parameters);
+    const canonValues = canonicalizeMomentValues(joint.parameters, refinedMag, spec.structure.cell, params);
+    const finalResult: RefinementResult = { ...joint, parameters: canonValues };
+    return {
+      final: finalResult,
+      parameters: applyResultToParams(jointStart, finalResult),
+      restartsRun: ms.restartsRun,
+      bestStartIndex: ms.bestStartIndex,
+      improved: ms.improved,
+      costByStart: ms.costByStart,
+      degeneracies: momentDegeneracies(joint.diagnostics, params),
+    };
+  }
+
   private async runParallel(
     spec: EvaluatorSpec,
     options: Partial<RefinementOptions>,
@@ -512,6 +598,60 @@ export class ComputeClient {
     if (this.poolSize() < 2) return this.refineMagnetic(req);
     const spec: EvaluatorSpec = { kind: "magneticSingleCrystal", structure: req.structure, magnetic: req.magnetic, dataset: req.dataset, parameters: req.parameters, bindings: req.bindings };
     return this.runParallel(spec, req.options ?? {}, req.dataset.reflections.length);
+  }
+
+  /**
+   * Local-minimum-resistant magnetic single-crystal refinement — the "escape min"
+   * path for a single magnetic dataset (the merged magnetic-supercell `.int`,
+   * whose nuclear reflections and satellites live in ONE dataset). Same shape as
+   * the powder and joint siblings: freeze the nuclear scaffold, search the moment
+   * subspace from a seeded multi-start, seed the best partition into one final LM
+   * over the caller's full freed set, canonicalize the global ±m sign, and report
+   * the data-limited moment directions.
+   */
+  async refineMagneticSingleCrystalMultiStart(
+    spec: Omit<Extract<EvaluatorSpec, { kind: "magneticSingleCrystal" }>, "kind">,
+    multiStart: MultiStartOptions = {},
+    options: Partial<RefinementOptions> = {},
+  ): Promise<MagneticMultiStartResult> {
+    const params = spec.parameters;
+    const isMoment = (p: RefinementParameter): boolean => isMomentParameterKind(p.kind);
+    const specWith = (parameters: readonly RefinementParameter[]): Extract<EvaluatorSpec, { kind: "magneticSingleCrystal" }> =>
+      ({ kind: "magneticSingleCrystal", ...spec, parameters: [...parameters] });
+
+    const frozenNuclear = params.map((p) => (!isMoment(p) && !p.fixed && !p.expression ? { ...p, fixed: true } : { ...p }));
+    const runOnce = (start: readonly RefinementParameter[]): { parameters: RefinementParameter[]; final: RefinementResult } => {
+      const r = refine(buildProblemForSpec(specWith(start)), options);
+      return { parameters: applyResultToParams(start, r), final: r };
+    };
+    const ms = await refineMultiStart(frozenNuclear, runOnce, {
+      escapeSigma: 6,
+      relFraction: 1,
+      ...multiStart,
+      shouldPerturb: isMoment,
+    });
+
+    const jointStart = params.map((p) => {
+      const best = ms.parameters.find((q) => q.id === p.id);
+      return isMoment(p) && best ? { ...p, value: best.value } : { ...p };
+    });
+    // Forward the caller's options to the FINAL LM (the solve that produces the
+    // reported values/e.s.d.s) — the powder/joint siblings do; without it this
+    // result-producing step silently runs at the engine defaults.
+    const joint = await this.refineMagneticParallel({ ...spec, parameters: jointStart, options });
+
+    const refinedMag = applyMagneticMoments(spec.magnetic, spec.bindings, joint.parameters);
+    const canonValues = canonicalizeMomentValues(joint.parameters, refinedMag, spec.structure.cell, params);
+    const finalResult: RefinementResult = { ...joint, parameters: canonValues };
+    return {
+      final: finalResult,
+      parameters: applyResultToParams(jointStart, finalResult),
+      restartsRun: ms.restartsRun,
+      bestStartIndex: ms.bestStartIndex,
+      improved: ms.improved,
+      costByStart: ms.costByStart,
+      degeneracies: momentDegeneracies(joint.diagnostics, params),
+    };
   }
 
   /** Abort any in-flight refinement: terminate the worker(s) (fresh ones are

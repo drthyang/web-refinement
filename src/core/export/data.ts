@@ -5,6 +5,7 @@
  */
 
 import type { PowderPattern, SingleCrystalDataset, Radiation } from "@/core/diffraction/types";
+import { writeFullProfInt } from "@/parsers/fullprofInt";
 
 /** Wavelength for a radiation, or 0 for TOF (which has none). */
 export function radiationWavelength(radiation: Radiation): number {
@@ -29,12 +30,12 @@ export function singleCrystalHkl(dataset: SingleCrystalDataset): string {
   return lines.join("\n") + "\n";
 }
 
-/** FullProf single-crystal `.int` (h k l F² σ, format 3i4,2f8.2). */
+/** FullProf single-crystal `.int` (h k l F² σ, format 3i4,2f8.2). Delegates to
+ *  the full-format writer with the historical minimal format (no cod column). */
 export function singleCrystalInt(dataset: SingleCrystalDataset): string {
-  const i4 = (n: number) => String(Math.round(n)).padStart(4);
-  const f8 = (n: number) => n.toFixed(2).padStart(8);
-  const lambda = radiationWavelength(dataset.radiation).toFixed(4);
-  const header = ["Crystal", "(3i4,2f8.2)", `${lambda} 0 0`];
-  const rows = dataset.reflections.map((r) => `${i4(r.h)}${i4(r.k)}${i4(r.l)}${f8(r.iObs)}${f8(r.sigma ?? 0)}`);
-  return [...header, ...rows].join("\n") + "\n";
+  return writeFullProfInt(dataset.reflections, {
+    title: "Crystal",
+    format: "(3i4,2f8.2)",
+    wavelength: radiationWavelength(dataset.radiation),
+  });
 }
