@@ -278,6 +278,17 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     handler: tools.write_single_crystal_data,
   },
   {
+    name: "merge_magnetic_supercell",
+    title: "Merge nuclear + magnetic to supercell",
+    description: "Merge a nuclear + magnetic single-crystal reflection pair (both indexed in the nuclear cell, the FullProf single-k convention where the magnetic file's h k l is the fundamental of a satellite at hkl+k) into one dataset in the magnetic supercell, where k becomes an integer reciprocal-lattice vector. Feed the result to a magnetic structure refinement. k must be commensurate and axis-diagonal.",
+    inputSchema: {
+      nuclearDataset: anyObj,
+      magneticDataset: anyObj,
+      k: z.array(z.number()).length(3).describe("Propagation vector, e.g. [0.25, 0, 0.25]"),
+    },
+    handler: tools.merge_magnetic_supercell,
+  },
+  {
     name: "refine_joint_single_crystal",
     title: "Joint nuclear + magnetic (single crystal)",
     description: "Co-refine one structure + magnetic model against TWO single-crystal datasets (nuclear .int + magnetic .int) with χ²_total = w_N·χ²_N + w_M·χ²_M. Local-minimum-resistant: seeded moment multi-start with the nuclear scaffold frozen, then one joint LM; ±m sign canonicalized, flat directions reported. weightNuclear/weightMagnetic, lorentz (false for pre-corrected F²), and per-dataset integer hkl transforms (base↔supercell) are named inputs. Combine build_refinement's nuclear set with build_magnetic_model's moments plus a magneticScale param (tie it to scale to share one scale). Returns the result, canonicalized magnetic model, per-block R-factors, σ-coverage, degeneracies, and per-start costs.",

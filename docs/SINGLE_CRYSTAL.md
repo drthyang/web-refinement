@@ -89,16 +89,30 @@ What differs is only the **observable and its corrections**, isolated in
   `write_single_crystal_data` tool.
 - **Pairing convention**: a `<name>_mag.int` loaded while a nuclear dataset is
   present routes to the magnetic partner (App `onLoadData`), so a `_nuc`/`_mag`
-  pair loads as one joint co-refinement session; the header **`.int` export**
-  writes the pair back with the same suffixes.
+  pair loads as one session; the header **`.int` export** writes the pair back
+  with the same suffixes.
+- **Magnetic-supercell merge** (`core/magnetic/magneticSupercell.ts`) — the field
+  convention for single-k magnetic refinement. Both `_nuc.int` and `_mag.int` are
+  indexed in the **nuclear** cell (the magnetic file's `h k l` is the fundamental
+  of a satellite at `hkl + k`). `mergeToMagneticSupercell` converts both into the
+  magnetic **supercell**, where k is an integer reciprocal-lattice vector:
+  nuclear `(h,k,l) → (n·h)`, magnetic `→ (n·h) + K` with `nᵢ` the denominators of
+  k and `Kᵢ = nᵢ·kᵢ`. The merged single dataset is then refined against the
+  magnetic structure in the supercell. MCP: `merge_magnetic_supercell`.
 - Validated: nuclear + k-variant parse, `-0` normalisation, line-numbered
   problems, strict rejection, writer round-trips, and a nuc+mag pair reproducing
   the Phase-2 joint refinement
   ([`fullprofInt.test.ts`](../src/parsers/fullprofInt.test.ts),
-  [`jointMultiStart.test.ts`](../src/workers/jointMultiStart.test.ts)).
-- **Pending external validation:** no golden exercises the k-vector header
-  against FullProf itself — the k path follows the manual + a real HB-3A file;
-  export a k file and cross-check in FullProf before publication.
+  [`jointMultiStart.test.ts`](../src/workers/jointMultiStart.test.ts)). **Real-data
+  golden (Eu₃In₂Te₄, k = (¼,0,¼))**: the reader parses the `_nuc`/`_mag`/`_ALL`
+  HB-3A files with zero problems, and the merge reproduces the reference
+  `_ALL_magcell.int` byte-exactly on every `(h,k,l,I,σ)`
+  ([`magneticSupercell.test.ts`](../src/core/magnetic/magneticSupercell.test.ts),
+  data-gated on `data/fullprof_int_handles/`).
+- **Still pending external validation:** the explicit **k-vector-header** reader
+  variant (count + `nv k1 k2 k3` block) — real files use the merge convention
+  above rather than the header, so no golden exercises it; export a k-header file
+  and cross-check in FullProf before relying on that path.
 
 ### Corrections & agreement — `core/diffraction/singleCrystalFactors.ts`
 - **Single-crystal Lorentz** `L = 1/sin2θ` (TOF → 1), **polarization**

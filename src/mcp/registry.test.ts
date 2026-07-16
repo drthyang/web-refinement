@@ -163,6 +163,14 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
     },
     keys: ["reflections", "text"],
   },
+  merge_magnetic_supercell: {
+    args: {
+      nuclearDataset: { id: "nuc", name: "n", radiation: { kind: "neutron", wavelength: 1 }, reflections: [{ h: -4, k: -10, l: 1, iObs: 0.04, sigma: 0.02 }] },
+      magneticDataset: { id: "mag", name: "m", radiation: { kind: "neutron", wavelength: 1 }, reflections: [{ h: -3, k: -11, l: 1, iObs: 0.03, sigma: 0.02 }] },
+      k: [0.25, 0, 0.25],
+    },
+    keys: ["dataset", "kInteger", "multiplicity", "reflections"],
+  },
   refine_joint_single_crystal: (() => {
     const build = tools.build_magnetic_model({ structure, ionLabels: ["Po1"], moment: 0.5 });
     // X-ray radiation: the shared Po fixture has X-ray form factors (no neutron

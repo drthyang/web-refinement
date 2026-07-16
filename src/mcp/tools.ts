@@ -56,6 +56,7 @@ import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import type { SingleCrystalAgreement } from "@/core/diffraction/singleCrystalFactors";
 import { parseFullProfInt, looksLikeFullProfInt, writeFullProfInt } from "@/parsers/fullprofInt";
 import { parseHkl } from "@/parsers/hkl";
+import { mergeToMagneticSupercell } from "@/core/magnetic/magneticSupercell";
 import { createNodeEvaluatorPool } from "@/mcp/nodeEvaluator";
 import { buildProblemForSpec } from "@/workers/runPowder";
 import type { EvaluatorSpec } from "@/workers/protocol";
@@ -619,6 +620,28 @@ export function parse_single_crystal_data(args: { text: string; name?: string; i
     format: "shelx",
     kVectors: [],
     problems: [],
+  };
+}
+
+/**
+ * Merge a nuclear + magnetic single-crystal reflection pair into the magnetic
+ * supercell (Phase 3), the FullProf single-k convention: both files are indexed
+ * in the nuclear cell (the magnetic file's `h k l` being the fundamental of a
+ * satellite at `hkl + k`); this converts both into the supercell where k is an
+ * integer reciprocal-lattice vector and concatenates them into one dataset ready
+ * for a magnetic structure refinement. k must be commensurate and axis-diagonal.
+ */
+export function merge_magnetic_supercell(args: {
+  nuclearDataset: SingleCrystalDataset;
+  magneticDataset: SingleCrystalDataset;
+  k: [number, number, number];
+}): { dataset: SingleCrystalDataset; multiplicity: [number, number, number]; kInteger: [number, number, number]; reflections: number } {
+  const { dataset, supercell } = mergeToMagneticSupercell(args.nuclearDataset, args.magneticDataset, args.k);
+  return {
+    dataset,
+    multiplicity: [...supercell.multiplicity] as [number, number, number],
+    kInteger: [...supercell.kInteger] as [number, number, number],
+    reflections: dataset.reflections.length,
   };
 }
 
