@@ -71,20 +71,35 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     () => [{ structure, id: structure.id }, ...extraPhases.map((s) => ({ structure: s, id: s.id }))],
     [structure, extraPhases],
   );
+  // Default fit window: above the reduction's low-r validity limit, and capped
+  // at 30 Å — files often carry G(r) to 100 Å, and modeling the whole grid on
+  // load would hang the page (the model is only ever computed in the window;
+  // drag the right handle out to fit further).
+  const defaultRange = useMemo((): FitRangeSelection => {
+    const rFirst0 = pattern.points[0]?.r ?? 0;
+    const rLast0 = pattern.points[pattern.points.length - 1]?.r ?? 1;
+    return {
+      min: Math.min(Math.max(pattern.rpoly ?? 1.5, rFirst0), rLast0),
+      max: Math.min(rLast0, 30),
+    };
+  }, [pattern]);
   // Parameter spec: PDF scale/envelope + the symmetry-reduced structural set,
   // with the phase scale(s) seeded from the least-squares optimum of the
   // starting model (exact for one linear scale; split evenly across phases).
   const spec = useMemo(() => {
     const raw = multiPhase ? buildMultiPhasePdfSpec([structure, ...extraPhases], pattern) : buildPdfSpec(structure, pattern);
     const start = multiPhase
-      ? multiPhasePdfCurves(phases, pattern, raw.params, raw.bindings)
-      : pdfCurves(structure, pattern, raw.params, raw.bindings);
-    const kappa = optimalPdfScale(start.yObs, start.yCalc) / (multiPhase ? phases.length : 1);
+      ? multiPhasePdfCurves(phases, pattern, raw.params, raw.bindings, defaultRange)
+      : pdfCurves(structure, pattern, raw.params, raw.bindings, defaultRange);
+    const kappa = optimalPdfScale(
+      start.yObs.filter((_, i) => start.x[i]! >= defaultRange.min && start.x[i]! <= defaultRange.max),
+      start.yCalc.filter((_, i) => start.x[i]! >= defaultRange.min && start.x[i]! <= defaultRange.max),
+    ) / (multiPhase ? phases.length : 1);
     const params = raw.params.map((p) =>
       p.kind === "pdfScale" ? { ...p, value: kappa, initialValue: kappa } : p,
     );
     return { ...raw, params };
-  }, [structure, extraPhases, multiPhase, phases, pattern]);
+  }, [structure, extraPhases, multiPhase, phases, pattern, defaultRange]);
 
   const [params, setParams] = useState<readonly RefinementParameter[]>(spec.params);
   const [result, setResult] = useState<RefinementResult | null>(null);
@@ -97,22 +112,19 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     setLive(null);
   }, [spec]);
 
-  // Fit window over r. Low r below the reduction's validity limit (rpoly, or a
-  // conservative 1.5 Å) is dominated by termination artifacts — excluded by
-  // default; the user drags the plot handles like the powder fit range.
+  // Fit window over r (drag the plot handles). Starts at the default window;
+  // the model is only computed inside it, so widening it costs compute.
   const rFirst = pattern.points[0]?.r ?? 0;
   const rLast = pattern.points[pattern.points.length - 1]?.r ?? 1;
-  const [fitRange, setFitRange] = useState<FitRangeSelection>(() => ({
-    min: Math.min(Math.max(pattern.rpoly ?? 1.5, rFirst), rLast),
-    max: rLast,
-  }));
+  const [fitRange, setFitRange] = useState<FitRangeSelection>(defaultRange);
+  useEffect(() => setFitRange(defaultRange), [defaultRange]);
 
   const curves = useMemo(
     () =>
       multiPhase
-        ? multiPhasePdfCurves(phases, pattern, params, spec.bindings)
-        : pdfCurves(structure, pattern, params, spec.bindings),
-    [multiPhase, phases, structure, pattern, params, spec.bindings],
+        ? multiPhasePdfCurves(phases, pattern, params, spec.bindings, fitRange)
+        : pdfCurves(structure, pattern, params, spec.bindings, fitRange),
+    [multiPhase, phases, structure, pattern, params, spec.bindings, fitRange],
   );
 
   // Decomposition overlays (P3): per-phase contributions on a multi-phase fit,
@@ -123,9 +135,9 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   const partials = useMemo(() => {
     if (!showPartials || !canOverlay) return null;
     return multiPhase
-      ? pdfPhaseCurves(phases, pattern, params, spec.bindings)
-      : pdfPartialCurves(structure, pattern, params, spec.bindings);
-  }, [showPartials, canOverlay, multiPhase, phases, structure, pattern, params, spec.bindings]);
+      ? pdfPhaseCurves(phases, pattern, params, spec.bindings, fitRange)
+      : pdfPartialCurves(structure, pattern, params, spec.bindings, fitRange);
+  }, [showPartials, canOverlay, multiPhase, phases, structure, pattern, params, spec.bindings, fitRange]);
   const plotCurves = useMemo(() => {
     if (!live) return curves;
     const yCalc = live;

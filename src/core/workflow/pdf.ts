@@ -70,6 +70,19 @@ function terminationPlanFor(pattern: PdfPattern, rValues: readonly number[]): Te
   return { modelGrid: rExt, sliceOffset: offset, terminate, step, qmax };
 }
 
+/** The contiguous index window of `rValues` inside the fit range. Points
+ *  outside carry zero weight, so the model is never evaluated there — the
+ *  difference between a snappy fit and a hung UI on an r → 100 Å file. */
+function windowFor(rValues: readonly number[], fitRange?: FitRange): { i0: number; i1: number } {
+  const min = fitRange?.min ?? -Infinity;
+  const max = fitRange?.max ?? Infinity;
+  let i0 = 0;
+  while (i0 < rValues.length && rValues[i0]! < min) i0++;
+  let i1 = rValues.length;
+  while (i1 > i0 && rValues[i1 - 1]! > max) i1--;
+  return { i0, i1 };
+}
+
 export function buildPdfProblem(
   structure: StructureModel,
   pattern: PdfPattern,
@@ -93,6 +106,11 @@ export function buildPdfProblem(
     weights[rValues.length + i] = 1 / (sigma * sigma);
   }
 
+  // Model only the fit window: everything outside has zero weight and stays 0
+  // in the calculated vector (never drawn, never fitted, never enumerated).
+  const { i0, i1 } = windowFor(rValues, fitRange);
+  const rWindow = rValues.slice(i0, i1);
+
   // Single-entry pair-list cache keyed on the exact values of every
   // geometry-bound parameter (the `createPeakBuilder` pattern). Amplitudes are
   // assembled per evaluation from the atoms (occupancy lives there), and the
@@ -103,8 +121,8 @@ export function buildPdfProblem(
   // Finite-Qmax termination (pdf/termination.ts): when the data carries a Qmax
   // and sits on a uniform grid oversampled past its Nyquist, the model is
   // evaluated on the margin-extended grid, band-limited, and sliced back onto
-  // the data grid. Otherwise the model grid IS the data grid.
-  const { modelGrid, sliceOffset, terminate, step, qmax } = terminationPlanFor(pattern, rValues);
+  // the data grid. Otherwise the model grid IS the (windowed) data grid.
+  const { modelGrid, sliceOffset, terminate, step, qmax } = terminationPlanFor(pattern, rWindow);
   const rMaxModel = modelGrid.length ? modelGrid[modelGrid.length - 1]! : 0;
   let lastKey: string | null = null;
   let cachedPairs: PdfPair[] = [];
@@ -126,19 +144,18 @@ export function buildPdfProblem(
     const pairs = pairsFor(applied.model.cell, atoms, resolved);
     const params: PdfModelParams = { scatteringType: pattern.scatteringType, ...(applied.pdf ?? PDF_DEFAULTS) };
     const gModel = computeGofR(applied.model.cell, atoms, modelGrid, params, pairs);
-    const gCalc = terminate
-      ? bandLimit(gModel, modelGrid[0]!, step, qmax).subarray(sliceOffset, sliceOffset + rValues.length)
+    const gWindow = terminate
+      ? bandLimit(gModel, modelGrid[0]!, step, qmax).subarray(sliceOffset, sliceOffset + rWindow.length)
       : gModel;
-    if (restraints.length === 0) return gCalc;
-    const withRestraints = new Float64Array(gCalc.length + restraints.length);
-    withRestraints.set(gCalc, 0);
+    const out = new Float64Array(rValues.length + restraints.length);
+    out.set(gWindow.subarray(0, rWindow.length), i0);
     for (let i = 0; i < restraints.length; i++) {
       const restraint = restraints[i]!;
       let value = 0;
       for (const term of restraint.terms) value += term.coefficient * (resolved[term.parameterId] ?? 0);
-      withRestraints[gCalc.length + i] = value;
+      out[rValues.length + i] = value;
     }
-    return withRestraints;
+    return out;
   };
 
   return { parameters, observations, weights, calculate };
@@ -158,8 +175,9 @@ export function pdfCurves(
   pattern: PdfPattern,
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
+  fitRange?: FitRange,
 ): PdfCurves {
-  const problem = buildPdfProblem(structure, pattern, parameters, bindings);
+  const problem = buildPdfProblem(structure, pattern, parameters, bindings, [], fitRange);
   const values: Record<string, number> = {};
   for (const p of parameters) values[p.id] = p.value;
   const yCalc = problem.calculate(values);
@@ -211,7 +229,11 @@ export function buildMultiPhasePdfProblem(
     weights[rValues.length + i] = 1 / (sigma * sigma);
   }
 
-  const { modelGrid, sliceOffset, terminate, step, qmax } = terminationPlanFor(pattern, rValues);
+  // Model only the fit window (see buildPdfProblem — zero-weight tails are
+  // never enumerated or convolved).
+  const { i0, i1 } = windowFor(rValues, fitRange);
+  const rWindow = rValues.slice(i0, i1);
+  const { modelGrid, sliceOffset, terminate, step, qmax } = terminationPlanFor(pattern, rWindow);
   const rMaxModel = modelGrid.length ? modelGrid[modelGrid.length - 1]! : 0;
 
   // One geometry-keyed pair cache per phase (same exactness argument as the
@@ -241,19 +263,18 @@ export function buildMultiPhasePdfProblem(
       const g = computeGofR(applied.model.cell, atoms, modelGrid, params, cache.pairs);
       for (let k = 0; k < gSum.length; k++) gSum[k] = gSum[k]! + g[k]!;
     }
-    const gCalc = terminate
-      ? bandLimit(gSum, modelGrid[0]!, step, qmax).subarray(sliceOffset, sliceOffset + rValues.length)
+    const gWindow = terminate
+      ? bandLimit(gSum, modelGrid[0]!, step, qmax).subarray(sliceOffset, sliceOffset + rWindow.length)
       : gSum;
-    if (restraints.length === 0) return gCalc;
-    const withRestraints = new Float64Array(gCalc.length + restraints.length);
-    withRestraints.set(gCalc.subarray(0, rValues.length), 0);
+    const out = new Float64Array(rValues.length + restraints.length);
+    out.set(gWindow.subarray(0, rWindow.length), i0);
     for (let i = 0; i < restraints.length; i++) {
       const restraint = restraints[i]!;
       let value = 0;
       for (const term of restraint.terms) value += term.coefficient * (resolved[term.parameterId] ?? 0);
-      withRestraints[rValues.length + i] = value;
+      out[rValues.length + i] = value;
     }
-    return withRestraints;
+    return out;
   };
 
   return { parameters, observations, weights, calculate };
@@ -265,8 +286,9 @@ export function multiPhasePdfCurves(
   pattern: PdfPattern,
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
+  fitRange?: FitRange,
 ): PdfCurves {
-  const problem = buildMultiPhasePdfProblem(phases, pattern, parameters, bindings);
+  const problem = buildMultiPhasePdfProblem(phases, pattern, parameters, bindings, [], fitRange);
   const values: Record<string, number> = {};
   for (const p of parameters) values[p.id] = p.value;
   const yCalc = problem.calculate(values);
@@ -286,9 +308,12 @@ export function pdfPhaseCurves(
   pattern: PdfPattern,
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
+  fitRange?: FitRange,
 ): PdfPartialCurve[] {
   const rValues = pattern.points.map((p) => p.r);
-  const plan = terminationPlanFor(pattern, rValues);
+  const { i0, i1 } = windowFor(rValues, fitRange);
+  const rWindow = rValues.slice(i0, i1);
+  const plan = terminationPlanFor(pattern, rWindow);
   const values: Record<string, number> = {};
   for (const p of parameters) values[p.id] = p.value;
   const resolved = resolveTies(parameters, values);
@@ -297,9 +322,11 @@ export function pdfPhaseCurves(
     const atoms = expandStructureAtoms(applied.model);
     const params: PdfModelParams = { scatteringType: pattern.scatteringType, ...(applied.pdf ?? PDF_DEFAULTS) };
     const g = computeGofR(applied.model.cell, atoms, plan.modelGrid, params);
-    const y = plan.terminate
-      ? bandLimit(g, plan.modelGrid[0]!, plan.step, plan.qmax).subarray(plan.sliceOffset, plan.sliceOffset + rValues.length)
+    const gWindow = plan.terminate
+      ? bandLimit(g, plan.modelGrid[0]!, plan.step, plan.qmax).subarray(plan.sliceOffset, plan.sliceOffset + rWindow.length)
       : g;
+    const y = new Float64Array(rValues.length);
+    y.set(gWindow.subarray(0, rWindow.length), i0);
     return { label: phase.structure.name || phase.id, y: Array.from(y) };
   });
 }
@@ -372,9 +399,11 @@ export function buildMultiDatasetPdfProblem(
   restraints: readonly LinearRestraint[] = [],
   fitRanges: readonly (FitRange | undefined)[] = [],
 ): RefinementProblem {
-  const plans = patterns.map((pattern) => {
+  const plans = patterns.map((pattern, i) => {
     const rValues = pattern.points.map((p) => p.r);
-    return { pattern, rValues, plan: terminationPlanFor(pattern, rValues) };
+    const { i0, i1 } = windowFor(rValues, fitRanges[i]);
+    const rWindow = rValues.slice(i0, i1);
+    return { pattern, rValues, i0, rWindow, plan: terminationPlanFor(pattern, rWindow) };
   });
   const nData = plans.reduce((s, d) => s + d.rValues.length, 0);
 
@@ -418,10 +447,10 @@ export function buildMultiDatasetPdfProblem(
       }
       const params: PdfModelParams = { scatteringType: d.pattern.scatteringType, ...(applied.pdf ?? PDF_DEFAULTS) };
       const g = computeGofR(applied.model.cell, atoms, d.plan.modelGrid, params, cachedPairs);
-      const sliced = d.plan.terminate
-        ? bandLimit(g, d.plan.modelGrid[0]!, d.plan.step, d.plan.qmax).subarray(d.plan.sliceOffset, d.plan.sliceOffset + d.rValues.length)
+      const gWindow = d.plan.terminate
+        ? bandLimit(g, d.plan.modelGrid[0]!, d.plan.step, d.plan.qmax).subarray(d.plan.sliceOffset, d.plan.sliceOffset + d.rWindow.length)
         : g;
-      out.set(sliced.subarray(0, d.rValues.length), cursor);
+      out.set(gWindow.subarray(0, d.rWindow.length), cursor + d.i0);
       cursor += d.rValues.length;
     }
     for (let i = 0; i < restraints.length; i++) {
@@ -477,9 +506,12 @@ export function pdfPartialCurves(
   pattern: PdfPattern,
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
+  fitRange?: FitRange,
 ): PdfPartialCurve[] {
   const rValues = pattern.points.map((p) => p.r);
-  const plan = terminationPlanFor(pattern, rValues);
+  const { i0, i1 } = windowFor(rValues, fitRange);
+  const rWindow = rValues.slice(i0, i1);
+  const plan = terminationPlanFor(pattern, rWindow);
   const values: Record<string, number> = {};
   for (const p of parameters) values[p.id] = p.value;
   const resolved = resolveTies(parameters, values);
@@ -488,10 +520,12 @@ export function pdfPartialCurves(
   const params: PdfModelParams = { scatteringType: pattern.scatteringType, ...(applied.pdf ?? PDF_DEFAULTS) };
   const partials = computePartialsGofR(applied.model.cell, atoms, plan.modelGrid, params);
   return partials.map((p) => {
-    const g = plan.terminate
-      ? bandLimit(p.g, plan.modelGrid[0]!, plan.step, plan.qmax).subarray(plan.sliceOffset, plan.sliceOffset + rValues.length)
+    const gWindow = plan.terminate
+      ? bandLimit(p.g, plan.modelGrid[0]!, plan.step, plan.qmax).subarray(plan.sliceOffset, plan.sliceOffset + rWindow.length)
       : p.g;
-    return { label: p.label, y: Array.from(g) };
+    const y = new Float64Array(rValues.length);
+    y.set(gWindow.subarray(0, rWindow.length), i0);
+    return { label: p.label, y: Array.from(y) };
   });
 }
 

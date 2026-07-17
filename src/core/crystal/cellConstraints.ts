@@ -179,8 +179,14 @@ const eqLen = (x: number, y: number): boolean => Math.abs(x - y) <= 1e-3 * Math.
 
 /** Crystal system from the IT number (authoritative), else the cell metric. */
 export function crystalSystem(spaceGroup: SpaceGroup, cell: UnitCell): CrystalSystem {
+  // A declared P1/P-1 (n < 3) carries no rotational symmetry to trust — fall
+  // through to the METRIC: structures exported "in P1" from a higher-symmetry
+  // parent (VESTA/CIF converts) keep an exactly special metric (a = b, γ = 120,
+  // …), and treating them as triclinic silently frees lattice parameters the
+  // parent ties (a real fit then breaks a = b — seen on a hexagonal P1 export).
+  // A genuinely triclinic cell has no special metric and still gets 6 params.
   const n = spaceGroup.number;
-  if (n !== undefined) {
+  if (n !== undefined && n >= 3) {
     if (n >= 195) return "cubic";
     if (n >= 168) return "hexagonal";
     if (n >= 143) {
