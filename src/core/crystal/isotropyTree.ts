@@ -51,7 +51,12 @@ const wrap = (v: number): number => {
   if (x < 0) x += 1;
   return x;
 };
-const samePos = (a: Vec3, b: Vec3, tol = 1e-4): boolean => {
+// Position tolerance 1e-3, matching the repo-wide orbit-dedup convention
+// (equivalentPositions / orbitAtoms / the isInteger lattice test). A tighter
+// tolerance here would silently DROP group actions for coordinates that sit
+// 1e-4–1e-3 off a special position — exactly what refined geometries produce —
+// degrading the character projector into garbage (verified failure mode).
+const samePos = (a: Vec3, b: Vec3, tol = 1e-3): boolean => {
   for (let i = 0; i < 3; i++) {
     const d = Math.abs(wrap(a[i]!) - wrap(b[i]!));
     if (Math.min(d, 1 - d) > tol) return false;
@@ -80,12 +85,19 @@ export function projectIsotypicModes(
   if (N === 0) return [];
   const M = orthogonalizationMatrix(structure.cell);
 
-  // Atom index of the op-image of atom j (mod lattice), per op.
+  // Atom index of the op-image of atom j (mod lattice), per op. A failed match
+  // means the orbit is NOT closed under the supplied group (tolerance drift or
+  // a caller bug) — the projector output would be silently wrong, so refuse.
   const imageIndex: number[][] = ops.map((g) =>
     atoms.map((r) => {
       const img = applyOperation(g, r);
       const m = atoms.findIndex((q) => samePos(q, img));
-      return m; // −1 never happens for a closed orbit under the full group
+      if (m < 0) {
+        throw new Error(
+          `projectIsotypicModes: orbit not closed under the group (atom ${r.join(",")} maps outside the atom list under ${g.xyz}) — position tolerances disagree or the structure/ops mismatch`,
+        );
+      }
+      return m;
     }),
   );
 
@@ -246,6 +258,22 @@ export function identifySubgroup(
 }
 
 /**
+ * Setting-invariant canonical key for a subgroup operation set: the minimal
+ * canonical op-set key over the 24 proper axis-permutation settings. Two
+ * conjugate (axis-permuted) subgroups share a key; subgroups differing in
+ * TRANSLATION content (Pm vs Pc — same point group, same index) do not, so
+ * grouping tree entries by this key never merges inequivalent subgroups.
+ */
+export function subgroupTypeKey(subOps: readonly SymmetryOperation[]): string {
+  let best: string | null = null;
+  for (const P of properCubicRotations()) {
+    const k = opSetKey(subOps.map((op) => transformOperation(op, P)));
+    if (best === null || k < best) best = k;
+  }
+  return best ?? opSetKey(subOps);
+}
+
+/**
  * Re-express the parent structure in a subgroup setting: split every Wyckoff
  * orbit into its subgroup orbits and emit one asymmetric site per subgroup
  * orbit (labels get a/b/c… suffixes when an orbit splits). Cell and site
@@ -268,19 +296,44 @@ export function realizeSubgroup(
       else classes.push([atom]);
     }
     // One child site per class; keep the original stored position as the
-    // representative of its own class.
+    // representative of its own class. Split labels get base-26 letter
+    // suffixes (a…z, aa, ab, …), advanced past any collision with existing
+    // parent labels or already-emitted child labels — everything downstream
+    // (bindings, seeds, exports) is keyed by site label.
+    const taken = new Set<string>([...parent.sites.map((s) => s.label), ...sites.map((s) => s.label)]);
+    const suffix = (n: number): string => {
+      let s = "";
+      let x = n;
+      do {
+        s = String.fromCharCode(97 + (x % 26)) + s;
+        x = Math.floor(x / 26) - 1;
+      } while (x >= 0);
+      return s;
+    };
     classes.forEach((cls, ci) => {
       const rep = cls.find((p) => samePos(p, site.position)) ?? cls[0]!;
-      const label = classes.length === 1 ? site.label : `${site.label}${String.fromCharCode(97 + ci)}`;
+      let label = site.label;
+      if (classes.length > 1) {
+        let k = ci;
+        do {
+          label = `${site.label}${suffix(k)}`;
+          k += classes.length;
+        } while (taken.has(label));
+      }
+      taken.add(label);
       sites.push({ ...site, label, position: [rep[0]!, rep[1]!, rep[2]!] as [number, number, number] });
     });
   }
+  // Stamp the standard name ONLY when the operation list actually IS the
+  // standard setting (a permuted-setting match would put a symbol on ops it
+  // does not describe — the identity is still reported to callers for labels).
+  const direct = identity?.method === "direct";
   return {
     ...parent,
     spaceGroup: {
       operations: [...subOps],
-      ...(identity?.hermannMauguin !== undefined ? { hermannMauguin: identity.hermannMauguin } : {}),
-      ...(identity?.number !== undefined ? { number: identity.number } : {}),
+      ...(direct && identity?.hermannMauguin !== undefined ? { hermannMauguin: identity.hermannMauguin } : {}),
+      ...(direct && identity?.number !== undefined ? { number: identity.number } : {}),
     },
     sites,
   };

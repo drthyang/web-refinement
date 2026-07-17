@@ -94,6 +94,73 @@ describe("mirror (Cs) displacement decomposition — hand check", () => {
   });
 });
 
+describe("complex conjugate pairs merge into physically irreducible reps (P4)", () => {
+  // Cyclic C4 about z: irreps Γ1 (trivial), Γ3 (χ(C4) = −1, real) and the
+  // conjugate pair Γ2/Γ4 (χ(C4) = ±i) — which a REAL displacement can only
+  // realize together. Site A on the 4-axis (1 atom, allowed shift z) + a
+  // general site B (orbit 4): 5 atoms, dim 15.
+  //   χ_disp = (15, 1, −1, 1) over (E, C4, C2, C4³)
+  //   n(Γ1) = 4 (= symmetry-conserving DOF: A z + B xyz... per-orbit),
+  //   n(Γ3) = 3, n(Γ2) = n(Γ4) = 4 → merged pair: dim 2, multiplicity 4.
+  // Acoustic: χ_vec = (3, 1, −1, 1) → Γ1: 1 (z), pair: 1 (x±iy), Γ3: 0.
+  const C4: SymmetryOperation = {
+    rotation: [
+      [0, -1, 0],
+      [1, 0, 0],
+      [0, 0, 1],
+    ],
+    translation: [0, 0, 0],
+    xyz: "-y,x,z",
+  };
+  const C2: SymmetryOperation = {
+    rotation: [
+      [-1, 0, 0],
+      [0, -1, 0],
+      [0, 0, 1],
+    ],
+    translation: [0, 0, 0],
+    xyz: "-x,-y,z",
+  };
+  const C4cube: SymmetryOperation = {
+    rotation: [
+      [0, 1, 0],
+      [-1, 0, 0],
+      [0, 0, 1],
+    ],
+    translation: [0, 0, 0],
+    xyz: "y,-x,z",
+  };
+  const TET: UnitCell = { a: 5, b: 5, c: 7, alpha: 90, beta: 90, gamma: 90 };
+  const p4: StructureModel = {
+    id: "p4", name: "P4-like", cell: TET,
+    spaceGroup: { operations: [IDENTITY_OP, C4, C2, C4cube] },
+    sites: [site("A1", "Ti", [0, 0, 0.1]), site("B1", "O", [0.2, 0.1, 0.3])],
+  };
+  const dec = decomposeDisplacementRepresentation(p4);
+
+  it("emits ONE merged pair term (real, dim 2) — never both conjugate members", () => {
+    expect(dec.available).toBe(true);
+    expect(dec.integerConsistent).toBe(true);
+    expect(dec.dimension).toBe(15);
+    // Three terms: trivial Γ1, real Γ3, and the merged Γ2⊕Γ4 pair.
+    expect(dec.terms).toHaveLength(3);
+    const pair = dec.terms.find((t) => t.irrep.label.includes("⊕"))!;
+    expect(pair).toBeDefined();
+    expect(pair.irrep.real).toBe(true);
+    expect(pair.irrep.dim).toBe(2);
+    expect(pair.multiplicity).toBe(4);
+    expect(pair.acoustic).toBe(1); // the x±iy translation pair
+    const trivial = dec.terms.find((t) => t.trivial)!;
+    expect(trivial.multiplicity).toBe(4);
+    expect(trivial.acoustic).toBe(1); // the z translation
+    const g3 = dec.terms.find((t) => !t.trivial && !t.irrep.label.includes("⊕"))!;
+    expect(g3.multiplicity).toBe(3);
+    expect(g3.acoustic).toBe(0);
+    // Σ multiplicity·dim = 3N — the invariant a double-listed pair breaks.
+    expect(dec.terms.reduce((s, t) => s + t.multiplicity * (t.irrep.dim ?? 1), 0)).toBe(15);
+  });
+});
+
 describe("cubic perovskite (BaTiO₃, Pm-3m) — the textbook Γ decomposition", () => {
   // Ba 1a (0,0,0) + Ti 1b (½,½,½) + O 3c (0,½,½): 5 atoms, dim 15.
   // Known result (ISODISTORT/AMPLIMODES): Γ_disp = 4·T1u ⊕ 1·T2u.

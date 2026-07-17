@@ -33,6 +33,7 @@ import {
   projectIsotypicModes,
   stabilizerOfField,
   identifySubgroup,
+  subgroupTypeKey,
   activateDisplacementMode,
   type DisplacementField,
   type SubgroupIdentity,
@@ -404,20 +405,29 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // which irreps could carry a symmetry-breaking distortion, and — per irrep —
   // which isotropy subgroups its modes lead to. Computed only when the 3D
   // Model card (which hosts the tree) is visible; single-phase only.
+  // The tree enumerates the PARENT's irreps, so it is only offered from the
+  // pristine parent state — an active mode set (activation or parent-CIF)
+  // lives in a different setting whose irreps/labels would not match; the
+  // user clears it (✕) first. Acoustic-only terms (optic = 0) are dropped:
+  // their entire content is a rigid translation the gauge projection would
+  // discard, making activation a guaranteed no-op.
   const subgroupTree = useMemo(() => {
-    if (multiPhase || viewTab !== "model3d") return null;
+    if (multiPhase || viewTab !== "model3d" || modes !== null) return null;
     const dec = decomposeDisplacementRepresentation(structure);
     if (!dec.available) return null;
     const terms = dec.terms
-      .filter((t) => !t.trivial)
+      .filter((t) => !t.trivial && t.multiplicity - t.acoustic > 0)
       .map((term) => {
         const fields = projectIsotypicModes(structure, undefined, term, structure.spaceGroup.operations);
         // Group candidate modes by the subgroup they lead to — the tree view.
+        // The key must distinguish subgroups that share point group and index
+        // but differ in translation content (Pm vs Pc), hence the
+        // setting-invariant op-set key fallback.
         const bySub = new Map<string, { identity: SubgroupIdentity; field: DisplacementField; count: number }>();
         for (const f of fields) {
           const subOps = stabilizerOfField(f, structure.spaceGroup.operations);
           const id = identifySubgroup(subOps, structure.spaceGroup.operations);
-          const key = id.number !== undefined ? `#${id.number}` : `${id.pointGroup ?? "?"}/${id.index}`;
+          const key = id.number !== undefined ? `#${id.number}` : subgroupTypeKey(subOps);
           const e = bySub.get(key);
           if (e) e.count++;
           else bySub.set(key, { identity: id, field: f, count: 1 });
@@ -425,7 +435,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         return { term, subgroups: [...bySub.values()] };
       });
     return { dec, terms };
-  }, [multiPhase, viewTab, structure]);
+  }, [multiPhase, viewTab, structure, modes]);
 
   // Activate one symmetry-breaking mode: realize the isotropy-subgroup child
   // (split Wyckoff orbits — parent ops would re-symmetrize the displacement
@@ -467,10 +477,19 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       return;
     }
     const act = activateDisplacementMode(refined, fieldNow, label);
+    // The seed survives only if it has optic (non-gauge) content — a pure
+    // acoustic field is projected away by buildSymmetryModes. Target the kick
+    // by the ACTIVE mode's id, never by index: with a dropped seed, index 0
+    // would be an unrelated fixed complement mode.
+    const activeId = act.modeSet.modes.find((m) => m.active)?.id;
+    if (activeId === undefined) {
+      console.error(`[status] activation of ${label} produced no refinable mode (the field is pure rigid translation) — nothing to do`);
+      return;
+    }
     const set: DistortionModeSet = {
       ...act.modeSet,
-      parameters: act.modeSet.parameters.map((p, i) =>
-        i === 0 ? { ...p, value: ACTIVATION_KICK, initialValue: ACTIVATION_KICK } : p,
+      parameters: act.modeSet.parameters.map((p) =>
+        p.id === activeId ? { ...p, value: ACTIVATION_KICK, initialValue: ACTIVATION_KICK, fixed: false } : p,
       ),
     };
     skipPositionCarryoverOnce.current = true; // keep the kick; carry the rest by id

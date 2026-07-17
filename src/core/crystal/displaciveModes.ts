@@ -160,18 +160,55 @@ export function decomposeDisplacementRepresentation(
   }
   if (!irreps) return { available: false, method: null, dimension, terms: [], integerConsistent: false };
 
+  // Merge complex conjugate pairs into PHYSICALLY irreducible reps: a real
+  // displacement field cannot transform as one member of a conjugate pair
+  // alone (the real span combines both), so listing χ and χ* separately would
+  // show the same physical distortion twice with double-counted mode bases.
+  // The merged term carries the PAIR characters χ+χ* (real — this is what the
+  // isotypic projector must use) and dim = 2d, while multiplicity and acoustic
+  // content are counted per PAIR (from a single member: n_pair = n_χ = n_χ*),
+  // keeping Σ multiplicity·dim = 3N.
+  const isConj = (a: Irrep, b: Irrep): boolean =>
+    a.characters.length === b.characters.length &&
+    a.characters.every((c, i) => Math.abs(c.re - b.characters[i]!.re) < 1e-9 && Math.abs(c.im + b.characters[i]!.im) < 1e-9);
+  const merged: { irrep: Irrep; multChars: readonly { re: number; im: number }[] }[] = [];
+  const used = new Set<number>();
+  irreps.forEach((a, i) => {
+    if (used.has(i)) return;
+    if (a.real) {
+      merged.push({ irrep: a, multChars: a.characters });
+      return;
+    }
+    const j = irreps!.findIndex((b, bi) => bi > i && !used.has(bi) && !b.real && isConj(a, b));
+    if (j >= 0) {
+      used.add(j);
+      const b = irreps![j]!;
+      merged.push({
+        irrep: {
+          label: `${a.label}⊕${b.label}`,
+          characters: a.characters.map((c, k) => ({ re: c.re + b.characters[k]!.re, im: c.im + b.characters[k]!.im })),
+          real: true,
+          dim: (a.dim ?? 1) + (b.dim ?? 1),
+        },
+        multChars: a.characters, // per-pair count = single-member multiplicity
+      });
+    } else {
+      merged.push({ irrep: a, multChars: a.characters });
+    }
+  });
+
   // Plain vector rep χ = tr(R): its irrep content is the acoustic branch.
   const vectorChi = ops.map((op) => ({ re: polarCharacter(op.rotation), im: 0 }));
   const reducible = chi.map((c) => ({ re: c.re, im: c.im }));
 
   const terms: DisplaciveIrrepTerm[] = [];
   let integerConsistent = true;
-  for (const irrep of irreps) {
-    const nRaw = irrepMultiplicity(reducible, irrep.characters);
+  for (const { irrep, multChars } of merged) {
+    const nRaw = irrepMultiplicity(reducible, multChars);
     const n = Math.round(nRaw);
     if (Math.abs(nRaw - n) > 0.05) integerConsistent = false;
     if (n <= 0) continue;
-    const aRaw = irrepMultiplicity(vectorChi, irrep.characters);
+    const aRaw = irrepMultiplicity(vectorChi, multChars);
     const acoustic = Math.min(n, Math.max(0, Math.round(aRaw)));
     const trivial = irrep.characters.every((c) => Math.abs(c.re - 1) < 1e-9 && Math.abs(c.im) < 1e-9);
     terms.push({ irrep, multiplicity: n, acoustic, trivial });

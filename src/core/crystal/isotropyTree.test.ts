@@ -84,6 +84,69 @@ describe("isotypic projector dimensions", () => {
   });
 });
 
+describe("refined-geometry tolerance (positions slightly off special values)", () => {
+  // A refined coordinate 0.0004 off the mirror (≈ 0.003 Å) — inside the
+  // repo-wide 1e-3 orbit-dedup tolerance, so the mirror still holds. The
+  // projector must see the SAME symmetry (regression: a tighter 1e-4 match
+  // silently dropped the mirror op, emitted 3 spurious modes including
+  // non-breaking x/z displacements, and offered them as 'Activate → P1').
+  const MIRROR_Y: import("@/core/crystal/types").SymmetryOperation = {
+    rotation: [
+      [1, 0, 0],
+      [0, -1, 0],
+      [0, 0, 1],
+    ],
+    translation: [0, 0, 0],
+    xyz: "x,-y,z",
+  };
+  const cell: UnitCell = { a: 6, b: 7, c: 8, alpha: 90, beta: 90, gamma: 90 };
+  const offMirror: StructureModel = {
+    id: "off", name: "off-mirror", cell,
+    spaceGroup: { operations: [{ rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], translation: [0, 0, 0], xyz: "x,y,z" }, MIRROR_Y] },
+    sites: [site("A1", "Ni", [0.1, 0.0004, 0.3])],
+  };
+
+  it("the symmetry-breaking term projects exactly ONE mode, along y", () => {
+    const dec = decomposeDisplacementRepresentation(offMirror);
+    expect(dec.available).toBe(true);
+    const breaking = dec.terms.find((t) => !t.trivial)!;
+    expect(breaking.multiplicity).toBe(1);
+    const fields = projectIsotypicModes(offMirror, undefined, breaking, offMirror.spaceGroup.operations);
+    expect(fields).toHaveLength(1);
+    for (const a of fields[0]!.atoms) {
+      expect(Math.abs(a.u[0])).toBeLessThan(1e-9); // no spurious x
+      expect(Math.abs(a.u[2])).toBeLessThan(1e-9); // no spurious z
+    }
+  });
+});
+
+describe("pure-acoustic activation is a visible no-op, not a silent mis-kick", () => {
+  it("a uniform-translation field yields a mode set with NO active mode", () => {
+    const cell: UnitCell = { a: 5, b: 5, c: 8, alpha: 90, beta: 90, gamma: 90 };
+    const MIRROR_Z: import("@/core/crystal/types").SymmetryOperation = {
+      rotation: [[1, 0, 0], [0, 1, 0], [0, 0, -1]],
+      translation: [0, 0, 0],
+      xyz: "x,y,-z",
+    };
+    const s: StructureModel = {
+      id: "m", name: "mirror", cell,
+      spaceGroup: { operations: [{ rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], translation: [0, 0, 0], xyz: "x,y,z" }, MIRROR_Z] },
+      sites: [site("A1", "Ni", [0, 0, 0]), site("B1", "O", [0.3, 0, 0.2])],
+    };
+    const translation: DisplacementField = {
+      atoms: [
+        { position: [0, 0, 0], u: [0.01, 0, 0] },
+        { position: [0.3, 0, 0.2], u: [0.01, 0, 0] },
+        { position: [0.3, 0, 0.8], u: [0.01, 0, 0] },
+      ],
+    };
+    const act = activateDisplacementMode(s, translation, "pure translation");
+    // The stabilizer is the whole group (a rigid translation breaks nothing),
+    // and the gauge projection removes the seed entirely: no active mode.
+    expect(act.modeSet.modes.some((m) => m.active)).toBe(false);
+  });
+});
+
 describe("stabilizer + subgroup identification (OP-direction dependence)", () => {
   const s = batio3();
 
