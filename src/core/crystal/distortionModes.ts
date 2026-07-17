@@ -391,6 +391,14 @@ export function buildDistortionModes(parent: StructureModel, child: StructureMod
  * order parameter to pre-free, so the user (or the subgroup tree) activates
  * modes deliberately — `withDistortionModes` honors the flag.
  *
+ * SEEDS (subgroup-tree activation): `opts.seeds` supplies displacement fields
+ * that become the LEADING modes of the catalog — normalized, orthogonalized
+ * against the acoustic gauge (only the optic part of a seeded field is
+ * observable) and each other, emitted `active: true` with the caller's label.
+ * The complement basis then fills the remaining symmetry-allowed space as
+ * usual. This is how an activated irrep distortion enters the refinement as
+ * mode 1 while the child's other degrees of freedom stay deliberately fixed.
+ *
  * ACOUSTIC EXCLUSION: a uniform (rigid) translation of the whole structure is
  * exactly unobservable in any scattering quantity — G(r) sees only interatomic
  * vectors and |F|² is origin-invariant — so when a lattice-axis translation
@@ -403,7 +411,17 @@ export function buildDistortionModes(parent: StructureModel, child: StructureMod
  * mode basis. (The child-decomposition path `buildDistortionModes` is left
  * as-is: its frozen order parameter is an observed, observable displacement.)
  */
-export function buildSymmetryModes(structure: StructureModel): DistortionModeSet {
+export interface SymmetryModeSeed {
+  /** Per-site fractional displacement of the seeded mode. */
+  readonly axes: readonly { readonly siteLabel: string; readonly axis: Vec3 }[];
+  readonly label: string;
+  readonly star?: string;
+}
+
+export function buildSymmetryModes(
+  structure: StructureModel,
+  opts?: { readonly seeds?: readonly SymmetryModeSeed[] },
+): DistortionModeSet {
   const M = orthogonalizationMatrix(structure.cell);
   const ops = structure.spaceGroup.operations;
 
@@ -536,6 +554,30 @@ export function buildSymmetryModes(structure: StructureModel): DistortionModeSet
     }
   }
 
+  // Seeded modes first (subgroup-tree activation): the caller's displacement
+  // fields, gauge-projected and normalized, become the leading catalog entries
+  // and are emitted `active: true` under the caller's label.
+  const ortho: GlobalVec[] = [];
+  const seedMeta: { readonly label: string; readonly star?: string }[] = [];
+  for (const seed of opts?.seeds ?? []) {
+    let w = zero();
+    for (const ax of seed.axes) {
+      const j = sites.findIndex((p) => p.site.label === ax.siteLabel);
+      if (j < 0) continue;
+      const f = w.frac[j] as [number, number, number];
+      f[0] += ax.axis[0];
+      f[1] += ax.axis[1];
+      f[2] += ax.axis[2];
+    }
+    for (const u of gauge) w = minus(w, u, dot(w, u));
+    for (const u of ortho) w = minus(w, u, dot(w, u));
+    const n = Math.sqrt(cartNormSq(w));
+    if (n > 1e-8) {
+      ortho.push(scaled(w, 1 / n));
+      seedMeta.push({ label: seed.label, ...(seed.star !== undefined ? { star: seed.star } : {}) });
+    }
+  }
+
   // Candidates: every allowed direction of every site, in deterministic
   // (asymmetric-site order, basis order) sequence, orthogonalized against the
   // acoustic gauge modes first (they are seeded but never emitted) and then
@@ -543,7 +585,6 @@ export function buildSymmetryModes(structure: StructureModel): DistortionModeSet
   // different sites have disjoint support and Gram–Schmidt never mixes sites;
   // with them, translation-orthogonal modes legitimately span several sites
   // (relative-displacement patterns — exactly the observable content).
-  const ortho: GlobalVec[] = [];
   sites.forEach((p, j) => {
     for (const b of p.basis) {
       let w = zero();
@@ -575,15 +616,17 @@ export function buildSymmetryModes(structure: StructureModel): DistortionModeSet
         domJ = j;
       }
     });
-    const label = `mode ${k + 1} @ Γ (${sites[domJ]!.site.label})`;
-    parameters.push({ id, label, kind: "positionShift", value: 0, initialValue: 0, fixed: true });
+    const seed = seedMeta[k];
+    const label = seed ? seed.label : `mode ${k + 1} @ Γ (${sites[domJ]!.site.label})`;
+    const active = seed !== undefined;
+    parameters.push({ id, label, kind: "positionShift", value: 0, initialValue: 0, fixed: !active });
     const axes: { siteLabel: string; axis: Vec3 }[] = [];
     m.frac.forEach((f, j) => {
       if (Math.hypot(f[0], f[1], f[2]) < 1e-10) return;
       axes.push({ siteLabel: sites[j]!.site.label, axis: f });
       bindings.push({ parameterId: id, kind: "positionShift", targetId: structure.id, targetKey: sites[j]!.site.label, axis: f });
     });
-    modes.push({ id, label, star: "Γ", observedAmplitude: 0, axes, active: false });
+    modes.push({ id, label, star: seed?.star ?? "Γ", observedAmplitude: 0, axes, active });
   });
 
   return {
