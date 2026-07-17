@@ -152,3 +152,10 @@ project shows how it got where it is.
   via `RefinementParameter.group` / `expression`, not a full expression compiler.
 - Simulated annealing / global optimization — LM is local; good starting models
   are assumed. Called out in [LIMITATIONS.md](./LIMITATIONS.md).
+- Alternative *local* minimizers behind the same `RefinementProblem` seam —
+  L-BFGS/L-BFGS-B and other gradient-only quasi-Newton methods for large-parameter
+  or expensive-Jacobian regimes, plus structure-preserving LM upgrades (geodesic
+  acceleration, trust-region step control, iterative LSMR/CG inner solves). LM
+  stays primary because it yields the covariance/ESDs for free; a gradient-only
+  driver would still need a final Hessian pass for uncertainties. Planned as
+  ROADMAP.md F1 item 7.
