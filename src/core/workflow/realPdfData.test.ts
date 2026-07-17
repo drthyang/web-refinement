@@ -144,3 +144,61 @@ describe.skipIf(!dataExists(GTS_GR) || !dataExists(GTS_CIF))("REAL GaTa4Se8 5K (
     expect(refined.result.status).toBe("converged");
   }, 600000);
 });
+
+// --- Local-structure head-to-head: cubic average vs the distorted P2_13 model
+// (extracted from the user's PDFgui P213.ddp refined 5.8 K state; their
+// protocol: r = 2-10 A, qdamp 0.0383, qbroad 0.0472, PDFgui Rw 8.88%). ---
+const P213_CIF = "GaNb4Se8_PDF_Qmax_27/P213_5p8K_extracted.cif";
+
+const trunc2 = (p: PdfPattern, rMax: number): PdfPattern => ({ ...p, points: p.points.filter((q) => q.r <= rMax) });
+
+async function localFit(structure: object, pattern: PdfPattern, qdamp: number, qbroad: number, label: string): Promise<number> {
+  const model = tools.build_pdf_model({ structure: structure as never, pattern });
+  const params = model.parameters.map((p) => {
+    if (p.id === "qdamp") return { ...p, value: qdamp };
+    if (p.id === "qbroad") return { ...p, value: qbroad };
+    if (p.kind === "bIso" || p.id === "delta2") return { ...p, fixed: false };
+    if (p.kind === "cellAngle") return { ...p, fixed: true };
+    return p;
+  });
+  const refined = await tools.refine_pdf({
+    structure: structure as never, pattern, parameters: params, bindings: model.bindings,
+    restraints: model.restraints, staged: true, fitRange: { min: 2.0, max: 10.0 }, maxIterations: 40,
+  });
+  const rw = refined.result.agreement.rWeighted ?? 1;
+  const aP = params.find((p) => p.kind === "cellLength")!;
+  // eslint-disable-next-line no-console
+  console.log(`[${label}] ${refined.result.status} · Rw(2–10 Å)=${(rw * 100).toFixed(2)}% · a=${(refined.result.parameters[aP.id] ?? 0).toFixed(5)} · free=${params.filter((p) => !p.fixed && !p.expression).length}`);
+  expect(refined.result.status).toBe("converged");
+  return rw;
+}
+
+describe.skipIf(!dataExists(GANB_GR) || !dataExists(P213_CIF))("GaNb4Se8 5.8K — cubic vs P2₁3 local fit (r = 2–10 Å, PDFgui settings)", () => {
+  it("distorted P2₁3 beats the cubic average; target: PDFgui Rw 8.88%", async () => {
+    const pattern = trunc2(tools.parse_pdf_data({ text: readData(GANB_GR), filename: "g.gr" }).pattern, 12);
+    const cubic = tools.parse_structure({ cif: readData(GANB_CIF) }).structure;
+    const p213 = tools.parse_structure({ cif: readData(P213_CIF) }).structure;
+    // eslint-disable-next-line no-console
+    console.log(`[models] cubic ${cubic.spaceGroup.hermannMauguin} ${cubic.sites.length} sites · p213 ${p213.spaceGroup.hermannMauguin} ${p213.sites.length} sites`);
+    const rwCubic = await localFit(cubic, pattern, 0.0383, 0.0472, "GaNb cubic 2–10");
+    const rwP213 = await localFit(p213, pattern, 0.0383, 0.0472, "GaNb P213 2–10");
+    expect(rwP213).toBeLessThan(rwCubic);
+  }, 600000);
+});
+
+describe.skipIf(!dataExists(GTS_GR) || !dataExists(P213_CIF))("GaTa4Se8 5K — Ta-substituted P2₁3 local fit", () => {
+  it("the distorted model fits the NOMAD 5K frame far better than cubic", async () => {
+    const pattern = trunc2(tools.parse_pdf_data({ text: readData(GTS_GR), filename: "gts.gr" }).pattern, 12);
+    const p213 = tools.parse_structure({ cif: readData(P213_CIF) }).structure;
+    const scale = 10.3563 / p213.cell.a;
+    const gts = {
+      ...p213,
+      cell: { ...p213.cell, a: p213.cell.a * scale, b: p213.cell.b * scale, c: p213.cell.c * scale },
+      sites: p213.sites.map((s) => (s.element === "Nb" ? { ...s, element: "Ta", label: s.label.replace("Nb", "Ta") } : s)),
+    };
+    const cubic = tools.parse_structure({ cif: readData("GaTa4Se8_NOMAD/GTS_5K.cif") }).structure;
+    const rwCubic = await localFit(cubic, pattern, 0.02, 0, "GTS cubic 2–10");
+    const rwP213 = await localFit(gts, pattern, 0.02, 0, "GTS P213 2–10");
+    expect(rwP213).toBeLessThan(rwCubic);
+  }, 600000);
+});
