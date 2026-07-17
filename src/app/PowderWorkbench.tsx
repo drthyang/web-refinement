@@ -68,7 +68,7 @@ import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { InfoBadge } from "@/app/ui/InfoBadge";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
-import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono, fz } from "@/app/theme";
+import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono, fz, toolbarBtn, resetRangeBtn } from "@/app/theme";
 import { applyParameters } from "@/core/workflow/apply";
 import { excludedPointMask } from "@/core/refinement/factors";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
@@ -1043,7 +1043,7 @@ export function PowderWorkbench({
           <>
             <SummaryCards cards={summaryCards} />
             <div className="wb-work2">
-              <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 64vh, 760px)" }}>
+              <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 66vh, 900px)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
                   <span style={themeLabel}>
                     {plotMode === "structure" ? "Crystal structure — unit cell" : plotMode === "validation" ? "Validation plots" : "Powder pattern"}
@@ -1455,41 +1455,33 @@ function ViewModeToggle({
 }
 
 const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 700, color: theme.ink };
-const toolbarBtn: React.CSSProperties = { border: `1px solid ${theme.primary}`, background: "#fff", color: theme.primary, borderRadius: 8, padding: "3px 11px", fontSize: 11, fontWeight: 600, fontFamily: themeMono, cursor: "pointer" };
-const resetRangeBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "1px 9px", fontSize: 11, fontFamily: themeMono, color: theme.secondary, cursor: "pointer" };
 const clearStructuresBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "3px 10px", fontSize: 11.5, color: theme.secondary, cursor: "pointer" };
 const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "2px 6px", fontSize: 12, color: theme.ink, cursor: "pointer" };
 const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };
 
-/** Empty-state panel shown in place of the plot/parameters on a clean start —
- *  the load cards sit above it; this points the user at them or a demo. One
- *  converged demo per technique (Rietveld / PDF), matching the header chips. */
+/** Empty-state panel shown in place of the plot/parameters on a clean start.
+ *  The two converged demos (one per technique, matching the header chips) are
+ *  the visual focus; the load cards above handle the user's own files. */
 function EmptyWorkbench({ onLoadDemo }: { onLoadDemo?: (kind: "rietveld" | "pdf") => void }): JSX.Element {
   return (
-    <div style={{ ...themeCard, padding: "clamp(40px, 9vh, 104px) 24px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 14 }}>
-      <div style={emptyIconBox} aria-hidden>
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke={theme.faint} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 3v18h18" />
-          <path d="M7 14l3-4 3 3 5-7" />
-        </svg>
-      </div>
-      <div style={{ fontSize: 16.5, fontWeight: 600, color: theme.ink, letterSpacing: "-0.005em" }}>No data loaded yet</div>
-      <p style={{ margin: 0, maxWidth: 460, fontSize: 13.5, lineHeight: 1.55, color: theme.secondary }}>
-        Load a structure (CIF) and diffraction data with the cards above — the app
-        routes to the right technique automatically — or open a converged example:
+    <div style={{ ...themeCard, padding: "clamp(36px, 9vh, 96px) 24px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 12 }}>
+      <div style={{ fontSize: fz.title, fontWeight: 650, color: theme.ink, letterSpacing: "-0.01em" }}>Start with a demo</div>
+      <p style={{ margin: 0, maxWidth: 460, fontSize: fz.small, lineHeight: 1.55, color: theme.secondary }}>
+        Each opens a converged refinement — or load your own CIF and data above; the
+        app routes to the right technique automatically.
       </p>
       {onLoadDemo && (
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", marginTop: 4 }}>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", marginTop: 8 }}>
           <DemoCard
             kicker="Rietveld · reciprocal space"
             title="Mn₃Ga neutron TOF"
-            blurb="Two-phase POWGEN pattern with a refined magnetic structure."
+            blurb="Two-phase POWGEN fit with a refined magnetic structure · wR 3.9%"
             onClick={() => onLoadDemo("rietveld")}
           />
           <DemoCard
             kicker="PDF · real space"
             title="GaTa₄Se₈ X-ray G(r)"
-            blurb="299 K synchrotron total-scattering fit of a lacunar spinel."
+            blurb="Synchrotron total-scattering fit at 299 K · Rw 8.1%"
             onClick={() => onLoadDemo("pdf")}
           />
         </div>
@@ -1506,23 +1498,23 @@ function DemoCard({ kicker, title, blurb, onClick }: { kicker: string; title: st
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        width: 250,
+        width: 290,
         textAlign: "left",
         display: "flex",
         flexDirection: "column",
-        gap: 5,
-        padding: "14px 16px",
-        borderRadius: 10,
-        border: `1px solid ${hover ? theme.primary : theme.control}`,
+        gap: 6,
+        padding: "18px 20px",
+        borderRadius: 12,
+        border: `1.5px solid ${hover ? theme.primary : theme.control}`,
         background: hover ? theme.primaryTintBg : "#fff",
+        boxShadow: hover ? "0 4px 14px rgba(31,79,216,0.12)" : "0 1px 4px rgba(25,23,20,0.05)",
         cursor: "pointer",
-        transition: "border-color 120ms, background 120ms",
+        transition: "border-color 120ms, background 120ms, box-shadow 120ms",
       }}
     >
-      <span style={{ fontFamily: themeMono, fontSize: 10.5, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: hover ? theme.primary : theme.faint }}>{kicker}</span>
-      <span style={{ fontSize: 14.5, fontWeight: 650, color: theme.ink }}>{title}</span>
-      <span style={{ fontSize: 12, lineHeight: 1.45, color: theme.secondary }}>{blurb}</span>
+      <span style={{ fontFamily: themeMono, fontSize: fz.micro, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: hover ? theme.primary : theme.faint }}>{kicker}</span>
+      <span style={{ fontSize: fz.large, fontWeight: 650, color: theme.ink }}>{title}</span>
+      <span style={{ fontSize: fz.small, lineHeight: 1.45, color: theme.secondary }}>{blurb}</span>
     </button>
   );
 }
-const emptyIconBox: React.CSSProperties = { width: 56, height: 56, borderRadius: 14, background: theme.chipBg, border: `1px solid ${theme.border}`, display: "flex", alignItems: "center", justifyContent: "center" };

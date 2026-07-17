@@ -76,6 +76,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
       </div>
       <div className="wb-header-divider" style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
       <nav style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <FormChips technique={technique} />
         <TechniqueChips technique={technique} />
         <ChipGroup
           chips={steps.map((s, i) => ({
@@ -194,12 +195,33 @@ function GroupChip({ chip }: { chip: Chip }): JSX.Element {
     : <span {...shared}>{chip.label}</span>;
 }
 
+/** Sample form: Powder (Bragg profile or total scattering) vs Single crystal (F²). */
+function FormChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | null }): JSX.Element {
+  const form = technique === null ? null : technique === "sc" ? "sc" : "powder";
+  const chips = [
+    { id: "powder", label: "Powder", hint: "Powder sample — Bragg profile (Rietveld) or total-scattering (PDF) data" },
+    { id: "sc", label: "Single crystal", hint: "Single-crystal sample — integrated-intensity F² reflection data (.hkl/.fcf/.int)" },
+  ] as const;
+  return (
+    <ChipGroup
+      chips={chips.map((c) => ({
+        key: c.id,
+        label: c.label,
+        active: form === c.id,
+        dimmed: form !== null && form !== c.id,
+        hint: c.hint,
+      }))}
+    />
+  );
+}
+
+/** Refinement space for powder data: Rietveld (reciprocal) vs PDF (real).
+ *  Single-crystal F² is neither, so both dim while a reflection list drives. */
 function TechniqueChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | null }): JSX.Element {
-  const chips: { id: "rietveld" | "pdf" | "sc"; label: string; hint: string }[] = [
+  const chips = [
     { id: "rietveld", label: "Rietveld", hint: "Reciprocal-space powder profile refinement — load Bragg powder data (or the Mn₃Ga demo)" },
     { id: "pdf", label: "PDF", hint: "Real-space G(r) refinement — load a reduced total-scattering file (.gr/.sq/.fq, or the GaTa4Se8 demo)" },
-    ...(technique === "sc" ? [{ id: "sc" as const, label: "Single crystal", hint: "Integrated-intensity F² refinement (reflection list loaded)" }] : []),
-  ];
+  ] as const;
   return (
     <ChipGroup
       chips={chips.map((c) => ({
