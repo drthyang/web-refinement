@@ -98,6 +98,8 @@ const LINEAR_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "background",
   "magneticScale",
   "pdfScale", // G(r) = pdfScale · (pair sum − baseline) · envelope
+  "mpdfOrdScale", // G(r) = G_nuc + ordScale·d_ord + paraScale·d_para — affine in both
+  "mpdfParaScale",
 ]);
 
 /** Whether the model is linear in this parameter (explicit flag, else by kind). */

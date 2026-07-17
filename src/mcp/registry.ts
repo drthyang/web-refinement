@@ -370,7 +370,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "build_distortion_modes",
     title: "Build distortion-mode parameters",
-    description: "Decompose a low-symmetry CHILD structure against its high-symmetry PARENT (same lattice; origin shift searched automatically) into refinable DISTORTION-MODE amplitudes — the AMPLIMODES/ISODISTORT paradigm. Mode 1 is the frozen distortion; its amplitude (Å) is the order parameter. Use `structure`/`parameters`/`bindings` with refine_pdf or refine_powder instead of per-coordinate positions: same engine, fewer and more informative parameters (free mode_1 first).",
+    description: "Decompose a low-symmetry CHILD structure against its high-symmetry PARENT (same lattice; origin shift searched automatically) into refinable DISTORTION-MODE amplitudes — the AMPLIMODES/ISODISTORT paradigm. Modes are tagged with their Brillouin-zone star (`star`: Γ, X, H, or a literal k) from the parent centerings the child breaks, and the observed distortion is split into one frozen (order-parameter) mode per star. Use `structure`/`parameters`/`bindings` with refine_pdf or refine_powder instead of per-coordinate positions: same engine, fewer and more informative parameters (the frozen modes come free).",
     inputSchema: {
       parent: anyObj.describe("High-symmetry parent StructureModel"),
       child: anyObj.describe("Low-symmetry child StructureModel on the same lattice"),

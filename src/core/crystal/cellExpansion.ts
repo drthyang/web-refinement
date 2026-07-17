@@ -474,7 +474,30 @@ export function expandMagneticSupercell(
   const k = magnetic.propagation[0] ?? [0, 0, 0];
   const n = magneticSupercell(k);
   if (n[0] === 1 && n[1] === 1 && n[2] === 1) return null; // k = 0 → no supercell
+  return expandMagneticBox(structure, magnetic, k, n);
+}
 
+/**
+ * The magnetic box every commensurate model reduces to: the k ≠ 0 magnetic
+ * supercell, or the parent cell itself at k = 0 (a 1×1×1 "supercell") — the
+ * unified spin-field expander mPDF needs (PDF_MPDF_ROADMAP P4), papering over
+ * {@link expandMagneticSupercell}'s null-at-k=0 contract. Same loop, same
+ * {@link displayMoment} arrows.
+ */
+export function expandSpinField(
+  structure: StructureModel,
+  magnetic: MagneticModel,
+): MagneticSupercellExpansion {
+  const k = magnetic.propagation[0] ?? [0, 0, 0];
+  return expandMagneticBox(structure, magnetic, k, magneticSupercell(k));
+}
+
+function expandMagneticBox(
+  structure: StructureModel,
+  magnetic: MagneticModel,
+  k: Vec3,
+  n: [number, number, number],
+): MagneticSupercellExpansion {
   const cell: UnitCell = {
     ...structure.cell,
     a: structure.cell.a * n[0],

@@ -119,6 +119,22 @@ also carries diagnostics:
 - `conditionNumber` and `maxLambda`: numerical health indicators for the final
   Hessian and LM search.
 
+## Sequential (series) refinement
+
+`refinement/sequential.ts` adds the third residual topology next to
+single-dataset fitting and multi-dataset co-refinement: an ordered SERIES of
+datasets (temperature / pressure / composition), each refined with its own copy
+of the parameters and seeded from the previous dataset's refined values — the
+GSAS-II "sequential refinement" workflow. The controller is engine-level and
+domain-blind (datasets supply only a `RefinementProblem` factory), so Rietveld
+and PDF share it verbatim through the thin adapters in `workflow/sequential.ts`
+(`powderSequentialDatasets` / `pdfSequentialDatasets`). Diverged/failed steps
+are not carried into the next seed (the series reseeds from the last good
+step), and the result includes a per-parameter value/esd **evolution table** —
+the a(T)/moment(T) curves that are the point of a sequential study.
+`seedFromPrevious: false` degrades to independent per-dataset refinements
+(bit-identical to running `refine` on each, tested).
+
 ## Refinement history
 
 Each `run` accumulates a `RefinementIteration[]` (iteration number, χ², agreement

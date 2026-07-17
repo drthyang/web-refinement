@@ -44,16 +44,18 @@ import { bandLimit, extendGridForTermination, terminationActive, uniformStep } f
  * `pdfScale`, the Qdamp/Qbroad envelope, δ1/δ2, occupancy (a pure per-atom
  * weight) — reuses the cached pairs, which dominates the Jacobian evaluations.
  */
-const PAIR_GEOMETRY_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
+export const PAIR_GEOMETRY_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "cellLength", "cellAngle", "atomX", "atomY", "atomZ", "positionShift", "bIso", "uAniso",
 ]);
 
 /** Neutral PDF parameter set when no PDF kind is bound (identity envelope). */
-const PDF_DEFAULTS = { scale: 1, qdamp: 0, qbroad: 0, delta1: 0, delta2: 0, spdiameter: 0, sratio: 1, rcut: 0 } as const;
+export const PDF_DEFAULTS = { scale: 1, qdamp: 0, qbroad: 0, delta1: 0, delta2: 0, spdiameter: 0, sratio: 1, rcut: 0 } as const;
 
 /** How a terminated model evaluation maps onto the data grid: the (possibly
- *  margin-extended) model grid and the slice back onto the observations. */
-interface TerminationPlan {
+ *  margin-extended) model grid and the slice back onto the observations.
+ *  Exported for the sibling mPDF workflow (workflow/mpdf.ts), which shares the
+ *  nuclear machinery and adds the magnetic component before band-limiting. */
+export interface TerminationPlan {
   readonly modelGrid: Float64Array;
   readonly sliceOffset: number;
   readonly terminate: boolean;
@@ -61,7 +63,7 @@ interface TerminationPlan {
   readonly qmax: number;
 }
 
-function terminationPlanFor(pattern: PdfPattern, rValues: readonly number[]): TerminationPlan {
+export function terminationPlanFor(pattern: PdfPattern, rValues: readonly number[]): TerminationPlan {
   const qmax = pattern.qmax ?? 0;
   const step = uniformStep(rValues) ?? 0;
   const terminate = step > 0 && rValues.length > 1 && terminationActive(qmax, step);
@@ -73,7 +75,7 @@ function terminationPlanFor(pattern: PdfPattern, rValues: readonly number[]): Te
 /** The contiguous index window of `rValues` inside the fit range. Points
  *  outside carry zero weight, so the model is never evaluated there — the
  *  difference between a snappy fit and a hung UI on an r → 100 Å file. */
-function windowFor(rValues: readonly number[], fitRange?: FitRange): { i0: number; i1: number } {
+export function windowFor(rValues: readonly number[], fitRange?: FitRange): { i0: number; i1: number } {
   const min = fitRange?.min ?? -Infinity;
   const max = fitRange?.max ?? Infinity;
   let i0 = 0;

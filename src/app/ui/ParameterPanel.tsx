@@ -62,6 +62,11 @@ const CATEGORY: Record<ParameterKind, string> = {
   spdiameter: "PDF",
   sratio: "PDF",
   rcut: "PDF",
+  // Magnetic PDF (mPDF) scales/widths join the magnetic group with the moments.
+  mpdfOrdScale: "Magnetic",
+  mpdfParaScale: "Magnetic",
+  mpdfPsigma: "Magnetic",
+  corrLength: "Magnetic",
 };
 
 const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "PDF", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic"];
