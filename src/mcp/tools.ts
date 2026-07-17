@@ -55,6 +55,7 @@ import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { rankNextParameterGroups } from "@/core/workflow/nextParameters";
 import { buildPowderProblem } from "@/core/workflow/powder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
+import { buildDistortionModes } from "@/core/crystal/distortionModes";
 import { refine, refineParallel } from "@/core/refinement/engine";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import { parseFullProfInt, looksLikeFullProfInt, writeFullProfInt } from "@/parsers/fullprofInt";
@@ -1008,5 +1009,38 @@ export function calibrate_qdamp(args: {
     },
     ...(result.agreement.rWeighted !== undefined ? { rw: result.agreement.rWeighted } : {}),
     iterations: result.history.length,
+  };
+}
+
+/**
+ * Decompose a low-symmetry CHILD structure against its high-symmetry PARENT
+ * into refinable distortion-mode amplitudes (AMPLIMODES/ISODISTORT paradigm):
+ * the frozen distortion is mode 1 (its amplitude is the order parameter, Å),
+ * plus an orthonormal complement. Feed `structure`/`parameters`/`bindings` to
+ * refine_pdf or refine_powder in place of per-coordinate positions — same
+ * engine, more informative parameters.
+ */
+export function build_distortion_modes(args: {
+  parent: StructureModel;
+  child: StructureModel;
+  originShift?: [number, number, number];
+}): {
+  structure: StructureModel;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  modes: { id: string; label: string; observedAmplitude: number }[];
+  totalAmplitude: number;
+  originShift: [number, number, number];
+  unpaired: string[];
+} {
+  const set = buildDistortionModes(args.parent, args.child, args.originShift);
+  return {
+    structure: set.parentized,
+    parameters: set.parameters,
+    bindings: set.bindings,
+    modes: set.modes.map((m) => ({ id: m.id, label: m.label, observedAmplitude: m.observedAmplitude })),
+    totalAmplitude: set.totalAmplitude,
+    originShift: [...set.originShift] as [number, number, number],
+    unpaired: [...set.unpaired],
   };
 }

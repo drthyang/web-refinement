@@ -207,6 +207,19 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
     args: { structure, pattern: pdfPattern, maxIterations: 2 },
     keys: ["esd", "iterations", "qbroad", "qdamp", "rw"],
   },
+  build_distortion_modes: (() => {
+    // Child: the Po structure re-declared in P1 with a small displacement.
+    const child = {
+      ...structure,
+      id: "child",
+      spaceGroup: { operations: [{ rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], translation: [0, 0, 0], xyz: "x,y,z" }] },
+      sites: structure.sites.map((s) => ({ ...s, position: [s.position[0], s.position[1], s.position[2] + 0.02] as [number, number, number] })),
+    };
+    return {
+      args: { parent: structure, child },
+      keys: ["bindings", "modes", "originShift", "parameters", "structure", "totalAmplitude", "unpaired"],
+    };
+  })(),
 };
 
 

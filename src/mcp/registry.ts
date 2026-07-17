@@ -367,4 +367,15 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     },
     handler: tools.calibrate_qdamp,
   },
+  {
+    name: "build_distortion_modes",
+    title: "Build distortion-mode parameters",
+    description: "Decompose a low-symmetry CHILD structure against its high-symmetry PARENT (same lattice; origin shift searched automatically) into refinable DISTORTION-MODE amplitudes — the AMPLIMODES/ISODISTORT paradigm. Mode 1 is the frozen distortion; its amplitude (Å) is the order parameter. Use `structure`/`parameters`/`bindings` with refine_pdf or refine_powder instead of per-coordinate positions: same engine, fewer and more informative parameters (free mode_1 first).",
+    inputSchema: {
+      parent: anyObj.describe("High-symmetry parent StructureModel"),
+      child: anyObj.describe("Low-symmetry child StructureModel on the same lattice"),
+      originShift: z.array(z.number()).length(3).optional().describe("Fractional origin shift child = parent + t; searched when omitted"),
+    },
+    handler: tools.build_distortion_modes,
+  },
 ];
