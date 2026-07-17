@@ -252,9 +252,12 @@ export function App(): JSX.Element {
           if (parsed.points.length < 3) throw new Error("fewer than 3 usable G(r) rows");
           setScNuclearDataset(null);
           setPdfDataset(parsed);
+          const provenance =
+            parsed.sourceKind === "sq" ? " (S(Q) → G(r) transformed at load)" :
+            parsed.sourceKind === "fq" ? " (F(Q) → G(r) transformed at load)" : "";
           setMessage(
             `Loaded PDF “${file.name}” · ${parsed.points.length} pts · ${parsed.scatteringType} ${tag}` +
-            `${parsed.qmax !== undefined ? ` · Qmax ${parsed.qmax}` : ""}. Real-space G(r) fit ready. ${fmt.note}`,
+            `${parsed.qmax !== undefined ? ` · Qmax ${parsed.qmax}` : ""}${provenance}. Real-space G(r) fit ready. ${fmt.note}`,
           );
           return;
         }
@@ -456,7 +459,11 @@ export function App(): JSX.Element {
   // CIF/mCIF + CSV + project JSON. Labels the shell can know (they depend only
   // on session state it owns); behavior lives in the engines.
   const headerExports: ExportAction[] = pdfDataset
-    ? [{ label: "CSV", onClick: () => pdfExports.current?.csv?.() }]
+    ? [
+        { label: "CIF", onClick: () => pdfExports.current?.cif?.() },
+        { label: "CSV", onClick: () => pdfExports.current?.csv?.() },
+        { label: "Report", onClick: () => pdfExports.current?.report?.() },
+      ]
     : scDataset
     ? [
         { label: "CIF", onClick: () => scExports.current?.cif?.() },

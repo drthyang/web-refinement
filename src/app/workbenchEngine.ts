@@ -34,8 +34,10 @@ export interface WorkbenchExports {
   /** Single-crystal reflection data as FullProf `.int` (nuclear, plus the paired
    *  magnetic set as `_mag.int` when a joint session is loaded). */
   scInt?: () => void;
-  /** Observed/calculated curves as CSV (powder). */
+  /** Observed/calculated curves as CSV (powder, PDF). */
   csv?: () => void;
+  /** Markdown refinement report (PDF page). */
+  report?: () => void;
   /** Whole-session project JSON (powder). */
   projectJson?: () => void;
   /** Model + data + build script as a FullProf bundle (.zip). */

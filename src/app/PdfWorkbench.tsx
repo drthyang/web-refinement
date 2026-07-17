@@ -32,6 +32,8 @@ import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { downloadText } from "@/app/download";
+import { structureToCif } from "@/core/export/cif";
+import { pdfReport } from "@/core/export/pdfReport";
 import { card as themeCard, color, mono, secondaryButton, uppercaseLabel } from "@/app/theme";
 
 const DATA_ACCEPT = ".gr,.sgr,.sq,.fq,.dat,.txt,text/plain";
@@ -176,6 +178,45 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     }
   }
 
+  // Qdamp/Qbroad calibration on a STANDARD: the loaded structure is taken as
+  // known — only the scale(s) and the instrument envelope refine; the result is
+  // adopted and kept fixed for subsequent sample fits.
+  async function runCalibrate(): Promise<void> {
+    setBusy(true);
+    try {
+      const calib = params.map((p) => ({
+        ...p,
+        fixed: !(p.kind === "pdfScale" || p.kind === "qdamp" || p.kind === "qbroad"),
+      }));
+      const res = await client.refinePdfParallel(
+        {
+          structure,
+          ...(multiPhase ? { extraPhases: [...extraPhases] } : {}),
+          pattern,
+          parameters: calib,
+          bindings: [...spec.bindings],
+          restraints: spec.restraints,
+          fitRange,
+          options: { maxIterations: 25 },
+        },
+        (yCalc) => setLive(yCalc),
+      );
+      setParams((ps) =>
+        ps.map((p) =>
+          p.kind === "qdamp" || p.kind === "qbroad" || p.kind === "pdfScale"
+            ? { ...p, value: res.parameters[p.id] ?? p.value, fixed: p.kind === "pdfScale" ? p.fixed : true }
+            : p,
+        ),
+      );
+      setResult(res);
+    } catch (e) {
+      console.error(`[status] Qdamp calibration failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLive(null);
+      setBusy(false);
+    }
+  }
+
   function onParamChange(id: string, patch: Partial<RefinementParameter>): void {
     setParams((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
@@ -186,16 +227,51 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     setLive(null);
   }
 
-  // CSV export of the current curves, published to the app header (engine
-  // contract): r, G_obs, G_calc, diff — the same shape as the powder CSV.
+  // Exports published to the app header (engine contract): the output triple —
+  // refined curves (CSV), refined structure(s) (CIF with esds + Rw meta), and
+  // the markdown report.
   const exportCsvRef = useRef<() => void>(noop);
   exportCsvRef.current = (): void => {
     const rows = curves.x.map((r, i) => `${r},${curves.yObs[i]},${curves.yCalc[i]},${curves.diff[i]}`);
     downloadText(`${pattern.id}.csv`, `r,Gobs,Gcalc,diff\n${rows.join("\n")}\n`, "text/csv");
   };
+  const exportCifRef = useRef<() => void>(noop);
+  exportCifRef.current = (): void => {
+    const withEsd = params.map((p) => {
+      const esd = result?.esd[p.id] ?? p.esd;
+      return esd !== undefined ? { ...p, esd } : { ...p };
+    });
+    const meta = {
+      rwp: rw * 100,
+      nRef: curves.x.filter((r) => r >= fitRange.min && r <= fitRange.max).length,
+      nParam: nFree,
+    };
+    for (const phase of phases) {
+      const cif = structureToCif(phase.structure, { params: withEsd, bindings: spec.bindings, refinement: meta });
+      downloadText(`${phase.structure.name || phase.id}_pdf.cif`, cif, "chemical/x-cif");
+    }
+  };
+  const exportReportRef = useRef<() => void>(noop);
+  exportReportRef.current = (): void => {
+    const conflict = correlatedMotionConflict(params);
+    const text = pdfReport({
+      phases: phases.map((p) => p.structure),
+      pattern,
+      parameters: params,
+      result,
+      rw,
+      fitRange,
+      ...(conflict ? { warnings: [conflict] } : {}),
+    });
+    downloadText(`${pattern.id}_report.md`, text, "text/markdown");
+  };
   useEffect(() => {
     if (!exportsRef) return;
-    exportsRef.current = { csv: () => exportCsvRef.current() };
+    exportsRef.current = {
+      csv: () => exportCsvRef.current(),
+      cif: () => exportCifRef.current(),
+      report: () => exportReportRef.current(),
+    };
     return () => { exportsRef.current = null; };
   }, [exportsRef]);
 
@@ -230,19 +306,30 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       meta:
         `${probeLabel} · r ${rFirst.toFixed(2)}–${rLast.toFixed(2)} Å · ${pattern.points.length} pts` +
         (pattern.qmax !== undefined ? ` · Qmax ${pattern.qmax.toFixed(1)} Å⁻¹` : "") +
+        (pattern.sourceKind === "sq" ? " · from S(Q)" : pattern.sourceKind === "fq" ? " · from F(Q)" : "") +
         (pattern.composition ? ` · ${pattern.composition}` : ""),
     },
   ];
 
   const refineActions = (
-    <button
-      style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? { opacity: 0.55, cursor: "default" } : {}) }}
-      disabled={busy}
-      onClick={() => void runRefine(true)}
-      title="Staged sequence: scale → cell → ADP → correlated motion (δ1) → positions (occupancies stay fixed)"
-    >
-      Guided refine
-    </button>
+    <>
+      <button
+        style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? { opacity: 0.55, cursor: "default" } : {}) }}
+        disabled={busy}
+        onClick={() => void runRefine(true)}
+        title="Staged sequence: scale → cell → ADP → correlated motion (δ1) → positions (occupancies stay fixed)"
+      >
+        Guided refine
+      </button>
+      <button
+        style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? { opacity: 0.55, cursor: "default" } : {}) }}
+        disabled={busy}
+        onClick={() => void runCalibrate()}
+        title="Instrument calibration on a STANDARD (Ni/Si/LaB₆ with a known structure): fit only scale + Qdamp + Qbroad, then adopt and hold them for sample fits"
+      >
+        Calibrate Qdamp
+      </button>
+    </>
   );
 
   return (

@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { parsePdfData, looksLikePdf } from "@/parsers/pdfData";
+import { parsePdfData, looksLikePdf, classifyReducedKind } from "@/parsers/pdfData";
 import { dataExists, readData } from "@/testSupport/data";
+import type { StructureModel, AtomSite, UnitCell } from "@/core/crystal/types";
+import { IDENTITY3 } from "@/core/math/mat3";
+import { expandStructureAtoms } from "@/core/diffraction/structureFactor";
+import { computeGofR, makeRGrid } from "@/core/pdf/forwardModel";
+import { bandLimit } from "@/core/pdf/termination";
 
 const DIFFPY_XRAY = `[DEFAULT]
 
@@ -82,6 +87,95 @@ describe("looksLikePdf", () => {
   });
   it("does not fire on a plain 2θ powder pattern", () => {
     expect(looksLikePdf("10.0 1234\n10.1 1250\n", "scan.xy")).toBe(false);
+  });
+});
+
+describe("classifyReducedKind", () => {
+  it("extension wins", () => {
+    expect(classifyReducedKind("", "x.sq")).toBe("sq");
+    expect(classifyReducedKind("", "x.fq")).toBe("fq");
+    expect(classifyReducedKind("", "x.gr")).toBe("gr");
+  });
+  it("header outputtype and #L labels", () => {
+    expect(classifyReducedKind("outputtype = fq\n1 0.5", "x.dat")).toBe("fq");
+    expect(classifyReducedKind("#L Q S(Q)\n1 1.02", "x.dat")).toBe("sq");
+    expect(classifyReducedKind("#L r G(r)\n1 0.02", "x.dat")).toBe("gr");
+  });
+  it("baseline heuristic: y ≈ 1 at high Q reads as S(Q)", () => {
+    const rows = Array.from({ length: 40 }, (_, i) => [i * 0.5, 1 + 0.02 * Math.sin(i)]);
+    expect(classifyReducedKind("", "x.dat", rows)).toBe("sq");
+    const grRows = Array.from({ length: 40 }, (_, i) => [i * 0.5, 0.4 * Math.sin(i)]);
+    expect(classifyReducedKind("", "x.dat", grRows)).toBe("gr");
+  });
+});
+
+describe("S(Q)/F(Q) auto-transform to G(r)", () => {
+  // Truth: a band-limited G(r) from the forward model; F(Q) by the forward
+  // sine transform; the parser must invert it back to the truth.
+  const IDENTITY_OP = { rotation: IDENTITY3, translation: [0, 0, 0] as const, xyz: "x,y,z" };
+  const CELL: UnitCell = { a: 4.0, b: 4.0, c: 4.0, alpha: 90, beta: 90, gamma: 90 };
+  const QMAX = 20;
+
+  function truthG(): { r: Float64Array; g: Float64Array } {
+    const sites: AtomSite[] = [{ label: "Ni1", element: "Ni", position: [0, 0, 0], occupancy: 1, adp: { kind: "isotropic", bIso: 0.6 } }];
+    const model: StructureModel = { id: "s", name: "s", cell: CELL, spaceGroup: { operations: [IDENTITY_OP] }, sites };
+    const r = makeRGrid(0.01, 30, 0.01);
+    const raw = computeGofR(CELL, expandStructureAtoms(model), r, {
+      scatteringType: "neutron", scale: 1, qdamp: 0.06, qbroad: 0, delta1: 0, delta2: 0,
+    });
+    return { r, g: bandLimit(raw, r[0]!, 0.01, QMAX) };
+  }
+
+  function forwardF(r: Float64Array, g: Float64Array): { q: number[]; f: number[] } {
+    const q = Array.from({ length: 1000 }, (_, i) => (i + 1) * 0.02); // to Q = 20
+    const f = q.map((qi) => {
+      let acc = 0;
+      for (let j = 0; j < r.length; j++) acc += g[j]! * Math.sin(qi * r[j]!) * 0.01;
+      return acc;
+    });
+    return { q, f };
+  }
+
+  const { r, g } = truthG();
+  const { q, f } = forwardF(r, g);
+
+  function agreement(parsed: { points: readonly { r: number; gObs: number }[] }): number {
+    // Compare on the common lattice (both grids are 0.01-step, 0-aligned).
+    let num = 0;
+    let den = 0;
+    const byR = new Map(parsed.points.map((p) => [Math.round(p.r * 100), p.gObs]));
+    for (let j = 0; j < r.length; j++) {
+      const gp = byR.get(Math.round(r[j]! * 100));
+      if (gp === undefined) continue;
+      num += (gp - g[j]!) ** 2;
+      den += g[j]! ** 2;
+    }
+    return Math.sqrt(num / den);
+  }
+
+  it(".fq parses, transforms, and recovers the truth G(r)", () => {
+    const text = `outputtype = fq\nmode = neutron\nqmax = ${QMAX}\n#### start data\n${q.map((qi, i) => `${qi.toFixed(3)} ${f[i]!.toPrecision(8)}`).join("\n")}\n`;
+    const p = parsePdfData(text, { filename: "t.fq" });
+    expect(p.sourceKind).toBe("fq");
+    expect(p.qmax).toBe(QMAX);
+    expect(p.points.length).toBeGreaterThan(1000);
+    expect(agreement(p)).toBeLessThan(0.05);
+  });
+
+  it(".sq parses via S = 1 + F/Q and recovers the same G(r)", () => {
+    const s = q.map((qi, i) => 1 + f[i]! / qi);
+    const text = `mode = neutron\nqmax = ${QMAX}\n#### start data\n${q.map((qi, i) => `${qi.toFixed(3)} ${s[i]!.toPrecision(8)}`).join("\n")}\n`;
+    const p = parsePdfData(text, { filename: "t.sq" });
+    expect(p.sourceKind).toBe("sq");
+    expect(agreement(p)).toBeLessThan(0.05);
+  });
+
+  it("a plain .gr is untouched (sourceKind gr, points verbatim)", () => {
+    const text = `mode = neutron\n#### start data\n0.01 0.5\n0.02 0.4\n0.03 0.3\n`;
+    const p = parsePdfData(text, { filename: "t.gr" });
+    expect(p.sourceKind).toBe("gr");
+    expect(p.points).toHaveLength(3);
+    expect(p.points[0]).toEqual({ r: 0.01, gObs: 0.5 });
   });
 });
 
