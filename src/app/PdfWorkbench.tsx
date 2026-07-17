@@ -9,7 +9,7 @@
  * shell mounts it (keyed on the dataset) whenever a reduced `.gr` PDF is loaded.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PdfPattern } from "@/core/diffraction/types";
@@ -23,11 +23,16 @@ import {
   multiPhasePdfCurves,
   pdfPartialCurves,
   pdfPhaseCurves,
+  pdfPhaseBindingsFor,
   optimalPdfScale,
   guidedPdfParams,
   correlatedMotionConflict,
   PDF_STAGE_KINDS,
 } from "@/core/workflow/pdf";
+import { applyParameters } from "@/core/workflow/apply";
+
+// Lazy so three.js stays out of the main bundle until the 3D view is opened.
+const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
@@ -106,11 +111,25 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   const [busy, setBusy] = useState(false);
   // Live calculated curve streamed from the worker during a refinement.
   const [live, setLive] = useState<number[] | null>(null);
+  // Plot-card view: the fit, or the refined 3D structure (per phase).
+  const [viewTab, setViewTab] = useState<"fit" | "model3d">("fit");
+  const [viewPhase, setViewPhase] = useState(0);
+  const [focusFitToken, setFocusFitToken] = useState(0);
   useEffect(() => {
     setParams(spec.params);
     setResult(null);
     setLive(null);
   }, [spec]);
+
+  // The 3D view tracks the refinement: apply the current parameter values so
+  // the viewer shows the refined cell/positions/ADPs, not the loaded CIF.
+  const viewStructure = useMemo(() => {
+    const phase = phases[Math.min(viewPhase, phases.length - 1)]!;
+    const values: Record<string, number> = {};
+    for (const p of params) values[p.id] = p.value;
+    const phaseBindings = multiPhase ? pdfPhaseBindingsFor(spec.bindings, phase.id) : spec.bindings;
+    return applyParameters(phase.structure, phaseBindings, values).model;
+  }, [phases, viewPhase, params, spec.bindings, multiPhase]);
 
   // Fit window over r (drag the plot handles). Starts at the default window;
   // the model is only computed inside it, so widening it costs compute.
@@ -144,21 +163,22 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     return { ...curves, yCalc, diff: curves.yObs.map((o, i) => o - (yCalc[i] ?? 0)) };
   }, [curves, live]);
 
-  // Rw over G(r) inside the fit window, live for the current parameters —
-  // uniform weights, so Rw = √(Σ(o−c)² / Σo²). A relative indicator only
-  // (correlated G(r) errors; see core/workflow/pdf.ts).
+  // Rw over G(r) inside the fit window — computed from the PLOTTED curves so
+  // it ticks live while a refinement streams its per-cycle calc. Uniform
+  // weights, Rw = √(Σ(o−c)² / Σo²): a relative indicator only (correlated
+  // G(r) errors; see core/workflow/pdf.ts).
   const rw = useMemo(() => {
     let num = 0;
     let den = 0;
-    for (let i = 0; i < curves.x.length; i++) {
-      const r = curves.x[i]!;
+    for (let i = 0; i < plotCurves.x.length; i++) {
+      const r = plotCurves.x[i]!;
       if (r < fitRange.min || r > fitRange.max) continue;
-      const d = curves.yObs[i]! - curves.yCalc[i]!;
+      const d = plotCurves.yObs[i]! - plotCurves.yCalc[i]!;
       num += d * d;
-      den += curves.yObs[i]! * curves.yObs[i]!;
+      den += plotCurves.yObs[i]! * plotCurves.yObs[i]!;
     }
     return den > 0 ? Math.sqrt(num / den) : NaN;
-  }, [curves, fitRange]);
+  }, [plotCurves, fitRange]);
 
   const nFree = params.filter((p) => !p.fixed && !p.expression).length;
 
@@ -223,6 +243,41 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       setResult(res);
     } catch (e) {
       console.error(`[status] Qdamp calibration failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLive(null);
+      setBusy(false);
+    }
+  }
+
+  // Multi-start (one engine, two faces, as powder): a cold start gets the wide
+  // "Prefit" search; once a fit exists it's a lighter "Escape min" nudge out of
+  // the current basin. Keeps the lowest-χ² of baseline + restarts.
+  async function runMultiStart(): Promise<void> {
+    setBusy(true);
+    try {
+      const escape = result !== null;
+      const ms = await client.refinePdfMultiStart(
+        {
+          structure,
+          ...(multiPhase ? { extraPhases: [...extraPhases] } : {}),
+          pattern,
+          parameters: [...params],
+          bindings: [...spec.bindings],
+          restraints: spec.restraints,
+          fitRange,
+          options: { maxIterations: 25 },
+        },
+        escape ? { restarts: 4, escapeSigma: 2 } : { restarts: 8 },
+        (yCalc) => setLive(yCalc),
+      );
+      setParams((ps) => ps.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value })));
+      setResult(ms.final);
+      console.info(
+        `[status] PDF multi-start (${escape ? "escape" : "prefit"}): best of ${ms.restartsRun + 1} starts` +
+        `${ms.bestStartIndex > 0 ? ` (restart ${ms.bestStartIndex} won)` : " (baseline held)"} · Rw ${(100 * (ms.final.agreement.rWeighted ?? 0)).toFixed(2)}%`,
+      );
+    } catch (e) {
+      console.error(`[status] PDF multi-start failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLive(null);
       setBusy(false);
@@ -350,9 +405,32 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       <div className="wb-sc">
         <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <span style={uppercaseLabel}>PDF fit — G(r), real space</span>
+            <div style={{ display: "flex", gap: 16, alignItems: "baseline" }}>
+              {(["fit", "model3d"] as const).map((k) => (
+                <button
+                  key={k}
+                  onClick={() => setViewTab(k)}
+                  style={{
+                    ...uppercaseLabel, background: "none", border: "none", padding: "0 0 3px", cursor: "pointer",
+                    color: viewTab === k ? color.primary : color.faint,
+                    borderBottom: `2px solid ${viewTab === k ? color.primary : "transparent"}`,
+                  }}
+                >
+                  {k === "fit" ? "PDF fit — G(r)" : "3D model"}
+                </button>
+              ))}
+            </div>
             <div style={{ display: "flex", gap: 20, alignItems: "baseline" }}>
-              {canOverlay && (
+              {viewTab === "fit" && (
+                <button
+                  onClick={() => setFocusFitToken((t) => t + 1)}
+                  style={{ ...uppercaseLabel, background: "none", border: "none", padding: 0, cursor: "pointer", color: color.secondary }}
+                  title="Zoom the plot onto the active fit window"
+                >
+                  optimize view
+                </button>
+              )}
+              {viewTab === "fit" && canOverlay && (
                 <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 11.5, color: color.secondary, cursor: "pointer" }} title={multiPhase ? "Overlay each phase's G(r) contribution — they sum exactly to the calc curve" : "Overlay the element-pair (Faber–Ziman) partial PDFs — they sum exactly to the calc curve"}>
                   <input type="checkbox" checked={showPartials} onChange={(e) => setShowPartials(e.target.checked)} style={{ accentColor: color.primary }} />
                   {multiPhase ? "phases" : "partials"}
@@ -364,22 +442,56 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
               <span style={{ fontFamily: mono, fontSize: 12, color: color.faint }}>{nFree} free</span>
             </div>
           </div>
-          <WorkbenchPlot
-            curves={plotCurves}
-            xLabel="r (Å)"
-            yLabel="G(r) (Å⁻²)"
-            signedY
-            showBackground={false}
-            fitRange={fitRange}
-            onFitRangeChange={setFitRange}
-            {...(partials ? { overlays: partials } : {})}
-          />
-          <div style={{ fontSize: 11.5, color: color.faint }}>
-            Fit window {fitRange.min.toFixed(2)}–{fitRange.max.toFixed(2)} Å (drag the handles; low r below r_poly is
-            reduction artifact). Qdamp/Qbroad are instrument constants — calibrate on a standard, then keep fixed.
-          </div>
-          {correlatedMotionConflict(params) && (
-            <div style={{ fontSize: 11.5, color: color.warnInk }}>⚠ {correlatedMotionConflict(params)}</div>
+          {viewTab === "fit" ? (
+            <>
+              <WorkbenchPlot
+                curves={plotCurves}
+                xLabel="r (Å)"
+                yLabel="G(r) (Å⁻²)"
+                signedY
+                showBackground={false}
+                fitRange={fitRange}
+                onFitRangeChange={setFitRange}
+                focusFitToken={focusFitToken}
+                {...(partials ? { overlays: partials } : {})}
+              />
+              <div style={{ fontSize: 11.5, color: color.faint }}>
+                Fit window {fitRange.min.toFixed(2)}–{fitRange.max.toFixed(2)} Å (drag the handles; low r below r_poly is
+                reduction artifact). Qdamp/Qbroad are instrument constants — calibrate on a standard, then keep fixed.
+              </div>
+              {correlatedMotionConflict(params) && (
+                <div style={{ fontSize: 11.5, color: color.warnInk }}>⚠ {correlatedMotionConflict(params)}</div>
+              )}
+            </>
+          ) : (
+            <>
+              {multiPhase && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ fontSize: 11.5, color: color.secondary }}>phase</span>
+                  <span style={{ display: "inline-flex", border: `1px solid ${color.border}`, borderRadius: 6, overflow: "hidden" }}>
+                    {phases.map((ph, i) => (
+                      <button
+                        key={ph.id}
+                        onClick={() => setViewPhase(i)}
+                        style={{ border: "none", padding: "1px 9px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", background: i === viewPhase ? color.primary : "#fff", color: i === viewPhase ? "#fff" : color.ink }}
+                      >
+                        {ph.structure.name || `phase ${i + 1}`}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              )}
+              <Suspense fallback={<div style={{ flex: 1, minHeight: 360, display: "grid", placeItems: "center", color: color.secondary, fontSize: 13 }}>Loading 3D viewer…</div>}>
+                <div style={{ minHeight: 360 }}>
+                  <StructureView key={viewStructure.id + viewPhase} structure={viewStructure} />
+                </div>
+              </Suspense>
+              <p style={{ marginTop: 4, fontSize: 12, color: color.secondary }}>
+                {viewStructure.name || "Structure"}
+                {viewStructure.spaceGroup.hermannMauguin ? ` · ${viewStructure.spaceGroup.hermannMauguin}` : ""}
+                {` · ${viewStructure.sites.length} site${viewStructure.sites.length === 1 ? "" : "s"} · refined values applied · drag to rotate, scroll to zoom.`}
+              </p>
+            </>
           )}
         </div>
 
@@ -388,6 +500,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           esd={result?.esd}
           onChange={onParamChange}
           onRefine={() => void runRefine(false)}
+          onThorough={() => void runMultiStart()}
+          thoroughMode={result ? "escape" : "prefit"}
           onReset={reset}
           busy={busy}
           result={result}
