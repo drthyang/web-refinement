@@ -55,7 +55,7 @@ function rwInk(rw: number): string {
   return color.warnInk;
 }
 
-export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructure = false, client, exportsRef, onLoadData, onLoadCif, onAddPhase, onRemovePhase }: {
+export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructure = false, client, exportsRef, onLoadData, onLoadCif, onAddPhase, onRemovePhase, presetValues, presetFitRange }: {
   structure: StructureModel;
   pattern: PdfPattern;
   /** Additional crystallographic phases (multi-phase G(r) sum). */
@@ -70,6 +70,11 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   onLoadCif?: (file: File) => void;
   onAddPhase?: (file: File) => void;
   onRemovePhase?: (id: string) => void;
+  /** Converged parameter values to open with (bundled demo snapshots). Applied
+   *  as value AND initialValue, so Reset returns to the converged state. */
+  presetValues?: Record<string, number>;
+  /** Fit window to open with (demo snapshots refine a specific window). */
+  presetFitRange?: { min: number; max: number };
 }): JSX.Element {
   const multiPhase = extraPhases.length > 0;
   const phases = useMemo(
@@ -83,11 +88,14 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   const defaultRange = useMemo((): FitRangeSelection => {
     const rFirst0 = pattern.points[0]?.r ?? 0;
     const rLast0 = pattern.points[pattern.points.length - 1]?.r ?? 1;
+    if (presetFitRange) {
+      return { min: Math.max(presetFitRange.min, rFirst0), max: Math.min(presetFitRange.max, rLast0) };
+    }
     return {
       min: Math.min(Math.max(pattern.rpoly ?? 1.5, rFirst0), rLast0),
       max: Math.min(rLast0, 30),
     };
-  }, [pattern]);
+  }, [pattern, presetFitRange]);
   // Parameter spec: PDF scale/envelope + the symmetry-reduced structural set,
   // with the phase scale(s) seeded from the least-squares optimum of the
   // starting model (exact for one linear scale; split evenly across phases).
@@ -100,11 +108,16 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       start.yObs.filter((_, i) => start.x[i]! >= defaultRange.min && start.x[i]! <= defaultRange.max),
       start.yCalc.filter((_, i) => start.x[i]! >= defaultRange.min && start.x[i]! <= defaultRange.max),
     ) / (multiPhase ? phases.length : 1);
-    const params = raw.params.map((p) =>
+    const seeded = raw.params.map((p) =>
       p.kind === "pdfScale" ? { ...p, value: kappa, initialValue: kappa } : p,
     );
+    // Demo snapshots open converged: preset values win over the κ seed, and
+    // become the reset anchor too.
+    const params = presetValues
+      ? seeded.map((p) => (presetValues[p.id] !== undefined ? { ...p, value: presetValues[p.id]!, initialValue: presetValues[p.id]! } : p))
+      : seeded;
     return { ...raw, params };
-  }, [structure, extraPhases, multiPhase, phases, pattern, defaultRange]);
+  }, [structure, extraPhases, multiPhase, phases, pattern, defaultRange, presetValues]);
 
   const [params, setParams] = useState<readonly RefinementParameter[]>(spec.params);
   const [result, setResult] = useState<RefinementResult | null>(null);
@@ -405,18 +418,20 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       <div className="wb-sc">
         <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 16, alignItems: "baseline" }}>
+            <div style={{ display: "inline-flex", gap: 2, background: color.chipBg, border: `1px solid ${color.border}`, borderRadius: 8, padding: 2 }}>
               {(["fit", "model3d"] as const).map((k) => (
                 <button
                   key={k}
                   onClick={() => setViewTab(k)}
+                  title={k === "fit" ? "Observed vs calculated G(r)" : "3D crystal-structure model"}
                   style={{
-                    ...uppercaseLabel, background: "none", border: "none", padding: "0 0 3px", cursor: "pointer",
-                    color: viewTab === k ? color.primary : color.faint,
-                    borderBottom: `2px solid ${viewTab === k ? color.primary : "transparent"}`,
+                    border: "none", borderRadius: 6, padding: "3px 11px", fontSize: 11, fontWeight: 600,
+                    cursor: "pointer", fontFamily: mono,
+                    background: viewTab === k ? color.primary : "transparent",
+                    color: viewTab === k ? "#fff" : color.secondary,
                   }}
                 >
-                  {k === "fit" ? "PDF fit — G(r)" : "3D model"}
+                  {k === "fit" ? "Refinement" : "3D Model"}
                 </button>
               ))}
             </div>
