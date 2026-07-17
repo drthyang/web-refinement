@@ -99,7 +99,3 @@ export function facilityLabel(inst: FacilityInstrument): string {
   return `${site}, ${inst.country}`;
 }
 
-/** Full "Name — Facility · Lab, Country" label. */
-export function instrumentLabel(inst: FacilityInstrument): string {
-  return `${inst.name} — ${facilityLabel(inst)}`;
-}

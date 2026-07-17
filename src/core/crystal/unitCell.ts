@@ -13,9 +13,6 @@ import { inverse, mulVec } from "@/core/math/mat3";
 
 const DEG = Math.PI / 180;
 
-export function toRadians(deg: number): number {
-  return deg * DEG;
-}
 
 /** Direct metric tensor G (Å²). */
 export function metricTensor(cell: UnitCell): Mat3 {

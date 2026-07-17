@@ -109,7 +109,3 @@ export function abscissaFromD(p: InstrumentParameters, d: number): number {
   return p.kind === "tof" ? tofFromD(p, d) : twoThetaFromD(p, d);
 }
 
-/** Convert the instrument's abscissa back to a d-spacing. */
-export function dFromAbscissa(p: InstrumentParameters, x: number): number {
-  return p.kind === "tof" ? dFromTof(p, x) : dFromTwoTheta(p, x);
-}

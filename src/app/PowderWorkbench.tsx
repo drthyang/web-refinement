@@ -69,6 +69,7 @@ import { InfoBadge } from "@/app/ui/InfoBadge";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono, fz, toolbarBtn, resetRangeBtn } from "@/app/theme";
+import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
 import { applyParameters } from "@/core/workflow/apply";
 import { excludedPointMask } from "@/core/refinement/factors";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
@@ -1423,34 +1424,16 @@ function ViewModeToggle({
   value: "curves" | "structure" | "validation";
   onChange: (m: "curves" | "structure" | "validation") => void;
 }): JSX.Element {
-  const opts: readonly { id: "curves" | "structure" | "validation"; label: string; title: string }[] = [
-    { id: "curves", label: "Refinement", title: "Observed vs calculated pattern" },
-    { id: "validation", label: "Validation", title: "F_obs vs F_calc + normal-probability plot" },
-    { id: "structure", label: "3D Model", title: "3D crystal-structure model" },
-  ];
   return (
-    <div style={{ display: "inline-flex", gap: 2, background: theme.chipBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: 2 }}>
-      {opts.map((o) => (
-        <button
-          key={o.id}
-          onClick={() => onChange(o.id)}
-          title={o.title}
-          style={{
-            border: "none",
-            borderRadius: 6,
-            padding: "3px 11px",
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: themeMono,
-            background: o.id === value ? theme.primary : "transparent",
-            color: o.id === value ? "#fff" : theme.secondary,
-          }}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
+    <SegmentedToggle
+      options={[
+        { id: "curves", label: "Refinement", title: "Observed vs calculated pattern" },
+        { id: "validation", label: "Validation", title: "F_obs vs F_calc + normal-probability plot" },
+        { id: "structure", label: "3D Model", title: "3D crystal-structure model" },
+      ] as const}
+      value={value}
+      onChange={onChange}
+    />
   );
 }
 

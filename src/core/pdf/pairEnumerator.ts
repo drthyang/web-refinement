@@ -85,9 +85,17 @@ export function enumeratePairs(cell: UnitCell, atoms: readonly ExpandedAtom[], r
   const cVec: Vec3 = [M[0][2], M[1][2], M[2][2]];
   const bodyDiag = len([aVec[0] + bVec[0] + cVec[0], aVec[1] + bVec[1] + cVec[1], aVec[2] + bVec[2] + cVec[2]]);
   const reach = rMax + bodyDiag;
-  const n1 = Math.ceil(reach / len(aVec));
-  const n2 = Math.ceil(reach / len(bVec));
-  const n3 = Math.ceil(reach / len(cVec));
+  // Per-axis image counts from the reciprocal basis: t1 = a*·T, so any image
+  // with |T| ≤ reach has |t1| ≤ |a*|·reach. Bounding with the axis LENGTH
+  // (reach/|a|) instead would under-enumerate oblique cells — |a| ≥ 1/|a*|
+  // (the (100) plane spacing), and e.g. a hexagonal cell needs ~15% more
+  // images along a/b than reach/|a| suggests, dropping edge-of-window pairs
+  // at unlucky window sizes. The extra shells this admits for orthogonal
+  // cells hold no pairs within rMax, so results are unchanged there.
+  const gStar = reciprocalMetricTensor(cell);
+  const n1 = Math.ceil(reach * Math.sqrt(Math.max(gStar[0][0], 0)));
+  const n2 = Math.ceil(reach * Math.sqrt(Math.max(gStar[1][1], 0)));
+  const n3 = Math.ceil(reach * Math.sqrt(Math.max(gStar[2][2], 0)));
 
   const pairs: PdfPair[] = [];
   const rMaxSq = rMax * rMax;

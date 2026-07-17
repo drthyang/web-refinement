@@ -19,6 +19,3 @@ export function modulusSquared(a: Complex): number {
   return a.re * a.re + a.im * a.im;
 }
 
-export function modulus(a: Complex): number {
-  return Math.hypot(a.re, a.im);
-}
