@@ -28,6 +28,16 @@ import {
   correlatedMotionConflict,
 } from "@/core/workflow/pdf";
 import { buildDistortionModes, buildSymmetryModes, positionShiftValuesFor, withDistortionModes, type DistortionModeSet } from "@/core/crystal/distortionModes";
+import { decomposeDisplacementRepresentation, type DisplaciveIrrepTerm } from "@/core/crystal/displaciveModes";
+import {
+  projectIsotypicModes,
+  stabilizerOfField,
+  identifySubgroup,
+  subgroupTypeKey,
+  activateDisplacementMode,
+  type DisplacementField,
+  type SubgroupIdentity,
+} from "@/core/crystal/isotropyTree";
 import { parseCif } from "@/parsers/cif";
 import { applyParameters } from "@/core/workflow/apply";
 
@@ -86,7 +96,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // excluded); loading a high-symmetry PARENT cif upgrades it to the observed
   // decomposition, whose mode 1 is the frozen order parameter (Å).
   const [positionMode, setPositionMode] = useState<"atomic" | "irreps">("atomic");
-  const [modes, setModes] = useState<{ set: DistortionModeSet; parentName: string } | null>(null);
+  const [modes, setModes] = useState<{ set: DistortionModeSet; parentName: string; fromActivation?: boolean } | null>(null);
   useEffect(() => setModes(null), [structure]);
   const symModes = useMemo(() => (multiPhase ? null : buildSymmetryModes(structure)), [structure, multiPhase]);
   // An empty symmetry set (every site pinned by symmetry) cannot replace the
@@ -127,11 +137,18 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     const raw = modeSet
       ? { ...base, ...withDistortionModes({ params: base.params, bindings: base.bindings }, modeSet) }
       : base;
+    // Demo preset values are keyed by the PARENT-setting parameter ids. After
+    // a subgroup-tree activation the spec lives in the CHILD setting, where
+    // colliding ids (U modes, cell rows) mean different symmetry modes —
+    // stamping the parent values would silently corrupt the fit. The child
+    // self-seeds from the refined (baked) anchor instead; setting-independent
+    // values carry over by id in the spec-swap effect.
+    const preset = modeSet !== null && modes?.fromActivation ? undefined : presetValues;
     // κ-seeding the phase scale(s) costs a full forward G(r) calculation —
     // skip it when a preset (demo snapshot) supplies every scale anyway.
     const presetCoversScale =
-      presetValues !== undefined &&
-      raw.params.every((p) => p.kind !== "pdfScale" || presetValues[p.id] !== undefined);
+      preset !== undefined &&
+      raw.params.every((p) => p.kind !== "pdfScale" || preset[p.id] !== undefined);
     let params = raw.params;
     if (!presetCoversScale) {
       const start = multiPhase
@@ -146,9 +163,10 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       );
     }
     // Demo snapshots open converged: preset values win over the κ seed, and
-    // become the reset anchor too.
-    if (presetValues) {
-      params = params.map((p) => (presetValues[p.id] !== undefined ? { ...p, value: presetValues[p.id]!, initialValue: presetValues[p.id]! } : p));
+    // become the reset anchor too. (Suppressed for activation specs — see
+    // `preset` above.)
+    if (preset) {
+      params = params.map((p) => (preset[p.id] !== undefined ? { ...p, value: preset[p.id]!, initialValue: preset[p.id]! } : p));
     }
     return { ...raw, params };
   }, [fitStructure, modeSet, extraPhases, multiPhase, phases, pattern, defaultRange, presetValues]);
@@ -183,23 +201,42 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     anchor: StructureModel;
     bindings: readonly ParameterBinding[];
   } | null>(null);
+  // Set by actions that deliberately CHANGE the model geometry (subgroup-tree
+  // activation with its starting kick): the next spec swap keeps the spec's
+  // own POSITION seeds (the kick) instead of re-deriving them from the
+  // previous fit's geometry, while the id-keyed carryover of non-position
+  // values (scale, δ, Qdamp/Qbroad, occupancies, matching cell rows) still
+  // runs — those hold the live refined state and their ids are
+  // setting-independent.
+  const skipPositionCarryoverOnce = useRef(false);
   useEffect(() => {
     const prev = prevSpecCtx.current;
     const prevParams = paramsRef.current;
+    const skipPos = skipPositionCarryoverOnce.current;
+    skipPositionCarryoverOnce.current = false;
     let next = spec.params;
     if (prev && prev.structure === structure && prev.pattern === pattern && !multiPhase && !prev.multiPhase) {
       const values: Record<string, number> = {};
       for (const p of prevParams) values[p.id] = p.value;
-      const realized = applyParameters(prev.anchor, prev.bindings, values).model;
-      const posSeed = positionShiftValuesFor(fitStructure, spec.bindings, realized);
+      const realized = skipPos ? null : applyParameters(prev.anchor, prev.bindings, values).model;
+      const posSeed = realized ? positionShiftValuesFor(fitStructure, spec.bindings, realized) : null;
       const prevById = new Map(prevParams.map((p) => [p.id, p]));
+      // On an activation swap (skipPos) the parameter SETTING changed: ids of
+      // setting-dependent kinds (U modes, cell rows) collide across settings
+      // while meaning different symmetry modes — carrying them by id would
+      // stamp parent-mode amplitudes onto different child modes. Carry only
+      // the setting-independent problem-level kinds; the child spec already
+      // seeds the structural ones from the refined (baked) anchor.
+      const settingFree = new Set(["pdfScale", "qdamp", "qbroad", "delta1", "delta2", "sratio", "rcut", "spdiameter", "occupancy", "scale"]);
       next = spec.params.map((p) => {
         if (p.kind === "positionShift") {
+          if (!posSeed) return p; // activation: keep the spec's seed (the kick)
           const v = posSeed[p.id] ?? 0;
           // Rows carrying real displacement enter free (they hold the fit);
           // the rest keep the spec's deliberate-activation default.
           return { ...p, value: v, fixed: Math.abs(v) > 1e-8 ? false : p.fixed };
         }
+        if (skipPos && !settingFree.has(p.kind)) return p;
         const old = prevById.get(p.id);
         return old ? { ...p, value: old.value, fixed: old.fixed } : p;
       });
@@ -361,6 +398,107 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
 
   function onParamChange(id: string, patch: Partial<RefinementParameter>): void {
     setParams((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+
+  // ---- Subgroup tree (Γ potential distortion modes, requirement 3) --------
+  // The displacive decomposition of the LOADED structure's own space group:
+  // which irreps could carry a symmetry-breaking distortion, and — per irrep —
+  // which isotropy subgroups its modes lead to. Computed only when the 3D
+  // Model card (which hosts the tree) is visible; single-phase only.
+  // The tree enumerates the PARENT's irreps, so it is only offered from the
+  // pristine parent state — an active mode set (activation or parent-CIF)
+  // lives in a different setting whose irreps/labels would not match; the
+  // user clears it (✕) first. Acoustic-only terms (optic = 0) are dropped:
+  // their entire content is a rigid translation the gauge projection would
+  // discard, making activation a guaranteed no-op.
+  const subgroupTree = useMemo(() => {
+    if (multiPhase || viewTab !== "model3d" || modes !== null) return null;
+    const dec = decomposeDisplacementRepresentation(structure);
+    if (!dec.available) return null;
+    const terms = dec.terms
+      .filter((t) => !t.trivial && t.multiplicity - t.acoustic > 0)
+      .map((term) => {
+        const fields = projectIsotypicModes(structure, undefined, term, structure.spaceGroup.operations);
+        // Group candidate modes by the subgroup they lead to — the tree view.
+        // The key must distinguish subgroups that share point group and index
+        // but differ in translation content (Pm vs Pc), hence the
+        // setting-invariant op-set key fallback.
+        const bySub = new Map<string, { identity: SubgroupIdentity; field: DisplacementField; count: number }>();
+        for (const f of fields) {
+          const subOps = stabilizerOfField(f, structure.spaceGroup.operations);
+          const id = identifySubgroup(subOps, structure.spaceGroup.operations);
+          const key = id.number !== undefined ? `#${id.number}` : subgroupTypeKey(subOps);
+          const e = bySub.get(key);
+          if (e) e.count++;
+          else bySub.set(key, { identity: id, field: f, count: 1 });
+        }
+        return { term, subgroups: [...bySub.values()] };
+      });
+    return { dec, terms };
+  }, [multiPhase, viewTab, structure, modes]);
+
+  // Activate one symmetry-breaking mode: realize the isotropy-subgroup child
+  // (split Wyckoff orbits — parent ops would re-symmetrize the displacement
+  // into a wrong orbit) and enter irreps mode with the activated field as the
+  // leading free amplitude. The amplitude gets a small starting KICK: for an
+  // inversion-odd (polar) mode of a centrosymmetric parent, amplitude 0 is an
+  // exact stationary point of χ² (±a are inversion domains with identical
+  // G(r)), so a gradient refinement could never leave it.
+  const ACTIVATION_KICK = 0.05; // Å whole-cell starting amplitude
+  function onActivateMode(term: DisplaciveIrrepTerm, sub: { identity: SubgroupIdentity; field: DisplacementField }): void {
+    const subName = sub.identity.hermannMauguin ?? sub.identity.pointGroup ?? "subgroup";
+    const label = `${term.irrep.label} → ${subName}`;
+    // Activate from the CURRENT refined geometry, not the loaded CIF: baking
+    // the refined cell/ADPs/positions into the anchor means the child spec
+    // self-seeds the refined values in ITS OWN setting — the parent-setting
+    // preset/param ids (U modes, cell rows) do not survive a symmetry change,
+    // so re-seeding from ids alone would silently revert the fit.
+    const values: Record<string, number> = {};
+    for (const p of paramsRef.current) values[p.id] = p.value;
+    const refined = applyParameters(fitStructure, spec.bindings, values).model;
+    // Re-derive the chosen field on the refined anchor (atom positions moved
+    // with the fit, so the display tree's field cannot be reused verbatim):
+    // match by irrep label, then by the resulting subgroup identity.
+    const dec = decomposeDisplacementRepresentation(refined);
+    const termNow = dec.terms.find((t) => t.irrep.label === term.irrep.label && !t.trivial);
+    let fieldNow: DisplacementField | null = null;
+    if (termNow) {
+      for (const f of projectIsotypicModes(refined, undefined, termNow, refined.spaceGroup.operations)) {
+        const id = identifySubgroup(stabilizerOfField(f, refined.spaceGroup.operations), refined.spaceGroup.operations);
+        const sameName = id.number !== undefined ? id.number === sub.identity.number : id.pointGroup === sub.identity.pointGroup && id.index === sub.identity.index;
+        if (sameName) {
+          fieldNow = f;
+          break;
+        }
+      }
+    }
+    if (!fieldNow) {
+      console.error(`[status] activation failed: ${label} not found on the refined structure (did the fit lower the effective symmetry?)`);
+      return;
+    }
+    const act = activateDisplacementMode(refined, fieldNow, label);
+    // The seed survives only if it has optic (non-gauge) content — a pure
+    // acoustic field is projected away by buildSymmetryModes. Target the kick
+    // by the ACTIVE mode's id, never by index: with a dropped seed, index 0
+    // would be an unrelated fixed complement mode.
+    const activeId = act.modeSet.modes.find((m) => m.active)?.id;
+    if (activeId === undefined) {
+      console.error(`[status] activation of ${label} produced no refinable mode (the field is pure rigid translation) — nothing to do`);
+      return;
+    }
+    const set: DistortionModeSet = {
+      ...act.modeSet,
+      parameters: act.modeSet.parameters.map((p) =>
+        p.id === activeId ? { ...p, value: ACTIVATION_KICK, initialValue: ACTIVATION_KICK, fixed: false } : p,
+      ),
+    };
+    skipPositionCarryoverOnce.current = true; // keep the kick; carry the rest by id
+    setModes({ set, parentName: label, fromActivation: true });
+    setPositionMode("irreps");
+    console.info(
+      `[status] activated ${label}${sub.identity.number !== undefined ? ` (#${sub.identity.number})` : ""}: ` +
+      `${act.child.sites.length} child site(s) · starting amplitude ${ACTIVATION_KICK} Å`,
+    );
   }
 
   // Decompose the current (child) structure against a HIGH-SYMMETRY parent CIF
@@ -663,6 +801,47 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                       <span style={{ fontSize: fz.micro, color: color.secondary }}>
                         or flip Positions → “Irreps (modes)” in the parameter panel — modes come from the loaded space group, no second CIF needed
                       </span>
+                    </div>
+                  )}
+                  {subgroupTree && subgroupTree.terms.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                        <span style={uppercaseLabel}>Potential Γ modes · subgroup tree</span>
+                        <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
+                          {structure.spaceGroup.hermannMauguin ?? "parent"} ·{" "}
+                          {subgroupTree.terms.length} symmetry-breaking irrep{subgroupTree.terms.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <div style={{ maxHeight: 180, overflowY: "auto", marginTop: 4, border: `1px solid ${color.border}`, borderRadius: 6 }}>
+                        {subgroupTree.terms.map(({ term, subgroups }) => {
+                          const dim = term.irrep.dim ?? 1;
+                          const optic = term.multiplicity - term.acoustic;
+                          return (
+                            <div key={term.irrep.label} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "5px 8px", borderTop: `1px solid ${color.subtle2}` }}>
+                              <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.ink, minWidth: 128 }}>
+                                {term.irrep.label} · dim {dim} · {optic} optic mode{optic === 1 ? "" : "s"}
+                                {term.acoustic > 0 ? ` (+${term.acoustic} acoustic)` : ""}
+                              </span>
+                              {subgroups.map((sub, si) => (
+                                <button
+                                  key={si}
+                                  style={{ ...resetRangeBtn, ...(busy ? { opacity: 0.55, cursor: "not-allowed" } : {}) }}
+                                  disabled={busy}
+                                  onClick={() => onActivateMode(term, sub)}
+                                  title={`Activate this distortion: the space group lowers to the isotropy subgroup (Wyckoff orbits split), the mode enters the Positions group free with a ${ACTIVATION_KICK} Å starting amplitude — a polar mode of a centrosymmetric parent sits at an exact χ² stationary point at amplitude 0, so it must start off zero.`}
+                                >
+                                  Activate → {sub.identity.hermannMauguin ?? sub.identity.pointGroup ?? "?"}
+                                  {sub.identity.number !== undefined ? ` #${sub.identity.number}` : ` (index ${sub.identity.index})`}
+                                  {sub.count > 1 ? ` ·${sub.count}` : ""}
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p style={{ marginTop: 4, marginBottom: 0, fontSize: 12, color: color.secondary }}>
+                        Cell-preserving (Γ) distortions of the loaded group only — zone-boundary (cell-multiplying) modes need projective small representations and are deliberately not enumerated. Oblique order-parameter directions arrive via a parent-CIF decomposition.
+                      </p>
                     </div>
                   )}
                 </div>
