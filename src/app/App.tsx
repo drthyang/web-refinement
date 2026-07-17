@@ -15,7 +15,7 @@ import { useCallback, useRef, useState } from "react";
 import { APP_VERSION } from "@/app/constants";
 import type { RefinementResult } from "@/core/refinement/types";
 import type { MagneticModel } from "@/core/magnetic/types";
-import type { SingleCrystalDataset } from "@/core/diffraction/types";
+import type { PdfPattern, SingleCrystalDataset } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { buildPowderSpec } from "@/app/powderSpec";
 import { parseMagneticCif, parseCif } from "@/parsers/cif";
@@ -25,6 +25,7 @@ import { parseFullProfInstrm6, looksLikeInstrm6 } from "@/parsers/fullprofInstrm
 import { parseGsasCsvPattern } from "@/parsers/gsasPattern";
 import { isGsasHistogram, parseGsasHistogramPattern } from "@/parsers/gsasHistogram";
 import { detectDataFormat, type DetectedFormat } from "@/parsers/detectFormat";
+import { parsePdfData } from "@/parsers/pdfData";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 import { startingPowderParams, loadReflectionDataset } from "@/app/loadData";
 import { powderBindings } from "@/examples/synthetic";
@@ -32,6 +33,7 @@ import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
 import { ComputeClient } from "@/workers/computeClient";
 import { PowderWorkbench } from "@/app/PowderWorkbench";
 import { SingleCrystalWorkbench } from "@/app/SingleCrystalWorkbench";
+import { PdfWorkbench } from "@/app/PdfWorkbench";
 import { WorkbenchHeader, type Step, type ExportAction } from "@/app/ui/WorkbenchHeader";
 import { color as theme } from "@/app/theme";
 import {
@@ -55,6 +57,8 @@ const SC_STEPS: readonly Step[] = [
   { num: "1", label: "Refinement" },
   { num: "2", label: "Magnetic" },
 ];
+// PDF is a single-step flow for now; mPDF (roadmap P4) adds the magnetic step.
+const PDF_STEPS: readonly Step[] = [{ num: "1", label: "Refinement" }];
 
 export function App(): JSX.Element {
   // The workbench opens clean (no data): the shell shows a landing view until the
@@ -76,6 +80,10 @@ export function App(): JSX.Element {
     setScDataset(next);
     setScMagneticDataset(null);
   };
+  // PDF mode: set when a reduced G(r) (.gr) is loaded; the app then renders the
+  // PDF workbench. Mutually exclusive with single-crystal mode, and cleared when
+  // powder data is loaded (auto-switch back), mirroring scDataset.
+  const [pdfDataset, setPdfDataset] = useState<PdfPattern | null>(null);
   const [step, setStep] = useState(0);
   const [instrument, setInstrument] = useState<InstrumentParameters>(DEFAULT_INSTRUMENT);
   const [instrumentLoaded, setInstrumentLoaded] = useState(false);
@@ -98,6 +106,7 @@ export function App(): JSX.Element {
   // which need engine-private state (parameters, results, live curves).
   const powderExports = useRef<WorkbenchExports | null>(null);
   const scExports = useRef<WorkbenchExports | null>(null);
+  const pdfExports = useRef<WorkbenchExports | null>(null);
 
   const { structure } = session;
 
@@ -135,6 +144,7 @@ export function App(): JSX.Element {
     setInstrumentLoaded(false);
     setOwnStructure(false);
     setScNuclearDataset(null);
+    setPdfDataset(null);
     setPowderResult(null);
     setDemoActive(false);
   }
@@ -158,6 +168,7 @@ export function App(): JSX.Element {
     setInstrumentLoaded(true);
     setOwnStructure(false);
     setScNuclearDataset(null);
+    setPdfDataset(null);
     setPowderResult(null);
     setDemoActive(true);
     setMessage("Loaded the bundled Mn₃Ga + MnO POWGEN demo (two-phase TOF, converged fit).");
@@ -236,6 +247,20 @@ export function App(): JSX.Element {
         }
         const fmt = detectDataFormat({ text, filename: file.name, instrument: instrumentLoaded ? instrument : undefined });
         const tag = `[${fmt.source}/${fmt.confidence}]`;
+        if (fmt.dataType === "pdf") {
+          const parsed = parsePdfData(text, { id: `${structure.id}-pdf`, filename: file.name });
+          if (parsed.points.length < 3) throw new Error("fewer than 3 usable G(r) rows");
+          setScNuclearDataset(null);
+          setPdfDataset(parsed);
+          const provenance =
+            parsed.sourceKind === "sq" ? " (S(Q) → G(r) transformed at load)" :
+            parsed.sourceKind === "fq" ? " (F(Q) → G(r) transformed at load)" : "";
+          setMessage(
+            `Loaded PDF “${file.name}” · ${parsed.points.length} pts · ${parsed.scatteringType} ${tag}` +
+            `${parsed.qmax !== undefined ? ` · Qmax ${parsed.qmax}` : ""}${provenance}. Real-space G(r) fit ready. ${fmt.note}`,
+          );
+          return;
+        }
         if (fmt.dataType === "single-crystal") {
           // Pairing convention (Phase 3): a `<name>_mag.*` file loaded while a
           // nuclear dataset is present is routed to the magnetic partner (for
@@ -248,6 +273,7 @@ export function App(): JSX.Element {
           }
           const loaded = loadReflectionDataset(text, structure, `${structure.id}-hkl`, file.name);
           if (loaded.kept < 1) throw new Error("no usable reflections in the file");
+          setPdfDataset(null);
           setScNuclearDataset(loaded.dataset);
           setMessage(
             `Loaded single-crystal “${file.name}” · ${loaded.kept} reflections [${loaded.format}]` +
@@ -256,6 +282,7 @@ export function App(): JSX.Element {
           return;
         }
         setScNuclearDataset(null); // powder data → leave single-crystal mode
+        setPdfDataset(null); // …and PDF mode
         applyPowder(text, file.name, fmt, tag);
       } catch (e) {
         setMessage(`Data load failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -300,6 +327,7 @@ export function App(): JSX.Element {
     });
     if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
     setScNuclearDataset(null);
+    setPdfDataset(null);
     const wavelength = parsed.wavelength ?? cw?.wavelength ?? 2.5;
     const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
     const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
@@ -317,6 +345,7 @@ export function App(): JSX.Element {
     const parsed = parseIllD1b(text, { id, name: filename, radiation: { kind: "neutron", wavelength }, wavelength });
     if (parsed.points.length < 3) throw new Error("fewer than 3 usable data rows");
     setScNuclearDataset(null);
+    setPdfDataset(null);
     const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
     const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
     setSession((s) => ({ ...s, extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
@@ -429,7 +458,13 @@ export function App(): JSX.Element {
   // published handlers: single crystal exposes only its own CIF; powder keeps
   // CIF/mCIF + CSV + project JSON. Labels the shell can know (they depend only
   // on session state it owns); behavior lives in the engines.
-  const headerExports: ExportAction[] = scDataset
+  const headerExports: ExportAction[] = pdfDataset
+    ? [
+        { label: "CIF", onClick: () => pdfExports.current?.cif?.() },
+        { label: "CSV", onClick: () => pdfExports.current?.csv?.() },
+        { label: "Report", onClick: () => pdfExports.current?.report?.() },
+      ]
+    : scDataset
     ? [
         { label: "CIF", onClick: () => scExports.current?.cif?.() },
         { label: ".int", onClick: () => scExports.current?.scInt?.() },
@@ -445,12 +480,12 @@ export function App(): JSX.Element {
   // The workbench opens clean: until the user loads the demo or their own CIF
   // (which replaces the empty session), the shell shows the landing view and
   // hides the workflow steps, exports, and disclaimer.
-  const hasContent = session.powderSource !== EMPTY_SOURCE || scDataset !== null;
+  const hasContent = session.powderSource !== EMPTY_SOURCE || scDataset !== null || pdfDataset !== null;
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <WorkbenchHeader
-        steps={hasContent ? (scDataset ? SC_STEPS : STEPS) : []}
+        steps={hasContent ? (pdfDataset ? PDF_STEPS : scDataset ? SC_STEPS : STEPS) : []}
         active={step}
         onStep={setStep}
         version={`v${APP_VERSION}`}
@@ -475,7 +510,7 @@ export function App(): JSX.Element {
         instrumentLoaded={instrumentLoaded}
         ownStructure={ownStructure}
         client={client.current}
-        active={!scDataset}
+        active={!scDataset && !pdfDataset}
         step={step}
         onStep={setStep}
         setMessage={setMessage}
@@ -488,6 +523,13 @@ export function App(): JSX.Element {
         onLoadInstrument={onLoadInstrument}
         onLoadDemo={onToggleDemo}
       />
+      {pdfDataset && (
+        // PDF mode (auto-switched on loading a reduced .gr). Keyed on the dataset
+        // id so a new file remounts with a fresh parameter set.
+        <main className="wb-main" style={{ flex: 1 }}>
+          <PdfWorkbench key={pdfDataset.id} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} />
+        </main>
+      )}
       {scDataset && (
         // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
         // the dataset id so a new file remounts with a fresh parameter set.

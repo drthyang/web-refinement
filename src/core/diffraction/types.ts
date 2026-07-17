@@ -122,6 +122,13 @@ export interface PdfPattern {
   readonly rstep?: number;
   /** Sample composition string as written in the header, e.g. "Ga Nb4 Se8". */
   readonly composition?: string;
+  /**
+   * What the loaded file actually contained. "gr" = the G(r) itself; "sq"/"fq"
+   * = Q-space S(Q)/F(Q) that the app sine-transformed to G(r) at load time
+   * (with `qmax` taken from the data's own Q extent). Provenance for the UI
+   * and reports; absent means "gr".
+   */
+  readonly sourceKind?: "gr" | "sq" | "fq";
 }
 
 /** Any diffraction dataset the engine can refine against. */

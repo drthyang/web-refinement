@@ -4,10 +4,11 @@
  * (guided) sequence, rebuilding the profile from the request fields.
  */
 
-import type { EvaluatorSpec, RefinePowderRequest } from "@/workers/protocol";
+import type { EvaluatorSpec, RefinePdfRequest, RefinePowderRequest } from "@/workers/protocol";
 import type { AgreementFactors, RefinementOptions, RefinementResult } from "@/core/refinement/types";
 import { refine, type RefinementProblem } from "@/core/refinement/engine";
 import { buildPowderProblem, type PowderProfile } from "@/core/workflow/powder";
+import { buildPdfProblem, buildMultiPhasePdfProblem } from "@/core/workflow/pdf";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
@@ -22,6 +23,14 @@ import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
  * single construction path.
  */
 export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
+  if (spec.kind === "pdf") {
+    const phases = spec.extraPhases && spec.extraPhases.length > 0
+      ? [{ structure: spec.structure, id: spec.structure.id }, ...spec.extraPhases.map((s) => ({ structure: s, id: s.id }))]
+      : null;
+    return phases
+      ? buildMultiPhasePdfProblem(phases, spec.pattern, spec.parameters, spec.bindings, spec.restraints ?? [], spec.fitRange)
+      : buildPdfProblem(spec.structure, spec.pattern, spec.parameters, spec.bindings, spec.restraints ?? [], spec.fitRange);
+  }
   if (spec.kind === "multiPhasePowder") {
     return buildMultiPhasePowderProblem([...spec.phases], spec.pattern, spec.parameters, spec.bindings, {
       shape: spec.shape,
@@ -66,6 +75,31 @@ export function runPowderRefinement(req: RefinePowderRequest, onProgress?: Powde
     phases
       ? buildMultiPhasePowderProblem(phases, req.pattern, params, req.bindings, profile, req.fitRange)
       : buildPowderProblem(req.structure, req.pattern, params, req.bindings, profile, req.restraints ?? [], req.fitRange);
+
+  const patternLen = req.pattern.points.length;
+  const onIteration = onProgress
+    ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
+        onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
+    : undefined;
+  const options: Partial<RefinementOptions> = { ...(req.options ?? {}), ...(onIteration ? { onIteration } : {}) };
+
+  if (req.staged && req.staged.length > 0) {
+    const out = refineStaged(req.parameters, build, stagesFromKindGroups(req.staged), options);
+    if (out.final) return out.final;
+  }
+  return refine(build(req.parameters), options);
+}
+
+/** Real-space PDF refinement runner (worker + in-thread fallback), mirroring
+ *  `runPowderRefinement`: flat co-refinement or the staged sequence. */
+export function runPdfRefinement(req: RefinePdfRequest, onProgress?: PowderProgress): RefinementResult {
+  const phases = req.extraPhases && req.extraPhases.length > 0
+    ? [{ structure: req.structure, id: req.structure.id }, ...req.extraPhases.map((s) => ({ structure: s, id: s.id }))]
+    : null;
+  const build = (params: readonly RefinePdfRequest["parameters"][number][]) =>
+    phases
+      ? buildMultiPhasePdfProblem(phases, req.pattern, params, req.bindings, req.restraints ?? [], req.fitRange)
+      : buildPdfProblem(req.structure, req.pattern, params, req.bindings, req.restraints ?? [], req.fitRange);
 
   const patternLen = req.pattern.points.length;
   const onIteration = onProgress

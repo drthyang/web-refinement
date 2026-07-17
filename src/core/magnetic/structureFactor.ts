@@ -13,7 +13,7 @@
  */
 
 import type { Complex, Vec3 } from "@/core/math/types";
-import type { StructureModel, DisplacementParameters } from "@/core/crystal/types";
+import type { StructureModel, DisplacementParameters, SymmetryOperation } from "@/core/crystal/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { MagneticFormFactorTable } from "@/core/scattering/types";
 import { add, expι, scale as cscale, ZERO } from "@/core/math/complex";
@@ -23,6 +23,23 @@ import { magneticTable } from "@/core/scattering/magnetic";
 import { crystalComponentsToCartesian, perpendicularMoment, qCartesian } from "@/core/magnetic/moment";
 import { determinant } from "@/core/math/mat3";
 import { anisotropicDebyeWaller, debyeWaller } from "@/core/diffraction/structureFactor";
+import { rotateUAniso } from "@/core/crystal/adp";
+import { IDENTITY3 } from "@/core/math/mat3";
+
+/** The nuclear operation carrying `from` onto `to` (mod 1), else identity —
+ *  used to anchor a split-orbit representative's anisotropic tensor. */
+function opToPosition(structure: StructureModel, from: Vec3, to: Vec3): SymmetryOperation {
+  const near = (a: number, b: number): boolean => {
+    let d = Math.abs((((a - b) % 1) + 1) % 1);
+    d = Math.min(d, 1 - d);
+    return d < 1e-4;
+  };
+  for (const op of structure.spaceGroup.operations) {
+    const p = applyOperation(op, from);
+    if (near(p[0], to[0]) && near(p[1], to[1]) && near(p[2], to[2])) return op;
+  }
+  return { rotation: IDENTITY3, translation: [0, 0, 0], xyz: "x,y,z" };
+}
 
 const TWO_PI = 2 * Math.PI;
 /**
@@ -86,6 +103,11 @@ export function expandMagneticAtoms(structure: StructureModel, magnetic: Magneti
     const ffId = formFactorId(structure, moment.siteLabel, moment.formFactorId);
     const seen: Vec3[] | null = dedup ? [] : null;
     const basePos = moment.position ?? site.position;
+    // Anisotropic ADP anchored at the orbit representative, rotated per image —
+    // mirrors magneticStructureFactor exactly (the GPU kernel marshals this).
+    const adpAtRep: DisplacementParameters = site.adp.kind === "anisotropic"
+      ? { kind: "anisotropic", uAniso: rotateUAniso(site.adp.uAniso, opToPosition(structure, site.position, basePos).rotation) }
+      : site.adp;
     for (const op of ops) {
       const p = applyOperation(op, basePos);
       if (seen) {
@@ -110,7 +132,10 @@ export function expandMagneticAtoms(structure: StructureModel, magnetic: Magneti
         axial * (r[2][0] * comps[0] + r[2][1] * comps[1] + r[2][2] * comps[2]),
       ];
       const momentCart = moment.frame === "cartesian" ? rotatedComps : crystalComponentsToCartesian(structure.cell, rotatedComps);
-      out.push({ position: p, momentCart, occupancy: site.occupancy, formFactorId: ffId, adp: site.adp });
+      const adp: DisplacementParameters = adpAtRep.kind === "anisotropic"
+        ? { kind: "anisotropic", uAniso: rotateUAniso(adpAtRep.uAniso, r) }
+        : adpAtRep;
+      out.push({ position: p, momentCart, occupancy: site.occupancy, formFactorId: ffId, adp });
     }
   }
   return out;
@@ -154,14 +179,20 @@ export function magneticStructureFactor(
     // factor — the magnetic scatterer is the same vibrating atom (GSAS-II and
     // FullProf damp |F_M| identically). Omitting it inflates the calculated
     // magnetic intensity at low d, biasing refined moments low.
-    const dw =
-      site.adp.kind === "isotropic"
-        ? debyeWaller(site.adp.bIso, s)
-        : anisotropicDebyeWaller(structure.cell, site.adp.uAniso, h, k, l);
+    // Isotropic Debye–Waller is rotation-invariant; an anisotropic tensor is
+    // rotated per orbit image (U′ = R·U·Rᵀ) inside the operation loop below.
+    const isoDw = site.adp.kind === "isotropic" ? debyeWaller(site.adp.bIso, s) : null;
     const seen: Vec3[] | null = dedup ? [] : null;
     // A split-orbit moment (magnetic subgroup ⊂ nuclear group) expands from its
     // own orbit-representative position, not the site's asymmetric-unit one.
     const basePos = moment.position ?? site.position;
+    // The tensor AT the representative: the site's U carried by the nuclear
+    // operation g₀ that maps the asymmetric position to basePos (identity when
+    // the moment sits on the asymmetric site itself). Each image below then
+    // sees R·U₀·Rᵀ.
+    const anisoU = site.adp.kind === "anisotropic"
+      ? rotateUAniso(site.adp.uAniso, opToPosition(structure, site.position, basePos).rotation)
+      : null;
 
     for (const op of ops) {
       const p = applyOperation(op, basePos);
@@ -203,6 +234,7 @@ export function magneticStructureFactor(
 
       const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
       const ph = expι(phase);
+      const dw = isoDw ?? anisotropicDebyeWaller(structure.cell, rotateUAniso(anisoU!, r), h, k, l);
       const w = MAGNETIC_PREFACTOR * site.occupancy * fMag * dw;
       fx = add(fx, cscale(ph, w * mPerp[0]));
       fy = add(fy, cscale(ph, w * mPerp[1]));

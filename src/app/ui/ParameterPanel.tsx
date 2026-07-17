@@ -52,9 +52,19 @@ const CATEGORY: Record<ParameterKind, string> = {
   momentY: "Magnetic",
   momentZ: "Magnetic",
   momentMode: "Magnetic",
+  // Real-space PDF fit: the G(r) scale joins "Scale"; the Qdamp/Qbroad envelope
+  // and δ1/δ2 correlated-motion sharpening get their own group.
+  pdfScale: "Scale",
+  qdamp: "PDF",
+  qbroad: "PDF",
+  delta1: "PDF",
+  delta2: "PDF",
+  spdiameter: "PDF",
+  sratio: "PDF",
+  rcut: "PDF",
 };
 
-const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic"];
+const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "PDF", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic"];
 
 /** difC/difA/difB come from instrument calibration — shown but not togglable. */
 const isLocked = (p: RefinementParameter): boolean => p.kind === "tofCalibration";

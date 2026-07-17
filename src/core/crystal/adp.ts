@@ -60,3 +60,34 @@ export function withAdpModel(structure: StructureModel, kind: "isotropic" | "ani
   const sites: AtomSite[] = structure.sites.map((s) => ({ ...s, adp: convert(s.adp) }));
   return { ...structure, sites };
 }
+
+/**
+ * Rotate an anisotropic U tensor by a space-group operation's (fractional)
+ * rotation matrix: U′ = R·U·Rᵀ, with U^{jk} the CIF contravariant components.
+ * This is how a site's displacement ellipsoid carries to the other members of
+ * its orbit — an image related by a 4-fold has U11 and U22 swapped, etc.
+ * Skipping this (using the asymmetric-unit tensor verbatim on every image)
+ * corrupts anisotropic Debye–Waller factors and real-space bond-projected
+ * displacement widths for every site whose orbit involves a rotation.
+ */
+export function rotateUAniso(
+  u: readonly [number, number, number, number, number, number],
+  r: readonly (readonly number[])[],
+): [number, number, number, number, number, number] {
+  const U = [
+    [u[0], u[3], u[4]],
+    [u[3], u[1], u[5]],
+    [u[4], u[5], u[2]],
+  ];
+  // W = R·U, then U′ = W·Rᵀ.
+  const w = [0, 1, 2].map((i) => [0, 1, 2].map((j) => r[i]![0]! * U[0]![j]! + r[i]![1]! * U[1]![j]! + r[i]![2]! * U[2]![j]!));
+  const up = [0, 1, 2].map((i) => [0, 1, 2].map((j) => w[i]![0]! * r[j]![0]! + w[i]![1]! * r[j]![1]! + w[i]![2]! * r[j]![2]!));
+  return [up[0]![0]!, up[1]![1]!, up[2]![2]!, up[0]![1]!, up[0]![2]!, up[1]![2]!];
+}
+
+/** A site's ADP as seen by one orbit image: isotropic passes through, an
+ *  anisotropic tensor is rotated by the operation (see rotateUAniso). */
+export function adpForOperation(adp: DisplacementParameters, rotation: readonly (readonly number[])[]): DisplacementParameters {
+  if (adp.kind === "isotropic") return adp;
+  return { kind: "anisotropic", uAniso: rotateUAniso(adp.uAniso, rotation) };
+}

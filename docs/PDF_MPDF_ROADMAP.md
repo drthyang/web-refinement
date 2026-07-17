@@ -279,7 +279,13 @@ and adds a `CONTRACTS` entry (registry tests are strict).
 Each phase ends the project way: **passing tests + updated docs + a working local
 app + a validation gate**, no broken intermediate state.
 
-### P0 — Data model + `.gr` import ⬜  *(small; unblocks everything)*
+### P0 — Data model + `.gr` import ✅  *(small; unblocks everything)*
+
+> **Status (2026-07-16):** done. `PdfPattern` + `.gr/.sq/.fq` parser (PDFgetX3 +
+> Mantid dialects, validated on real NSLS-II 28-ID and POWGEN files), the
+> `detectFormat` pdf branch, the signed-y `WorkbenchPlot` mode (data-min floor +
+> zero line), and the `PdfWorkbench` shell. Remaining sliver: PDF session in the
+> project-JSON schema (`PROJECT_SCHEMA_VERSION` bump + round-trip gate).
 - **Goal:** ingest and display an observed `G(r)`.
 - **Deliverables:** `PdfPattern` type in `diffraction/types.ts` + `DiffractionDataset`
   union; `parsers/pdfData.ts` reading two-column `.gr` (r, G) with the
@@ -291,7 +297,21 @@ app + a validation gate**, no broken intermediate state.
 - **Gate:** round-trip a diffpy `.gr` (e.g. Ni) → JSON → back, byte-stable
   metadata; observed curve renders with negative lobes intact.
 
-### P1 — Neutron PDF core forward model + refinement ⬜  *(large; the keystone)*
+### P1 — Neutron PDF core forward model + refinement ✅ 🔬  *(large; the keystone)*
+
+> **Status (2026-07-16):** done. `pairEnumerator` (periodic images + bond-projected
+> anisotropic ADP), `forwardModel` (Proffen–Billinge sum, δ1/δ2, Qdamp/Qbroad,
+> −4πρ₀r), `totalscattering/weights`, and the engine wiring: `workflow/pdf.ts`
+> (`buildPdfProblem` — uniform weights, fit-range mask, geometry-keyed pair-list
+> cache proven bit-identical; `buildPdfSpec` reusing the powder symmetry machinery;
+> `pdfCurves`; `PDF_STAGE_KINDS`), new `ParameterKind`s with `pdfScale` linear, the
+> `refinePdf` worker path, and a synthetic round-trip test recovering cell/scale/B
+> to Rw ≈ 0. G_calc golden vs PDFgui (POWGEN Fe0.1Co0.9Sn 1.7K) locked in at
+> corr 0.9998, κ ≈ 1.000. **Update 2026-07-17: the 🔬 refined-parameter gate is
+> closed** — a committed PDFfit2-generated fixture (see P2) pins perturbed-model
+> recovery of cell (<1 mÅ), scale, and per-element ADPs on CI. Minor note:
+> peak-width `σ′_ij` lives in the enumerator rather than a separate
+> `peakWidth.ts` (fold out only if a future phase needs it).
 - **Goal:** a working neutron PDF fit of a known crystal.
 - **Deliverables:** `pdf/pairEnumerator.ts` (rmax periodic-image pairs, neighbor-
   binned, vector output — **not** `geometry.bondLengths`, which dedups and tiles
@@ -308,7 +328,17 @@ app + a validation gate**, no broken intermediate state.
   agree with a PDFgui reference within esd. Golden-value snapshot like the
   GSAS-II gates.
 
-### P2 — X-ray PDF + Q-averaging ⬜  *(small–medium)*
+### P2 — X-ray PDF + Q-averaging ✅  *(small–medium)*
+
+> **Status (2026-07-17):** done. The `f(0)=Z` weight branch shipped with P0/P1;
+> the golden gates now run against a **local PDFfit2 1.6.0** (diffpy.pdffit2
+> wheel + Homebrew GSL) with a **committed** synthetic fixture
+> (`core/pdf/pdffit2Golden.ts`), so they run on CI: Ni X-ray corr 0.99988 /
+> κ 1.0001, MnO X-ray corr 0.99982 / κ 1.0000, plus a refined-parameter
+> recovery (cell to <1 mÅ) that also closes P1's 🔬 item. Documented provenance
+> caveat: PDFfit2's neutron b table (Mn −3.75018) vs our NIST Sears values
+> (Mn −3.73) gives a ~2.3 % amplitude offset on MnO-neutron cases (⟨b⟩ nearly
+> cancels), absorbed by the scale and gated explicitly in the test.
 - **Goal:** X-ray (synchrotron) PDF fitting.
 - **Deliverables:** X-ray branch of the pair weight using `Z = f(0)` (constant,
   matching PDFfit2 — **not** `f(Q)`); `⟨Z⟩` normalization; `Qbroad`;
@@ -317,7 +347,30 @@ app + a validation gate**, no broken intermediate state.
 - **Gate 🔬:** golden **Ni or CeO₂ X-ray PDF** vs diffpy; document the `f=Z`
   approximation and its accuracy vs a Q-dependent normalization.
 
-### P3 — Advanced PDF ⬜  *(medium)*
+### P3 — Advanced PDF ✅  *(medium)*
+
+> **Status (2026-07-17):** done (two small slivers below). Shipped and gated:
+> - `pdf/termination.ts` — Qmax sinc band-limit (direct sampled kernel — exact,
+>   no FFT padding pitfalls; swap-in FFT later behind the same seam) with the
+>   6·(2π/Qmax) grid extension and the odd-reflection term at r → 0; identity at
+>   grid Nyquist by construction; auto-applied when the pattern carries `qmax`.
+> - `spdiameter` sphere envelope — external gate vs PDFfit2 (κ 1.0003).
+> - `pdf/partials.ts` — Faber–Ziman element-pair partials (Σ ≡ total to 1e-10)
+>   with the plot-overlay toggle.
+> - **Multi-phase G(r)** — per-phase scale/cell/atoms/δ/Ø, shared Qdamp/Qbroad,
+>   per-phase pair caches, per-phase overlay curves, Add-CIF/phase badges on the
+>   PDF page; synthetic two-phase round trip to Rw ≈ 0 AND an external two-phase
+>   gate vs PDFfit2 (corr 0.9998).
+> - **Multi-dataset co-refinement** (temperature series / joint X-ray+neutron):
+>   one concatenated residual, shared structure + sample terms, per-dataset
+>   scale/Qdamp/Qbroad, per-dataset fit ranges — core + tests (UI to follow with
+>   the multi-dataset data card, P6).
+> - `sratio`/`rcut` kinds with the δ-family mutual-exclusion guard
+>   (`correlatedMotionConflict`, surfaced as a warning in the workbench).
+>
+> Remaining slivers: `calibrate_qdamp` convenience (fold into the P6 MCP tools —
+> freeing qdamp/qbroad on a standard already works by hand), `stepcut`, and the
+> multi-dataset UI.
 - **Goal:** publication-grade PDF: correct termination, finite size, partials,
   multi-phase, multi-dataset.
 - **Deliverables:** `pdf/termination.ts` (Qmax sinc FFT + `6·(2π/Qmax)` range
@@ -364,7 +417,20 @@ app + a validation gate**, no broken intermediate state.
   irrep dimension; refining ξ recovers a correlation length consistent with peak
   fall-off; symmetry-illegal spin directions stay identically zero.
 
-### P6 — Agent tools, UI polish, uncertainty quantification ⬜  *(medium)*
+### P6 — Agent tools, UI polish, uncertainty quantification 🚧  *(medium)*
+
+> **Status (2026-07-17):** the nuclear agent slice is live. Five PDF tools on
+> the contract-tested registry (30 tools total): `parse_pdf_data`,
+> `build_pdf_model` (single + multi-phase, scale-seeded), `refine_pdf`
+> (flat/staged, fit range, node-pool parallel fast path, correlated-motion
+> conflict in `warnings`), `compute_partial_pdf` (element pairs / per-phase),
+> and `calibrate_qdamp` (standard → instrument constants). The P6 gate for the
+> nuclear track passes: an agent completes parse → build → staged refine →
+> partials → calibrate via the registry only (`pdfAgentLoop.test.ts`), and the
+> `{kind:"pdf"}` EvaluatorSpec arm gives pooled/parallel refinement in both the
+> browser workbench and the node MCP server, pooled ≡ serial bit-for-bit.
+> Remaining for P6: mPDF tools (with P4), PDF-aware `assess_refinement` bands,
+> next-step suggestions for PDF, resampling uncertainty, multi-dataset UI.
 - **Goal:** the browser + agent experience is first-class.
 - **Deliverables:** the full MCP tool set (§4) with `CONTRACTS`; `pdf`/`mpdf`
   `EvaluatorSpec` arms for pooled/parallel refine; PDF-aware `assess_refinement`

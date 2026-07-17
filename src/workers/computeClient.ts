@@ -18,6 +18,7 @@ import type {
   EvaluatorSpec,
   LeBailPrefitRequest,
   RefineMagneticRequest,
+  RefinePdfRequest,
   RefinePowderRequest,
   RefineSingleCrystalRequest,
   WorkerMessage,
@@ -27,7 +28,7 @@ import type { RefinementResult, RefinementOptions, AgreementFactors, RefinementP
 import { refine, refineParallel, type BatchEvaluator } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem, applyMagneticMoments } from "@/core/workflow/magnetic";
-import { runPowderRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
+import { runPowderRefinement, runPdfRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
 import { refineStagedAsync } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
 import { refineMultiStart, type MultiStartOptions, type MultiStartResult } from "@/core/refinement/multiStart";
@@ -269,6 +270,11 @@ export class ComputeClient {
     return this.run({ ...req, type: "refinePowder", requestId: this.nextId++ }, onProgress);
   }
 
+  /** Real-space PDF refinement off the main thread (inline in node/tests). */
+  refinePdf(req: Omit<RefinePdfRequest, "requestId" | "type">, onProgress?: PowderProgress): Promise<RefinementResult> {
+    return this.run({ ...req, type: "refinePdf", requestId: this.nextId++ }, onProgress);
+  }
+
   /**
    * Le Bail cell pre-fit off the main thread: refine the cell against peak
    * positions with free intensities (no structure), returning the refined cell +
@@ -336,6 +342,37 @@ export class ComputeClient {
           ...(req.backgroundType !== undefined ? { backgroundType: req.backgroundType } : {}),
           ...(req.fitRange ? { fitRange: req.fitRange } : {}),
         };
+  }
+
+  /**
+   * PDF refinement with the Jacobian parallelized over the evaluator pool —
+   * same replica-construction guarantee as the powder path (both sides build
+   * from `buildProblemForSpec`, so pooled and serial are bit-identical). The
+   * staged sequence runs each stage's Jacobian on the pool too; falls back to
+   * the single-worker `refinePdf` when pooling is unavailable.
+   */
+  async refinePdfParallel(
+    req: Omit<RefinePdfRequest, "requestId" | "type">,
+    onProgress?: PowderProgress,
+  ): Promise<RefinementResult> {
+    const size = this.poolSize();
+    if (size < 2) {
+      return this.refinePdf(req, onProgress);
+    }
+    const spec: EvaluatorSpec = {
+      kind: "pdf",
+      structure: req.structure,
+      ...(req.extraPhases && req.extraPhases.length ? { extraPhases: req.extraPhases } : {}),
+      pattern: req.pattern,
+      parameters: req.parameters,
+      bindings: req.bindings,
+      ...(req.restraints && req.restraints.length ? { restraints: req.restraints } : {}),
+      ...(req.fitRange ? { fitRange: req.fitRange } : {}),
+    };
+    if (req.staged && req.staged.length > 0) {
+      return this.runStagedParallel(spec, req.staged, req.options ?? {}, req.pattern.points.length, onProgress);
+    }
+    return this.runParallel(spec, req.options ?? {}, req.pattern.points.length, onProgress, false);
   }
 
   async refinePowderParallel(
@@ -689,6 +726,9 @@ export const CANCELLED = "__refinement_cancelled__";
 function runInline(req: ComputeRequest, onProgress?: PowderProgress): RefinementResult {
   if (req.type === "refinePowder") {
     return runPowderRefinement(req, onProgress);
+  }
+  if (req.type === "refinePdf") {
+    return runPdfRefinement(req, onProgress);
   }
   if (req.type === "refineMagnetic") {
     const problem = buildMagneticSingleCrystalProblem(

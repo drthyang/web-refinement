@@ -22,6 +22,7 @@
  */
 
 import type { PdfPattern, PdfPoint, PdfScatteringType } from "@/core/diffraction/types";
+import { fOfQFromSOfQ, gOfRFromFOfQ, defaultTransformGrid } from "@/core/totalscattering/fourier";
 
 export interface ParsePdfOptions {
   /** Display name; defaults to the filename or "PDF pattern". */
@@ -69,6 +70,37 @@ function resolveColumns(labelLine: string | undefined, ncol: number): { r: numbe
   return { r: 0, g: 1, sigma };
 }
 
+/** What a reduced total-scattering file contains: real-space G(r), or Q-space
+ *  S(Q)/F(Q) (which the loader sine-transforms to G(r)). */
+export type ReducedKind = "gr" | "sq" | "fq";
+
+/**
+ * Classify a reduced file, most authoritative signal first: the filename
+ * extension, then an explicit header marker (PDFgetX3 `outputtype = …` or a
+ * `#L` column label), then a numeric baseline heuristic — S(Q) oscillates
+ * about 1 at high Q, F(Q)/G(r) about 0 (those two default to "gr", the safe
+ * choice given F(Q) files essentially always carry the .fq extension).
+ */
+export function classifyReducedKind(text: string, filename = "", rows?: readonly (readonly number[])[]): ReducedKind {
+  const ext = filename.match(/\.(gr|sgr|sq|fq)$/i)?.[1]?.toLowerCase();
+  if (ext === "sq") return "sq";
+  if (ext === "fq") return "fq";
+  if (ext === "gr" || ext === "sgr") return "gr";
+  const head = text.slice(0, 1200);
+  const out = head.match(/outputtype\s*=\s*(gr|sq|fq)/i)?.[1]?.toLowerCase();
+  if (out === "sq" || out === "fq" || out === "gr") return out;
+  if (/#\s*l\s+q\b.*\bs\s*\(\s*q/i.test(head)) return "sq";
+  if (/#\s*l\s+q\b.*\bf\s*\(\s*q/i.test(head)) return "fq";
+  if (/#\s*l\s+r\b/i.test(head)) return "gr";
+  // Baseline heuristic over the last quarter of the table: S(Q) → ⟨y⟩ ≈ 1.
+  if (rows && rows.length > 8) {
+    const tail = rows.slice(Math.floor(rows.length * 0.75));
+    const mean = tail.reduce((s, r) => s + (r[1] ?? 0), 0) / tail.length;
+    if (Math.abs(mean - 1) < 0.15) return "sq";
+  }
+  return "gr";
+}
+
 /** True if `text`/`filename` looks like a reduced-PDF file (for format routing). */
 export function looksLikePdf(text: string, filename = ""): boolean {
   if (/\.(gr|sgr|sq|fq)$/i.test(filename)) return true;
@@ -76,8 +108,9 @@ export function looksLikePdf(text: string, filename = ""): boolean {
   return (
     /diffpy\.pdfgetx/i.test(head) ||
     /pdf\s+from\s+mantid/i.test(head) ||
-    /outputtype\s*=\s*gr/i.test(head) ||
+    /outputtype\s*=\s*(gr|sq|fq)/i.test(head) ||
     /#\s*l\s+r\b.*\bg\(/i.test(head) ||
+    /#\s*l\s+q\b.*\b[sf]\s*\(\s*q/i.test(head) || // S(Q)/F(Q) column labels
     /g\(\s*å?\s*\$?\^?\{?-?2/i.test(head) // G(Å^-2) ordinate label
   );
 }
@@ -142,12 +175,45 @@ export function parsePdfData(text: string, opts: ParsePdfOptions = {}): PdfPatte
   put("rpoly", num(header, /rpoly\s*[=:]\s*([0-9.eE+-]+)/i));
   if (rstep !== undefined) put("rstep", rstep);
 
+  const scatteringType = opts.scatteringType ?? detectScatteringType(header);
+
+  // Q-space data (S(Q)/F(Q)): sine-transform to G(r) at load time so the app's
+  // entry point is uniform — any reduced file lands on a fittable G(r). The
+  // data's own Q window becomes the model's termination Qmax (header bounds,
+  // when present, win over the raw extent — PDFgetX3 files can carry data past
+  // the qmax it would itself transform with).
+  const kind = classifyReducedKind(text, opts.filename ?? "", rows);
+  if (kind !== "gr" && points.length >= 8) {
+    const qmaxEff = meta["qmax"] ?? points[points.length - 1]!.r;
+    const qminEff = meta["qmin"] ?? 0;
+    const inWindow = points.filter((p) => p.r >= qminEff && p.r <= qmaxEff);
+    const q = inWindow.map((p) => p.r);
+    const y = inWindow.map((p) => p.gObs);
+    const f = kind === "sq" ? fOfQFromSOfQ(q, y) : Float64Array.from(y);
+    const rGrid = defaultTransformGrid();
+    const g = gOfRFromFOfQ(q, f, rGrid);
+    return {
+      id,
+      name,
+      scatteringType,
+      points: rGrid.map((r, i) => ({ r, gObs: g[i]! })),
+      qmax: qmaxEff,
+      ...(qminEff > 0 ? { qmin: qminEff } : {}),
+      ...(meta["qdamp"] !== undefined ? { qdamp: meta["qdamp"] } : {}),
+      ...(meta["qbroad"] !== undefined ? { qbroad: meta["qbroad"] } : {}),
+      rstep: 0.01,
+      ...(composition ? { composition } : {}),
+      sourceKind: kind,
+    };
+  }
+
   return {
     id,
     name,
-    scatteringType: opts.scatteringType ?? detectScatteringType(header),
+    scatteringType,
     points,
     ...meta,
     ...(composition ? { composition } : {}),
+    sourceKind: "gr",
   };
 }

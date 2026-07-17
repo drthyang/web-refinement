@@ -14,11 +14,15 @@ import type { Radiation } from "@/core/diffraction/types";
 import type { ScatteringTable } from "@/core/scattering/types";
 import { add, expι, modulusSquared, scale, ZERO } from "@/core/math/complex";
 import { applyOperation } from "@/core/crystal/symmetry";
+import { adpForOperation, rotateUAniso } from "@/core/crystal/adp";
 import { wrapFractional } from "@/core/math/vec3";
 import { dSpacing, reciprocalMetricTensor } from "@/core/crystal/unitCell";
 import { neutronTable } from "@/core/scattering/neutron";
 import { xrayTable } from "@/core/scattering/xray";
 import type { UnitCell } from "@/core/crystal/types";
+
+/** The 6-component CIF anisotropic tensor [U11,U22,U33,U12,U13,U23]. */
+type UAniso6 = readonly [number, number, number, number, number, number];
 
 const TWO_PI = 2 * Math.PI;
 
@@ -120,11 +124,10 @@ export function nuclearStructureFactor(
   let f = ZERO;
   for (const site of model.sites) {
     const b = table.factor(site.element, s, site.isotope);
-    const dw =
-      site.adp.kind === "isotropic"
-        ? debyeWaller(site.adp.bIso, s)
-        : anisotropicDebyeWaller(model.cell, site.adp.uAniso, h, k, l);
-    const weight = site.occupancy * b * dw;
+    // Isotropic Debye–Waller is rotation-invariant and hoists out of the orbit
+    // loop; an anisotropic tensor is NOT — each image sees U′ = R·U·Rᵀ, so its
+    // factor is evaluated per operation below.
+    const isoDw = site.adp.kind === "isotropic" ? debyeWaller(site.adp.bIso, s) : null;
 
     // Sum over the DISTINCT equivalent positions (the site's orbit), each once.
     // Summing over all space-group operations instead over-counts a special
@@ -132,9 +135,10 @@ export function nuclearStructureFactor(
     // different site symmetries (e.g. Nb/Se on 3m vs Ga on -43m in GaNb4Se8),
     // that corrupts the *relative* structure factors, not just an overall scale.
     for (const op of distinctSiteOps(model.spaceGroup.operations, site.position)) {
+      const dw = isoDw ?? anisotropicDebyeWaller(model.cell, rotateUAniso((site.adp as { uAniso: UAniso6 }).uAniso, op.rotation), h, k, l);
       const p = applyOperation(op, site.position);
       const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
-      f = add(f, scale(expι(phase), weight));
+      f = add(f, scale(expι(phase), site.occupancy * b * dw));
     }
   }
   return f;
@@ -155,7 +159,11 @@ export interface ExpandedAtom {
   readonly adp: DisplacementParameters;
 }
 
-/** Expand a structure's asymmetric unit over each site's distinct orbit. */
+/** Expand a structure's asymmetric unit over each site's distinct orbit. Each
+ *  image carries the site's ADP AS SEEN BY ITS OPERATION — an anisotropic
+ *  tensor rotates with the orbit (U′ = R·U·Rᵀ), so real-space displacement
+ *  projections and per-atom Debye–Waller factors are correct off the
+ *  asymmetric unit. */
 export function expandStructureAtoms(model: StructureModel): ExpandedAtom[] {
   const out: ExpandedAtom[] = [];
   for (const site of model.sites) {
@@ -165,7 +173,7 @@ export function expandStructureAtoms(model: StructureModel): ExpandedAtom[] {
         occupancy: site.occupancy,
         element: site.element,
         ...(site.isotope !== undefined ? { isotope: site.isotope } : {}),
-        adp: site.adp,
+        adp: adpForOperation(site.adp, op.rotation),
       });
     }
   }
@@ -198,17 +206,20 @@ export function nuclearStructureFactorPartials(
   const perSite: { label: string; unitSite: Complex; occupancy: number; isotropic: boolean }[] = [];
   for (const site of model.sites) {
     const b = table.factor(site.element, s, site.isotope);
-    const dw =
-      site.adp.kind === "isotropic"
-        ? debyeWaller(site.adp.bIso, s)
-        : anisotropicDebyeWaller(model.cell, site.adp.uAniso, h, k, l);
+    // Per-image Debye–Waller: isotropic hoists; anisotropic rotates with each
+    // orbit operation (U′ = R·U·Rᵀ), so it multiplies inside the phase sum.
+    const isoDw = site.adp.kind === "isotropic" ? debyeWaller(site.adp.bIso, s) : null;
     let sum = ZERO;
     for (const op of distinctSiteOps(model.spaceGroup.operations, site.position)) {
       const p = applyOperation(op, site.position);
       const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
-      sum = add(sum, expι(phase));
+      // Isotropic factors out of the sum (bit-identical to the hoisted form);
+      // anisotropic multiplies inside, per image.
+      sum = isoDw !== null
+        ? add(sum, expι(phase))
+        : add(sum, scale(expι(phase), anisotropicDebyeWaller(model.cell, rotateUAniso((site.adp as { uAniso: UAniso6 }).uAniso, op.rotation), h, k, l)));
     }
-    const unitSite = scale(sum, b * dw);
+    const unitSite = scale(sum, b * (isoDw ?? 1));
     perSite.push({ label: site.label, unitSite, occupancy: site.occupancy, isotropic: site.adp.kind === "isotropic" });
     f = add(f, scale(unitSite, site.occupancy));
   }

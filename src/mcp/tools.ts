@@ -13,18 +13,31 @@
  */
 
 import type { StructureModel } from "@/core/crystal/types";
-import type { PowderPattern } from "@/core/diffraction/types";
+import type { PdfPattern, PowderPattern } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
-import type { ParameterBinding, RefinementParameter, RefinementResult } from "@/core/refinement/types";
+import type { LinearRestraint, ParameterBinding, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { MagneticModel } from "@/core/magnetic/types";
 import { parseMagneticCif } from "@/parsers/cif";
 import { parsePowderData } from "@/parsers/powderData";
+import { parsePdfData } from "@/parsers/pdfData";
 import { detectDataFormat } from "@/parsers/detectFormat";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 import { buildPowderSpec, type MustrainModel } from "@/app/powderSpec";
-import { runPowderRefinement } from "@/workers/runPowder";
+import { runPowderRefinement, runPdfRefinement } from "@/workers/runPowder";
 import { powderCurves } from "@/core/workflow/powder";
+import {
+  buildPdfSpec,
+  buildMultiPhasePdfSpec,
+  buildPdfProblem,
+  pdfCurves,
+  multiPhasePdfCurves,
+  pdfPartialCurves,
+  pdfPhaseCurves,
+  optimalPdfScale,
+  correlatedMotionConflict,
+  PDF_STAGE_KINDS,
+} from "@/core/workflow/pdf";
 import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
 import { computeAgreementFactors, excludedPointMask, weightsFromSigma } from "@/core/refinement/factors";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
@@ -785,4 +798,215 @@ export function interpret_structure(args: {
     ...(args.wavelength !== undefined ? { wavelength: args.wavelength } : {}),
     ...(args.magnetic ? { magnetic: args.magnetic } : {}),
   });
+}
+
+// ---------------------------------------------------------------------------
+// PDF (pair distribution function) tools — the real-space track's agent
+// surface (PDF_MPDF_ROADMAP P6, nuclear slice). Same layer contract: one pure
+// JSON → JSON wrapper per capability over the tested core.
+// ---------------------------------------------------------------------------
+
+/** Parse a reduced PDF file (.gr/.sq/.fq — PDFgetX3 or Mantid dialect). */
+export function parse_pdf_data(args: { text: string; filename?: string }): {
+  detected: { dataType: string; source: string; confidence: string; note?: string };
+  pattern: PdfPattern;
+  summary: {
+    points: number; rMin: number; rMax: number; rStep?: number;
+    scatteringType: string; qmax?: number; qdamp?: number; composition?: string;
+  };
+} {
+  const fmt = detectDataFormat({ text: args.text, filename: args.filename ?? "data.gr" });
+  if (fmt.dataType !== "pdf") throw new Error(`detected ${fmt.dataType} data, not a reduced PDF — use the powder/single-crystal path`);
+  const pattern = parsePdfData(args.text, { id: "pdf", ...(args.filename ? { filename: args.filename } : {}) });
+  if (pattern.points.length < 3) throw new Error("fewer than 3 usable G(r) rows");
+  const rMin = pattern.points[0]!.r;
+  const rMax = pattern.points[pattern.points.length - 1]!.r;
+  return {
+    detected: { dataType: fmt.dataType, source: fmt.source, confidence: fmt.confidence, ...(fmt.note ? { note: fmt.note } : {}) },
+    pattern,
+    summary: {
+      points: pattern.points.length, rMin, rMax,
+      ...(pattern.rstep !== undefined ? { rStep: pattern.rstep } : {}),
+      scatteringType: pattern.scatteringType,
+      ...(pattern.qmax !== undefined ? { qmax: pattern.qmax } : {}),
+      ...(pattern.qdamp !== undefined ? { qdamp: pattern.qdamp } : {}),
+      ...(pattern.composition ? { composition: pattern.composition } : {}),
+    },
+  };
+}
+
+/**
+ * Build the symmetry-allowed PDF parameter set for a structure (or several
+ * phases) + observed G(r): PDF scale (seeded to the least-squares optimum) and
+ * envelope terms plus the symmetry-reduced structural set. Only
+ * symmetry-allowed parameters are created.
+ */
+export function build_pdf_model(args: {
+  structure: StructureModel;
+  pattern: PdfPattern;
+  extraPhases?: StructureModel[];
+}): { parameters: RefinementParameter[]; bindings: ParameterBinding[]; restraints: LinearRestraint[]; freeCount: number } {
+  const multi = args.extraPhases && args.extraPhases.length > 0;
+  const spec = multi
+    ? buildMultiPhasePdfSpec([args.structure, ...args.extraPhases!], args.pattern)
+    : buildPdfSpec(args.structure, args.pattern);
+  const phases = multi
+    ? [{ structure: args.structure, id: args.structure.id }, ...args.extraPhases!.map((s) => ({ structure: s, id: s.id }))]
+    : null;
+  const start = phases
+    ? multiPhasePdfCurves(phases, args.pattern, spec.params, spec.bindings)
+    : pdfCurves(args.structure, args.pattern, spec.params, spec.bindings);
+  const kappa = optimalPdfScale(start.yObs, start.yCalc) / (phases ? phases.length : 1);
+  const parameters = spec.params.map((p) => (p.kind === "pdfScale" ? { ...p, value: kappa, initialValue: kappa } : p));
+  return {
+    parameters,
+    bindings: spec.bindings,
+    restraints: spec.restraints,
+    freeCount: parameters.filter((p) => !p.fixed && !p.expression).length,
+  };
+}
+
+/**
+ * Refine the freed parameters against an observed G(r) (uniform weights, Rw
+ * over G — real-space Rietveld). Flat co-refinement or the staged PDF sequence;
+ * single- or multi-phase. Returns the result, the r-space residual, the
+ * masked-observation count, and any correlated-motion model conflict.
+ */
+export async function refine_pdf(args: {
+  structure: StructureModel;
+  pattern: PdfPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  restraints?: LinearRestraint[];
+  extraPhases?: StructureModel[];
+  staged?: boolean;
+  fitRange?: { min?: number; max?: number };
+  maxIterations?: number;
+}): Promise<{
+  result: RefinementResult;
+  observationCount: number;
+  residual: { r: number[]; gObs: number[]; gCalc: number[] };
+  warnings: string[];
+  parallel: { workers: number } | null;
+}> {
+  const options = { maxIterations: args.maxIterations ?? 30 };
+  const multi = args.extraPhases && args.extraPhases.length > 0;
+
+  // Parallel fast path (flat fits): the Jacobian fans out over the node
+  // worker-thread pool when the runtime supports it; bit-identical to serial.
+  let parallel: { workers: number } | null = null;
+  let result: RefinementResult | null = null;
+  if (!args.staged) {
+    const spec: EvaluatorSpec = {
+      kind: "pdf",
+      structure: args.structure,
+      ...(multi ? { extraPhases: args.extraPhases } : {}),
+      pattern: args.pattern,
+      parameters: args.parameters,
+      bindings: args.bindings,
+      ...(args.restraints && args.restraints.length ? { restraints: args.restraints } : {}),
+      ...(args.fitRange ? { fitRange: args.fitRange } : {}),
+    };
+    const pool = await createNodeEvaluatorPool(spec);
+    if (pool) {
+      try {
+        result = await refineParallel(buildProblemForSpec(spec), options, pool);
+        parallel = { workers: pool.size };
+      } finally {
+        await pool.dispose();
+      }
+    }
+  }
+  if (!result) {
+    result = runPdfRefinement({
+      type: "refinePdf",
+      requestId: 0,
+      structure: args.structure,
+      ...(multi ? { extraPhases: args.extraPhases } : {}),
+      pattern: args.pattern,
+      parameters: args.parameters,
+      bindings: args.bindings,
+      ...(args.restraints && args.restraints.length ? { restraints: args.restraints } : {}),
+      ...(args.staged ? { staged: PDF_STAGE_KINDS } : {}),
+      ...(args.fitRange ? { fitRange: args.fitRange } : {}),
+      options,
+    });
+  }
+
+  const refined = args.parameters.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value }));
+  const phases = multi
+    ? [{ structure: args.structure, id: args.structure.id }, ...args.extraPhases!.map((s) => ({ structure: s, id: s.id }))]
+    : null;
+  const curves = phases
+    ? multiPhasePdfCurves(phases, args.pattern, refined, args.bindings)
+    : pdfCurves(args.structure, args.pattern, refined, args.bindings);
+  const inRange = (r: number): boolean =>
+    (args.fitRange?.min === undefined || r >= args.fitRange.min) &&
+    (args.fitRange?.max === undefined || r <= args.fitRange.max);
+  const observationCount = curves.x.filter(inRange).length;
+  const conflict = correlatedMotionConflict(args.parameters);
+  return {
+    result,
+    observationCount,
+    residual: { r: [...curves.x], gObs: [...curves.yObs], gCalc: [...curves.yCalc] },
+    warnings: conflict ? [conflict] : [],
+    parallel,
+  };
+}
+
+/**
+ * Decompose the calculated G(r) for interpretation: element-pair (Faber–Ziman)
+ * partials for a single phase, or per-phase contributions for a multi-phase
+ * model. The curves sum exactly to the total calc.
+ */
+export function compute_partial_pdf(args: {
+  structure: StructureModel;
+  pattern: PdfPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  extraPhases?: StructureModel[];
+}): { kind: "element-pairs" | "phases"; r: number[]; partials: { label: string; g: number[] }[] } {
+  const r = args.pattern.points.map((p) => p.r);
+  if (args.extraPhases && args.extraPhases.length > 0) {
+    const phases = [{ structure: args.structure, id: args.structure.id }, ...args.extraPhases.map((s) => ({ structure: s, id: s.id }))];
+    const curves = pdfPhaseCurves(phases, args.pattern, args.parameters, args.bindings);
+    return { kind: "phases", r, partials: curves.map((c) => ({ label: c.label, g: c.y })) };
+  }
+  const curves = pdfPartialCurves(args.structure, args.pattern, args.parameters, args.bindings);
+  return { kind: "element-pairs", r, partials: curves.map((c) => ({ label: c.label, g: c.y })) };
+}
+
+/**
+ * Calibrate the instrument resolution (Qdamp/Qbroad) from a measured STANDARD
+ * (Ni/Si/LaB₆) with a known structure: frees only the PDF scale + Qdamp +
+ * Qbroad (structure held at the certified values) and returns the calibrated
+ * constants to carry to sample fits.
+ */
+export function calibrate_qdamp(args: {
+  structure: StructureModel;
+  pattern: PdfPattern;
+  fitRange?: { min?: number; max?: number };
+  maxIterations?: number;
+}): { qdamp: number; qbroad: number; esd: { qdamp?: number; qbroad?: number }; rw?: number; iterations: number } {
+  const spec = buildPdfSpec(args.structure, args.pattern);
+  const start = pdfCurves(args.structure, args.pattern, spec.params, spec.bindings);
+  const kappa = optimalPdfScale(start.yObs, start.yCalc);
+  const free = new Set(["pdfScale", "qdamp", "qbroad"]);
+  const params = spec.params.map((p) => ({
+    ...p,
+    ...(p.kind === "pdfScale" ? { value: kappa, initialValue: kappa } : {}),
+    fixed: !free.has(p.id) && !free.has(p.kind),
+  }));
+  const problem = buildPdfProblem(args.structure, args.pattern, params, spec.bindings, spec.restraints, args.fitRange);
+  const result = refine(problem, { maxIterations: args.maxIterations ?? 30, convergenceTolerance: 1e-9 });
+  return {
+    qdamp: result.parameters["qdamp"] ?? 0,
+    qbroad: result.parameters["qbroad"] ?? 0,
+    esd: {
+      ...(result.esd["qdamp"] !== undefined ? { qdamp: result.esd["qdamp"] } : {}),
+      ...(result.esd["qbroad"] !== undefined ? { qbroad: result.esd["qbroad"] } : {}),
+    },
+    ...(result.agreement.rWeighted !== undefined ? { rw: result.agreement.rWeighted } : {}),
+    iterations: result.history.length,
+  };
 }
