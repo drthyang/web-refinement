@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { dataExists, readData } from "@/testSupport/data";
 import * as tools from "@/mcp/tools";
+import { buildPdfSpec } from "@/core/workflow/pdf";
 import type { PdfPattern } from "@/core/diffraction/types";
 import type { RefinementParameter } from "@/core/refinement/types";
 
@@ -200,5 +201,48 @@ describe.skipIf(!dataExists(GTS_GR) || !dataExists(P213_CIF))("GaTa4Se8 5K — T
     const rwCubic = await localFit(cubic, pattern, 0.02, 0, "GTS cubic 2–10");
     const rwP213 = await localFit(gts, pattern, 0.02, 0, "GTS P213 2–10");
     expect(rwP213).toBeLessThan(rwCubic);
+  }, 600000);
+});
+
+// --- Distortion-mode fitting (AMPLIMODES paradigm): decompose the P2_13 child
+// against the cubic F-43m parent and fit the FROZEN-MODE AMPLITUDE — one
+// order-parameter instead of 13 coordinates. ---
+describe.skipIf(!dataExists(GANB_GR) || !dataExists(P213_CIF) || !dataExists(GANB_CIF))("GaNb4Se8 5.8K — frozen-mode amplitude fit (F-43m → P2_13)", () => {
+  it("one mode amplitude captures the distortion (vs 13 free positions)", async () => {
+    const { buildDistortionModes, withDistortionModes } = await import("@/core/crystal/distortionModes");
+    const parent = tools.parse_structure({ cif: readData(GANB_CIF) }).structure;
+    const p213 = tools.parse_structure({ cif: readData(P213_CIF) }).structure;
+    const set = buildDistortionModes(parent, p213);
+    // eslint-disable-next-line no-console
+    console.log(`[modes] ${set.parameters.length} modes over ${p213.sites.length} sites · A_total=${set.totalAmplitude.toFixed(4)} Å · A1=${set.modes[0]!.observedAmplitude.toFixed(4)} Å · unpaired: ${set.unpaired.join(",") || "none"}`);
+    expect(set.unpaired).toEqual([]);
+    expect(set.parameters).toHaveLength(13);
+    expect(set.totalAmplitude).toBeGreaterThan(0.05);
+
+    const pattern = trunc2(tools.parse_pdf_data({ text: readData(GANB_GR), filename: "g.gr" }).pattern, 12);
+    const spec = buildPdfSpec(set.parentized, pattern);
+    const swapped = withDistortionModes({ params: spec.params, bindings: spec.bindings }, set);
+    const params = swapped.params.map((p) => {
+      if (p.id === "qdamp") return { ...p, value: 0.0383 };
+      if (p.id === "qbroad") return { ...p, value: 0.0472 };
+      if (p.kind === "bIso" || p.id === "delta2") return { ...p, fixed: false };
+      if (p.kind === "cellAngle") return { ...p, fixed: true };
+      return p; // withDistortionModes leaves only mode_1 free among the modes
+    });
+    const refined = await tools.refine_pdf({
+      structure: set.parentized, pattern, parameters: params, bindings: swapped.bindings,
+      restraints: spec.restraints, staged: true, fitRange: { min: 2.0, max: 10.0 }, maxIterations: 40,
+    });
+    const rw = refined.result.agreement.rWeighted ?? 1;
+    const amp = refined.result.parameters["mode_1"] ?? 0;
+    // eslint-disable-next-line no-console
+    console.log(`[mode fit] ${refined.result.status} · Rw(2–10 Å)=${(rw * 100).toFixed(2)}% · A1=${amp.toFixed(4)} Å (obs ${set.modes[0]!.observedAmplitude.toFixed(4)}) · free=${params.filter((p) => !p.fixed && !p.expression).length}`);
+    expect(["converged", "stalled"]).toContain(refined.result.status);
+    // One amplitude must beat the CUBIC average (9.19 %) — the frozen mode IS
+    // the local distortion — and land near the full 13-coordinate fit (7.98 %).
+    expect(rw).toBeLessThan(0.0919);
+    // The fitted amplitude agrees with the decomposition of the user's refined
+    // P2_13 state to ~20 % (δ2/ADP trade-offs move it slightly).
+    expect(Math.abs(amp - set.modes[0]!.observedAmplitude) / set.modes[0]!.observedAmplitude).toBeLessThan(0.2);
   }, 600000);
 });
