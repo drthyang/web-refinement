@@ -27,6 +27,8 @@ import {
   optimalPdfScale,
   correlatedMotionConflict,
 } from "@/core/workflow/pdf";
+import { buildDistortionModes, withDistortionModes, type DistortionModeSet } from "@/core/crystal/distortionModes";
+import { parseCif } from "@/parsers/cif";
 import { applyParameters } from "@/core/workflow/apply";
 
 // Lazy so three.js stays out of the main bundle until the 3D view is opened.
@@ -76,9 +78,19 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   presetFitRange?: { min: number; max: number };
 }): JSX.Element {
   const multiPhase = extraPhases.length > 0;
+  // Distortion-mode parameterization (AMPLIMODES/ISODISTORT paradigm): after
+  // loading a high-symmetry PARENT cif, positions are refined as symmetry-
+  // adapted mode AMPLITUDES anchored on the parentized structure — mode 1 is
+  // the frozen distortion (the order parameter, in Å). Single-phase only.
+  const [modes, setModes] = useState<{ set: DistortionModeSet; parentName: string } | null>(null);
+  useEffect(() => setModes(null), [structure]);
+  const modeSet = !multiPhase && modes ? modes.set : null;
+  // The mode parameters are anchored on the parentized structure; everything
+  // downstream (spec, curves, worker refine, 3D view, CIF export) uses it.
+  const fitStructure = modeSet ? modeSet.parentized : structure;
   const phases = useMemo(
-    () => [{ structure, id: structure.id }, ...extraPhases.map((s) => ({ structure: s, id: s.id }))],
-    [structure, extraPhases],
+    () => [{ structure: fitStructure, id: fitStructure.id }, ...extraPhases.map((s) => ({ structure: s, id: s.id }))],
+    [fitStructure, extraPhases],
   );
   // Default fit window: above the reduction's low-r validity limit, and capped
   // at 30 Å — files often carry G(r) to 100 Å, and modeling the whole grid on
@@ -99,7 +111,12 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // with the phase scale(s) seeded from the least-squares optimum of the
   // starting model (exact for one linear scale; split evenly across phases).
   const spec = useMemo(() => {
-    const raw = multiPhase ? buildMultiPhasePdfSpec([structure, ...extraPhases], pattern) : buildPdfSpec(structure, pattern);
+    const base = multiPhase ? buildMultiPhasePdfSpec([fitStructure, ...extraPhases], pattern) : buildPdfSpec(fitStructure, pattern);
+    // Swap per-coordinate position rows for mode amplitudes when a parent has
+    // been decomposed (fixed on entry except the frozen mode, per core policy).
+    const raw = modeSet
+      ? { ...base, ...withDistortionModes({ params: base.params, bindings: base.bindings }, modeSet) }
+      : base;
     // κ-seeding the phase scale(s) costs a full forward G(r) calculation —
     // skip it when a preset (demo snapshot) supplies every scale anyway.
     const presetCoversScale =
@@ -109,7 +126,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     if (!presetCoversScale) {
       const start = multiPhase
         ? multiPhasePdfCurves(phases, pattern, raw.params, raw.bindings, defaultRange)
-        : pdfCurves(structure, pattern, raw.params, raw.bindings, defaultRange);
+        : pdfCurves(fitStructure, pattern, raw.params, raw.bindings, defaultRange);
       const kappa = optimalPdfScale(
         start.yObs.filter((_, i) => start.x[i]! >= defaultRange.min && start.x[i]! <= defaultRange.max),
         start.yCalc.filter((_, i) => start.x[i]! >= defaultRange.min && start.x[i]! <= defaultRange.max),
@@ -124,7 +141,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       params = params.map((p) => (presetValues[p.id] !== undefined ? { ...p, value: presetValues[p.id]!, initialValue: presetValues[p.id]! } : p));
     }
     return { ...raw, params };
-  }, [structure, extraPhases, multiPhase, phases, pattern, defaultRange, presetValues]);
+  }, [fitStructure, modeSet, extraPhases, multiPhase, phases, pattern, defaultRange, presetValues]);
 
   const [params, setParams] = useState<readonly RefinementParameter[]>(spec.params);
   const [result, setResult] = useState<RefinementResult | null>(null);
@@ -141,15 +158,27 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     setLive(null);
   }, [spec]);
 
+  // A spec swap (new structure / new mode set) resets `params` in the effect
+  // above — one render AFTER the memos below run. Mixing the stale params with
+  // the new spec's bindings would stamp the previous structure's values onto
+  // the new one — worst case the 1 Å placeholder cell onto a real structure,
+  // whose 30 Å pair enumeration then hangs the page for good. Until the state
+  // catches up, every consumer pairs spec.bindings with the spec's own params.
+  const specParamIds = useMemo(() => new Set(spec.params.map((p) => p.id)), [spec]);
+  const activeParams =
+    params.length === spec.params.length && params.every((p) => specParamIds.has(p.id))
+      ? params
+      : spec.params;
+
   // The 3D view tracks the refinement: apply the current parameter values so
   // the viewer shows the refined cell/positions/ADPs, not the loaded CIF.
   const viewStructure = useMemo(() => {
     const phase = phases[Math.min(viewPhase, phases.length - 1)]!;
     const values: Record<string, number> = {};
-    for (const p of params) values[p.id] = p.value;
+    for (const p of activeParams) values[p.id] = p.value;
     const phaseBindings = multiPhase ? pdfPhaseBindingsFor(spec.bindings, phase.id) : spec.bindings;
     return applyParameters(phase.structure, phaseBindings, values).model;
-  }, [phases, viewPhase, params, spec.bindings, multiPhase]);
+  }, [phases, viewPhase, activeParams, spec.bindings, multiPhase]);
 
   // Fit window over r (drag the plot handles). Starts at the default window;
   // the model is only computed inside it, so widening it costs compute.
@@ -161,9 +190,9 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   const curves = useMemo(
     () =>
       multiPhase
-        ? multiPhasePdfCurves(phases, pattern, params, spec.bindings, fitRange)
-        : pdfCurves(structure, pattern, params, spec.bindings, fitRange),
-    [multiPhase, phases, structure, pattern, params, spec.bindings, fitRange],
+        ? multiPhasePdfCurves(phases, pattern, activeParams, spec.bindings, fitRange)
+        : pdfCurves(fitStructure, pattern, activeParams, spec.bindings, fitRange),
+    [multiPhase, phases, fitStructure, pattern, activeParams, spec.bindings, fitRange],
   );
 
   // Decomposition overlays (P3): per-phase contributions on a multi-phase fit,
@@ -174,9 +203,9 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   const partials = useMemo(() => {
     if (!showPartials || !canOverlay) return null;
     return multiPhase
-      ? pdfPhaseCurves(phases, pattern, params, spec.bindings, fitRange)
-      : pdfPartialCurves(structure, pattern, params, spec.bindings, fitRange);
-  }, [showPartials, canOverlay, multiPhase, phases, structure, pattern, params, spec.bindings, fitRange]);
+      ? pdfPhaseCurves(phases, pattern, activeParams, spec.bindings, fitRange)
+      : pdfPartialCurves(fitStructure, pattern, activeParams, spec.bindings, fitRange);
+  }, [showPartials, canOverlay, multiPhase, phases, fitStructure, pattern, activeParams, spec.bindings, fitRange]);
   const plotCurves = useMemo(() => {
     if (!live) return curves;
     const yCalc = live;
@@ -209,7 +238,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       const start = [...params];
       const res = await client.refinePdfParallel(
         {
-          structure,
+          structure: fitStructure,
           ...(multiPhase ? { extraPhases: [...extraPhases] } : {}),
           pattern,
           parameters: start,
@@ -239,7 +268,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       const escape = result !== null;
       const ms = await client.refinePdfMultiStart(
         {
-          structure,
+          structure: fitStructure,
           ...(multiPhase ? { extraPhases: [...extraPhases] } : {}),
           pattern,
           parameters: [...params],
@@ -267,6 +296,25 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
 
   function onParamChange(id: string, patch: Partial<RefinementParameter>): void {
     setParams((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+
+  // Decompose the current (child) structure against a HIGH-SYMMETRY parent CIF
+  // into refinable distortion-mode amplitudes. The seeded amplitudes reproduce
+  // the loaded structure exactly, so activating modes never changes the curve.
+  async function onLoadParentCif(file: File): Promise<void> {
+    try {
+      const text = await file.text();
+      const parent = parseCif(text, `parent-${Date.now().toString(36)}`);
+      const set = buildDistortionModes(parent, structure);
+      if (set.modes.length === 0) {
+        console.error("[status] distortion modes: no child site could be paired with the parent structure — check that both CIFs share the same lattice/setting.");
+        return;
+      }
+      setModes({ set, parentName: parent.name || file.name.replace(/\.[^.]+$/, "") });
+      console.info(`[status] distortion modes: ${set.modes.length} mode(s), total |A| = ${set.totalAmplitude.toFixed(4)} Å${set.unpaired.length ? ` · unpaired: ${set.unpaired.join(", ")}` : ""}`);
+    } catch (e) {
+      console.error(`[status] parent CIF failed to parse: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   function reset(): void {
@@ -365,7 +413,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     <button
       style={{ ...secondaryButton, flex: "0 0 auto", padding: "10px 13px", fontSize: 13, opacity: 0.5, cursor: "default" }}
       disabled
-      title="Magnetic PDF (mPDF) — moment refinement against magnetic G(r). The next roadmap milestone (P4)."
+      title="Magnetic PDF (mPDF) — moment refinement against magnetic G(r). The core (P4) is built and validated against diffpy.mpdf; this page arrives with the mPDF UI milestone."
     >
       Magnetic PDF →
     </button>
@@ -466,6 +514,82 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                   <StructureView key={viewStructure.id + viewPhase} structure={viewStructure} />
                 </div>
               </Suspense>
+              {!multiPhase && (
+                <div style={{ marginTop: 6 }}>
+                  {modeSet ? (
+                    <>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                        <span style={uppercaseLabel}>Distortion modes</span>
+                        <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
+                          vs {modes!.parentName} · total |A| ={" "}
+                          {Math.sqrt(
+                            modeSet.modes.reduce((s, m) => {
+                              const v = params.find((p) => p.id === m.id)?.value ?? 0;
+                              return s + v * v;
+                            }, 0),
+                          ).toFixed(4)}{" "}
+                          Å
+                        </span>
+                        <button style={resetRangeBtn} onClick={() => setModes(null)} title="Back to per-coordinate position parameters">
+                          ✕ clear
+                        </button>
+                      </div>
+                      <div style={{ maxHeight: 150, overflowY: "auto", marginTop: 4, border: `1px solid ${color.border}`, borderRadius: 6 }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: mono, fontSize: fz.micro }}>
+                          <thead>
+                            <tr style={{ color: color.secondary, textAlign: "left" }}>
+                              <th style={{ padding: "3px 8px", fontWeight: 500 }}>mode</th>
+                              <th style={{ padding: "3px 8px", fontWeight: 500, textAlign: "right" }}>A (Å)</th>
+                              <th style={{ padding: "3px 8px", fontWeight: 500, textAlign: "right" }}>esd</th>
+                              <th style={{ padding: "3px 8px", fontWeight: 500 }}>state</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {modeSet.modes.map((m, i) => {
+                              const p = params.find((q) => q.id === m.id);
+                              const esd = result?.esd[m.id] ?? p?.esd;
+                              return (
+                                <tr key={m.id} style={{ borderTop: `1px solid ${color.border}`, background: i === 0 ? "rgba(90, 130, 255, 0.06)" : "transparent" }}>
+                                  <td style={{ padding: "3px 8px", color: i === 0 ? color.primary : color.ink }}>{m.label}</td>
+                                  <td style={{ padding: "3px 8px", textAlign: "right" }}>{(p?.value ?? 0).toFixed(5)}</td>
+                                  <td style={{ padding: "3px 8px", textAlign: "right", color: color.secondary }}>{esd !== undefined ? esd.toFixed(5) : "—"}</td>
+                                  <td style={{ padding: "3px 8px", color: color.secondary }}>{p?.fixed ? "fixed" : "free"}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p style={{ marginTop: 4, marginBottom: 0, fontSize: 12, color: color.secondary }}>
+                        Amplitudes are whole-cell displacement norms (Å); mode 1 is the frozen distortion — its fitted amplitude is the order parameter. Free/fix rows in the parameter panel (Positions group).
+                      </p>
+                    </>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={uppercaseLabel}>Distortion modes</span>
+                      <label
+                        style={{ border: `1px solid ${color.border}`, borderRadius: 6, padding: "2px 10px", fontSize: fz.micro, color: color.ink, cursor: "pointer" }}
+                        title="Decompose this structure against a high-symmetry parent CIF (same lattice/setting) into refinable symmetry-mode amplitudes — refine one order parameter instead of many coordinates"
+                      >
+                        Load parent CIF…
+                        <input
+                          type="file"
+                          accept=".cif,text/plain"
+                          style={{ display: "none" }}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void onLoadParentCif(f);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                      <span style={{ fontSize: fz.micro, color: color.secondary }}>
+                        refine symmetry-adapted mode amplitudes instead of raw coordinates
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
               <p style={{ marginTop: 4, fontSize: 12, color: color.secondary }}>
                 {viewStructure.name || "Structure"}
                 {viewStructure.spaceGroup.hermannMauguin ? ` · ${viewStructure.spaceGroup.hermannMauguin}` : ""}
