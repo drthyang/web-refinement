@@ -216,37 +216,3 @@ export class GpuSynthesizer {
   }
 }
 
-/**
- * Validation harness: synthesize the same batches on GPU and CPU and return
- * the maximum relative deviation (against the CPU f64 truth) plus timings.
- * Run from the browser console / dev harness; used to enforce the precision
- * contract before any integration is switched on.
- */
-export async function gpuValidation(
-  xValues: readonly number[],
-  batches: readonly GpuSynthesisBatch[],
-  opts: Pick<ProfileOptions, "shape" | "eta">,
-  cpuSynthesize: (x: readonly number[], peaks: readonly ProfilePeak[], o: ProfileOptions) => Float64Array,
-): Promise<{ maxRelError: number; gpuMs: number; cpuMs: number } | null> {
-  const gpu = await GpuSynthesizer.create();
-  if (!gpu) return null;
-  try {
-    const t0 = performance.now();
-    const gpuOut = await gpu.synthesizeBatches(xValues, batches, opts);
-    const gpuMs = performance.now() - t0;
-    const t1 = performance.now();
-    const cpuOut = batches.map((b) => cpuSynthesize(xValues, b.peaks, { shape: opts.shape, ...(opts.eta !== undefined ? { eta: opts.eta } : {}) }));
-    const cpuMs = performance.now() - t1;
-    let maxRel = 0;
-    for (let b = 0; b < batches.length; b++) {
-      const scale = Math.max(...cpuOut[b]!.map(Math.abs), 1e-30);
-      for (let i = 0; i < xValues.length; i++) {
-        const rel = Math.abs(gpuOut[b]![i]! - cpuOut[b]![i]!) / scale;
-        if (rel > maxRel) maxRel = rel;
-      }
-    }
-    return { maxRelError: maxRel, gpuMs, cpuMs };
-  } finally {
-    gpu.dispose();
-  }
-}

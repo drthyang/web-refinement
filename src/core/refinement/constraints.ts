@@ -56,10 +56,6 @@ export function resolveTies(
   return out;
 }
 
-/** Parameters that are tied should not be refined independently. */
-export function freeParameterIds(params: readonly RefinementParameter[]): string[] {
-  return params.filter((p) => !p.fixed && !p.expression).map((p) => p.id);
-}
 
 /**
  * Grouped (equal-value) refinement (Phase 8): within each named group the first

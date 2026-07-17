@@ -1,17 +1,12 @@
 /**
  * Bundled example: the Mn₃Ga hexagonal structure (P6₃/mmc) from the GSAS-II
  * validation data. Embedded as CIF text so the deployed static app has a real
- * structure to work with out of the box, plus a synthetic neutron powder
- * pattern generated from it.
+ * structure to work with out of the box.
  */
 
 import { parseCif } from "@/parsers/cif";
 import type { StructureModel } from "@/core/crystal/types";
-import type { PowderPattern, SingleCrystalDataset } from "@/core/diffraction/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
-import { powderCurves } from "@/core/workflow/powder";
-import { singleCrystalComparison } from "@/core/workflow/singleCrystal";
-import { generateReflections } from "@/core/diffraction/reflections";
 
 export const MN3GA_CIF = `data_Mn3Ga
 _pd_phase_name  Mn3Ga
@@ -69,8 +64,6 @@ export function exampleStructure(): StructureModel {
   return parseCif(MN3GA_CIF, "mn3ga");
 }
 
-const NEUTRON = { kind: "neutron" as const, wavelength: 1.54 };
-
 /** Bindings for a scale + peak-width powder refinement of the example. */
 export function examplePowderBindings(datasetId: string): ParameterBinding[] {
   return [
@@ -91,59 +84,4 @@ export function examplePowderParameters(): RefinementParameter[] {
   ];
 }
 
-/**
- * Build a synthetic powder pattern (2θ, neutron) from the example structure at a
- * known scale, with Poisson-like noise-free intensities. Useful as a working
- * demonstration and as the "observed" data for a self-consistent refinement.
- */
-export function examplerPowderPattern(): PowderPattern {
-  const structure = exampleStructure();
-  const grid = Array.from({ length: 500 }, (_, i) => 12 + (i * 108) / 500);
-  const empty: PowderPattern = {
-    id: "mn3ga-powder",
-    name: "Mn₃Ga synthetic neutron (λ=1.54 Å)",
-    xUnit: "twoTheta",
-    radiation: NEUTRON,
-    wavelength: 1.54,
-    points: grid.map((x) => ({ x, yObs: 0 })),
-  };
-  const truthParams = examplePowderParameters().map((p) =>
-    p.id === "scale" ? { ...p, value: 80 } : p,
-  );
-  const curves = powderCurves(structure, empty, truthParams, examplePowderBindings("mn3ga-powder"));
-  return {
-    ...empty,
-    points: grid.map((x, i) => {
-      const y = curves.yCalc[i] ?? 0;
-      return { x, yObs: y + 2, sigma: Math.sqrt(Math.max(y, 1)) + 1 };
-    }),
-  };
-}
 
-/** Build a synthetic single-crystal dataset from the example structure. */
-export function exampleSingleCrystalDataset(): SingleCrystalDataset {
-  const structure = exampleStructure();
-  const reflections = generateReflections(structure.cell, structure.spaceGroup, 1.0, 5.0).slice(0, 20);
-  const params: RefinementParameter[] = [
-    { id: "scale", label: "scale", kind: "scale", value: 5, initialValue: 5, fixed: false },
-  ];
-  const bindings: ParameterBinding[] = [{ parameterId: "scale", kind: "scale", targetId: "mn3ga-sx" }];
-  const comparison = singleCrystalComparison(
-    structure,
-    { id: "mn3ga-sx", name: "sx", radiation: NEUTRON, reflections: reflections.map((r) => ({ h: r.h, k: r.k, l: r.l, iObs: 0 })) },
-    params,
-    bindings,
-  );
-  return {
-    id: "mn3ga-sx",
-    name: "Mn₃Ga synthetic single crystal",
-    radiation: NEUTRON,
-    reflections: comparison.map((c) => ({
-      h: c.h,
-      k: c.k,
-      l: c.l,
-      iObs: c.iCalc,
-      sigma: Math.sqrt(Math.abs(c.iCalc)) + 1,
-    })),
-  };
-}

@@ -50,7 +50,6 @@ export const color = {
 } as const;
 
 export const mono = "'IBM Plex Mono', ui-monospace, monospace";
-export const sans = "'IBM Plex Sans', system-ui, sans-serif";
 
 /**
  * Fluid font-size tokens (defined in workbench.css as clamp() CSS variables).

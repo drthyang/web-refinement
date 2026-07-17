@@ -102,6 +102,10 @@ export function computeGofR(
 
   const sratio = params.sratio ?? 1;
   const rcut = params.rcut ?? 0;
+  // Hoisted invariants (same operations in the same order — bit-identical).
+  const d1 = params.delta1;
+  const d2 = params.delta2;
+  const qb2 = params.qbroad * params.qbroad;
 
   // Enumerate a little beyond the grid so peak tails just outside still land.
   const pairList = pairs ?? enumeratePairs(cell, atoms, rMaxGrid + PAIR_REACH_MARGIN);
@@ -109,7 +113,7 @@ export function computeGofR(
   const INV_SQRT_2PI = 1 / Math.sqrt(2 * Math.PI);
   for (const pair of pairList) {
     const r = pair.rij;
-    let sig2 = pair.msd * (1 - params.delta1 / r - params.delta2 / (r * r) + params.qbroad * params.qbroad * r * r);
+    let sig2 = pair.msd * (1 - d1 / r - d2 / (r * r) + qb2 * r * r);
     if (!(sig2 > 0)) sig2 = pair.msd > 0 ? pair.msd : SIGMA_FLOOR * SIGMA_FLOOR;
     let sigma = Math.sqrt(sig2);
     if (rcut > 0 && r < rcut) sigma *= sratio;

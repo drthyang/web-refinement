@@ -34,6 +34,7 @@ const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
+import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
 import { downloadText } from "@/app/download";
 import { structureToCif } from "@/core/export/cif";
 import { pdfReport } from "@/core/export/pdfReport";
@@ -99,21 +100,29 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // starting model (exact for one linear scale; split evenly across phases).
   const spec = useMemo(() => {
     const raw = multiPhase ? buildMultiPhasePdfSpec([structure, ...extraPhases], pattern) : buildPdfSpec(structure, pattern);
-    const start = multiPhase
-      ? multiPhasePdfCurves(phases, pattern, raw.params, raw.bindings, defaultRange)
-      : pdfCurves(structure, pattern, raw.params, raw.bindings, defaultRange);
-    const kappa = optimalPdfScale(
-      start.yObs.filter((_, i) => start.x[i]! >= defaultRange.min && start.x[i]! <= defaultRange.max),
-      start.yCalc.filter((_, i) => start.x[i]! >= defaultRange.min && start.x[i]! <= defaultRange.max),
-    ) / (multiPhase ? phases.length : 1);
-    const seeded = raw.params.map((p) =>
-      p.kind === "pdfScale" ? { ...p, value: kappa, initialValue: kappa } : p,
-    );
+    // κ-seeding the phase scale(s) costs a full forward G(r) calculation —
+    // skip it when a preset (demo snapshot) supplies every scale anyway.
+    const presetCoversScale =
+      presetValues !== undefined &&
+      raw.params.every((p) => p.kind !== "pdfScale" || presetValues[p.id] !== undefined);
+    let params = raw.params;
+    if (!presetCoversScale) {
+      const start = multiPhase
+        ? multiPhasePdfCurves(phases, pattern, raw.params, raw.bindings, defaultRange)
+        : pdfCurves(structure, pattern, raw.params, raw.bindings, defaultRange);
+      const kappa = optimalPdfScale(
+        start.yObs.filter((_, i) => start.x[i]! >= defaultRange.min && start.x[i]! <= defaultRange.max),
+        start.yCalc.filter((_, i) => start.x[i]! >= defaultRange.min && start.x[i]! <= defaultRange.max),
+      ) / (multiPhase ? phases.length : 1);
+      params = params.map((p) =>
+        p.kind === "pdfScale" ? { ...p, value: kappa, initialValue: kappa } : p,
+      );
+    }
     // Demo snapshots open converged: preset values win over the κ seed, and
     // become the reset anchor too.
-    const params = presetValues
-      ? seeded.map((p) => (presetValues[p.id] !== undefined ? { ...p, value: presetValues[p.id]!, initialValue: presetValues[p.id]! } : p))
-      : seeded;
+    if (presetValues) {
+      params = params.map((p) => (presetValues[p.id] !== undefined ? { ...p, value: presetValues[p.id]!, initialValue: presetValues[p.id]! } : p));
+    }
     return { ...raw, params };
   }, [structure, extraPhases, multiPhase, phases, pattern, defaultRange, presetValues]);
 
@@ -192,6 +201,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   }, [plotCurves, fitRange]);
 
   const nFree = params.filter((p) => !p.fixed && !p.expression).length;
+  const motionConflict = useMemo(() => correlatedMotionConflict(params), [params]);
 
   async function runRefine(): Promise<void> {
     setBusy(true);
@@ -291,7 +301,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   };
   const exportReportRef = useRef<() => void>(noop);
   exportReportRef.current = (): void => {
-    const conflict = correlatedMotionConflict(params);
+    const conflict = motionConflict;
     const text = pdfReport({
       phases: phases.map((p) => p.structure),
       pattern,
@@ -403,23 +413,14 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                   optimize view
                 </button>
               )}
-              <div style={{ display: "inline-flex", gap: 2, background: color.chipBg, border: `1px solid ${color.border}`, borderRadius: 8, padding: 2 }}>
-                {(["fit", "model3d"] as const).map((k) => (
-                  <button
-                    key={k}
-                    onClick={() => setViewTab(k)}
-                    title={k === "fit" ? "Observed vs calculated G(r)" : "3D crystal-structure model"}
-                    style={{
-                      border: "none", borderRadius: 6, padding: "3px 11px", fontSize: 11, fontWeight: 600,
-                      cursor: "pointer", fontFamily: mono,
-                      background: viewTab === k ? color.primary : "transparent",
-                      color: viewTab === k ? "#fff" : color.secondary,
-                    }}
-                  >
-                    {k === "fit" ? "Refinement" : "3D Model"}
-                  </button>
-                ))}
-              </div>
+              <SegmentedToggle
+                options={[
+                  { id: "fit", label: "Refinement", title: "Observed vs calculated G(r)" },
+                  { id: "model3d", label: "3D Model", title: "3D crystal-structure model" },
+                ] as const}
+                value={viewTab}
+                onChange={setViewTab}
+              />
             </div>
           </div>
           {viewTab === "fit" ? (
@@ -438,8 +439,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
               <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: color.secondary }}>
                 Drag across the plot to zoom, blue handles to set the fit window. Qdamp/Qbroad are instrument constants — hold them fixed once calibrated on a standard.
               </p>
-              {correlatedMotionConflict(params) && (
-                <div style={{ marginTop: 6, fontSize: 12, color: color.warnInk }}>⚠ {correlatedMotionConflict(params)}</div>
+              {motionConflict && (
+                <div style={{ marginTop: 6, fontSize: 12, color: color.warnInk }}>⚠ {motionConflict}</div>
               )}
             </>
           ) : (

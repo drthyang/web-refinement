@@ -3,20 +3,10 @@
  * projects as JSON. Pure string producers — file saving is a UI concern.
  */
 
-import type { SingleCrystalCalc } from "@/core/workflow/singleCrystal";
 import type { PowderCurves } from "@/core/workflow/powder";
 import type { ProjectFile } from "@/core/project/types";
 import { serializeProject } from "@/parsers/project";
 
-export function reflectionTableCsv(rows: readonly SingleCrystalCalc[]): string {
-  const header = "h,k,l,Iobs,sigma,Icalc,delta";
-  const lines = rows.map((r) => {
-    const sigma = r.sigma ?? "";
-    const delta = r.iObs - r.iCalc;
-    return `${r.h},${r.k},${r.l},${r.iObs},${sigma},${r.iCalc.toFixed(4)},${delta.toFixed(4)}`;
-  });
-  return [header, ...lines].join("\n");
-}
 
 export function powderPatternCsv(curves: PowderCurves): string {
   const header = "x,yObs,yCalc,diff";
