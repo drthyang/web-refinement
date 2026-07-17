@@ -135,6 +135,53 @@ The engine is capable but still fragile on hard real data. Close these, in order
 6. **Optional global search for starting models** ⬜ — Monte Carlo / simulated
    annealing, *only* to generate candidates (bad initial model, magnetic
    sign/phase ambiguity), never as the main engine. Feeds M2 and M4.
+7. **Alternative / pluggable local minimizers (L-BFGS & beyond)** ⬜ —
+   Levenberg–Marquardt stays the **primary** engine: it exploits the least-squares
+   structure `χ² = Σ w·r²`, so the Gauss–Newton Hessian `JᵀJ` — and with it the
+   covariance matrix, ESDs, and correlations that are a *deliverable* here, not a
+   nicety — falls out of the same Jacobian the step uses. The knowledge base's
+   rule #1 (no generic black-box optimizer as the *main* driver) still holds. But
+   `refineCore` is already a sans-io generator behind the `RefinementProblem` seam
+   ([`engine.ts`](../src/core/refinement/engine.ts)), so a different optimizer is a
+   **drop-in behind the same interface**, not a rewrite. Candidates, ordered by
+   honest expected value:
+   - **Structure-preserving LM upgrades (highest value, most aligned).**
+     **Geodesic acceleration** (Transtrum & Sethna 2012) — one extra directional
+     derivative per step that dramatically helps the long, narrow "sloppy" canyons
+     crystallographic models live in; a **trust-region / dogleg** step control
+     (Moré 1978) as a more principled alternative to the current diagonal LM
+     damping; and an **iterative inner solve** — LSMR/LSQR on `J` directly, or CG
+     on the normal equations (Fong & Saunders 2011) — to replace the dense
+     pseudo-inverse once the parameter count grows, keeping *both* the least-squares
+     structure and the covariance. These improve the engine we have rather than
+     replacing it.
+   - **L-BFGS / L-BFGS-B (a genuine win in one regime).** A limited-memory
+     quasi-Newton method (Nocedal & Wright §7.2; Byrd et al. 1995 for the
+     bound-constrained `-B` variant) that needs only the **gradient**
+     `∇χ² = −2·Jᵀr`, never the full `J` or `JᵀJ`. Per-iteration cost and memory
+     drop from LM's `O(n²)` normal-matrix step to `O(n·m)`, so it scales to the
+     **large-parameter** fits LM chokes on — spherical-harmonic texture ODFs (M6),
+     many-site/multi-arm magnetic models (M4), big-box-adjacent PDF, or any future
+     ML-style parameterization — and its `-B` form handles box bounds natively,
+     better than today's clamp-and-limit. **Honest caveat:** L-BFGS does *not*
+     exploit the least-squares form, and its low-rank inverse-Hessian is **not** a
+     valid covariance — so uncertainty quantification still needs a final LM-style
+     Jacobian/Hessian pass for the ESDs. Even when L-BFGS drives the descent, the LM
+     machinery stays for the covariance step. It is **complementary to LM, not a
+     replacement**, and "better minimizer" is true only where `n` is large or `J` is
+     expensive; on the tens-to-hundreds of parameters of a typical refinement, LM's
+     use of `JᵀJ` usually converges in fewer evaluations.
+   - **Lighter gradient-only fallbacks** — nonlinear conjugate gradient, or plain
+     spectral/Barzilai–Borwein gradient descent — trivial to add behind the same
+     seam for very large `n`; generally dominated by L-BFGS but useful as a
+     low-memory floor. (Item 6 covers *global* search — a different axis: escaping
+     a basin, not descending one faster.)
+
+   *Validation gate:* every alternative reaches the **same minimum** as LM on the
+   golden cases (GaNb₄Se₈, the PDF golden) within tolerance; a benchmark of
+   evaluations + wall-clock vs LM across problem sizes (to show *where* each wins);
+   and, for the gradient-only methods, **ESD parity** with the LM covariance after
+   the final Hessian pass.
 
 *Validation gate:* the GaNb₄Se₈ regression tightens toward the GSAS-II wR (✅
 staged wR 5.8% vs GSAS-II 7.34%); analytic-vs-finite-difference Jacobian
