@@ -14,6 +14,11 @@ const display = '"Space Grotesk", "IBM Plex Sans", system-ui, sans-serif';
 export interface Step {
   readonly num: string;
   readonly label: string;
+  /** Greyed and non-clickable — e.g. Magnetic on the PDF page until mPDF, or
+   *  both steps before any data is loaded. */
+  readonly disabled?: boolean;
+  /** Tooltip explaining why (shown on the pill). */
+  readonly hint?: string;
 }
 
 /** One header export button. The active mode supplies its own set, so the
@@ -31,19 +36,22 @@ interface Props {
   readonly version: string;
   /** Export buttons for the current mode, rendered left-to-right. */
   readonly exports: readonly ExportAction[];
-  /** Toggle the bundled demo dataset: load it when clean, clear it when active. */
-  readonly onToggleDemo?: () => void;
-  /** Whether the demo is currently loaded (flips the toggle's label/state). */
-  readonly demoActive?: boolean;
   /**
-   * The active refinement MODE ("Rietveld · powder", "PDF · real space",
-   * "Single crystal · F²") — the always-visible answer to "which engine am I
-   * driving right now", set by the kind of data loaded.
+   * The active TECHNIQUE, set by the kind of data loaded. Both technique chips
+   * (Rietveld, PDF) are always visible: null (nothing loaded) shows both
+   * neutral; otherwise the active one is lit and the other dimmed. Single
+   * crystal appears as a third chip only while active.
    */
-  readonly mode?: { readonly label: string; readonly hint?: string };
+  readonly technique?: "rietveld" | "pdf" | "sc" | null;
+  /** The bundled demos (one per technique) for the Demos ▾ menu. */
+  readonly demos?: readonly { readonly id: "rietveld" | "pdf"; readonly label: string }[];
+  /** Which demo is loaded (adds "Exit demo" to the menu and lights the button). */
+  readonly activeDemo?: "rietveld" | "pdf" | null;
+  readonly onLoadDemo?: (id: "rietveld" | "pdf") => void;
+  readonly onExitDemo?: () => void;
 }
 
-export function WorkbenchHeader({ steps, active, onStep, version, exports, onToggleDemo, demoActive, mode }: Props): JSX.Element {
+export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo }: Props): JSX.Element {
   return (
     <header className="wb-header" style={headerBar}>
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
@@ -68,21 +76,17 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, onTog
         </div>
       </div>
       <div className="wb-header-divider" style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
-      <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        {mode && (
-          <span style={modeBadge} title={mode.hint ?? "The refinement engine driving this session — set by the kind of data loaded"}>
-            {mode.label}
-          </span>
-        )}
-        {steps.map((s, i) => (
-          <StepPill key={s.label} step={s} active={i === active} onClick={() => onStep(i)} />
-        ))}
+      <nav style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <TechniqueChips technique={technique} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {steps.map((s, i) => (
+            <StepPill key={s.label} step={s} active={i === active && !s.disabled} onClick={() => !s.disabled && onStep(i)} />
+          ))}
+        </div>
       </nav>
       <div className="wb-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
-        {onToggleDemo && (
-          <ActionButton onClick={onToggleDemo} active={!!demoActive}>
-            {demoActive ? "Exit demo" : "Demo"}
-          </ActionButton>
+        {demos && demos.length > 0 && onLoadDemo && (
+          <DemosMenu demos={demos} activeDemo={activeDemo} onLoadDemo={onLoadDemo} onExitDemo={onExitDemo} />
         )}
         {exports.length > 0 && <ExportMenu exports={exports} />}
       </div>
@@ -134,7 +138,8 @@ function GpuBadge(): JSX.Element {
 }
 
 function StepPill({ step, active, onClick }: { step: Step; active: boolean; onClick: () => void }): JSX.Element {
-  const [hover, setHover] = useState(false);
+  const [rawHover, setHover] = useState(false);
+  const hover = rawHover && !step.disabled;
   const base: CSSProperties = {
     borderRadius: radius.pill,
     padding: "8px 18px 8px 9px",
@@ -152,8 +157,9 @@ function StepPill({ step, active, onClick }: { step: Step; active: boolean; onCl
         ...base,
         background: color.surface,
         border: `1px solid ${hover ? color.primary : color.control}`,
-        color: hover ? color.primary : color.secondary,
+        color: hover ? color.primary : step.disabled ? color.faintest : color.secondary,
         fontWeight: 500,
+        ...(step.disabled ? { opacity: 0.55, cursor: "default" } : {}),
       };
   const badge: CSSProperties = {
     width: 22,
@@ -170,10 +176,90 @@ function StepPill({ step, active, onClick }: { step: Step; active: boolean; onCl
     border: active ? "1px solid rgba(255,255,255,0.28)" : `1px solid ${color.border}`,
   };
   return (
-    <button className="wb-header-step" style={style} onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+    <button className="wb-header-step" style={style} onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} title={step.hint} aria-disabled={step.disabled || undefined}>
       <span style={badge}>{step.num}</span>
       {step.label}
     </button>
+  );
+}
+
+/**
+ * The always-visible technique indicator: Rietveld and PDF side by side.
+ * Nothing loaded → both neutral; data loaded → the active technique is lit
+ * and the other dims, so "what kind of refinement am I in" is one glance.
+ * Single crystal joins as a third chip only while it is the active mode.
+ */
+function TechniqueChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | null }): JSX.Element {
+  const chips: { id: "rietveld" | "pdf" | "sc"; label: string; hint: string }[] = [
+    { id: "rietveld", label: "Rietveld", hint: "Reciprocal-space powder profile refinement — load Bragg powder data (or the Mn₃Ga demo)" },
+    { id: "pdf", label: "PDF", hint: "Real-space G(r) refinement — load a reduced total-scattering file (.gr/.sq/.fq, or the GaTa4Se8 demo)" },
+    ...(technique === "sc" ? [{ id: "sc" as const, label: "Single crystal", hint: "Integrated-intensity F² refinement (reflection list loaded)" }] : []),
+  ];
+  return (
+    <span style={{ display: "inline-flex", border: `1px solid ${color.control}`, borderRadius: radius.pill, overflow: "hidden" }}>
+      {chips.map((c) => {
+        const isActive = technique === c.id;
+        const dimmed = technique !== null && !isActive;
+        return (
+          <span
+            key={c.id}
+            title={c.hint}
+            style={{
+              fontFamily: mono,
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.07em",
+              textTransform: "uppercase",
+              padding: "7px 14px",
+              whiteSpace: "nowrap",
+              background: isActive ? color.primary : "transparent",
+              color: isActive ? "#fff" : dimmed ? color.faintest : color.secondary,
+              transition: "color 160ms, background 160ms",
+            }}
+          >
+            {c.label}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+/** "Demos ▾": one bundled, converged example per technique. */
+function DemosMenu({ demos, activeDemo, onLoadDemo, onExitDemo }: {
+  demos: readonly { readonly id: "rietveld" | "pdf"; readonly label: string }[];
+  activeDemo: "rietveld" | "pdf" | null;
+  onLoadDemo: (id: "rietveld" | "pdf") => void;
+  onExitDemo?: (() => void) | undefined;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <ActionButton onClick={() => setOpen((o) => !o)} active={open || activeDemo !== null}>
+        {activeDemo ? "Demo ✓ ▾" : "Demos ▾"}
+      </ActionButton>
+      {open && (
+        <div style={menu}>
+          {demos.map((d) => (
+            <MenuItem key={d.id} onClick={() => { setOpen(false); onLoadDemo(d.id); }}>
+              {activeDemo === d.id ? "✓ " : ""}{d.label}
+            </MenuItem>
+          ))}
+          {activeDemo && onExitDemo && (
+            <MenuItem onClick={() => { setOpen(false); onExitDemo(); }}>Exit demo</MenuItem>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -295,19 +381,6 @@ const brandMark: CSSProperties = {
 
 /** Engine-mode badge (Rietveld / PDF / single crystal): primary-tinted pill so
  *  the active engine is always one glance away, next to the workflow steps. */
-const modeBadge: CSSProperties = {
-  fontFamily: mono,
-  fontSize: 10.5,
-  fontWeight: 600,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-  color: "#fff",
-  background: color.primary,
-  borderRadius: 999,
-  padding: "4px 11px",
-  whiteSpace: "nowrap",
-};
-
 const versionChip: CSSProperties = {
   fontFamily: mono,
   fontSize: 11,

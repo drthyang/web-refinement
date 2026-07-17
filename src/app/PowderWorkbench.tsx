@@ -107,7 +107,7 @@ export interface PowderWorkbenchProps {
   onClearStructures: () => void;
   onLoadInstrument: (file: File) => void;
   /** Load the bundled demo (from the empty-state prompt). */
-  onLoadDemo?: () => void;
+  onLoadDemo?: (kind: "rietveld" | "pdf") => void;
 }
 
 export function PowderWorkbench({
@@ -967,7 +967,7 @@ export function PowderWorkbench({
         ? `${structure.name} + ${session.extraPhases.map((p) => p.name).join(" + ")}`
         : `${structure.name}${structure.spaceGroup.hermannMauguin ? ` · ${structure.spaceGroup.hermannMauguin}` : ""}`,
       meta: !hasContent
-        ? "Load a CIF to begin, or click Demo"
+        ? "Load a CIF to begin, or pick a demo"
         : session.extraPhases.length > 0
         ? [structure, ...session.extraPhases].map((p) => `${p.name} ${p.spaceGroup.hermannMauguin ?? ""}`.trim()).join(" · ")
         : `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
@@ -1462,8 +1462,9 @@ const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, ba
 const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };
 
 /** Empty-state panel shown in place of the plot/parameters on a clean start —
- *  the load cards sit above it; this points the user at them or the demo. */
-function EmptyWorkbench({ onLoadDemo }: { onLoadDemo?: () => void }): JSX.Element {
+ *  the load cards sit above it; this points the user at them or a demo. One
+ *  converged demo per technique (Rietveld / PDF), matching the header chips. */
+function EmptyWorkbench({ onLoadDemo }: { onLoadDemo?: (kind: "rietveld" | "pdf") => void }): JSX.Element {
   return (
     <div style={{ ...themeCard, padding: "clamp(40px, 9vh, 104px) 24px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 14 }}>
       <div style={emptyIconBox} aria-hidden>
@@ -1473,13 +1474,55 @@ function EmptyWorkbench({ onLoadDemo }: { onLoadDemo?: () => void }): JSX.Elemen
         </svg>
       </div>
       <div style={{ fontSize: 16.5, fontWeight: 600, color: theme.ink, letterSpacing: "-0.005em" }}>No data loaded yet</div>
-      <p style={{ margin: 0, maxWidth: 430, fontSize: 13.5, lineHeight: 1.55, color: theme.secondary }}>
-        Load a structure (CIF) and diffraction data with the cards above, or explore
-        the built-in powder example.
+      <p style={{ margin: 0, maxWidth: 460, fontSize: 13.5, lineHeight: 1.55, color: theme.secondary }}>
+        Load a structure (CIF) and diffraction data with the cards above — the app
+        routes to the right technique automatically — or open a converged example:
       </p>
-      {onLoadDemo && <button style={demoCta} onClick={onLoadDemo}>Load demo dataset</button>}
+      {onLoadDemo && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", marginTop: 4 }}>
+          <DemoCard
+            kicker="Rietveld · reciprocal space"
+            title="Mn₃Ga neutron TOF"
+            blurb="Two-phase POWGEN pattern with a refined magnetic structure."
+            onClick={() => onLoadDemo("rietveld")}
+          />
+          <DemoCard
+            kicker="PDF · real space"
+            title="GaTa₄Se₈ X-ray G(r)"
+            blurb="299 K synchrotron total-scattering fit of a lacunar spinel."
+            onClick={() => onLoadDemo("pdf")}
+          />
+        </div>
+      )}
     </div>
   );
 }
+
+function DemoCard({ kicker, title, blurb, onClick }: { kicker: string; title: string; blurb: string; onClick: () => void }): JSX.Element {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 250,
+        textAlign: "left",
+        display: "flex",
+        flexDirection: "column",
+        gap: 5,
+        padding: "14px 16px",
+        borderRadius: 10,
+        border: `1px solid ${hover ? theme.primary : theme.control}`,
+        background: hover ? theme.primaryTintBg : "#fff",
+        cursor: "pointer",
+        transition: "border-color 120ms, background 120ms",
+      }}
+    >
+      <span style={{ fontFamily: themeMono, fontSize: 10.5, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: hover ? theme.primary : theme.faint }}>{kicker}</span>
+      <span style={{ fontSize: 14.5, fontWeight: 650, color: theme.ink }}>{title}</span>
+      <span style={{ fontSize: 12, lineHeight: 1.45, color: theme.secondary }}>{blurb}</span>
+    </button>
+  );
+}
 const emptyIconBox: React.CSSProperties = { width: 56, height: 56, borderRadius: 14, background: theme.chipBg, border: `1px solid ${theme.border}`, display: "flex", alignItems: "center", justifyContent: "center" };
-const demoCta: React.CSSProperties = { marginTop: 4, border: `1px solid ${theme.primary}`, background: theme.primary, color: "#fff", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer" };

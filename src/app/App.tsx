@@ -30,6 +30,7 @@ import { parseInstrumentParameters } from "@/parsers/instrument";
 import { startingPowderParams, loadReflectionDataset } from "@/app/loadData";
 import { powderBindings } from "@/examples/synthetic";
 import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
+import { gata4se8PdfExample } from "@/examples/gata4se8Pdf";
 import { ComputeClient } from "@/workers/computeClient";
 import { PowderWorkbench } from "@/app/PowderWorkbench";
 import { SingleCrystalWorkbench } from "@/app/SingleCrystalWorkbench";
@@ -57,8 +58,24 @@ const SC_STEPS: readonly Step[] = [
   { num: "1", label: "Refinement" },
   { num: "2", label: "Magnetic" },
 ];
-// PDF is a single-step flow for now; mPDF (roadmap P4) adds the magnetic step.
-const PDF_STEPS: readonly Step[] = [{ num: "1", label: "Refinement" }];
+// PDF is a single-step flow for now; mPDF (roadmap P4) adds the magnetic step —
+// shown dimmed so the workflow shape stays visible.
+const PDF_STEPS: readonly Step[] = [
+  { num: "1", label: "Refinement" },
+  { num: "2", label: "Magnetic", disabled: true, hint: "Magnetic PDF (mPDF) is the next milestone — arrives with roadmap P4" },
+];
+// Before any data loads, the steps preview the workflow but aren't clickable.
+const IDLE_STEPS: readonly Step[] = STEPS.map((s) => ({
+  ...s,
+  disabled: true,
+  hint: "Load a structure + dataset (or pick a demo) to start",
+}));
+// The bundled demos — one converged snapshot per technique (header Demos menu
+// and the landing cards).
+const DEMOS = [
+  { id: "rietveld", label: "Rietveld · Mn₃Ga neutron TOF" },
+  { id: "pdf", label: "PDF · GaTa₄Se₈ X-ray G(r)" },
+] as const;
 
 export function App(): JSX.Element {
   // The workbench opens clean (no data): the shell shows a landing view until the
@@ -87,9 +104,12 @@ export function App(): JSX.Element {
   const [step, setStep] = useState(0);
   const [instrument, setInstrument] = useState<InstrumentParameters>(DEFAULT_INSTRUMENT);
   const [instrumentLoaded, setInstrumentLoaded] = useState(false);
-  // True while the bundled demo is the loaded content — drives the header toggle
-  // (Demo → load, Exit demo → clear) and is cleared once the user loads their own.
-  const [demoActive, setDemoActive] = useState(false);
+  // Which bundled demo is the loaded content (null = user's own / nothing) —
+  // drives the header Demos menu and is cleared once the user loads their own.
+  const [demo, setDemo] = useState<null | "rietveld" | "pdf">(null);
+  // Loading own content clears the demo marker (the session is no longer the
+  // pristine bundled snapshot); the demo loaders set it directly.
+  const setDemoActive = (on: boolean): void => setDemo(on ? demo ?? "rietveld" : null);
   // Once the user has loaded their own primary structure (replacing the bundled
   // example), the Structure card's load button becomes "Add CIF…" and appends a
   // phase instead of replacing — the multi-phase entry point.
@@ -154,24 +174,37 @@ export function App(): JSX.Element {
     setMessage("Cleared the workbench.");
   }
 
-  /** Header Demo toggle: load the bundled Mn₃Ga POWGEN example when clean, or
-   *  clear back to the landing when the demo is already loaded. */
-  function onToggleDemo(): void {
-    if (demoActive) {
-      clearWorkbench();
-      setMessage("Exited the demo — workbench cleared.");
+  /** The two bundled demos — one per technique, both converged snapshots. */
+  function onLoadDemo(kind: "rietveld" | "pdf"): void {
+    if (kind === "rietveld") {
+      const ex = mn3gaPowgenExample();
+      setSession(loadedSession(ex.structure, ex.pattern, ex.instrument, ex.extraPhases, ex.refinedParams));
+      setInstrument(ex.instrument);
+      setInstrumentLoaded(true);
+      setOwnStructure(false);
+      setScNuclearDataset(null);
+      setPdfDataset(null);
+      setPowderResult(null);
+      setDemo("rietveld");
+      setMessage("Loaded the bundled Mn₃Ga + MnO POWGEN demo (two-phase TOF, converged fit).");
       return;
     }
-    const ex = mn3gaPowgenExample();
-    setSession(loadedSession(ex.structure, ex.pattern, ex.instrument, ex.extraPhases, ex.refinedParams));
-    setInstrument(ex.instrument);
-    setInstrumentLoaded(true);
-    setOwnStructure(false);
+    const ex = gata4se8PdfExample();
+    setSession(newSession(ex.structure, DEFAULT_INSTRUMENT));
+    setInstrument(DEFAULT_INSTRUMENT);
+    setInstrumentLoaded(false);
+    setOwnStructure(true); // "Add CIF…" appends phases, as after a user CIF load
     setScNuclearDataset(null);
-    setPdfDataset(null);
+    setPdfDataset(ex.pattern);
     setPowderResult(null);
-    setDemoActive(true);
-    setMessage("Loaded the bundled Mn₃Ga + MnO POWGEN demo (two-phase TOF, converged fit).");
+    setDemo("pdf");
+    setMessage("Loaded the bundled GaTa4Se8 299 K X-ray PDF demo (cubic lacunar spinel, converged fit).");
+  }
+
+  /** Header Demos menu exit: clear back to the landing. */
+  function onExitDemo(): void {
+    clearWorkbench();
+    setMessage("Exited the demo — workbench cleared.");
   }
 
   /** Append a CIF as an additional crystallographic phase (multi-phase refinement),
@@ -485,22 +518,16 @@ export function App(): JSX.Element {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <WorkbenchHeader
-        steps={hasContent ? (pdfDataset ? PDF_STEPS : scDataset ? SC_STEPS : STEPS) : []}
+        steps={hasContent ? (pdfDataset ? PDF_STEPS : scDataset ? SC_STEPS : STEPS) : IDLE_STEPS}
         active={step}
         onStep={setStep}
         version={`v${APP_VERSION}`}
         exports={hasContent ? headerExports : []}
-        demoActive={demoActive}
-        onToggleDemo={onToggleDemo}
-        {...(hasContent
-          ? {
-              mode: pdfDataset
-                ? { label: "PDF · real space", hint: "Real-space G(r) refinement — total scattering (reduced PDF). Load Bragg data to switch engines." }
-                : scDataset
-                  ? { label: "Single crystal · F²", hint: "Integrated-intensity F² refinement. Load powder or PDF data to switch engines." }
-                  : { label: "Rietveld · powder", hint: "Reciprocal-space powder profile refinement. Load a .gr (PDF) or reflection list to switch engines." },
-            }
-          : {})}
+        technique={hasContent ? (pdfDataset ? "pdf" : scDataset ? "sc" : "rietveld") : null}
+        demos={DEMOS}
+        activeDemo={demo}
+        onLoadDemo={onLoadDemo}
+        onExitDemo={onExitDemo}
       />
       {hasContent && (
         <div style={disclaimerBar}>
@@ -530,13 +557,13 @@ export function App(): JSX.Element {
         onRemovePhase={onRemovePhase}
         onClearStructures={onClearStructures}
         onLoadInstrument={onLoadInstrument}
-        onLoadDemo={onToggleDemo}
+        onLoadDemo={onLoadDemo}
       />
       {pdfDataset && (
         // PDF mode (auto-switched on loading a reduced .gr). Keyed on the dataset
         // id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <PdfWorkbench key={pdfDataset.id} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} />
+          <PdfWorkbench key={pdfDataset.id} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} />
         </main>
       )}
       {scDataset && (
