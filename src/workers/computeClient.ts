@@ -359,7 +359,16 @@ export class ComputeClient {
     if (size < 2) {
       return this.refinePdf(req, onProgress);
     }
-    const spec: EvaluatorSpec = {
+    const spec = this.pdfSpec(req);
+    if (req.staged && req.staged.length > 0) {
+      return this.runStagedParallel(spec, req.staged, req.options ?? {}, req.pattern.points.length, onProgress);
+    }
+    return this.runParallel(spec, req.options ?? {}, req.pattern.points.length, onProgress, false);
+  }
+
+  /** The pdf EvaluatorSpec for a refine request (single- or multi-phase). */
+  private pdfSpec(req: Omit<RefinePdfRequest, "requestId" | "type">): EvaluatorSpec {
+    return {
       kind: "pdf",
       structure: req.structure,
       ...(req.extraPhases && req.extraPhases.length ? { extraPhases: req.extraPhases } : {}),
@@ -369,10 +378,48 @@ export class ComputeClient {
       ...(req.restraints && req.restraints.length ? { restraints: req.restraints } : {}),
       ...(req.fitRange ? { fitRange: req.fitRange } : {}),
     };
-    if (req.staged && req.staged.length > 0) {
-      return this.runStagedParallel(spec, req.staged, req.options ?? {}, req.pattern.points.length, onProgress);
+  }
+
+  /**
+   * Multi-start PDF refinement (escape local minima): one baseline refine plus
+   * perturbed restarts sharing ONE evaluator pool, keeping the lowest-χ² result
+   * — the real-space twin of `refinePowderMultiStart` (same generic core).
+   */
+  async refinePdfMultiStart(
+    req: Omit<RefinePdfRequest, "requestId" | "type">,
+    multiStart: MultiStartOptions = {},
+    onProgress?: PowderProgress,
+  ): Promise<MultiStartResult> {
+    const spec = this.pdfSpec(req);
+    const options = req.options ?? {};
+    const patternLen = req.pattern.points.length;
+
+    if (this.poolSize() < 2) {
+      const runOnce = (start: readonly RefinementParameter[]): { parameters: RefinementParameter[]; final: RefinementResult } => {
+        const result = refine(buildProblemForSpec({ ...spec, parameters: [...start] }), options);
+        return { parameters: applyResultToParams(start, result), final: result };
+      };
+      return refineMultiStart(spec.parameters, runOnce, multiStart);
     }
-    return this.runParallel(spec, req.options ?? {}, req.pattern.points.length, onProgress, false);
+
+    const pool = new EvaluatorPool(this.poolSize());
+    this.activePool = pool;
+    try {
+      await pool.init(spec);
+      const onIteration = onProgress
+        ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
+            onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
+        : undefined;
+      const runOnce = async (start: readonly RefinementParameter[]): Promise<{ parameters: RefinementParameter[]; final: RefinementResult }> => {
+        const problem = buildProblemForSpec({ ...spec, parameters: [...start] });
+        const result = await refineParallel(problem, { ...options, ...(onIteration ? { onIteration } : {}) }, pool);
+        return { parameters: applyResultToParams(start, result), final: result };
+      };
+      return await refineMultiStart(spec.parameters, runOnce, multiStart);
+    } finally {
+      pool.dispose();
+      if (this.activePool === pool) this.activePool = null;
+    }
   }
 
   async refinePowderParallel(

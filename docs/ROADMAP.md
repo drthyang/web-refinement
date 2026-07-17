@@ -43,7 +43,7 @@ only symmetry-allowed parameters, use global search only for starting models.
 
 ## 2. Current state (honest baseline)
 
-What genuinely works today (656 passing tests; real-data validated):
+What genuinely works today (999 passing tests; real-data validated):
 
 - **Refinement engine** — Levenberg–Marquardt with diagonal preconditioning,
   SVD-truncated pseudo-inverse, per-cycle shift limiting, bound projection,
@@ -72,6 +72,15 @@ What genuinely works today (656 passing tests; real-data validated):
   powder + single-crystal refinement, and honest **k = 0 magnetic space-group
   candidate generation** (GF(2) homomorphism enumeration) with candidate
   comparison ([`magnetic/magneticGroups.ts`](../src/core/magnetic/magneticGroups.ts)).
+- **Real-space PDF (pair distribution function)** — a nuclear PDF track on the
+  same engine: neutron + X-ray `G(r)` forward model and refinement (Proffen–
+  Billinge sum, δ1/δ2, Qdamp/Qbroad, Qmax termination, `spdiameter`), multi-phase
+  and multi-dataset co-refinement, Faber–Ziman element-pair partials,
+  `.gr`/`.sq`/`.fq` import, and five PDF agent tools — cross-checked against a
+  local **PDFfit2 1.6.0** / PDFgui with committed CI golden fixtures (Ni/MnO
+  X-ray `G(r)` corr ≈ 0.9998, refined cell < 1 mÅ). The full phased plan (nuclear
+  P0–P3 + agent slice done; mPDF next) lives in
+  [`PDF_MPDF_ROADMAP.md`](./PDF_MPDF_ROADMAP.md).
 - **Validation** — GSAS-II golden values; the real GaNb₄Se₈ 28-ID synchrotron
   XRD regression reaches wR ≈ 36.5% (see [`archive/POWDER_ROADMAP.md`](./archive/POWDER_ROADMAP.md)).
 
@@ -409,7 +418,9 @@ agent tool it exposes.**
 *M6 and M7 are extensions of the atomic→magnetic spine (M1–M5), not gates on it:
 both reuse the same engine, symmetry, and scattering core, so they can be built
 in parallel with — or after — the magnetic arc, whichever a real dataset needs
-first.*
+first. The **real-space PDF / mPDF track** is a further parallel extension on the
+same engine — nuclear PDF is landed and its own phased plan lives in
+[`PDF_MPDF_ROADMAP.md`](./PDF_MPDF_ROADMAP.md).*
 
 ---
 

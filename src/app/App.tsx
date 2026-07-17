@@ -492,6 +492,15 @@ export function App(): JSX.Element {
         exports={hasContent ? headerExports : []}
         demoActive={demoActive}
         onToggleDemo={onToggleDemo}
+        {...(hasContent
+          ? {
+              mode: pdfDataset
+                ? { label: "PDF · real space", hint: "Real-space G(r) refinement — total scattering (reduced PDF). Load Bragg data to switch engines." }
+                : scDataset
+                  ? { label: "Single crystal · F²", hint: "Integrated-intensity F² refinement. Load powder or PDF data to switch engines." }
+                  : { label: "Rietveld · powder", hint: "Reciprocal-space powder profile refinement. Load a .gr (PDF) or reflection list to switch engines." },
+            }
+          : {})}
       />
       {hasContent && (
         <div style={disclaimerBar}>

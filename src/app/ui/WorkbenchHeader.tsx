@@ -35,9 +35,15 @@ interface Props {
   readonly onToggleDemo?: () => void;
   /** Whether the demo is currently loaded (flips the toggle's label/state). */
   readonly demoActive?: boolean;
+  /**
+   * The active refinement MODE ("Rietveld · powder", "PDF · real space",
+   * "Single crystal · F²") — the always-visible answer to "which engine am I
+   * driving right now", set by the kind of data loaded.
+   */
+  readonly mode?: { readonly label: string; readonly hint?: string };
 }
 
-export function WorkbenchHeader({ steps, active, onStep, version, exports, onToggleDemo, demoActive }: Props): JSX.Element {
+export function WorkbenchHeader({ steps, active, onStep, version, exports, onToggleDemo, demoActive, mode }: Props): JSX.Element {
   return (
     <header className="wb-header" style={headerBar}>
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
@@ -62,7 +68,12 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, onTog
         </div>
       </div>
       <div className="wb-header-divider" style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
-      <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {mode && (
+          <span style={modeBadge} title={mode.hint ?? "The refinement engine driving this session — set by the kind of data loaded"}>
+            {mode.label}
+          </span>
+        )}
         {steps.map((s, i) => (
           <StepPill key={s.label} step={s} active={i === active} onClick={() => onStep(i)} />
         ))}
@@ -279,6 +290,22 @@ const brandMark: CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   flexShrink: 0,
+};
+
+
+/** Engine-mode badge (Rietveld / PDF / single crystal): primary-tinted pill so
+ *  the active engine is always one glance away, next to the workflow steps. */
+const modeBadge: CSSProperties = {
+  fontFamily: mono,
+  fontSize: 10.5,
+  fontWeight: 600,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: "#fff",
+  background: color.primary,
+  borderRadius: 999,
+  padding: "4px 11px",
+  whiteSpace: "nowrap",
 };
 
 const versionChip: CSSProperties = {

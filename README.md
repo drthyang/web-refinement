@@ -108,7 +108,7 @@ powder) plus a commensurate single-k magnetic workflow — and a first agent-too
 layer over the same core. The scientific core, Levenberg–Marquardt refinement
 engine, symmetry-adapted constrained parameters, CIF parsing, a 3D
 structure/moment viewer, plots, and Web Worker compute are implemented and
-tested (**656 tests**). Crystallographic and scattering foundations are
+tested (**999 passing tests**). Crystallographic and scattering foundations are
 validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
 As with any beta, results intended for publication must be validated against
@@ -132,6 +132,24 @@ their standard **BNS/OG labels** (bundled ISO-MAG table). The star of k /
 multi-k, representation analysis, and refined CIF/mCIF export are the next
 milestones; see [docs/ROADMAP.md](docs/ROADMAP.md) and
 [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+
+**Real-space PDF (pair distribution function).** A local-structure track now
+runs on the same engine — "real-space Rietveld": nuclear **neutron and X-ray
+G(r) fitting** (Proffen–Billinge forward model, δ1/δ2 and sratio/rcut correlated
+motion, Qdamp/Qbroad envelopes, Qmax termination ripples, `spdiameter`
+nanoparticle envelope, Faber–Ziman element-pair partials), **multi-phase** and
+**multi-dataset** (temperature-series / joint X-ray+neutron) co-refinement, and
+`.gr`/`.sq`/`.fq` import (PDFgetX3 + Mantid dialects). It is cross-checked
+against a **local PDFfit2 1.6.0** with committed CI golden fixtures — Ni and MnO
+X-ray G(r) to corr ≈ 0.9998 and refined cell recovery < 1 mÅ — plus a PDFgui
+`G_calc` golden. The nuclear track (P0–P3) and its agent slice are done;
+**magnetic PDF (mPDF)** and the symmetry-constrained local-spin model are the
+next milestones. Full plan in
+[docs/PDF_MPDF_ROADMAP.md](docs/PDF_MPDF_ROADMAP.md).
+
+The MCP tool surface has grown to **30 contract-tested tools** spanning the
+powder, single-crystal, and PDF tracks (the five PDF tools: `parse_pdf_data`,
+`build_pdf_model`, `refine_pdf`, `compute_partial_pdf`, `calibrate_qdamp`).
 
 The agent-tools layer and the LLM-guided refinement loop (the vision above)
 are documented in [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) and ship
@@ -157,8 +175,11 @@ failure modes much better than synthetic examples.
 Single-crystal and powder workflows sharing one refinement engine, for both
 nuclear and magnetic structures:
 
-- Load CIF structures, hkl reflection tables, and powder patterns.
+- Load CIF structures, hkl reflection tables, powder patterns, and reduced
+  pair distribution functions (`.gr`/`.sq`/`.fq`).
 - Compute nuclear and magnetic structure factors and intensities.
+- Fit reduced pair distribution functions `G(r)` (neutron / X-ray) in real space
+  — "real-space Rietveld," single- and multi-phase, with element-pair partials.
 - Refine scale, coordinates, occupancies, displacement, lattice, background
   (Chebyshev / Fourier / lin+log interpolation), peak width, microstructure
   (crystallite size & microstrain, isotropic / uniaxial / generalized Mustrain),
@@ -181,6 +202,7 @@ correct f64 CPU path (WebAssembly is skipped). Full detail in
 ## Documentation
 
 - [docs/ROADMAP.md](docs/ROADMAP.md) — **the single authoritative roadmap** (vision, foundations, milestones, agent layer)
+- [docs/PDF_MPDF_ROADMAP.md](docs/PDF_MPDF_ROADMAP.md) — the real-space PDF / mPDF track (nuclear done; mPDF next)
 - [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) — agent tools, skills, and the LLM-guided refinement plan
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layers, source tree, conventions
 - [docs/DATA_MODEL.md](docs/DATA_MODEL.md) — data types and their reasoning
