@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { StructureModel } from "@/core/crystal/types";
 import { exampleStructure } from "@/examples/mn3ga";
+import { allowedAnisotropicAdpModes } from "@/core/crystal/adpConstraints";
 import { allowedPositionShifts } from "@/core/crystal/siteConstraints";
 import { buildStructureRefinement, refinePowderStructure, describePositionMode, DEFAULT_STAGE_KINDS } from "@/core/workflow/structureRefinement";
 import { powderCurves } from "@/core/workflow/powder";
@@ -59,13 +60,22 @@ function wR(structure: StructureModel, pattern: PowderPattern, spec: ReturnType<
 
 describe("powder structure refinement", () => {
   it("emits and refines anisotropic ADP modes for Uani sites", () => {
+    // The truth tensor must be SITE-LEGAL (invariant under Mn1's site symmetry):
+    // compose it from the symmetry-allowed modes with distinct amplitudes. An
+    // arbitrary 6-vector is not a physical structure — since the per-image
+    // tensor rotation fix (U′ = R·U·Rᵀ), an illegal truth is no longer
+    // representable by the allowed modes and the fit correctly cannot reach it.
+    const base = exampleStructure();
+    const mn1 = base.sites.find((s) => s.label === "Mn1")!;
+    const modes = allowedAnisotropicAdpModes(base.spaceGroup.operations, mn1.position, [0.008, 0.008, 0.008, 0, 0, 0]).modes;
+    const amps = [0.015, 0.01, 0.006, 0.003];
+    const uTruth: [number, number, number, number, number, number] = [0, 0, 0, 0, 0, 0];
+    modes.forEach((m, i) => {
+      for (let j = 0; j < 6; j++) uTruth[j] = uTruth[j]! + (amps[i] ?? 0.005) * m.basis[j]!;
+    });
     const truth: StructureModel = {
-      ...exampleStructure(),
-      sites: exampleStructure().sites.map((s) =>
-        s.label === "Mn1"
-          ? { ...s, adp: { kind: "anisotropic" as const, uAniso: [0.015, 0.010, 0.006, 0.001, 0.0005, -0.0003] } }
-          : s,
-      ),
+      ...base,
+      sites: base.sites.map((s) => (s.label === "Mn1" ? { ...s, adp: { kind: "anisotropic" as const, uAniso: uTruth } } : s)),
     };
     const wrong: StructureModel = {
       ...truth,

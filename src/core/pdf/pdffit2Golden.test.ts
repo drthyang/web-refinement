@@ -34,6 +34,26 @@ function p1Structure(
 }
 
 function structureFor(c: Pdffit2GoldenCase, aOverride?: number, uScale = 1): StructureModel {
+  if (c.ops && c.sitesAniso) {
+    // Symmetric case: MATERIA expands the asymmetric unit over the space-group
+    // operations itself — positions AND rotated anisotropic tensors — while the
+    // reference g came from diffpy's own independent expansion.
+    const a = aOverride ?? c.a;
+    const cell: UnitCell = { a, b: a, c: c.c ?? a, alpha: 90, beta: 90, gamma: 90 };
+    const operations = c.ops.map((op, i) => ({
+      rotation: op.r as unknown as [[number, number, number], [number, number, number], [number, number, number]],
+      translation: [op.t[0]!, op.t[1]!, op.t[2]!] as [number, number, number],
+      xyz: `op${i}`,
+    }));
+    const sites: AtomSite[] = c.sitesAniso.map(([el, x, y, z, u], i) => ({
+      label: `${el}${i + 1}`,
+      element: el,
+      position: [x, y, z],
+      occupancy: 1,
+      adp: { kind: "anisotropic", uAniso: [u[0]!, u[1]!, u[2]!, u[3]!, u[4]!, u[5]!] },
+    }));
+    return { id: "g", name: c.name, cell, spaceGroup: { operations }, sites };
+  }
   return p1Structure(c.name, aOverride ?? c.a, c.sites, uScale);
 }
 
