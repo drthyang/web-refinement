@@ -6,18 +6,17 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { color, mono, radius, shadow, sans } from "@/app/theme";
+import { color, mono, radius, shadow } from "@/app/theme";
 
 /** Display face for the MATERIA wordmark — geometric, loaded in index.html. */
 const display = '"Space Grotesk", "IBM Plex Sans", system-ui, sans-serif';
 
 export interface Step {
-  readonly num: string;
   readonly label: string;
   /** Greyed and non-clickable — e.g. Magnetic on the PDF page until mPDF, or
-   *  both steps before any data is loaded. */
+   *  both chips before any data is loaded. */
   readonly disabled?: boolean;
-  /** Tooltip explaining why (shown on the pill). */
+  /** Tooltip (shown on the chip). */
   readonly hint?: string;
 }
 
@@ -76,13 +75,18 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
         </div>
       </div>
       <div className="wb-header-divider" style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
-      <nav style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+      <nav style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <TechniqueChips technique={technique} />
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {steps.map((s, i) => (
-            <StepPill key={s.label} step={s} active={i === active && !s.disabled} onClick={() => !s.disabled && onStep(i)} />
-          ))}
-        </div>
+        <ChipGroup
+          chips={steps.map((s, i) => ({
+            key: s.label,
+            label: s.label,
+            active: i === active && !s.disabled,
+            dimmed: !!s.disabled || i !== active,
+            ...(s.hint !== undefined ? { hint: s.hint } : {}),
+            ...(s.disabled ? {} : { onClick: () => onStep(i) }),
+          }))}
+        />
       </nav>
       <div className="wb-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
         {demos && demos.length > 0 && onLoadDemo && (
@@ -137,58 +141,59 @@ function GpuBadge(): JSX.Element {
   );
 }
 
-function StepPill({ step, active, onClick }: { step: Step; active: boolean; onClick: () => void }): JSX.Element {
-  const [rawHover, setHover] = useState(false);
-  const hover = rawHover && !step.disabled;
-  const base: CSSProperties = {
-    borderRadius: radius.pill,
-    padding: "8px 18px 8px 9px",
-    fontSize: 13.5,
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 9,
-    cursor: "pointer",
-    fontFamily: sans,
-    transition: "border-color 120ms, color 120ms, background 120ms",
-  };
-  const style: CSSProperties = active
-    ? { ...base, background: color.primary, color: "#fff", border: `1px solid ${color.primary}`, fontWeight: 650, boxShadow: shadow.primaryPill }
-    : {
-        ...base,
-        background: color.surface,
-        border: `1px solid ${hover ? color.primary : color.control}`,
-        color: hover ? color.primary : step.disabled ? color.faintest : color.secondary,
-        fontWeight: 500,
-        ...(step.disabled ? { opacity: 0.55, cursor: "default" } : {}),
-      };
-  const badge: CSSProperties = {
-    width: 22,
-    height: 22,
-    borderRadius: "50%",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontFamily: mono,
-    fontSize: 11.5,
-    fontWeight: 600,
-    background: active ? "rgba(255,255,255,0.18)" : color.chipBg,
-    color: active ? "#fff" : hover ? color.primary : color.faint,
-    border: active ? "1px solid rgba(255,255,255,0.28)" : `1px solid ${color.border}`,
-  };
+/**
+ * The header nav is four chips in two matching groups — technique
+ * (Rietveld | PDF) and refinement target (Nuclear | Magnetic) — so "what am I
+ * fitting, and in which space" is one glance. Nothing loaded → all neutral;
+ * once data picks the direction, the active chip in each group lights and the
+ * inactive one dims.
+ */
+interface Chip {
+  readonly key: string;
+  readonly label: string;
+  readonly active: boolean;
+  readonly dimmed: boolean;
+  readonly hint?: string;
+  /** Present = clickable (the Nuclear/Magnetic chips navigate); absent = indicator only. */
+  readonly onClick?: () => void;
+}
+
+function ChipGroup({ chips }: { chips: readonly Chip[] }): JSX.Element {
   return (
-    <button className="wb-header-step" style={style} onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} title={step.hint} aria-disabled={step.disabled || undefined}>
-      <span style={badge}>{step.num}</span>
-      {step.label}
-    </button>
+    <span style={{ display: "inline-flex", border: `1px solid ${color.control}`, borderRadius: radius.pill, overflow: "hidden" }}>
+      {chips.map((c) => <GroupChip key={c.key} chip={c} />)}
+    </span>
   );
 }
 
-/**
- * The always-visible technique indicator: Rietveld and PDF side by side.
- * Nothing loaded → both neutral; data loaded → the active technique is lit
- * and the other dims, so "what kind of refinement am I in" is one glance.
- * Single crystal joins as a third chip only while it is the active mode.
- */
+function GroupChip({ chip }: { chip: Chip }): JSX.Element {
+  const [rawHover, setHover] = useState(false);
+  const hover = rawHover && chip.onClick !== undefined && !chip.active;
+  const style: CSSProperties = {
+    fontFamily: mono,
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: "0.07em",
+    textTransform: "uppercase",
+    padding: "7px 14px",
+    whiteSpace: "nowrap",
+    border: "none",
+    background: chip.active ? color.primary : hover ? color.primaryTintBg : "transparent",
+    color: chip.active ? "#fff" : hover ? color.primary : chip.dimmed ? color.faintest : color.secondary,
+    cursor: chip.onClick && !chip.active ? "pointer" : "default",
+    transition: "color 160ms, background 160ms",
+  };
+  const shared = {
+    title: chip.hint,
+    style,
+    onMouseEnter: () => setHover(true),
+    onMouseLeave: () => setHover(false),
+  };
+  return chip.onClick
+    ? <button className="wb-header-step" {...shared} onClick={chip.onClick}>{chip.label}</button>
+    : <span {...shared}>{chip.label}</span>;
+}
+
 function TechniqueChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | null }): JSX.Element {
   const chips: { id: "rietveld" | "pdf" | "sc"; label: string; hint: string }[] = [
     { id: "rietveld", label: "Rietveld", hint: "Reciprocal-space powder profile refinement — load Bragg powder data (or the Mn₃Ga demo)" },
@@ -196,32 +201,15 @@ function TechniqueChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | 
     ...(technique === "sc" ? [{ id: "sc" as const, label: "Single crystal", hint: "Integrated-intensity F² refinement (reflection list loaded)" }] : []),
   ];
   return (
-    <span style={{ display: "inline-flex", border: `1px solid ${color.control}`, borderRadius: radius.pill, overflow: "hidden" }}>
-      {chips.map((c) => {
-        const isActive = technique === c.id;
-        const dimmed = technique !== null && !isActive;
-        return (
-          <span
-            key={c.id}
-            title={c.hint}
-            style={{
-              fontFamily: mono,
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.07em",
-              textTransform: "uppercase",
-              padding: "7px 14px",
-              whiteSpace: "nowrap",
-              background: isActive ? color.primary : "transparent",
-              color: isActive ? "#fff" : dimmed ? color.faintest : color.secondary,
-              transition: "color 160ms, background 160ms",
-            }}
-          >
-            {c.label}
-          </span>
-        );
-      })}
-    </span>
+    <ChipGroup
+      chips={chips.map((c) => ({
+        key: c.id,
+        label: c.label,
+        active: technique === c.id,
+        dimmed: technique !== null && technique !== c.id,
+        hint: c.hint,
+      }))}
+    />
   );
 }
 

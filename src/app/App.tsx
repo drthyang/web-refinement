@@ -48,21 +48,21 @@ import {
 } from "@/app/powderSession";
 import type { WorkbenchExports } from "@/app/workbenchEngine";
 
+// The header's refinement-target chips. "Nuclear" is the main refinement page
+// (the whole app refines, so no "Refinement" label needed); "Magnetic" is the
+// magnetic symmetry-analysis page.
 const STEPS: readonly Step[] = [
-  { num: "1", label: "Refinement" },
-  { num: "2", label: "Magnetic" },
+  { label: "Nuclear", hint: "Crystal-structure refinement against the loaded data" },
+  { label: "Magnetic", hint: "Magnetic symmetry analysis + moment refinement on the refined structure" },
 ];
 // Single crystal shares the same two-step flow: F² refinement, then the (shared,
 // structure-driven) magnetic symmetry analysis fitting moments against F² data.
-const SC_STEPS: readonly Step[] = [
-  { num: "1", label: "Refinement" },
-  { num: "2", label: "Magnetic" },
-];
-// PDF is a single-step flow for now; mPDF (roadmap P4) adds the magnetic step —
+const SC_STEPS: readonly Step[] = STEPS;
+// PDF is nuclear-only for now; mPDF (roadmap P4) enables the magnetic chip —
 // shown dimmed so the workflow shape stays visible.
 const PDF_STEPS: readonly Step[] = [
-  { num: "1", label: "Refinement" },
-  { num: "2", label: "Magnetic", disabled: true, hint: "Magnetic PDF (mPDF) is the next milestone — arrives with roadmap P4" },
+  STEPS[0]!,
+  { label: "Magnetic", disabled: true, hint: "Magnetic PDF (mPDF) is the next milestone — arrives with roadmap P4" },
 ];
 // Before any data loads, the steps preview the workflow but aren't clickable.
 const IDLE_STEPS: readonly Step[] = STEPS.map((s) => ({
@@ -167,6 +167,7 @@ export function App(): JSX.Element {
     setPdfDataset(null);
     setPowderResult(null);
     setDemoActive(false);
+    setStep(0);
   }
 
   function onClearStructures(): void {
@@ -185,6 +186,7 @@ export function App(): JSX.Element {
       setScNuclearDataset(null);
       setPdfDataset(null);
       setPowderResult(null);
+      setStep(0);
       setDemo("rietveld");
       setMessage("Loaded the bundled Mn₃Ga + MnO POWGEN demo (two-phase TOF, converged fit).");
       return;
@@ -197,6 +199,7 @@ export function App(): JSX.Element {
     setScNuclearDataset(null);
     setPdfDataset(ex.pattern);
     setPowderResult(null);
+    setStep(0);
     setDemo("pdf");
     setMessage("Loaded the bundled GaTa4Se8 299 K X-ray PDF demo (cubic lacunar spinel, converged fit).");
   }
@@ -285,6 +288,7 @@ export function App(): JSX.Element {
           if (parsed.points.length < 3) throw new Error("fewer than 3 usable G(r) rows");
           setScNuclearDataset(null);
           setPdfDataset(parsed);
+          setStep(0);
           const provenance =
             parsed.sourceKind === "sq" ? " (S(Q) → G(r) transformed at load)" :
             parsed.sourceKind === "fq" ? " (F(Q) → G(r) transformed at load)" : "";
