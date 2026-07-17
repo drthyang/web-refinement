@@ -517,6 +517,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           onRefine={() => void runRefine(false)}
           onThorough={() => void runMultiStart()}
           thoroughMode={result ? "escape" : "prefit"}
+          prefitTitle="Prefit from a cold start: a broad set of perturbed restarts of the free parameters, keeping the best — lands the model in a good basin before you refine. (No Le Bail stage — that extracts Bragg intensities, which real-space G(r) doesn't have.)"
           onReset={reset}
           busy={busy}
           result={result}
