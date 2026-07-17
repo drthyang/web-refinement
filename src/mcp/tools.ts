@@ -1028,7 +1028,7 @@ export function build_distortion_modes(args: {
   structure: StructureModel;
   parameters: RefinementParameter[];
   bindings: ParameterBinding[];
-  modes: { id: string; label: string; observedAmplitude: number }[];
+  modes: { id: string; label: string; star?: string; observedAmplitude: number }[];
   totalAmplitude: number;
   originShift: [number, number, number];
   unpaired: string[];
@@ -1038,7 +1038,12 @@ export function build_distortion_modes(args: {
     structure: set.parentized,
     parameters: set.parameters,
     bindings: set.bindings,
-    modes: set.modes.map((m) => ({ id: m.id, label: m.label, observedAmplitude: m.observedAmplitude })),
+    modes: set.modes.map((m) => ({
+      id: m.id,
+      label: m.label,
+      ...(m.star !== undefined ? { star: m.star } : {}),
+      observedAmplitude: m.observedAmplitude,
+    })),
     totalAmplitude: set.totalAmplitude,
     originShift: [...set.originShift] as [number, number, number],
     unpaired: [...set.unpaired],

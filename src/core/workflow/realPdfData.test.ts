@@ -227,7 +227,7 @@ describe.skipIf(!dataExists(GANB_GR) || !dataExists(P213_CIF) || !dataExists(GAN
       if (p.id === "qbroad") return { ...p, value: 0.0472 };
       if (p.kind === "bIso" || p.id === "delta2") return { ...p, fixed: false };
       if (p.kind === "cellAngle") return { ...p, fixed: true };
-      return p; // withDistortionModes leaves only mode_1 free among the modes
+      return p; // withDistortionModes leaves only the frozen (per-star) modes free
     });
     const refined = await tools.refine_pdf({
       structure: set.parentized, pattern, parameters: params, bindings: swapped.bindings,

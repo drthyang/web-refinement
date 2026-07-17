@@ -27,24 +27,39 @@
  * SEVERAL bindings (one per involved site, each with its fractional `axis`) —
  * the same multi-binding pattern the magnetic `momentMode` uses, so the whole
  * refinement stack (engine, staged, multi-start, pool, UI grouping) works
- * unchanged. Phase B (planned): import irrep-labelled mode definitions from
- * ISODISTORT displacive-mode CIFs for authoritative labels.
+ * unchanged.
+ *
+ * Modes carry their **Brillouin-zone star** (Γ, X, H, or a literal k): the
+ * parent centerings the child breaks generate an abelian translation quotient
+ * whose ±1 character channels split the displacement space; channels related
+ * by the child point group form one star, and the observed distortion is
+ * decomposed into one frozen (order-parameter) mode PER star — the k-part of
+ * the AMPLIMODES/ISODISTORT irrep label. Phase B (planned): import
+ * irrep-labelled mode definitions from ISODISTORT displacive-mode CIFs for
+ * the full authoritative labels (irrep index and branch).
  */
 
 import type { StructureModel, AtomSite } from "@/core/crystal/types";
-import type { Vec3 } from "@/core/math/types";
+import type { Mat3, Vec3 } from "@/core/math/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { allowedPositionShifts } from "@/core/crystal/siteConstraints";
 import { expandStructureAtoms } from "@/core/diffraction/structureFactor";
-import { siteMultiplicity } from "@/core/crystal/symmetry";
+import { applyOperation, siteMultiplicity } from "@/core/crystal/symmetry";
 import { orthogonalizationMatrix } from "@/core/crystal/unitCell";
-import { mulVec } from "@/core/math/mat3";
+import { inverse, mulVec, transpose } from "@/core/math/mat3";
 
 export interface DistortionMode {
   /** Parameter id (mode_1, mode_2, …). */
   readonly id: string;
-  /** Human label: mode index, dominant site, and the frozen-mode tag. */
+  /** Human label: mode index, dominant site, the k-star, and the frozen tag. */
   readonly label: string;
+  /**
+   * Brillouin-zone star of the mode's propagation vector, from the parent
+   * centerings the child breaks: "Γ" (cell-preserving), "X"/"H" (cubic F/I
+   * zone-boundary points), or a literal "k=(h,k,l)" for other lattices.
+   * Absent when the channel decomposition was not applicable.
+   */
+  readonly star?: string;
   /** Observed amplitude (Å over the child cell) in the input child structure. */
   readonly observedAmplitude: number;
   /** Per-child-site fractional displacement at amplitude 1 Å. */
@@ -256,25 +271,51 @@ export function buildDistortionModes(parent: StructureModel, child: StructureMod
     }
   });
 
-  // Leading mode: the observed distortion itself (when nonzero), then a
-  // Cartesian Gram–Schmidt over the candidates for the complement.
+  // ---- Brillouin-zone (k-star) channels ----------------------------------
+  // The parent centerings the child breaks generate an abelian translation
+  // quotient; same-cell displacement fields split into its character channels
+  // k ∈ ℤ³ (phase e^{2πik·t} = ±1 on the lost half-translations). Channels
+  // related by the child point group form one STAR — the symmetry name of a
+  // mode (Γ, X, H, …), AMPLIMODES' k-label without the irrep index (Phase B).
+  const stars = buildStars(parentAtomsRaw, child, paired.map((p) => p.reference));
+
+  // Leading modes: the observed distortion's per-star components (each is an
+  // independent order parameter), then a Cartesian Gram–Schmidt over the
+  // star-projected candidates for the complement. Star projectors are
+  // orthogonal in the multiplicity-weighted Cartesian metric and sum to the
+  // identity, so the span — and the exact reproduction of the child by the
+  // seeded amplitudes — is unchanged by the decomposition.
   const observed: GlobalVec = { frac: paired.map((p) => p.observed) };
   const observedNorm = Math.sqrt(cartNormSq(observed));
   const ortho: GlobalVec[] = [];
-  const push = (v: GlobalVec): void => {
+  const orthoMeta: { star: string | undefined; frozen: boolean }[] = [];
+  const push = (v: GlobalVec, star: string | undefined, frozen: boolean): void => {
     let w = v;
     for (const u of ortho) w = minus(w, u, dot(w, u));
     const n = Math.sqrt(cartNormSq(w));
-    if (n > 1e-8) ortho.push(scaled(w, 1 / n));
+    if (n > 1e-8) {
+      ortho.push(scaled(w, 1 / n));
+      orthoMeta.push({ star, frozen });
+    }
   };
-  if (observedNorm > 1e-6) push(observed);
-  for (const c of candidates) push(c);
+  // Frozen components first, largest star share first — mode_1 stays the
+  // dominant order parameter.
+  const frozenPieces = stars
+    .map((s) => ({ star: s.label, piece: s.project(observed) }))
+    .map((q) => ({ ...q, norm: Math.sqrt(cartNormSq(q.piece)) }))
+    .filter((q) => q.norm > 1e-6)
+    .sort((a, b) => b.norm - a.norm);
+  for (const q of frozenPieces) push(q.piece, q.star, true);
+  for (const s of stars) {
+    for (const c of candidates) push(s.project(c), s.label, false);
+  }
 
   // Emit parameters + bindings. Seed = the observed decomposition, so the
   // parentized structure + seeded amplitudes reproduce the child exactly.
   const parameters: RefinementParameter[] = [];
   const bindings: ParameterBinding[] = [];
   const modes: DistortionMode[] = [];
+  let frozenCount = 0;
   ortho.forEach((m, k) => {
     const id = `mode_${k + 1}`;
     const amp = observedNorm > 1e-6 ? dot(observed, m) : 0;
@@ -289,10 +330,11 @@ export function buildDistortionModes(parent: StructureModel, child: StructureMod
         domJ = j;
       }
     });
-    const frozen = k === 0 && observedNorm > 1e-6;
+    const { star, frozen } = orthoMeta[k]!;
+    const starTag = star ? ` @ ${star}` : "";
     const label = frozen
-      ? `A1 frozen distortion (${paired[domJ]!.site.label}…)`
-      : `mode ${k + 1} (${paired[domJ]!.site.label})`;
+      ? `A${++frozenCount} frozen distortion${starTag} (${paired[domJ]!.site.label}…)`
+      : `mode ${k + 1}${starTag} (${paired[domJ]!.site.label})`;
     parameters.push({ id, label, kind: "positionShift", value: amp, initialValue: amp, fixed: false });
     const axes: { siteLabel: string; axis: Vec3 }[] = [];
     m.frac.forEach((f, j) => {
@@ -300,7 +342,7 @@ export function buildDistortionModes(parent: StructureModel, child: StructureMod
       axes.push({ siteLabel: paired[j]!.site.label, axis: f });
       bindings.push({ parameterId: id, kind: "positionShift", targetId: child.id, targetKey: paired[j]!.site.label, axis: f });
     });
-    modes.push({ id, label, observedAmplitude: amp, axes });
+    modes.push({ id, label, ...(star !== undefined ? { star } : {}), observedAmplitude: amp, axes });
   });
 
   const parentized: StructureModel = {
@@ -314,19 +356,244 @@ export function buildDistortionModes(parent: StructureModel, child: StructureMod
   return { parentized, originShift: shift, parameters, bindings, modes, totalAmplitude: observedNorm, unpaired };
 }
 
+// ---------------------------------------------------------------------------
+// Brillouin-zone star decomposition of the same-cell displacement space.
+// ---------------------------------------------------------------------------
+
+/** A whole-cell displacement field, reduced to the child asymmetric sites. */
+interface FieldVec {
+  readonly frac: Vec3[];
+}
+
+/** One k-star channel group: its display label and orthogonal projector. */
+interface KStar {
+  readonly label: string | undefined;
+  readonly project: (v: FieldVec) => FieldVec;
+}
+
+function wrapFrac(v: Vec3): Vec3 {
+  return [((v[0] % 1) + 1) % 1, ((v[1] % 1) + 1) % 1, ((v[2] % 1) + 1) % 1];
+}
+
+/** Periodic fractional-position equality (tolerance matches the pairing). */
+function sameFrac(a: Vec3, b: Vec3): boolean {
+  for (let i = 0; i < 3; i++) {
+    let d = Math.abs(a[i]! - b[i]!);
+    d = Math.min(d, 1 - d);
+    if (d > 1e-3) return false;
+  }
+  return true;
+}
+
+/**
+ * Non-trivial half-integer translations mapping the parent atom set onto
+ * itself — the centerings (F/I/A/B/C) a same-cell child can break. Candidates
+ * come from the rarest element's position differences; each is validated over
+ * every atom and the set is closed under addition. Translations with other
+ * denominators (e.g. rhombohedral ⅓) are deliberately not handled — the caller
+ * degrades to unlabeled modes.
+ */
+function pseudoHalfTranslations(atoms: readonly { readonly element: string; readonly position: Vec3 }[]): Vec3[] {
+  if (atoms.length < 2) return [];
+  const counts = new Map<string, number>();
+  for (const a of atoms) counts.set(a.element, (counts.get(a.element) ?? 0) + 1);
+  const seedEl = [...counts.entries()].sort((x, y) => x[1] - y[1])[0]![0];
+  const seeds = atoms.filter((a) => a.element === seedEl);
+  const ref = seeds[0]!;
+  const isTranslation = (t: Vec3): boolean =>
+    atoms.every((a) => atoms.some((c) => c.element === a.element && sameFrac(wrapFrac([a.position[0] + t[0], a.position[1] + t[1], a.position[2] + t[2]]), c.position)));
+  const found: Vec3[] = [];
+  const pushCandidate = (raw: Vec3): void => {
+    // Snap to exact halves; reject anything that is not a pure half-translation.
+    const snapped: number[] = [];
+    for (const x of wrapFrac(raw)) {
+      const d0 = Math.min(x, 1 - x);
+      if (d0 < 1e-3) snapped.push(0);
+      else if (Math.abs(x - 0.5) < 1e-3) snapped.push(0.5);
+      else return;
+    }
+    const t = snapped as unknown as Vec3;
+    if (t[0] === 0 && t[1] === 0 && t[2] === 0) return;
+    if (found.some((q) => q[0] === t[0] && q[1] === t[1] && q[2] === t[2])) return;
+    if (isTranslation(t)) found.push(t);
+  };
+  for (const b of seeds) {
+    pushCandidate([b.position[0] - ref.position[0], b.position[1] - ref.position[1], b.position[2] - ref.position[2]]);
+  }
+  // Closure (elementary abelian 2-group): sums of members are members.
+  for (let i = 0; i < found.length; i++) {
+    for (let j = i + 1; j < found.length; j++) {
+      pushCandidate([found[i]![0] + found[j]![0], found[i]![1] + found[j]![1], found[i]![2] + found[j]![2]]);
+    }
+  }
+  return found;
+}
+
+/**
+ * Partition the same-cell displacement channels into Brillouin-zone stars.
+ * `references` are the parentized child asymmetric positions the fields live
+ * on. Returns a single identity star ("Γ" when the parent has no lost
+ * half-translations; unlabeled when the geometry fails to close) so callers
+ * never branch.
+ */
+function buildStars(
+  parentAtoms: readonly { readonly element: string; readonly position: Vec3 }[],
+  child: StructureModel,
+  references: readonly Vec3[],
+): KStar[] {
+  const lost = pseudoHalfTranslations(parentAtoms);
+  if (lost.length === 0) return [{ label: "Γ", project: (v) => v }];
+  const untagged: KStar[] = [{ label: undefined, project: (v) => v }];
+  const group: Vec3[] = [[0, 0, 0], ...lost];
+
+  // Atom matching is by NEAREST position with a physical (Å) cutoff, not an
+  // exact fractional tolerance: the searched origin shift absorbs the seed
+  // atom's own displacement, so reference-orbit copies sit up to ~0.1 Å off
+  // the ideal translation grid — far from any OTHER atom, so the permutation
+  // (all the projector needs) is still unambiguous.
+  const M = orthogonalizationMatrix(child.cell);
+  const distCart = (a: Vec3, b: Vec3): number => {
+    const d: Vec3 = [a[0] - b[0], a[1] - b[1], a[2] - b[2]].map((x) => {
+      let w = x % 1;
+      if (w > 0.5) w -= 1;
+      if (w < -0.5) w += 1;
+      return w;
+    }) as unknown as Vec3;
+    const c = mulVec(M, d);
+    return Math.hypot(c[0], c[1], c[2]);
+  };
+  const MATCH_CUTOFF = 0.6; // Å — well under any interatomic distance
+
+  // Full-cell field table on the reference geometry: position, owning
+  // asymmetric site, and the (fractional) rotation relating them.
+  const entries: { pos: Vec3; j: number; R: Mat3 }[] = [];
+  references.forEach((ref, j) => {
+    for (const op of child.spaceGroup.operations) {
+      const pos = wrapFrac(applyOperation(op, ref) as Vec3);
+      if (!entries.some((e) => distCart(e.pos, pos) < MATCH_CUTOFF)) entries.push({ pos, j, R: op.rotation });
+    }
+  });
+
+  // T(t) on a (child-symmetric) reduced field: u′(r_j) = u(r_j − t) = R_g·u_{j′}.
+  const translate = (v: FieldVec, t: Vec3): FieldVec | null => {
+    const frac: Vec3[] = [];
+    for (let j = 0; j < references.length; j++) {
+      const r = references[j]!;
+      const src = wrapFrac([r[0] - t[0], r[1] - t[1], r[2] - t[2]]);
+      let best: { e: (typeof entries)[number]; d: number } | null = null;
+      for (const e of entries) {
+        const d = distCart(e.pos, src);
+        if (!best || d < best.d) best = { e, d };
+      }
+      if (!best || best.d > MATCH_CUTOFF) return null;
+      frac.push(mulVec(best.e.R, v.frac[best.e.j]!) as Vec3);
+    }
+    return { frac };
+  };
+  const probe: FieldVec = { frac: references.map((_, i) => [i + 1, 0, 0] as Vec3) };
+  for (const t of lost) if (!translate(probe, t)) return untagged;
+
+  // Channels: k ∈ {0,1}³ with the ±1 phase pattern over the group; dedupe by
+  // pattern (k's differing by a parent reciprocal vector alias), keeping the
+  // smallest-|k| representative.
+  const sigmaOf = (k: Vec3): number[] =>
+    group.map((t) => (Math.round(2 * (k[0] * t[0] + k[1] * t[1] + k[2] * t[2])) % 2 === 0 ? 1 : -1));
+  const kNormSq = (k: Vec3): number => k[0] * k[0] + k[1] * k[1] + k[2] * k[2];
+  const channels: { k: Vec3; sigma: number[] }[] = [];
+  for (let h = 0; h <= 1; h++) {
+    for (let kk = 0; kk <= 1; kk++) {
+      for (let l = 0; l <= 1; l++) {
+        const k: Vec3 = [h, kk, l];
+        const sigma = sigmaOf(k);
+        const dup = channels.find((c) => c.sigma.every((s, i) => s === sigma[i]));
+        if (!dup) channels.push({ k, sigma });
+        else if (kNormSq(k) < kNormSq(dup.k)) dup.k = k;
+      }
+    }
+  }
+
+  // Stars: orbits of channels under the child point group, k′ = R⁻ᵀk matched
+  // back by phase pattern.
+  const starOf: number[] = channels.map(() => -1);
+  let nStars = 0;
+  for (let i = 0; i < channels.length; i++) {
+    if (starOf[i]! >= 0) continue;
+    const star = nStars++;
+    const queue = [i];
+    starOf[i] = star;
+    while (queue.length > 0) {
+      const c = channels[queue.pop()!]!;
+      for (const op of child.spaceGroup.operations) {
+        const kPrimeRaw = mulVec(transpose(inverse(op.rotation)), c.k);
+        const kPrime: Vec3 = [Math.round(kPrimeRaw[0]), Math.round(kPrimeRaw[1]), Math.round(kPrimeRaw[2])];
+        const sigma = sigmaOf(kPrime);
+        const m = channels.findIndex((q) => q.sigma.every((s, ii) => s === sigma[ii]));
+        if (m >= 0 && starOf[m]! < 0) {
+          starOf[m] = star;
+          queue.push(m);
+        }
+      }
+    }
+  }
+
+  // Standard letters where they are unambiguous; a literal k elsewhere.
+  const cell = child.cell;
+  const cubic =
+    Math.abs(cell.a - cell.b) < 1e-3 * cell.a &&
+    Math.abs(cell.a - cell.c) < 1e-3 * cell.a &&
+    [cell.alpha, cell.beta, cell.gamma].every((x) => Math.abs(x - 90) < 1e-3);
+  const has = (t: Vec3): boolean => lost.some((q) => q[0] === t[0] && q[1] === t[1] && q[2] === t[2]);
+  const isF = lost.length === 3 && has([0, 0.5, 0.5]) && has([0.5, 0, 0.5]) && has([0.5, 0.5, 0]);
+  const isI = lost.length === 1 && has([0.5, 0.5, 0.5]);
+  const letter = (k: Vec3): string => {
+    if (k[0] === 0 && k[1] === 0 && k[2] === 0) return "Γ";
+    const sorted = k.map(Math.abs).sort((a, b) => a - b);
+    const zoneEdge = sorted[0] === 0 && sorted[1] === 0 && sorted[2] === 1;
+    if (cubic && isF && zoneEdge) return "X";
+    if (cubic && isI && zoneEdge) return "H";
+    return `k=(${k.join(",")})`;
+  };
+
+  const stars: KStar[] = [];
+  for (let s = 0; s < nStars; s++) {
+    const members = channels.filter((_, i) => starOf[i] === s);
+    const rep = members.reduce((best, c) => (kNormSq(c.k) < kNormSq(best.k) ? c : best));
+    const project = (v: FieldVec): FieldVec => {
+      const acc: Vec3[] = v.frac.map(() => [0, 0, 0] as Vec3);
+      group.forEach((t, ti) => {
+        let w = 0;
+        for (const m of members) w += m.sigma[ti]!;
+        if (w === 0) return;
+        const tv = translate(v, t)!;
+        for (let j = 0; j < acc.length; j++) {
+          (acc[j] as [number, number, number])[0] += w * tv.frac[j]![0];
+          (acc[j] as [number, number, number])[1] += w * tv.frac[j]![1];
+          (acc[j] as [number, number, number])[2] += w * tv.frac[j]![2];
+        }
+      });
+      const inv = 1 / group.length;
+      return { frac: acc.map((u) => [u[0] * inv, u[1] * inv, u[2] * inv] as Vec3) };
+    };
+    stars.push({ label: letter(rep.k), project });
+  }
+  return stars;
+}
+
 /**
  * Swap a spec's per-coordinate position parameters for mode amplitudes: drop
- * every `positionShift` row/binding and splice in the mode set (fixed on
- * entry except the frozen mode — free the rest deliberately, as with any
- * strongly-correlated group). Works for any engine's spec (PDF, powder).
+ * every `positionShift` row/binding and splice in the mode set. The frozen
+ * (order-parameter) modes — one per k-star component of the observed
+ * distortion — enter free; the complement enters fixed, freed deliberately
+ * like any strongly-correlated group. Works for any engine's spec (PDF, powder).
  */
 export function withDistortionModes(
   spec: { params: RefinementParameter[]; bindings: ParameterBinding[] },
   modeSet: DistortionModeSet,
 ): { params: RefinementParameter[]; bindings: ParameterBinding[] } {
+  const frozenIds = new Set(modeSet.modes.filter((m) => m.label.includes("frozen")).map((m) => m.id));
   const params = [
     ...spec.params.filter((p) => p.kind !== "positionShift"),
-    ...modeSet.parameters.map((p, i) => ({ ...p, fixed: i > 0 })),
+    ...modeSet.parameters.map((p) => ({ ...p, fixed: !frozenIds.has(p.id) })),
   ];
   const keep = new Set(params.map((p) => p.id));
   const bindings = [

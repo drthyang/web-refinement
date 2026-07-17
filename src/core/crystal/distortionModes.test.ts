@@ -95,6 +95,74 @@ describe("buildDistortionModes — decomposition", () => {
   });
 });
 
+describe("Brillouin-zone star labels (same-cell F → P)", () => {
+  const A = 6;
+  const F_CELL: UnitCell = { a: A, b: A, c: A, alpha: 90, beta: 90, gamma: 90 };
+  const trOp = (t: readonly [number, number, number]): SymmetryOperation => ({
+    rotation: IDENTITY3, translation: [...t] as [number, number, number], xyz: "x,y,z",
+  });
+  /** F-centered cubic parent: A on the corners' orbit, B on (¼,¼,¼)'s. */
+  const fParent: StructureModel = {
+    id: "fp", name: "F parent", cell: F_CELL,
+    spaceGroup: { operations: [IDENTITY_OP, trOp([0, 0.5, 0.5]), trOp([0.5, 0, 0.5]), trOp([0.5, 0.5, 0])] },
+    sites: [site("A1", "Ni", [0, 0, 0]), site("B1", "O", [0.25, 0.25, 0.25])],
+  };
+  /** P1 child: explicit A orbit + B orbit displaced along x with the sign
+   *  pattern of one X arm (k = (0,0,1): +,−,−,+ over the F centerings) and
+   *  along y with a uniform Γ component. */
+  const DX = 0.02;
+  const SY = 0.01;
+  const child8 = (dx: number, sy: number): StructureModel => ({
+    id: "c8", name: "child", cell: F_CELL,
+    spaceGroup: { operations: [IDENTITY_OP] },
+    sites: [
+      site("A1", "Ni", [0, 0, 0]), site("A2", "Ni", [0, 0.5, 0.5]),
+      site("A3", "Ni", [0.5, 0, 0.5]), site("A4", "Ni", [0.5, 0.5, 0]),
+      site("B1", "O", [0.25 + dx, 0.25 + sy, 0.25]),
+      site("B2", "O", [0.25 - dx, 0.75 + sy, 0.75]),
+      site("B3", "O", [0.75 - dx, 0.25 + sy, 0.75]),
+      site("B4", "O", [0.75 + dx, 0.75 + sy, 0.25]),
+    ],
+  });
+
+  it("splits the observed distortion into per-star frozen order parameters", () => {
+    const set = buildDistortionModes(fParent, child8(DX, SY));
+    expect(set.unpaired).toEqual([]);
+    const frozen = set.modes.filter((m) => m.label.includes("frozen"));
+    expect(frozen).toHaveLength(2);
+    // Dominant component: the X-pattern (2·dx·a Å), then the Γ shift (2·sy·a Å).
+    expect(frozen[0]!.star).toBe("X");
+    expect(frozen[0]!.label).toContain("@ X");
+    expect(Math.abs(frozen[0]!.observedAmplitude)).toBeCloseTo(2 * DX * A, 6);
+    expect(frozen[1]!.star).toBe("Γ");
+    expect(Math.abs(frozen[1]!.observedAmplitude)).toBeCloseTo(2 * SY * A, 6);
+    // Star components are orthogonal: amplitudes add in quadrature.
+    const sumSq = frozen.reduce((s, m) => s + m.observedAmplitude ** 2, 0);
+    expect(Math.sqrt(sumSq)).toBeCloseTo(set.totalAmplitude, 8);
+    // Every mode carries a star tag on this lattice.
+    for (const m of set.modes) expect(m.star).toBeDefined();
+  });
+
+  it("a pure zone-boundary distortion is a single X mode; withDistortionModes frees all frozen modes", () => {
+    const pure = buildDistortionModes(fParent, child8(DX, 0));
+    const frozen = pure.modes.filter((m) => m.label.includes("frozen"));
+    expect(frozen).toHaveLength(1);
+    expect(frozen[0]!.star).toBe("X");
+
+    const mixed = buildDistortionModes(fParent, child8(DX, SY));
+    const swapped = withDistortionModes({ params: [], bindings: [] }, mixed);
+    const free = swapped.params.filter((p) => !p.fixed).map((p) => p.id);
+    expect(free).toEqual(mixed.modes.filter((m) => m.label.includes("frozen")).map((m) => m.id));
+    expect(free).toHaveLength(2);
+  });
+
+  it("a parent without lost centerings labels everything Γ", () => {
+    const set = buildDistortionModes(parent(), child());
+    for (const m of set.modes) expect(m.star).toBe("Γ");
+    expect(set.modes[0]!.label).toContain("@ Γ");
+  });
+});
+
 describe("mode-amplitude refinement ≡ coordinate refinement", () => {
   /** Synthetic G(r) from the true (distorted) child. */
   function truthPattern(): PdfPattern {
