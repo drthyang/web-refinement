@@ -25,9 +25,7 @@ import {
   pdfPhaseCurves,
   pdfPhaseBindingsFor,
   optimalPdfScale,
-  guidedPdfParams,
   correlatedMotionConflict,
-  PDF_STAGE_KINDS,
 } from "@/core/workflow/pdf";
 import { applyParameters } from "@/core/workflow/apply";
 
@@ -39,7 +37,7 @@ import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { downloadText } from "@/app/download";
 import { structureToCif } from "@/core/export/cif";
 import { pdfReport } from "@/core/export/pdfReport";
-import { card as themeCard, color, mono, secondaryButton, uppercaseLabel } from "@/app/theme";
+import { card as themeCard, color, mono, secondaryButton, uppercaseLabel, fz, toolbarBtn, resetRangeBtn } from "@/app/theme";
 
 const DATA_ACCEPT = ".gr,.sgr,.sq,.fq,.dat,.txt,text/plain";
 const noop = (): void => {};
@@ -195,10 +193,10 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
 
   const nFree = params.filter((p) => !p.fixed && !p.expression).length;
 
-  async function runRefine(guided: boolean): Promise<void> {
+  async function runRefine(): Promise<void> {
     setBusy(true);
     try {
-      const start = guided ? guidedPdfParams(params) : [...params];
+      const start = [...params];
       const res = await client.refinePdfParallel(
         {
           structure,
@@ -207,7 +205,6 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           parameters: start,
           bindings: [...spec.bindings],
           restraints: spec.restraints,
-          ...(guided ? { staged: PDF_STAGE_KINDS } : {}),
           fitRange,
           options: { maxIterations: 30 },
         },
@@ -217,45 +214,6 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       setResult(res);
     } catch (e) {
       console.error(`[status] PDF refinement failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setLive(null);
-      setBusy(false);
-    }
-  }
-
-  // Qdamp/Qbroad calibration on a STANDARD: the loaded structure is taken as
-  // known — only the scale(s) and the instrument envelope refine; the result is
-  // adopted and kept fixed for subsequent sample fits.
-  async function runCalibrate(): Promise<void> {
-    setBusy(true);
-    try {
-      const calib = params.map((p) => ({
-        ...p,
-        fixed: !(p.kind === "pdfScale" || p.kind === "qdamp" || p.kind === "qbroad"),
-      }));
-      const res = await client.refinePdfParallel(
-        {
-          structure,
-          ...(multiPhase ? { extraPhases: [...extraPhases] } : {}),
-          pattern,
-          parameters: calib,
-          bindings: [...spec.bindings],
-          restraints: spec.restraints,
-          fitRange,
-          options: { maxIterations: 25 },
-        },
-        (yCalc) => setLive(yCalc),
-      );
-      setParams((ps) =>
-        ps.map((p) =>
-          p.kind === "qdamp" || p.kind === "qbroad" || p.kind === "pdfScale"
-            ? { ...p, value: res.parameters[p.id] ?? p.value, fixed: p.kind === "pdfScale" ? p.fixed : true }
-            : p,
-        ),
-      );
-      setResult(res);
-    } catch (e) {
-      console.error(`[status] Qdamp calibration failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLive(null);
       setBusy(false);
@@ -391,70 +349,77 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     },
   ];
 
+  // Mirrors the powder page's "Magnetic analysis →" slot; enabled when mPDF
+  // (roadmap P4) lands.
   const refineActions = (
-    <>
-      <button
-        style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? { opacity: 0.55, cursor: "default" } : {}) }}
-        disabled={busy}
-        onClick={() => void runRefine(true)}
-        title="Staged sequence: scale → cell → ADP → correlated motion (δ1) → positions (occupancies stay fixed)"
-      >
-        Guided refine
-      </button>
-      <button
-        style={{ ...secondaryButton, padding: "7px 13px", ...(busy ? { opacity: 0.55, cursor: "default" } : {}) }}
-        disabled={busy}
-        onClick={() => void runCalibrate()}
-        title="Instrument calibration on a STANDARD (Ni/Si/LaB₆ with a known structure): fit only scale + Qdamp + Qbroad, then adopt and hold them for sample fits"
-      >
-        Calibrate Qdamp
-      </button>
-    </>
+    <button
+      style={{ ...secondaryButton, flex: "0 0 auto", padding: "10px 13px", fontSize: 13, opacity: 0.5, cursor: "default" }}
+      disabled
+      title="Magnetic PDF (mPDF) — moment refinement against magnetic G(r). The next roadmap milestone (P4)."
+    >
+      Magnetic PDF →
+    </button>
   );
 
   return (
     <>
       <SummaryCards cards={summaryCards} />
-      <div className="wb-sc">
-        <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "inline-flex", gap: 2, background: color.chipBg, border: `1px solid ${color.border}`, borderRadius: 8, padding: 2 }}>
-              {(["fit", "model3d"] as const).map((k) => (
-                <button
-                  key={k}
-                  onClick={() => setViewTab(k)}
-                  title={k === "fit" ? "Observed vs calculated G(r)" : "3D crystal-structure model"}
-                  style={{
-                    border: "none", borderRadius: 6, padding: "3px 11px", fontSize: 11, fontWeight: 600,
-                    cursor: "pointer", fontFamily: mono,
-                    background: viewTab === k ? color.primary : "transparent",
-                    color: viewTab === k ? "#fff" : color.secondary,
-                  }}
-                >
-                  {k === "fit" ? "Refinement" : "3D Model"}
-                </button>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 20, alignItems: "baseline" }}>
-              {viewTab === "fit" && (
-                <button
-                  onClick={() => setFocusFitToken((t) => t + 1)}
-                  style={{ ...uppercaseLabel, background: "none", border: "none", padding: 0, cursor: "pointer", color: color.secondary }}
-                  title="Zoom the plot onto the active fit window"
-                >
-                  optimize view
-                </button>
-              )}
+      <div className="wb-work2">
+        <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 66vh, 900px)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+            <span style={uppercaseLabel}>
+              {viewTab === "fit" ? "PDF pattern — G(r)" : "Crystal structure — unit cell"}
+            </span>
+            {viewTab === "fit" && (
+              <span style={{ display: "flex", gap: 14, fontFamily: mono, fontSize: 12.5 }}>
+                <span style={{ color: color.secondary }} title="Rw over G(r) inside the fit window (uniform weights). G(r) point errors are correlated, so treat as a relative indicator.">
+                  Rw <b style={{ color: rwInk(rw) }}>{Number.isFinite(rw) ? pct(rw) : "—"}</b>
+                </span>
+              </span>
+            )}
+            {viewTab === "fit" && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: mono, fontSize: fz.micro, color: color.secondary }} title="The r window used for refinement (set with the blue handles). Low r below r_poly is reduction artifact.">
+                fit {fitRange.min.toFixed(2)}–{fitRange.max.toFixed(2)} Å
+                <button style={resetRangeBtn} onClick={() => setFitRange(defaultRange)} title="Reset to the default window">Reset range</button>
+              </span>
+            )}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, rowGap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
               {viewTab === "fit" && canOverlay && (
-                <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 11.5, color: color.secondary, cursor: "pointer" }} title={multiPhase ? "Overlay each phase's G(r) contribution — they sum exactly to the calc curve" : "Overlay the element-pair (Faber–Ziman) partial PDFs — they sum exactly to the calc curve"}>
+                <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: fz.micro, color: color.secondary, cursor: "pointer" }} title={multiPhase ? "Overlay each phase's G(r) contribution — they sum exactly to the calc curve" : "Overlay the element-pair (Faber–Ziman) partial PDFs — they sum exactly to the calc curve"}>
                   <input type="checkbox" checked={showPartials} onChange={(e) => setShowPartials(e.target.checked)} style={{ accentColor: color.primary }} />
                   {multiPhase ? "phases" : "partials"}
                 </label>
               )}
-              <span style={{ fontFamily: mono, fontSize: 15, color: rwInk(rw) }} title="Rw over G(r) inside the fit window (uniform weights). G(r) point errors are correlated, so treat as a relative indicator.">
-                Rw {Number.isFinite(rw) ? pct(rw) : "—"}
-              </span>
-              <span style={{ fontFamily: mono, fontSize: 12, color: color.faint }}>{nFree} free</span>
+              {viewTab === "fit" && (
+                <button
+                  style={{ ...toolbarBtn, display: "inline-flex", alignItems: "center", gap: 5 }}
+                  title="Zoom the plot onto the active fit window"
+                  onClick={() => setFocusFitToken((t) => t + 1)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  optimize view
+                </button>
+              )}
+              <div style={{ display: "inline-flex", gap: 2, background: color.chipBg, border: `1px solid ${color.border}`, borderRadius: 8, padding: 2 }}>
+                {(["fit", "model3d"] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setViewTab(k)}
+                    title={k === "fit" ? "Observed vs calculated G(r)" : "3D crystal-structure model"}
+                    style={{
+                      border: "none", borderRadius: 6, padding: "3px 11px", fontSize: 11, fontWeight: 600,
+                      cursor: "pointer", fontFamily: mono,
+                      background: viewTab === k ? color.primary : "transparent",
+                      color: viewTab === k ? "#fff" : color.secondary,
+                    }}
+                  >
+                    {k === "fit" ? "Refinement" : "3D Model"}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           {viewTab === "fit" ? (
@@ -470,12 +435,11 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                 focusFitToken={focusFitToken}
                 {...(partials ? { overlays: partials } : {})}
               />
-              <div style={{ fontSize: 11.5, color: color.faint }}>
-                Fit window {fitRange.min.toFixed(2)}–{fitRange.max.toFixed(2)} Å (drag the handles; low r below r_poly is
-                reduction artifact). Qdamp/Qbroad are instrument constants — calibrate on a standard, then keep fixed.
-              </div>
+              <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: color.secondary }}>
+                Drag across the plot to zoom, blue handles to set the fit window. Qdamp/Qbroad are instrument constants — hold them fixed once calibrated on a standard.
+              </p>
               {correlatedMotionConflict(params) && (
-                <div style={{ fontSize: 11.5, color: color.warnInk }}>⚠ {correlatedMotionConflict(params)}</div>
+                <div style={{ marginTop: 6, fontSize: 12, color: color.warnInk }}>⚠ {correlatedMotionConflict(params)}</div>
               )}
             </>
           ) : (
@@ -514,7 +478,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           params={params}
           esd={result?.esd}
           onChange={onParamChange}
-          onRefine={() => void runRefine(false)}
+          onRefine={() => void runRefine()}
           onThorough={() => void runMultiStart()}
           thoroughMode={result ? "escape" : "prefit"}
           prefitTitle="Prefit from a cold start: a broad set of perturbed restarts of the free parameters, keeping the best — lands the model in a good basin before you refine. (No Le Bail stage — that extracts Bragg intensities, which real-space G(r) doesn't have.)"

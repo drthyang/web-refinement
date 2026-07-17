@@ -111,6 +111,31 @@ export const secondaryButton: CSSProperties = {
   cursor: "pointer",
 };
 
+/** Small outlined action in a plot-card toolbar ("optimize view"). */
+export const toolbarBtn: CSSProperties = {
+  border: `1px solid ${color.primary}`,
+  background: "#fff",
+  color: color.primary,
+  borderRadius: radius.button,
+  padding: "3px 11px",
+  fontSize: fz.micro,
+  fontWeight: 600,
+  fontFamily: mono,
+  cursor: "pointer",
+};
+
+/** Tiny inline reset chip next to the fit-range readout. */
+export const resetRangeBtn: CSSProperties = {
+  border: `1px solid ${color.control}`,
+  background: "#fff",
+  borderRadius: radius.small,
+  padding: "1px 9px",
+  fontSize: fz.micro,
+  fontFamily: mono,
+  color: color.secondary,
+  cursor: "pointer",
+};
+
 export const primaryButton: CSSProperties = {
   border: `1px solid ${color.primary}`,
   background: color.primary,

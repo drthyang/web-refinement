@@ -13,7 +13,9 @@ workbench; the same pure core is exposed to agents as tools (see
 
 **▶ Try it in your browser: [drthyang.github.io/web-refinement](https://drthyang.github.io/web-refinement/)** — a
 fully static GitHub Pages app; nothing to install, and your data never leaves
-your machine.
+your machine. Two bundled demos open converged from the start page: a two-phase
+**Mn₃Ga neutron TOF Rietveld** fit (wR 3.9%) and a **GaTa₄Se₈ X-ray PDF** fit
+(Rw 8.1%).
 
 <p align="center">
   <img src="docs/screenshots/desktop.png" alt="Two-phase Mn₃Ga + MnO Rietveld refinement of POWGEN time-of-flight data, converged at wR 3.86%: observed/calculated/difference curves, per-phase Bragg ticks, and the symmetry-allowed parameter table with esds" width="100%" />
@@ -108,7 +110,7 @@ powder) plus a commensurate single-k magnetic workflow — and a first agent-too
 layer over the same core. The scientific core, Levenberg–Marquardt refinement
 engine, symmetry-adapted constrained parameters, CIF parsing, a 3D
 structure/moment viewer, plots, and Web Worker compute are implemented and
-tested (**999 passing tests**). Crystallographic and scattering foundations are
+tested (**1006 passing tests**). Crystallographic and scattering foundations are
 validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
 As with any beta, results intended for publication must be validated against
@@ -139,7 +141,9 @@ G(r) fitting** (Proffen–Billinge forward model, δ1/δ2 and sratio/rcut correl
 motion, Qdamp/Qbroad envelopes, Qmax termination ripples, `spdiameter`
 nanoparticle envelope, Faber–Ziman element-pair partials), **multi-phase** and
 **multi-dataset** (temperature-series / joint X-ray+neutron) co-refinement, and
-`.gr`/`.sq`/`.fq` import (PDFgetX3 + Mantid dialects). It is cross-checked
+`.gr`/`.sq`/`.fq` import (PDFgetX3 + Mantid dialects), plus **distortion-mode
+amplitude refinement** (AMPLIMODES-style: fit symmetry-adapted mode amplitudes
+instead of raw coordinates). It is cross-checked
 against a **local PDFfit2 1.6.0** with committed CI golden fixtures — Ni and MnO
 X-ray G(r) to corr ≈ 0.9998 and refined cell recovery < 1 mÅ — plus a PDFgui
 `G_calc` golden. The nuclear track (P0–P3) and its agent slice are done;
@@ -147,9 +151,10 @@ X-ray G(r) to corr ≈ 0.9998 and refined cell recovery < 1 mÅ — plus a PDFgu
 next milestones. Full plan in
 [docs/PDF_MPDF_ROADMAP.md](docs/PDF_MPDF_ROADMAP.md).
 
-The MCP tool surface has grown to **30 contract-tested tools** spanning the
-powder, single-crystal, and PDF tracks (the five PDF tools: `parse_pdf_data`,
-`build_pdf_model`, `refine_pdf`, `compute_partial_pdf`, `calibrate_qdamp`).
+The MCP tool surface has grown to **31 contract-tested tools** spanning the
+powder, single-crystal, and PDF tracks (the PDF tools: `parse_pdf_data`,
+`build_pdf_model`, `refine_pdf`, `compute_partial_pdf`, `calibrate_qdamp`,
+plus `build_distortion_modes` for mode-amplitude fits).
 
 The agent-tools layer and the LLM-guided refinement loop (the vision above)
 are documented in [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) and ship
