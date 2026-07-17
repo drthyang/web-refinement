@@ -938,8 +938,8 @@ export async function refine_pdf(args: {
     ? [{ structure: args.structure, id: args.structure.id }, ...args.extraPhases!.map((s) => ({ structure: s, id: s.id }))]
     : null;
   const curves = phases
-    ? multiPhasePdfCurves(phases, args.pattern, refined, args.bindings)
-    : pdfCurves(args.structure, args.pattern, refined, args.bindings);
+    ? multiPhasePdfCurves(phases, args.pattern, refined, args.bindings, args.fitRange)
+    : pdfCurves(args.structure, args.pattern, refined, args.bindings, args.fitRange);
   const inRange = (r: number): boolean =>
     (args.fitRange?.min === undefined || r >= args.fitRange.min) &&
     (args.fitRange?.max === undefined || r <= args.fitRange.max);
