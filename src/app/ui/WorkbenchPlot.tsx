@@ -63,7 +63,25 @@ interface Props {
    * x in data units — e.g. the magnetic page's "add a residual peak here".
    */
   readonly onPlotClick?: (x: number) => void;
+  /**
+   * Signed ordinate: auto-scale y to the observed data's [min, max] instead of
+   * clamping at 0, and draw a zero line. For observables that oscillate about
+   * zero — a reduced PDF G(r) has negative lobes that the default [0, yTop]
+   * intensity scale would flatten. Default false (Rietveld intensity behaviour).
+   */
+  readonly signedY?: boolean;
+  /** y-axis caption; defaults to the Rietveld "Intensity (a.u.)". */
+  readonly yLabel?: string;
+  /**
+   * Extra decomposition curves on the calc's y-scale with their own legend
+   * entries — e.g. element-pair partial PDFs. Drawn under the calc line,
+   * clipped to the fit window, coloured from a fixed muted palette.
+   */
+  readonly overlays?: readonly { readonly label: string; readonly y: readonly number[] }[];
 }
+
+/** Muted overlay palette — distinct from the obs/calc/diff/bkg series inks. */
+const OVERLAY_COLORS = ["#b0812f", "#7a5ea8", "#2f8f8a", "#c05575", "#5d7f34", "#8a6652"];
 
 // Fixed plot geometry (SVG user units); the SVG stretches to its container.
 // Vertical stack (top→bottom): intensity plot, x-axis ticks/labels, a Bragg
@@ -96,10 +114,14 @@ function niceNum(x: number, round: boolean): number {
   return nf * 10 ** exp;
 }
 
-function formatY(v: number): string {
+function formatY(v: number, step = 1): string {
   if (v === 0) return "0";
   if (Math.abs(v) >= 1000) return `${+(v / 1000).toFixed(1)}k`;
-  return String(Math.round(v));
+  if (step >= 1) return String(Math.round(v));
+  // Sub-unit tick spacing (signed G(r) scales are O(1)): show enough decimals
+  // to distinguish adjacent ticks.
+  const decimals = Math.min(3, Math.max(1, -Math.floor(Math.log10(step))));
+  return v.toFixed(decimals);
 }
 
 function formatX(v: number, span: number): string {
@@ -138,6 +160,9 @@ export function WorkbenchPlot({
   highlight: highlightSel = null,
   onHighlight,
   onPlotClick,
+  signedY = false,
+  yLabel = "Intensity (a.u.)",
+  overlays,
 }: Props): JSX.Element {
   const svgRef = useRef<SVGSVGElement>(null);
   const draggingGrip = useRef(false);
@@ -209,13 +234,26 @@ export function WorkbenchPlot({
   // y auto-scale to the *observed* data in view only. Basing it on the calc too
   // would make the axis (and every marker) rescale on every refinement cycle;
   // observed peaks dominate the height anyway, so this keeps the frame stable.
+  // Signed mode (G(r)): the floor follows the data's minimum instead of 0.
   const yObs = curves.yObs;
-  let yTop = 1;
+  let yTop = signedY ? -Infinity : 1;
+  let yLo = 0;
   for (let i = 0; i < xs.length; i++) {
-    if (xs[i]! >= vlo && xs[i]! <= vhi) yTop = Math.max(yTop, yObs[i]!);
+    if (xs[i]! >= vlo && xs[i]! <= vhi) {
+      yTop = Math.max(yTop, yObs[i]!);
+      if (signedY) yLo = Math.min(yLo, yObs[i]!);
+    }
   }
-  yTop *= 1.06;
-  const sy = (y: number): number => BASE - (Math.min(Math.max(y, 0), yTop) / yTop) * MAINH;
+  if (!Number.isFinite(yTop)) yTop = 1;
+  if (signedY) {
+    const pad = 0.06 * (yTop - yLo || 1);
+    yTop += pad;
+    yLo -= pad;
+  } else {
+    yTop *= 1.06;
+  }
+  const ySpan = yTop - yLo || 1;
+  const sy = (y: number): number => BASE - ((Math.min(Math.max(y, yLo), yTop) - yLo) / ySpan) * MAINH;
 
   // Difference band scaled to its own max in view (with headroom) so a poor fit
   // fills the band instead of clipping flat against its edge; a floor keeps a
@@ -248,7 +286,7 @@ export function WorkbenchPlot({
   // every cycle, keeping the live update cheap and flicker-free.
   const obsMarkers = useMemo(() => {
     const mx = (x: number): number => X0 + ((x - vlo) / vspan) * XW;
-    const my = (y: number): number => BASE - (Math.min(Math.max(y, 0), yTop) / yTop) * MAINH;
+    const my = (y: number): number => BASE - ((Math.min(Math.max(y, yLo), yTop) - yLo) / (yTop - yLo || 1)) * MAINH;
     const out: JSX.Element[] = [];
     for (let i = 0; i < xs.length; i += 2) {
       const x = xs[i]!;
@@ -256,7 +294,7 @@ export function WorkbenchPlot({
       out.push(<circle key={i} cx={mx(x)} cy={my(yObs[i]!)} r={1.3} fill={color.obs} opacity={0.5} />);
     }
     return out;
-  }, [xs, yObs, vlo, vhi, vspan, yTop, XW]);
+  }, [xs, yObs, vlo, vhi, vspan, yTop, yLo, XW]);
 
   // The single selected reflection (from a scatter-point OR a Bragg-tick click):
   // locate its Bragg tick so we can spotlight that peak. Prefer the row whose
@@ -348,10 +386,10 @@ export function WorkbenchPlot({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on the command token only
   }, [focusPeakToken]);
 
-  // Y / X nice ticks.
-  const yStep = niceNum(yTop / 4, true);
+  // Y / X nice ticks. The signed scale starts at the first step at/above yLo.
+  const yStep = niceNum((yTop - yLo) / 4, true);
   const yTicks: number[] = [];
-  for (let v = 0; v <= yTop + 1e-6; v += yStep) yTicks.push(v);
+  for (let v = Math.ceil(yLo / yStep) * yStep; v <= yTop + 1e-6 * yStep; v += yStep) yTicks.push(v);
   const xStep = niceNum(vspan / 6, true);
   const xTicks: number[] = [];
   for (let v = Math.ceil(vlo / xStep) * xStep; v <= vhi + 1e-6; v += xStep) xTicks.push(v);
@@ -446,12 +484,16 @@ export function WorkbenchPlot({
           <g key={v}>
             <line x1={X0 - 4} y1={sy(v)} x2={X0} y2={sy(v)} stroke="#c9c0b0" />
             <text x={X0 - 7} y={sy(v) + 3} textAnchor="end" fontSize={9.5} fontFamily={mono} fill={color.faint}>
-              {formatY(v)}
+              {formatY(v, yStep)}
             </text>
           </g>
         ))}
+        {/* zero line for a signed ordinate (G(r) oscillates about 0) */}
+        {signedY && yLo < 0 && (
+          <line x1={X0} y1={sy(0)} x2={X1} y2={sy(0)} stroke="#c9c0b0" strokeDasharray="4 4" opacity={0.6} />
+        )}
         <text x={16} y={(TOP + BASE) / 2} fontSize={10} fontFamily={mono} fill={color.faint} textAnchor="middle" transform={`rotate(-90 16 ${(TOP + BASE) / 2})`}>
-          Intensity (a.u.)
+          {yLabel}
         </text>
 
         {/* x ticks */}
@@ -469,6 +511,17 @@ export function WorkbenchPlot({
 
         {/* observed markers (memoized — see obsMarkers) */}
         {obsMarkers}
+        {/* decomposition overlays (e.g. partial PDFs), under the calc line */}
+        {overlays?.map((o, i) => (
+          <polyline
+            key={o.label}
+            points={poly(o.y, sy, fitLo, fitHi)}
+            fill="none"
+            stroke={OVERLAY_COLORS[i % OVERLAY_COLORS.length]}
+            strokeWidth={1}
+            opacity={0.85}
+          />
+        ))}
         {/* background, calc */}
         {showBackground && curves.yBackground && <polyline points={bkgLine} fill="none" stroke={color.bkg} strokeWidth={1.2} strokeDasharray="5 3" opacity={0.9} />}
         <polyline points={calcLine} fill="none" stroke={color.calc} strokeWidth={1.4} />
@@ -604,28 +657,40 @@ export function WorkbenchPlot({
           <line x1={X0 + 134} y1={24} x2={X0 + 150} y2={24} stroke={color.bkg} strokeWidth={1.6} strokeDasharray="5 3" />
           <text x={X0 + 154} y={27}>bkg</text>
           {(() => {
+            // No Bragg rows on a signed-y (PDF) plot — the generic "hkl" key
+            // only applies where reflection ticks can render.
             const phaseEntries = phases && phases.length > 0
               ? phases.map((p) => ({ color: p.color, label: p.label, shape: "line" as const }))
-              : [{ color: color.hkl, label: "hkl", shape: "line" as const }];
+              : signedY
+                ? []
+                : [{ color: color.hkl, label: "hkl", shape: "line" as const }];
             // The ▽ "found" key leads the dynamic entries when found peaks exist.
             const entries = [
               ...(foundPeaks && foundPeaks.length > 0
                 ? [{ color: color.obs, label: "found", shape: "triangle" as const }]
                 : []),
-              ...phaseEntries,
+              ...(overlays ?? []).map((o, i) => ({
+                color: OVERLAY_COLORS[i % OVERLAY_COLORS.length]!,
+                label: o.label,
+                shape: "dash" as const,
+              })),
+              ...(overlays && overlays.length > 0 ? [] : phaseEntries),
             ];
             let x = X0 + 182;
             return entries.map((e, i) => {
               const gx = x;
-              x += 10 + e.label.length * 6.6 + 16;
+              const swatchW = e.shape === "dash" ? 16 : 0;
+              x += 10 + swatchW + e.label.length * 6.6 + 16;
               return (
                 <g key={i}>
                   {e.shape === "triangle" ? (
                     <path d={`M ${gx - 4} 20 L ${gx + 4} 20 L ${gx} 28 Z`} fill={e.color} />
+                  ) : e.shape === "dash" ? (
+                    <line x1={gx} y1={24} x2={gx + 14} y2={24} stroke={e.color} strokeWidth={1.6} />
                   ) : (
                     <line x1={gx} y1={19} x2={gx} y2={29} stroke={e.color} strokeWidth={2} />
                   )}
-                  <text x={gx + 7} y={27}>{e.label}</text>
+                  <text x={gx + (e.shape === "dash" ? 18 : 7)} y={27}>{e.label}</text>
                 </g>
               );
             });

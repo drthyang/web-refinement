@@ -133,28 +133,36 @@ function pearson(a: number[], b: number[]): number {
 }
 
 describe.skipIf(!dataExists(GOLD))("golden: PDFgui G_calc for Fe0.1Co0.9Sn 1.7K (Q30, neutron)", () => {
-  const lines = readData(GOLD).split(/\r?\n/).filter((l) => l.trim() && !l.startsWith("#"));
-  const goldR: number[] = [];
-  const goldG: number[] = [];
-  for (const l of lines) {
-    const [r, g] = l.trim().split(/\s+/).map(Number);
-    if (Number.isFinite(r) && Number.isFinite(g)) { goldR.push(r!); goldG.push(g!); }
-  }
-
-  const model = feCoSnRefined();
-  const atoms = expandStructureAtoms(model);
-  const rGrid = Float64Array.from(goldR);
-  const params: PdfModelParams = {
-    scatteringType: "neutron",
-    scale: 17.6843,
-    qdamp: 0.0155299,
-    qbroad: 0.0120727,
-    delta1: 0.408599,
-    delta2: 0.417248,
+  // Loaded lazily (memoized): a skipped suite still runs this callback at
+  // collection time, so top-level readData/computeGofR would fail (and cost)
+  // on machines/CI without the git-ignored data/ folder.
+  let memo: { goldR: number[]; goldG: number[]; mine: number[] } | null = null;
+  const golden = (): { goldR: number[]; goldG: number[]; mine: number[] } => {
+    if (memo) return memo;
+    const lines = readData(GOLD).split(/\r?\n/).filter((l) => l.trim() && !l.startsWith("#"));
+    const goldR: number[] = [];
+    const goldG: number[] = [];
+    for (const l of lines) {
+      const [r, g] = l.trim().split(/\s+/).map(Number);
+      if (Number.isFinite(r) && Number.isFinite(g)) { goldR.push(r!); goldG.push(g!); }
+    }
+    const model = feCoSnRefined();
+    const atoms = expandStructureAtoms(model);
+    const rGrid = Float64Array.from(goldR);
+    const params: PdfModelParams = {
+      scatteringType: "neutron",
+      scale: 17.6843,
+      qdamp: 0.0155299,
+      qbroad: 0.0120727,
+      delta1: 0.408599,
+      delta2: 0.417248,
+    };
+    memo = { goldR, goldG, mine: Array.from(computeGofR(model.cell, atoms, rGrid, params)) };
+    return memo;
   };
-  const mine = Array.from(computeGofR(model.cell, atoms, rGrid, params));
 
   it("reproduces the PDFgui peak SHAPE (high correlation over the fit range)", () => {
+    const { goldR, goldG, mine } = golden();
     // Termination (P3) not yet applied, so compare peak structure via correlation.
     const rc = pearson(mine, goldG);
     // Over r ≥ 3 Å (clear of the low-r termination-ripple region) the agreement is tighter.
@@ -180,6 +188,7 @@ describe.skipIf(!dataExists(GOLD))("golden: PDFgui G_calc for Fe0.1Co0.9Sn 1.7K 
   });
 
   it("places the first strong peak at the same r as PDFgui (±0.03 Å)", () => {
+    const { goldR, goldG, mine } = golden();
     const argmaxIn = (arr: number[], lo: number, hi: number) => {
       let best = -Infinity, bestR = 0;
       for (let i = 0; i < arr.length; i++) {

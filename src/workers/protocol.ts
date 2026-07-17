@@ -5,7 +5,7 @@
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { MagneticModel } from "@/core/magnetic/types";
-import type { PowderPattern, SingleCrystalDataset } from "@/core/diffraction/types";
+import type { PdfPattern, PowderPattern, SingleCrystalDataset } from "@/core/diffraction/types";
 import type {
   ParameterBinding,
   LinearRestraint,
@@ -51,6 +51,26 @@ export interface RefinePowderRequest {
    * gpuPowderEvaluator); falls back to the CPU pool if WebGPU is unavailable.
    */
   readonly useGpu?: boolean;
+}
+
+/** Real-space PDF refinement: fit the structure to an observed reduced G(r)
+ *  (uniform weights, Rw over G — see core/workflow/pdf.ts). Flat co-refinement
+ *  of the free parameters, or the staged sequence when `staged` is present. */
+export interface RefinePdfRequest {
+  readonly type: "refinePdf";
+  readonly requestId: number;
+  readonly structure: StructureModel;
+  /** Additional crystallographic phases: when present the G(r) is refined as a
+   *  multi-phase sum (per-phase scale/cell/atoms/δ, shared Qdamp/Qbroad). */
+  readonly extraPhases?: readonly StructureModel[];
+  readonly pattern: PdfPattern;
+  readonly parameters: RefinementParameter[];
+  readonly bindings: ParameterBinding[];
+  readonly restraints?: readonly LinearRestraint[];
+  readonly staged?: readonly StageKinds[];
+  /** Restrict the fit to an inclusive r-window (Å); omit for the full grid. */
+  readonly fitRange?: { readonly min?: number; readonly max?: number };
+  readonly options?: Partial<RefinementOptions>;
 }
 
 /** Le Bail cell pre-fit (escape local minima): refine the cell against peak
@@ -171,6 +191,7 @@ export interface EvaluateRequest {
 
 export type ComputeRequest =
   | RefinePowderRequest
+  | RefinePdfRequest
   | RefineSingleCrystalRequest
   | RefineMagneticRequest
   | LeBailPrefitRequest

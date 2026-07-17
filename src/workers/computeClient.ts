@@ -18,6 +18,7 @@ import type {
   EvaluatorSpec,
   LeBailPrefitRequest,
   RefineMagneticRequest,
+  RefinePdfRequest,
   RefinePowderRequest,
   RefineSingleCrystalRequest,
   WorkerMessage,
@@ -27,7 +28,7 @@ import type { RefinementResult, RefinementOptions, AgreementFactors, RefinementP
 import { refine, refineParallel, type BatchEvaluator } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem, applyMagneticMoments } from "@/core/workflow/magnetic";
-import { runPowderRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
+import { runPowderRefinement, runPdfRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
 import { refineStagedAsync } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
 import { refineMultiStart, type MultiStartOptions, type MultiStartResult } from "@/core/refinement/multiStart";
@@ -267,6 +268,11 @@ export class ComputeClient {
 
   refinePowder(req: Omit<RefinePowderRequest, "requestId" | "type">, onProgress?: PowderProgress): Promise<RefinementResult> {
     return this.run({ ...req, type: "refinePowder", requestId: this.nextId++ }, onProgress);
+  }
+
+  /** Real-space PDF refinement off the main thread (inline in node/tests). */
+  refinePdf(req: Omit<RefinePdfRequest, "requestId" | "type">, onProgress?: PowderProgress): Promise<RefinementResult> {
+    return this.run({ ...req, type: "refinePdf", requestId: this.nextId++ }, onProgress);
   }
 
   /**
@@ -689,6 +695,9 @@ export const CANCELLED = "__refinement_cancelled__";
 function runInline(req: ComputeRequest, onProgress?: PowderProgress): RefinementResult {
   if (req.type === "refinePowder") {
     return runPowderRefinement(req, onProgress);
+  }
+  if (req.type === "refinePdf") {
+    return runPdfRefinement(req, onProgress);
   }
   if (req.type === "refineMagnetic") {
     const problem = buildMagneticSingleCrystalProblem(

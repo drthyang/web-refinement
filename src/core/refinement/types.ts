@@ -52,7 +52,25 @@ export type ParameterKind =
   | "momentX"
   | "momentY"
   | "momentZ"
-  | "momentMode";
+  | "momentMode"
+  // Pair-distribution-function (real-space) parameters — PDF_MPDF_ROADMAP §2.
+  // `pdfScale` multiplies the whole G(r) (linear, like `scale`); Qdamp/Qbroad are
+  // the instrument-resolution envelope/broadening (Å⁻¹, calibrated from a
+  // standard and normally fixed); δ1/δ2 are the 1/r and 1/r² correlated-motion
+  // peak-sharpening coefficients (mutually exclusive models in principle —
+  // usually only one is freed).
+  | "pdfScale"
+  | "qdamp"
+  | "qbroad"
+  | "delta1"
+  | "delta2"
+  // Spherical-particle diameter (Å) for the nanoparticle PDF envelope; 0 = bulk.
+  | "spdiameter"
+  // Alternative correlated-motion model (PDFgui sratio/rcut): peak widths are
+  // multiplied by `sratio` (≤1) below the cutoff `rcut` (Å). Mutually exclusive
+  // with δ1/δ2 in principle — refine one family, never both.
+  | "sratio"
+  | "rcut";
 
 /**
  * True for parameter kinds that drive magnetic moments — the symmetry-mode

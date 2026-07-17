@@ -89,8 +89,11 @@ const GANB = "PDF/GaNb4Se8_28ID/GaNb4Se8_796_T_base_299.5K_T_FC0.0K_Sample_X_5.7
 const POWGEN = "PDF/Fe1Co9Sn_PG3/PG3_48288_PDF_1p7K_Q30.gr";
 
 describe.skipIf(!dataExists(GANB))("real NSLS-II 28-ID synchrotron X-ray PDF (GaNb4Se8)", () => {
-  const p = parsePdfData(readData(GANB), { filename: "GaNb4Se8_28ID.gr" });
+  // Read lazily inside the test: a skipped suite still executes this callback
+  // at collection time, so a top-level readData would fail on machines/CI
+  // without the git-ignored data/ folder (and break the deploy's test gate).
   it("parses composition, Q-range and a full G(r) with negative lobes", () => {
+    const p = parsePdfData(readData(GANB), { filename: "GaNb4Se8_28ID.gr" });
     expect(p.scatteringType).toBe("xray");
     expect(p.composition).toBe("Ga Nb4 Se8");
     expect(p.qmax).toBe(28);
@@ -104,8 +107,8 @@ describe.skipIf(!dataExists(GANB))("real NSLS-II 28-ID synchrotron X-ray PDF (Ga
 });
 
 describe.skipIf(!dataExists(POWGEN))("real POWGEN neutron PDF (Fe0.1Co0.9Sn, Q30)", () => {
-  const p = parsePdfData(readData(POWGEN), { filename: "PG3_48288_PDF_1p7K_Q30.gr" });
   it("detects neutron, reads Qmax≈29.99 and carries per-point sigma", () => {
+    const p = parsePdfData(readData(POWGEN), { filename: "PG3_48288_PDF_1p7K_Q30.gr" });
     expect(p.scatteringType).toBe("neutron");
     expect(p.qmax).toBeCloseTo(29.9866, 3);
     expect(p.points.length).toBeGreaterThan(1000);

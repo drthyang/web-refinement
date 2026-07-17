@@ -93,6 +93,25 @@ export interface AppliedModel {
   readonly mustrainIso?: number;
   /** Moment-magnitude scale applied to magnetic moments. */
   readonly momentScale: number;
+  /**
+   * Pair-distribution-function parameters (real-space G(r) fit): the overall
+   * PDF scale, the Qdamp/Qbroad instrument-resolution envelope (Å⁻¹), and the
+   * δ1/δ2 correlated-motion sharpening (Å, Å²). Present only when a PDF kind is
+   * bound (a PDF refinement problem); the reciprocal-space workflows never see it.
+   */
+  readonly pdf?: {
+    readonly scale: number;
+    readonly qdamp: number;
+    readonly qbroad: number;
+    readonly delta1: number;
+    readonly delta2: number;
+    /** Spherical-particle diameter (Å); 0 disables the envelope (bulk). */
+    readonly spdiameter: number;
+    /** Near-neighbour width ratio (≤1) applied below rcut; 1 disables. */
+    readonly sratio: number;
+    /** Cutoff (Å) for the sratio sharpening; 0 disables. */
+    readonly rcut: number;
+  };
 }
 
 type MutableCell = { -readonly [K in keyof UnitCell]: UnitCell[K] };
@@ -139,6 +158,7 @@ export function applyParameters(
   const background: number[] = [];
   const tofCal = new Map<string, number>();
   const tofProf = new Map<string, number>();
+  const pdfVals = new Map<string, number>();
 
   for (const binding of bindings) {
     const v = values[binding.parameterId];
@@ -276,6 +296,16 @@ export function applyParameters(
       case "mustrainIso":
         mustrainIsoMu = v;
         break;
+      case "pdfScale":
+      case "qdamp":
+      case "qbroad":
+      case "delta1":
+      case "delta2":
+      case "spdiameter":
+      case "sratio":
+      case "rcut":
+        pdfVals.set(binding.kind, v);
+        break;
     }
   }
 
@@ -318,6 +348,18 @@ export function applyParameters(
     mustrainPerp !== undefined || mustrainPar !== undefined
       ? { yPerp: mustrainPerp ?? 0, yPar: mustrainPar ?? mustrainPerp ?? 0, axis: mustrainAxis ?? ([0, 0, 1] as [number, number, number]) }
       : undefined;
+  const pdf = pdfVals.size
+    ? {
+        scale: pdfVals.get("pdfScale") ?? 1,
+        qdamp: pdfVals.get("qdamp") ?? 0,
+        qbroad: pdfVals.get("qbroad") ?? 0,
+        delta1: pdfVals.get("delta1") ?? 0,
+        delta2: pdfVals.get("delta2") ?? 0,
+        spdiameter: pdfVals.get("spdiameter") ?? 0,
+        sratio: pdfVals.get("sratio") ?? 1,
+        rcut: pdfVals.get("rcut") ?? 0,
+      }
+    : undefined;
 
   return {
     model: appliedModel,
@@ -337,6 +379,7 @@ export function applyParameters(
     ...(axial ? { axial } : {}),
     ...(tof ? { tof } : {}),
     ...(tofProfile ? { tofProfile } : {}),
+    ...(pdf ? { pdf } : {}),
     ...(po ? { po } : {}),
     background: background.length ? background.map((c) => c ?? 0) : [],
   };
