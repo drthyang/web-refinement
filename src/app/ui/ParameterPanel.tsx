@@ -82,6 +82,13 @@ interface Props {
    * nudge out of a stalled minimum). Same engine, different tuning.
    */
   readonly thoroughMode?: "prefit" | "escape";
+  /**
+   * Override for the cold-start ("prefit") tooltip. The default text describes
+   * the powder engine's Le Bail cell pre-fit stage; an engine whose multi-start
+   * has no such stage (PDF — Le Bail extracts Bragg intensities, which a
+   * real-space G(r) doesn't have) must supply its own accurate description.
+   */
+  readonly prefitTitle?: string;
   /** Abort a running refinement; a Cancel button appears while `busy`. */
   readonly onCancel?: () => void;
   readonly onReset: () => void;
@@ -102,7 +109,7 @@ interface Props {
   readonly groupControls?: Partial<Record<string, ReactNode>> | undefined;
 }
 
-export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, thoroughMode = "prefit", onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls }: Props): JSX.Element {
+export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, thoroughMode = "prefit", prefitTitle, onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls }: Props): JSX.Element {
   const groups = useMemo(() => {
     const byGroup = new Map<string, RefinementParameter[]>();
     for (const p of params) {
@@ -143,7 +150,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
             onClick={onThorough}
             title={thoroughMode === "escape"
               ? "Escape a local minimum: a few perturbed restarts around the current fit, keeping the best — use when a plain Refine has stalled"
-              : "Prefit from a cold start: a Le Bail cell pre-fit then a broad set of perturbed restarts, keeping the best — lands the structure in a good basin before you refine"}
+              : prefitTitle ?? "Prefit from a cold start: a Le Bail cell pre-fit then a broad set of perturbed restarts, keeping the best — lands the structure in a good basin before you refine"}
           >
             {thoroughMode === "escape" ? "Escape min ↻" : "Prefit ↻"}
           </button>
