@@ -70,7 +70,16 @@ export type ParameterKind =
   // multiplied by `sratio` (≤1) below the cutoff `rcut` (Å). Mutually exclusive
   // with δ1/δ2 in principle — refine one family, never both.
   | "sratio"
-  | "rcut";
+  | "rcut"
+  // Magnetic PDF (mPDF, roadmap P4). `mpdfOrdScale` scales the ordered
+  // (spin-pair) component and `mpdfParaScale` the paramagnetic self-scattering
+  // hump of the unnormalized d_mag(r) — both linear. `mpdfPsigma` is the
+  // Gaussian broadening (Å) of the magnetic pair peaks (thermal motion), and
+  // `corrLength` an exponential short-range-order damping length ξ (Å, 0 = ∞).
+  | "mpdfOrdScale"
+  | "mpdfParaScale"
+  | "mpdfPsigma"
+  | "corrLength";
 
 /**
  * True for parameter kinds that drive magnetic moments — the symmetry-mode

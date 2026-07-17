@@ -112,6 +112,20 @@ export interface AppliedModel {
     /** Cutoff (Å) for the sratio sharpening; 0 disables. */
     readonly rcut: number;
   };
+  /**
+   * Magnetic-PDF (mPDF) parameters (roadmap P4). Present only when an mPDF kind
+   * is bound (a magnetic PDF problem); every other workflow ignores it.
+   */
+  readonly mpdf?: {
+    /** Scale of the ordered (spin-pair) d_mag(r) component. */
+    readonly ordScale: number;
+    /** Scale of the paramagnetic self-scattering component. */
+    readonly paraScale: number;
+    /** Gaussian broadening σ (Å) of the magnetic pair peaks. */
+    readonly psigma: number;
+    /** Exponential short-range-order damping length ξ (Å); 0 = infinite. */
+    readonly corrLength: number;
+  };
 }
 
 type MutableCell = { -readonly [K in keyof UnitCell]: UnitCell[K] };
@@ -159,6 +173,7 @@ export function applyParameters(
   const tofCal = new Map<string, number>();
   const tofProf = new Map<string, number>();
   const pdfVals = new Map<string, number>();
+  const mpdfVals = new Map<string, number>();
 
   for (const binding of bindings) {
     const v = values[binding.parameterId];
@@ -306,6 +321,12 @@ export function applyParameters(
       case "rcut":
         pdfVals.set(binding.kind, v);
         break;
+      case "mpdfOrdScale":
+      case "mpdfParaScale":
+      case "mpdfPsigma":
+      case "corrLength":
+        mpdfVals.set(binding.kind, v);
+        break;
     }
   }
 
@@ -360,6 +381,14 @@ export function applyParameters(
         rcut: pdfVals.get("rcut") ?? 0,
       }
     : undefined;
+  const mpdf = mpdfVals.size
+    ? {
+        ordScale: mpdfVals.get("mpdfOrdScale") ?? 1,
+        paraScale: mpdfVals.get("mpdfParaScale") ?? 1,
+        psigma: mpdfVals.get("mpdfPsigma") ?? 0.1,
+        corrLength: mpdfVals.get("corrLength") ?? 0,
+      }
+    : undefined;
 
   return {
     model: appliedModel,
@@ -380,6 +409,7 @@ export function applyParameters(
     ...(tof ? { tof } : {}),
     ...(tofProfile ? { tofProfile } : {}),
     ...(pdf ? { pdf } : {}),
+    ...(mpdf ? { mpdf } : {}),
     ...(po ? { po } : {}),
     background: background.length ? background.map((c) => c ?? 0) : [],
   };

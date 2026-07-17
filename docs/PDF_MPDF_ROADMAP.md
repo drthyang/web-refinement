@@ -384,7 +384,23 @@ app + a validation gate**, no broken intermediate state.
   fit; termination ripples match a low-Qmax reference (the PDFgetN Ni r≈3 Å
   spurious-peak case).
 
-### P4 — Magnetic PDF (mPDF) ⬜  *(large)*
+### P4 — Magnetic PDF (mPDF) ✅ *(core)*  🚧 *(UI/agent surface)*
+
+> **Status (2026-07-17):** the core is done and externally gated. Shipped:
+> `magnetic/mpdf.ts` (Frandsen A/B spin-pair kernel with the exact reference
+> histogram/broadening/normalization, ⟨j0⟩ cosine-transform envelope + self-
+> convolution, paramagnetic S′ term, net-moment line, SRO ξ envelope),
+> `expandSpinField` in `crystal/cellExpansion.ts` (the unified k = 0 / k ≠ 0
+> magnetic box), `workflow/mpdf.ts` (`buildMpdfSpec`/`buildMpdfProblem` — one
+> separable residual over the nuclear machinery with geometry/moment-keyed spin
+> caches, `mpdfComponents`, `MPDF_STAGE_KINDS`), and the four new kinds
+> (`mpdfOrdScale`/`mpdfParaScale` linear, `mpdfPsigma`, `corrLength`).
+> **Gate closed:** committed diffpy.mpdf fixtures (`magnetic/mpdfGolden.ts`) pin
+> f(r) for an AFM and a net-moment FM box to ≤1e-6·peak and D(r) to
+> corr > 0.9999 / κ within 0.5 % on CI, plus a synthetic co-refinement
+> round trip recovering a perturbed moment to 3 decimals. Remaining for the
+> milestone: the mPDF page/UI (the header's reserved "Magnetic PDF →" slot),
+> worker `EvaluatorSpec` arm, and MCP tools (fold into P6).
 - **Goal:** co-refine the magnetic PDF with the nuclear PDF (ordered structure).
 - **Deliverables:** box spin-field expander (unifies commensurate k=0 and k≠0 via
   `displayMoment`, handling `expandMagneticSupercell`'s null-at-k=0);
