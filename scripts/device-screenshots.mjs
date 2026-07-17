@@ -26,9 +26,10 @@ async function preparePage(context) {
   const page = await context.newPage();
   await page.goto(BASE, { waitUntil: "networkidle" });
   await page.waitForSelector("header");
-  // The workbench opens clean; load the bundled demo (it opens on the converged
-  // two-phase Mn₃Ga + MnO fit).
-  await page.getByRole("button", { name: "Demo", exact: true }).click();
+  // The workbench opens clean; load the bundled Rietveld demo from the Demos
+  // menu (it opens on the converged two-phase Mn₃Ga + MnO fit).
+  await page.getByRole("button", { name: "Demos ▾", exact: true }).click();
+  await page.getByRole("button", { name: "Rietveld · Mn₃Ga neutron TOF", exact: true }).click();
   const refine = page.getByRole("button", { name: "Refine", exact: true });
   await refine.waitFor({ timeout: 15000 });
   // Run the refinement so the parameter table shows final values with esds
