@@ -220,6 +220,10 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
       keys: ["bindings", "modes", "originShift", "parameters", "structure", "totalAmplitude", "unpaired"],
     };
   })(),
+  build_symmetry_modes: {
+    args: { structure },
+    keys: ["acousticExcluded", "bindings", "modes", "parameters", "structure"],
+  },
 };
 
 

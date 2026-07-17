@@ -378,4 +378,13 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     },
     handler: tools.build_distortion_modes,
   },
+  {
+    name: "build_symmetry_modes",
+    title: "Enumerate symmetry modes from the space group",
+    description: "Enumerate the symmetry-adapted displacement modes of a structure FROM ITS OWN SPACE GROUP — no parent/child CIF pair. Every asymmetric site contributes its symmetry-allowed shift directions, orthonormalized as whole-cell Å amplitudes seeded at 0 (activating modes never changes the curve; they enter fixed and are freed deliberately). Rigid-translation (acoustic) combinations — exactly unobservable in G(r) or |F|² — are projected out (`acousticExcluded`), so freeing every mode is always a well-posed fit. These are the symmetry-CONSERVING (Γ) modes: the same DOF as per-coordinate positions in a physically informative basis. Use `structure`/`parameters`/`bindings` with refine_pdf or refine_powder.",
+    inputSchema: {
+      structure: anyObj.describe("StructureModel whose own space group defines the modes"),
+    },
+    handler: tools.build_symmetry_modes,
+  },
 ];

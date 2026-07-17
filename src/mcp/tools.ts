@@ -55,7 +55,7 @@ import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { rankNextParameterGroups } from "@/core/workflow/nextParameters";
 import { buildPowderProblem } from "@/core/workflow/powder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
-import { buildDistortionModes } from "@/core/crystal/distortionModes";
+import { buildDistortionModes, buildSymmetryModes } from "@/core/crystal/distortionModes";
 import { refine, refineParallel } from "@/core/refinement/engine";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import { parseFullProfInt, looksLikeFullProfInt, writeFullProfInt } from "@/parsers/fullprofInt";
@@ -1047,5 +1047,37 @@ export function build_distortion_modes(args: {
     totalAmplitude: set.totalAmplitude,
     originShift: [...set.originShift] as [number, number, number],
     unpaired: [...set.unpaired],
+  };
+}
+
+/**
+ * Enumerate the symmetry-adapted displacement modes of a structure FROM ITS
+ * OWN SPACE GROUP — no parent/child pair. All amplitudes seed at 0 (activating
+ * a mode never changes the curve); modes enter `fixed` and are freed
+ * deliberately. Rigid-translation (acoustic) combinations — unobservable in
+ * any scattering fit — are projected out (`acousticExcluded` counts them).
+ * These are the symmetry-CONSERVING (Γ, identity-irrep) modes: the same DOF
+ * as per-coordinate positions, re-expressed as orthonormal whole-cell Å
+ * amplitudes. Symmetry-breaking (subgroup-tree) modes are a separate,
+ * irrep-projected capability.
+ */
+export function build_symmetry_modes(args: { structure: StructureModel }): {
+  structure: StructureModel;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  modes: { id: string; label: string; star?: string }[];
+  acousticExcluded: number;
+} {
+  const set = buildSymmetryModes(args.structure);
+  return {
+    structure: set.parentized,
+    parameters: set.parameters,
+    bindings: set.bindings,
+    modes: set.modes.map((m) => ({
+      id: m.id,
+      label: m.label,
+      ...(m.star !== undefined ? { star: m.star } : {}),
+    })),
+    acousticExcluded: set.acousticExcluded ?? 0,
   };
 }

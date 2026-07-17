@@ -52,6 +52,16 @@ where `J_ij = ∂r_i/∂p_j`, `r_i = sqrt(w_i) * (y_obs,i - y_calc,i)`.
   Moore-Penrose pseudo-inverse. Singular values below `svdTolerance *
   max(singularValue)` are dropped, preventing nearly-null parameter combinations
   from producing huge shifts.
+- **Dead-column guard:** a parameter with *no leverage* at the current point
+  (an exactly stationary pseudo-symmetric direction — e.g. a coordinate whose
+  pair distances are quadratic at a special value) has a finite-difference
+  Jacobian column that is pure cancellation noise (~`eps·|√w·y|/2h`). Such a
+  column must not be normalized up to a unit diagonal — the amplified noise
+  step would be rejected at every λ and stall the whole fit. Columns at the
+  noise floor get the largest scale instead, so the SVD drops them cleanly and
+  they are reported in `singularParameterIds`. Exact (linear/analytic) columns
+  are exempt: a legitimately tiny exact column is what the preconditioner
+  exists to fix.
 - **Bounds:** enforced by clamping/reparameterization; parameters with `min`/`max`
   stay inside `[min, max]`.
 - **Fixed parameters** are removed from `p` entirely (not just zero-weighted), so

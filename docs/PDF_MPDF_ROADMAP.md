@@ -436,7 +436,9 @@ app + a validation gate**, no broken intermediate state.
 ### P6 — Agent tools, UI polish, uncertainty quantification 🚧  *(medium)*
 
 > **Status (2026-07-17):** the nuclear agent slice is live. Five PDF tools on
-> the contract-tested registry (31 tools total, incl. `build_distortion_modes`): `parse_pdf_data`,
+> the contract-tested registry (32 tools total, incl. `build_distortion_modes`
+> and `build_symmetry_modes` — modes from the structure's own space group, no
+> parent CIF): `parse_pdf_data`,
 > `build_pdf_model` (single + multi-phase, scale-seeded), `refine_pdf`
 > (flat/staged, fit range, node-pool parallel fast path, correlated-motion
 > conflict in `warnings`), `compute_partial_pdf` (element pairs / per-phase),
