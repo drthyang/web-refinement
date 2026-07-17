@@ -64,6 +64,14 @@ export interface DistortionMode {
   readonly observedAmplitude: number;
   /** Per-child-site fractional displacement at amplitude 1 Å. */
   readonly axes: readonly { readonly siteLabel: string; readonly axis: Vec3 }[];
+  /**
+   * Whether this mode enters the refinement FREE when spliced in by
+   * `withDistortionModes`. When absent, the legacy heuristic applies (free iff
+   * the label carries the "frozen" order-parameter tag) — so child-decomposed
+   * sets keep their behavior, while symmetry-enumerated sets (which have no
+   * observed distortion and hence no frozen mode) can state intent explicitly.
+   */
+  readonly active?: boolean;
 }
 
 export interface DistortionModeSet {
@@ -83,6 +91,12 @@ export interface DistortionModeSet {
   readonly totalAmplitude: number;
   /** Child sites that found no parent partner (left untouched, no modes). */
   readonly unpaired: readonly string[];
+  /**
+   * Number of rigid-translation (acoustic) combinations projected out of the
+   * catalog by `buildSymmetryModes` — unobservable in any scattering fit.
+   * Absent for child-decomposed sets.
+   */
+  readonly acousticExcluded?: number;
 }
 
 const PAIR_TOLERANCE = 1.2; // Å — max parent↔child site separation to pair
@@ -356,6 +370,325 @@ export function buildDistortionModes(parent: StructureModel, child: StructureMod
   return { parentized, originShift: shift, parameters, bindings, modes, totalAmplitude: observedNorm, unpaired };
 }
 
+/**
+ * Enumerate the symmetry-adapted displacement modes of a structure FROM ITS
+ * OWN SPACE GROUP — no second (parent/child) CIF. The loaded structure is
+ * treated as the high-symmetry reference: each asymmetric site contributes its
+ * symmetry-allowed shift directions (`allowedPositionShifts` — the null space
+ * of the site stabilizer), orthonormalized in the whole-cell Cartesian metric
+ * and normalized so amplitude 1 ⇒ 1 Å whole-cell displacement, exactly like
+ * `buildDistortionModes`. All amplitudes seed at 0, so activating modes never
+ * changes the calculated curve.
+ *
+ * Scope honesty: these are the symmetry-CONSERVING (identity-irrep) modes —
+ * the same DOF as the per-coordinate `positionShift` parameters, re-expressed
+ * as whole-cell Å amplitudes (span-equivalence is tested). Every mode is
+ * cell-preserving, so the star is Γ by construction. Symmetry-BREAKING modes
+ * (non-trivial irreps, isotropy subgroups) require the polar irrep engine —
+ * the subgroup-tree phase — and are NOT produced here.
+ *
+ * Modes are emitted `active: false`: with no observed distortion there is no
+ * order parameter to pre-free, so the user (or the subgroup tree) activates
+ * modes deliberately — `withDistortionModes` honors the flag.
+ *
+ * ACOUSTIC EXCLUSION: a uniform (rigid) translation of the whole structure is
+ * exactly unobservable in any scattering quantity — G(r) sees only interatomic
+ * vectors and |F|² is origin-invariant — so when a lattice-axis translation
+ * lies fully inside the symmetry-allowed space (every site free to follow), it
+ * is an exact null direction of the fit. Refining it stalls the engine with a
+ * ±1.00 correlation. Such combinations are projected OUT of the catalog here
+ * (`acousticExcluded` counts them); when a symmetry-pinned site anchors the
+ * origin, no translation is in-span and nothing is excluded. The per-coordinate
+ * parameterization cannot make this distinction — a genuine advantage of the
+ * mode basis. (The child-decomposition path `buildDistortionModes` is left
+ * as-is: its frozen order parameter is an observed, observable displacement.)
+ */
+export function buildSymmetryModes(structure: StructureModel): DistortionModeSet {
+  const M = orthogonalizationMatrix(structure.cell);
+  const ops = structure.spaceGroup.operations;
+
+  interface SymSite {
+    readonly site: AtomSite;
+    readonly basis: Vec3[];
+    readonly multiplicity: number;
+  }
+  const sites: SymSite[] = structure.sites
+    .map((site) => ({
+      site,
+      basis: allowedPositionShifts(ops, site.position).basis.map((b) => [...b] as Vec3),
+      multiplicity: siteMultiplicity(ops, site.position),
+    }))
+    .filter((s) => s.basis.length > 0);
+
+  // Whole-cell Cartesian metric over the retained sites (multiplicity-weighted,
+  // same convention as buildDistortionModes: rotations preserve the metric, so
+  // each orbit image contributes the norm of its representative).
+  interface GlobalVec {
+    readonly frac: Vec3[];
+  }
+  const cartNormSq = (v: GlobalVec): number =>
+    sites.reduce((s, p, j) => {
+      const c = mulVec(M, v.frac[j]!);
+      return s + p.multiplicity * (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+    }, 0);
+  const dot = (a: GlobalVec, b: GlobalVec): number =>
+    sites.reduce((s, p, j) => {
+      const ca = mulVec(M, a.frac[j]!);
+      const cb = mulVec(M, b.frac[j]!);
+      return s + p.multiplicity * (ca[0] * cb[0] + ca[1] * cb[1] + ca[2] * cb[2]);
+    }, 0);
+  const scaled = (v: GlobalVec, s: number): GlobalVec => ({ frac: v.frac.map((f) => [f[0] * s, f[1] * s, f[2] * s] as Vec3) });
+  const minus = (a: GlobalVec, b: GlobalVec, s: number): GlobalVec => ({
+    frac: a.frac.map((f, j) => [f[0] - s * b.frac[j]![0], f[1] - s * b.frac[j]![1], f[2] - s * b.frac[j]![2]] as Vec3),
+  });
+  const zero = (): GlobalVec => ({ frac: sites.map(() => [0, 0, 0] as Vec3) });
+
+  // Acoustic gauge modes: a rigid translation of the whole structure along ANY
+  // direction — not only a lattice axis — is an exact scattering null, and it
+  // lies inside the parameter space exactly when the direction is in EVERY
+  // site's allowed span (a symmetry-pinned site anchors the origin and kills
+  // it). The gauge subspace is therefore the INTERSECTION of the per-site
+  // spans, computed in Cartesian as the null space of Q = Σ_sites (I − P_s)
+  // (P_s = orthogonal projector onto site s's allowed span): Q·v = 0 ⇔ v is
+  // allowed at every site. Testing only the coordinate axes would miss oblique
+  // gauges — e.g. every site on a [111] 3-fold (rhombohedral GeTe): the common
+  // direction is [111], not x/y/z.
+  const gauge: GlobalVec[] = [];
+  {
+    // Per-site projector complements, over ALL sites (a pinned site contributes
+    // I − 0 = I, forcing an empty intersection — the origin is anchored).
+    const Q: number[][] = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (const s of structure.sites) {
+      const basis = allowedPositionShifts(ops, s.position).basis;
+      const bC = basis.map((b) => mulVec(M, b));
+      // P = B·(BᵀB)⁻¹·Bᵀ via the small Gram solve; complement added to Q.
+      const nb = bC.length;
+      const P: number[][] = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+      if (nb > 0) {
+        const G = bC.map((bi) => bC.map((bj) => bi[0] * bj[0] + bi[1] * bj[1] + bi[2] * bj[2]));
+        // Invert G (nb ≤ 3) by Gauss–Jordan with pivoting.
+        const A = G.map((row, i) => [...row, ...G.map((_, j) => (i === j ? 1 : 0))]);
+        let ok = true;
+        for (let col = 0; col < nb; col++) {
+          let piv = col;
+          for (let r = col + 1; r < nb; r++) if (Math.abs(A[r]![col]!) > Math.abs(A[piv]![col]!)) piv = r;
+          if (Math.abs(A[piv]![col]!) < 1e-12) { ok = false; break; }
+          [A[col], A[piv]] = [A[piv]!, A[col]!];
+          const d = A[col]![col]!;
+          for (let k = 0; k < 2 * nb; k++) A[col]![k] = A[col]![k]! / d;
+          for (let r = 0; r < nb; r++) {
+            if (r === col) continue;
+            const f = A[r]![col]!;
+            for (let k = 0; k < 2 * nb; k++) A[r]![k] = A[r]![k]! - f * A[col]![k]!;
+          }
+        }
+        if (ok) {
+          for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 3; j++) {
+              let v = 0;
+              for (let a = 0; a < nb; a++) {
+                for (let b = 0; b < nb; b++) v += bC[a]![i]! * A[a]![nb + b]! * bC[b]![j]!;
+              }
+              P[i]![j] = v;
+            }
+          }
+        }
+      }
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) Q[i]![j] = Q[i]![j]! + (i === j ? 1 : 0) - P[i]![j]!;
+      }
+    }
+    // Null space of the symmetric PSD 3×3 Q by row reduction (entries are sums
+    // of projectors, O(1) — an absolute pivot tolerance is safe).
+    const R = Q.map((r) => [...r]);
+    const pivotCols: number[] = [];
+    let rr = 0;
+    for (let c = 0; c < 3 && rr < 3; c++) {
+      let best = rr;
+      for (let i = rr + 1; i < 3; i++) if (Math.abs(R[i]![c]!) > Math.abs(R[best]![c]!)) best = i;
+      if (Math.abs(R[best]![c]!) < 1e-9) continue;
+      [R[rr], R[best]] = [R[best]!, R[rr]!];
+      const d = R[rr]![c]!;
+      for (let k = 0; k < 3; k++) R[rr]![k] = R[rr]![k]! / d;
+      for (let i = 0; i < 3; i++) {
+        if (i === rr) continue;
+        const f = R[i]![c]!;
+        for (let k = 0; k < 3; k++) R[i]![k] = R[i]![k]! - f * R[rr]![k]!;
+      }
+      pivotCols.push(c);
+      rr++;
+    }
+    const Minv = inverse(M);
+    for (let c = 0; c < 3; c++) {
+      if (pivotCols.includes(c)) continue;
+      // Free column c → null vector: v_c = 1, v_pivot = −R[row][c].
+      const vC: [number, number, number] = [0, 0, 0];
+      vC[c] = 1;
+      pivotCols.forEach((pc, row) => {
+        vC[pc] = -R[row]![c]!;
+      });
+      // Uniform fractional shift realizing the Cartesian translation vC.
+      const tFrac = mulVec(Minv, vC);
+      let t: GlobalVec = { frac: sites.map(() => [...tFrac] as Vec3) };
+      for (const u of gauge) t = minus(t, u, dot(t, u));
+      const n = Math.sqrt(cartNormSq(t));
+      if (n > 1e-8) gauge.push(scaled(t, 1 / n));
+    }
+  }
+
+  // Candidates: every allowed direction of every site, in deterministic
+  // (asymmetric-site order, basis order) sequence, orthogonalized against the
+  // acoustic gauge modes first (they are seeded but never emitted) and then
+  // against the already-accepted modes. Without gauge modes, candidates of
+  // different sites have disjoint support and Gram–Schmidt never mixes sites;
+  // with them, translation-orthogonal modes legitimately span several sites
+  // (relative-displacement patterns — exactly the observable content).
+  const ortho: GlobalVec[] = [];
+  sites.forEach((p, j) => {
+    for (const b of p.basis) {
+      let w = zero();
+      (w.frac[j] as [number, number, number])[0] = b[0];
+      (w.frac[j] as [number, number, number])[1] = b[1];
+      (w.frac[j] as [number, number, number])[2] = b[2];
+      for (const u of gauge) w = minus(w, u, dot(w, u));
+      for (const u of ortho) w = minus(w, u, dot(w, u));
+      const n = Math.sqrt(cartNormSq(w));
+      if (n > 1e-8) ortho.push(scaled(w, 1 / n));
+    }
+  });
+
+  const parameters: RefinementParameter[] = [];
+  const bindings: ParameterBinding[] = [];
+  const modes: DistortionMode[] = [];
+  ortho.forEach((m, k) => {
+    const id = `mode_${k + 1}`;
+    // Dominant site (largest multiplicity-weighted Cartesian share) for the
+    // label. Without gauge exclusion modes are single-site; with it they may
+    // span several sites (relative-displacement patterns).
+    let domJ = 0;
+    let domV = -1;
+    m.frac.forEach((f, j) => {
+      const c = mulVec(M, f);
+      const w = sites[j]!.multiplicity * (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+      if (w > domV) {
+        domV = w;
+        domJ = j;
+      }
+    });
+    const label = `mode ${k + 1} @ Γ (${sites[domJ]!.site.label})`;
+    parameters.push({ id, label, kind: "positionShift", value: 0, initialValue: 0, fixed: true });
+    const axes: { siteLabel: string; axis: Vec3 }[] = [];
+    m.frac.forEach((f, j) => {
+      if (Math.hypot(f[0], f[1], f[2]) < 1e-10) return;
+      axes.push({ siteLabel: sites[j]!.site.label, axis: f });
+      bindings.push({ parameterId: id, kind: "positionShift", targetId: structure.id, targetKey: sites[j]!.site.label, axis: f });
+    });
+    modes.push({ id, label, star: "Γ", observedAmplitude: 0, axes, active: false });
+  });
+
+  return {
+    parentized: structure,
+    originShift: [0, 0, 0],
+    parameters,
+    bindings,
+    modes,
+    totalAmplitude: 0,
+    unpaired: [],
+    acousticExcluded: gauge.length,
+  };
+}
+
+/**
+ * Re-seed `positionShift` parameter VALUES so a realized geometry is preserved
+ * across a change of position parameterization (constrained-atomic ↔ mode
+ * amplitudes). Solves the weighted least-squares system
+ * `Σ_p v_p·axes_p ≈ (realized − anchor)` in the multiplicity-weighted
+ * whole-cell Cartesian metric. This is an interpolation, not a fit: whenever
+ * the displacement lies in the target parameterization's span the solution is
+ * exact, and any unrepresentable component (e.g. the rigid-translation gauge a
+ * symmetry-mode basis excludes) is dropped — which leaves the calculated curve
+ * unchanged by construction, since that component is unobservable.
+ */
+export function positionShiftValuesFor(
+  anchor: StructureModel,
+  bindings: readonly ParameterBinding[],
+  realized: StructureModel,
+): Record<string, number> {
+  const M = orthogonalizationMatrix(anchor.cell);
+  const bySite = new Map(anchor.sites.map((s) => [s.label, s]));
+  const mult = new Map(
+    anchor.sites.map((s) => [s.label, siteMultiplicity(anchor.spaceGroup.operations, s.position)]),
+  );
+  // Fractional displacement per site, minimum-image wrapped.
+  const disp = new Map<string, Vec3>();
+  for (const s of realized.sites) {
+    const a = bySite.get(s.label);
+    if (!a) continue;
+    disp.set(s.label, [
+      wrapDelta(s.position[0] - a.position[0]),
+      wrapDelta(s.position[1] - a.position[1]),
+      wrapDelta(s.position[2] - a.position[2]),
+    ]);
+  }
+  // Group each parameter's axes by site.
+  const paramAxes = new Map<string, { site: string; axis: Vec3 }[]>();
+  for (const b of bindings) {
+    if (b.kind !== "positionShift" || !b.axis || b.targetKey === undefined) continue;
+    const list = paramAxes.get(b.parameterId) ?? [];
+    list.push({ site: b.targetKey, axis: b.axis as Vec3 });
+    paramAxes.set(b.parameterId, list);
+  }
+  const ids = [...paramAxes.keys()];
+  const n = ids.length;
+  if (n === 0) return {};
+  // Weighted Gram system G·v = rhs over the parameter axes.
+  const cart = (v: Vec3): Vec3 => mulVec(M, v);
+  const G: number[][] = Array.from({ length: n }, () => new Array<number>(n + 1).fill(0));
+  for (let p = 0; p < n; p++) {
+    const ap = paramAxes.get(ids[p]!)!;
+    for (let q = p; q < n; q++) {
+      const aq = paramAxes.get(ids[q]!)!;
+      let g = 0;
+      for (const { site, axis } of ap) {
+        const other = aq.find((x) => x.site === site);
+        if (!other) continue;
+        const ca = cart(axis);
+        const cb = cart(other.axis);
+        g += (mult.get(site) ?? 1) * (ca[0] * cb[0] + ca[1] * cb[1] + ca[2] * cb[2]);
+      }
+      G[p]![q] = g;
+      if (q !== p) G[q]![p] = g;
+    }
+    let r = 0;
+    for (const { site, axis } of ap) {
+      const d = disp.get(site);
+      if (!d) continue;
+      const ca = cart(axis);
+      const cd = cart(d);
+      r += (mult.get(site) ?? 1) * (ca[0] * cd[0] + ca[1] * cd[1] + ca[2] * cd[2]);
+    }
+    G[p]![n] = r;
+  }
+  // Gaussian elimination with partial pivoting; skipped (near-zero) pivots
+  // leave that direction at 0 — a particular solution, fine for re-seeding.
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(G[r]![col]!) > Math.abs(G[piv]![col]!)) piv = r;
+    if (Math.abs(G[piv]![col]!) < 1e-12) continue;
+    [G[col], G[piv]] = [G[piv]!, G[col]!];
+    for (let r = 0; r < n; r++) {
+      if (r === col) continue;
+      const f = G[r]![col]! / G[col]![col]!;
+      for (let k = col; k <= n; k++) G[r]![k] = G[r]![k]! - f * G[col]![k]!;
+    }
+  }
+  const out: Record<string, number> = {};
+  for (let p = 0; p < n; p++) {
+    out[ids[p]!] = Math.abs(G[p]![p]!) > 1e-12 ? G[p]![n]! / G[p]![p]! : 0;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Brillouin-zone star decomposition of the same-cell displacement space.
 // ---------------------------------------------------------------------------
@@ -590,7 +923,11 @@ export function withDistortionModes(
   spec: { params: RefinementParameter[]; bindings: ParameterBinding[] },
   modeSet: DistortionModeSet,
 ): { params: RefinementParameter[]; bindings: ParameterBinding[] } {
-  const frozenIds = new Set(modeSet.modes.filter((m) => m.label.includes("frozen")).map((m) => m.id));
+  // Free selection: an explicit `active` flag wins; absent (child-decomposed
+  // sets) falls back to the frozen-label heuristic, preserving legacy behavior.
+  const frozenIds = new Set(
+    modeSet.modes.filter((m) => m.active ?? m.label.includes("frozen")).map((m) => m.id),
+  );
   const params = [
     ...spec.params.filter((p) => p.kind !== "positionShift"),
     ...modeSet.parameters.map((p) => ({ ...p, fixed: !frozenIds.has(p.id) })),

@@ -14,7 +14,7 @@ import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PdfPattern } from "@/core/diffraction/types";
 import type { RefinementResult } from "@/core/refinement/types";
-import type { RefinementParameter } from "@/core/refinement/types";
+import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
 import {
   buildPdfSpec,
@@ -27,7 +27,7 @@ import {
   optimalPdfScale,
   correlatedMotionConflict,
 } from "@/core/workflow/pdf";
-import { buildDistortionModes, withDistortionModes, type DistortionModeSet } from "@/core/crystal/distortionModes";
+import { buildDistortionModes, buildSymmetryModes, positionShiftValuesFor, withDistortionModes, type DistortionModeSet } from "@/core/crystal/distortionModes";
 import { parseCif } from "@/parsers/cif";
 import { applyParameters } from "@/core/workflow/apply";
 
@@ -78,13 +78,23 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   presetFitRange?: { min: number; max: number };
 }): JSX.Element {
   const multiPhase = extraPhases.length > 0;
-  // Distortion-mode parameterization (AMPLIMODES/ISODISTORT paradigm): after
-  // loading a high-symmetry PARENT cif, positions are refined as symmetry-
-  // adapted mode AMPLITUDES anchored on the parentized structure — mode 1 is
-  // the frozen distortion (the order parameter, in Å). Single-phase only.
+  // Position parameterization (single-phase only): "atomic" refines the
+  // symmetry-constrained per-coordinate shifts; "irreps" refines symmetry-
+  // adapted distortion-mode AMPLITUDES (AMPLIMODES/ISODISTORT paradigm). The
+  // mode set comes from the structure's OWN space group (`buildSymmetryModes`,
+  // no second CIF needed — amplitudes seed at 0, rigid-translation gauge
+  // excluded); loading a high-symmetry PARENT cif upgrades it to the observed
+  // decomposition, whose mode 1 is the frozen order parameter (Å).
+  const [positionMode, setPositionMode] = useState<"atomic" | "irreps">("atomic");
   const [modes, setModes] = useState<{ set: DistortionModeSet; parentName: string } | null>(null);
   useEffect(() => setModes(null), [structure]);
-  const modeSet = !multiPhase && modes ? modes.set : null;
+  const symModes = useMemo(() => (multiPhase ? null : buildSymmetryModes(structure)), [structure, multiPhase]);
+  // An empty symmetry set (every site pinned by symmetry) cannot replace the
+  // position rows — fall back to atomic (the toggle is disabled in that case).
+  const modeSet =
+    !multiPhase && positionMode === "irreps"
+      ? modes?.set ?? (symModes && symModes.modes.length > 0 ? symModes : null)
+      : null;
   // The mode parameters are anchored on the parentized structure; everything
   // downstream (spec, curves, worker refine, 3D view, CIF export) uses it.
   const fitStructure = modeSet ? modeSet.parentized : structure;
@@ -152,10 +162,53 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   const [viewTab, setViewTab] = useState<"fit" | "model3d">("fit");
   const [viewPhase, setViewPhase] = useState(0);
   const [focusFitToken, setFocusFitToken] = useState(0);
+  // Spec-swap reset, with FIT PRESERVATION across a position-parameterization
+  // flip: when the same structure+pattern merely changed parameterization
+  // (atomic ↔ irreps, or a parent-CIF decomposition arriving), the current
+  // geometry is realized under the OLD bindings and re-seeded EXACTLY onto the
+  // new position parameters (`positionShiftValuesFor` — an interpolation, not
+  // a fit), and every non-position value/free-flag carries over by id. Any
+  // other spec change (new structure, new data, phases) is a full reset.
+  const paramsRef = useRef<readonly RefinementParameter[]>(params);
+  paramsRef.current = params;
+  // Latest spec, for staleness checks: a worker refinement that resolves AFTER
+  // a parameterization flip must be discarded — its parameter ids belong to
+  // the old spec and would stamp garbage onto (or silently miss) the new rows.
+  const specRef = useRef(spec);
+  specRef.current = spec;
+  const prevSpecCtx = useRef<{
+    structure: StructureModel;
+    pattern: PdfPattern;
+    multiPhase: boolean;
+    anchor: StructureModel;
+    bindings: readonly ParameterBinding[];
+  } | null>(null);
   useEffect(() => {
-    setParams(spec.params);
+    const prev = prevSpecCtx.current;
+    const prevParams = paramsRef.current;
+    let next = spec.params;
+    if (prev && prev.structure === structure && prev.pattern === pattern && !multiPhase && !prev.multiPhase) {
+      const values: Record<string, number> = {};
+      for (const p of prevParams) values[p.id] = p.value;
+      const realized = applyParameters(prev.anchor, prev.bindings, values).model;
+      const posSeed = positionShiftValuesFor(fitStructure, spec.bindings, realized);
+      const prevById = new Map(prevParams.map((p) => [p.id, p]));
+      next = spec.params.map((p) => {
+        if (p.kind === "positionShift") {
+          const v = posSeed[p.id] ?? 0;
+          // Rows carrying real displacement enter free (they hold the fit);
+          // the rest keep the spec's deliberate-activation default.
+          return { ...p, value: v, fixed: Math.abs(v) > 1e-8 ? false : p.fixed };
+        }
+        const old = prevById.get(p.id);
+        return old ? { ...p, value: old.value, fixed: old.fixed } : p;
+      });
+    }
+    setParams(next);
     setResult(null);
     setLive(null);
+    prevSpecCtx.current = { structure, pattern, multiPhase, anchor: fitStructure, bindings: spec.bindings };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- spec is the sole trigger; the rest is read-at-fire context
   }, [spec]);
 
   // A spec swap (new structure / new mode set) resets `params` in the effect
@@ -234,6 +287,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
 
   async function runRefine(): Promise<void> {
     setBusy(true);
+    const specAtCall = specRef.current;
     try {
       const start = [...params];
       const res = await client.refinePdfParallel(
@@ -249,7 +303,13 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         },
         (yCalc) => setLive(yCalc),
       );
-      setParams(start.map((p) => ({ ...p, value: res.parameters[p.id] ?? p.value })));
+      if (specRef.current !== specAtCall) {
+        // The parameterization (or the whole problem) changed mid-run; the
+        // result's ids belong to the old spec — drop it rather than mixing.
+        console.info("[status] refinement result discarded — the parameter spec changed while it ran");
+        return;
+      }
+      setParams((ps) => ps.map((p) => ({ ...p, value: res.parameters[p.id] ?? p.value })));
       setResult(res);
     } catch (e) {
       console.error(`[status] PDF refinement failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -264,6 +324,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // the current basin. Keeps the lowest-χ² of baseline + restarts.
   async function runMultiStart(): Promise<void> {
     setBusy(true);
+    const specAtCall = specRef.current;
     try {
       const escape = result !== null;
       const ms = await client.refinePdfMultiStart(
@@ -280,6 +341,10 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         escape ? { restarts: 4, escapeSigma: 2 } : { restarts: 8 },
         (yCalc) => setLive(yCalc),
       );
+      if (specRef.current !== specAtCall) {
+        console.info("[status] multi-start result discarded — the parameter spec changed while it ran");
+        return;
+      }
       setParams((ps) => ps.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value })));
       setResult(ms.final);
       console.info(
@@ -311,6 +376,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         return;
       }
       setModes({ set, parentName: parent.name || file.name.replace(/\.[^.]+$/, "") });
+      setPositionMode("irreps");
       console.info(`[status] distortion modes: ${set.modes.length} mode(s), total |A| = ${set.totalAmplitude.toFixed(4)} Å${set.unpaired.length ? ` · unpaired: ${set.unpaired.join(", ")}` : ""}`);
     } catch (e) {
       console.error(`[status] parent CIF failed to parse: ${e instanceof Error ? e.message : String(e)}`);
@@ -521,7 +587,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                       <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
                         <span style={uppercaseLabel}>Distortion modes</span>
                         <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
-                          vs {modes!.parentName} · total |A| ={" "}
+                          {modes ? `vs ${modes.parentName}` : `from ${structure.spaceGroup.hermannMauguin ?? "own space group"}`}
+                          {" · total |A| = "}
                           {Math.sqrt(
                             modeSet.modes.reduce((s, m) => {
                               const v = params.find((p) => p.id === m.id)?.value ?? 0;
@@ -529,8 +596,16 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                             }, 0),
                           ).toFixed(4)}{" "}
                           Å
+                          {(modeSet.acousticExcluded ?? 0) > 0 ? ` · ${modeSet.acousticExcluded} acoustic excluded` : ""}
                         </span>
-                        <button style={resetRangeBtn} onClick={() => setModes(null)} title="Back to per-coordinate position parameters">
+                        <button
+                          style={resetRangeBtn}
+                          onClick={() => {
+                            setModes(null);
+                            setPositionMode("atomic");
+                          }}
+                          title="Back to per-coordinate position parameters"
+                        >
                           ✕ clear
                         </button>
                       </div>
@@ -561,7 +636,9 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                         </table>
                       </div>
                       <p style={{ marginTop: 4, marginBottom: 0, fontSize: 12, color: color.secondary }}>
-                        Amplitudes are whole-cell displacement norms (Å); mode 1 is the frozen distortion — its fitted amplitude is the order parameter. Free/fix rows in the parameter panel (Positions group).
+                        {modes
+                          ? "Amplitudes are whole-cell displacement norms (Å); mode 1 is the frozen distortion — its fitted amplitude is the order parameter. Free/fix rows in the parameter panel (Positions group)."
+                          : "Amplitudes are whole-cell displacement norms (Å), enumerated from the structure's own space group (symmetry-conserving Γ modes; rigid-translation gauge excluded). All seed at 0 — free the rows you want active in the parameter panel (Positions group), or load a parent CIF for the observed order-parameter decomposition."}
                       </p>
                     </>
                   ) : (
@@ -584,7 +661,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                         />
                       </label>
                       <span style={{ fontSize: fz.micro, color: color.secondary }}>
-                        refine symmetry-adapted mode amplitudes instead of raw coordinates
+                        or flip Positions → “Irreps (modes)” in the parameter panel — modes come from the loaded space group, no second CIF needed
                       </span>
                     </div>
                   )}
@@ -612,6 +689,50 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           result={result}
           title="PDF parameters"
           extraActions={refineActions}
+          groupControls={
+            multiPhase || !symModes || (symModes.modes.length === 0 && !modes)
+              ? undefined
+              : {
+                  Positions: (
+                    <>
+                      <SegmentedToggle
+                        options={[
+                          {
+                            id: "atomic",
+                            label: "Constrained atomic",
+                            title: "Per-coordinate symmetry-allowed shifts — one row per free coordinate of each site",
+                          },
+                          {
+                            id: "irreps",
+                            label: "Irreps (modes)",
+                            title:
+                              "Symmetry-adapted distortion-mode amplitudes (whole-cell Å) computed from the structure's own space group — no parent CIF needed. Modes seed at 0 and enter fixed; free the ones you want active. The unobservable rigid-translation (acoustic) combinations are excluded, so freeing every mode stays well-posed.",
+                          },
+                        ]}
+                        value={positionMode}
+                        // Guard the input side of the mid-refine race too: a
+                        // flip while the worker runs would swap the spec under
+                        // the in-flight result (which the staleness check in
+                        // runRefine would then discard — better not to invite it).
+                        onChange={(id) => {
+                          if (!busy) setPositionMode(id);
+                        }}
+                      />
+                      {positionMode === "irreps" && modeSet && (
+                        <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
+                          {modes
+                            ? `vs ${modes.parentName}`
+                            : `from ${structure.spaceGroup.hermannMauguin ?? "own space group"}`}
+                          {` · ${modeSet.modes.length} mode${modeSet.modes.length === 1 ? "" : "s"}`}
+                          {(modeSet.acousticExcluded ?? 0) > 0
+                            ? ` · ${modeSet.acousticExcluded} acoustic (translation) excluded`
+                            : ""}
+                        </span>
+                      )}
+                    </>
+                  ),
+                }
+          }
         />
       </div>
     </>

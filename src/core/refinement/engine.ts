@@ -315,16 +315,95 @@ function normalEquations(jac: Matrix, r: Float64Array): { jtj: Matrix; jtr: numb
   return { jtj, jtr };
 }
 
+/**
+ * Squared DEAD-COLUMN noise floors, one per Jacobian column (0 = exact column,
+ * never dead). A parameter with no leverage at the current point (an exactly
+ * stationary pseudo-symmetric direction — e.g. an atom whose pair distances
+ * depend on a coordinate only quadratically at a special value) has a
+ * central-difference column that is pure floating-point cancellation noise:
+ * magnitude ~ eps·|√w·y|/(2h). Such a column must not be normalized up to a
+ * unit diagonal by the preconditioner — the noise would become an O(1)
+ * direction whose astronomically amplified (1/s_j) step poisons every LM
+ * attempt and stalls the whole fit. Columns at the noise floor are instead
+ * given the LARGEST scale (see `preconditionScales`), so they stay ~0 in the
+ * scaled system and the SVD truncation drops them cleanly — reported via
+ * `singularParameterIds`. Linear and analytic columns are exact by
+ * construction and exempt: a legitimately tiny exact column (parameters many
+ * orders apart in units) is precisely what the preconditioner exists to fix.
+ * C = 100 absorbs rounding accumulation across the model sum (√N ulps) with a
+ * safety margin — only columns within ~2 orders of the eps floor are killed,
+ * where no real information survives in double precision anyway.
+ */
+function deadColumnFloors(
+  plan: readonly JacobianColumnPlan[],
+  n: number,
+  baseline: Float64Array,
+  weights: Float64Array,
+): number[] {
+  let wy = 0;
+  for (let i = 0; i < baseline.length; i++) wy += weights[i]! * baseline[i]! * baseline[i]!;
+  const wyNorm = Math.sqrt(wy);
+  const EPS = 2.220446049250313e-16;
+  const C = 100;
+  const floors = new Array<number>(n).fill(0);
+  for (const col of plan) {
+    if (col.analytic || col.linear) continue; // exact columns are never dead
+    const f = (C * EPS * wyNorm) / (2 * col.h);
+    floors[col.j] = f * f;
+  }
+  return floors;
+}
+
+/**
+ * Diagonal preconditioner scales s_j = √(JᵀJ_jj), plus an explicit per-column
+ * deadness verdict. A column at or below its noise floor (see
+ * `deadColumnFloors`) is DEAD: its scaled row/column and gradient entry are
+ * zeroed outright by the callers, so its step component is exactly 0 and the
+ * direction is reported singular — never solved. This is deliberate: relying
+ * on the SVD cutoff alone fails when the largest diagonal is ITSELF dead
+ * (e.g. every freed mode sitting at a stationary seed with no live scale
+ * column) — normalizing noise by noise puts it at O(1) and the pre-guard
+ * pathology returns. `maxDiag` is therefore the largest LIVE diagonal, and
+ * deadness is carried out-of-band rather than smuggled through the scales.
+ */
+function preconditionScales(
+  jtj: Matrix,
+  floors?: readonly number[],
+): { scales: number[]; dead: boolean[] } {
+  const dead = jtj.map((row, j) => {
+    const d = row[j]!;
+    return !(d > (floors?.[j] ?? 0)) || !Number.isFinite(d);
+  });
+  let maxDiag = 0;
+  for (let j = 0; j < jtj.length; j++) {
+    const d = jtj[j]![j]!;
+    if (!dead[j]! && d > maxDiag) maxDiag = d;
+  }
+  const scales = jtj.map((row, j) =>
+    dead[j]! ? (maxDiag > 0 ? Math.sqrt(maxDiag) : 1) : Math.sqrt(row[j]!),
+  );
+  return { scales, dead };
+}
+
 function normalizedPseudoInverse(
   jtj: Matrix,
   rcond: number,
+  floors?: readonly number[],
 ): { covarianceBase: Matrix; diagnostics: SymmetricPseudoInverseResult } {
-  const scale = jtj.map((row, j) => {
-    const d = row[j]!;
-    return d > 0 && Number.isFinite(d) ? Math.sqrt(d) : 1;
-  });
-  const normalized = jtj.map((row, i) => row.map((v, j) => v / (scale[i]! * scale[j]!)));
-  const diagnostics = pseudoInverseSymmetric(normalized, rcond);
+  const { scales: scale, dead } = preconditionScales(jtj, floors);
+  // Dead rows/columns are zeroed, not just down-scaled: their singular values
+  // are exactly 0, so the pseudo-inverse drops them and their variance is 0
+  // (esd 0), even when EVERY column is dead and no live scale reference exists.
+  const normalized = jtj.map((row, i) =>
+    row.map((v, j) => (dead[i]! || dead[j]! ? 0 : v / (scale[i]! * scale[j]!))),
+  );
+  const raw = pseudoInverseSymmetric(normalized, rcond);
+  const deadIdx = dead.flatMap((isDead, j) => (isDead ? [j] : []));
+  const diagnostics: SymmetricPseudoInverseResult = {
+    ...raw,
+    droppedIndices: [...new Set([...raw.droppedIndices, ...deadIdx])],
+    zeroCount: Math.max(raw.zeroCount, deadIdx.length),
+  };
   const covarianceBase = diagnostics.inverse.map((row, i) =>
     row.map((v, j) => v / (scale[i]! * scale[j]!)),
   );
@@ -427,13 +506,24 @@ function* refineCore(
     // Diagonal preconditioning: rescale so JᵀJ has a unit diagonal before the
     // solve. This keeps the normal matrix well-conditioned even when parameters
     // span many orders of magnitude (scale ~1e-11, cell ~10, B ~1, xyz ~0.1),
-    // which is the main cause of stalls/divergence. s_j = sqrt(JᵀJ_jj).
-    const sc = jtj.map((row, j) => {
-      const d = row[j]!;
-      return d > 0 && Number.isFinite(d) ? Math.sqrt(d) : 1;
-    });
-    const A: Matrix = jtj.map((row, i) => row.map((v, j) => v / (sc[i]! * sc[j]!)));
-    const b = jtr.map((g, i) => g / sc[i]!);
+    // which is the main cause of stalls/divergence. s_j = sqrt(JᵀJ_jj), with
+    // the dead-column guard (see `deadColumnFloors`/`preconditionScales`):
+    // zero-leverage FD columns are zeroed out of the scaled system and the
+    // gradient — their step component is exactly 0 (never a noise-amplified
+    // garbage shift, even when EVERY free column is dead) — and reported via
+    // `singularParameterIds`.
+    const floors = deadColumnFloors(plan, n, current.yCalc, problem.weights);
+    const { scales: sc, dead } = preconditionScales(jtj, floors);
+    const A: Matrix = jtj.map((row, i) =>
+      row.map((v, j) => (dead[i]! || dead[j]! ? 0 : v / (sc[i]! * sc[j]!))),
+    );
+    const b = jtr.map((g, i) => (dead[i]! ? 0 : g / sc[i]!));
+    for (let j = 0; j < n; j++) {
+      if (dead[j]!) {
+        const id = freeIds[j];
+        if (id !== undefined) solveDropped.add(id);
+      }
+    }
 
     // LM damping on the (unit-diagonal) scaled system; retry with larger λ.
     let stepAccepted = false;
@@ -534,9 +624,11 @@ function* refineCore(
   const { sets: finalSets, plan: finalPlan } = jacobianPlan(problem, freeParams, freeValues, useAnalytic);
   const finalJacobian = assembleJacobian(problem, finalPlan, n, current.yCalc, yield finalSets);
   const { jtj: finalJtj } = normalEquations(finalJacobian, finalResiduals);
+  const finalFloors = deadColumnFloors(finalPlan, n, current.yCalc, problem.weights);
   const { covarianceBase, diagnostics: covDiagnostics } = normalizedPseudoInverse(
     finalJtj,
     opts.svdTolerance ?? 1e-6,
+    finalFloors,
   );
   const covariance = covarianceBase.map((row) => row.map((v) => v * reducedChi));
   for (let j = 0; j < n; j++) {

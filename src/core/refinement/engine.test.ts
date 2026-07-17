@@ -316,3 +316,63 @@ describe("constraints", () => {
     expect(resolved.b3).toBe(0.7);
   });
 });
+
+describe("dead-column guard (zero-leverage parameters)", () => {
+  // A parameter whose Jacobian column is pure FD cancellation noise (an exact
+  // stationary direction) must be dropped and flagged — never solved into a
+  // garbage step or a garbage esd. The all-dead case (NO live column at all)
+  // is the regression: maxDiag used to be taken over dead diagonals too, so
+  // noise normalized to O(1), survived the SVD, and produced esd ~ 1e9 with
+  // empty diagnostics.
+  const xs = Array.from({ length: 60 }, (_, i) => 0.5 + i * 0.25);
+
+  it("all-dead system: dead parameter is flagged singular with esd 0, value unmoved", () => {
+    // y depends on p only at the 1e-9 level → the p column is numerically dead;
+    // a 1% scale misfit in obs is unfixable (s is FIXED), so residuals stay big.
+    const observations = Float64Array.from(xs.map((x) => 1.01 * (100 + Math.sin(0.1 * x))));
+    const weights = Float64Array.from(xs.map(() => 1));
+    const parameters: RefinementParameter[] = [
+      { id: "s", label: "s", kind: "scale", value: 1, initialValue: 1, fixed: true },
+      // Non-linear kind → central-difference column → dead-column guard applies.
+      { id: "p", label: "p", kind: "cellLength", value: 0, initialValue: 0, fixed: false },
+    ];
+    const result = refine(
+      {
+        parameters,
+        observations,
+        weights,
+        calculate: (v) =>
+          Float64Array.from(xs.map((x) => (v.s ?? 1) * (100 + Math.sin(0.1 * x)) + 1e-9 * Math.sin(x * (1 + (v.p ?? 0))))),
+      },
+      { maxIterations: 10 },
+    );
+    // The dead direction must not have produced a garbage shift…
+    expect(Math.abs(result.parameters.p!)).toBeLessThan(1e-6);
+    // …and must be reported: dropped (esd 0) + flagged singular.
+    expect(result.esd.p).toBe(0);
+    expect(result.diagnostics?.singularParameterIds ?? []).toContain("p");
+  });
+
+  it("mixed system: the live parameter refines while the dead one is dropped", () => {
+    const trueS = 1.01;
+    const observations = Float64Array.from(xs.map((x) => trueS * (100 + Math.sin(0.1 * x))));
+    const weights = Float64Array.from(xs.map(() => 1));
+    const parameters: RefinementParameter[] = [
+      { id: "s", label: "s", kind: "cellLength", value: 1, initialValue: 1, fixed: false },
+      { id: "p", label: "p", kind: "cellLength", value: 0, initialValue: 0, fixed: false },
+    ];
+    const result = refine(
+      {
+        parameters,
+        observations,
+        weights,
+        calculate: (v) =>
+          Float64Array.from(xs.map((x) => (v.s ?? 1) * (100 + Math.sin(0.1 * x)) + 1e-9 * Math.sin(x * (1 + (v.p ?? 0))))),
+      },
+      { maxIterations: 20 },
+    );
+    expect(result.parameters.s).toBeCloseTo(trueS, 6);
+    expect(Math.abs(result.parameters.p!)).toBeLessThan(1e-6);
+    expect(result.diagnostics?.singularParameterIds ?? []).toContain("p");
+  });
+});
