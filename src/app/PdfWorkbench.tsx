@@ -152,7 +152,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     setBusy(true);
     try {
       const start = guided ? guidedPdfParams(params) : [...params];
-      const res = await client.refinePdf(
+      const res = await client.refinePdfParallel(
         {
           structure,
           ...(multiPhase ? { extraPhases: [...extraPhases] } : {}),

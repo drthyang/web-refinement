@@ -93,6 +93,20 @@ const built = tools.build_refinement({ structure, pattern, backgroundTerms: 1 })
 const refined = await tools.refine_powder({ structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile, maxIterations: 2 });
 const assessment = tools.assess_refinement({ result: refined.result, parameters: built.parameters, observationCount: refined.observationCount, residual: refined.residual });
 
+// Reduced-PDF fixture: a placeholder .gr parsed through the tool surface, then
+// filled with the model's own starting curve (sum of partials ≡ calc) so a
+// 2-iteration refine is cheap and stable.
+// X-ray: the shared Po fixture has no neutron scattering length in the table.
+const GR = `mode = xray\nqdamp = 0.03\n#### start data\n${Array.from({ length: 120 }, (_, i) => `${(0.5 + i * 0.05).toFixed(2)} 0`).join("\n")}\n`;
+const pdfParsed = tools.parse_pdf_data({ text: GR, filename: "t.gr" });
+const pdfBuilt0 = tools.build_pdf_model({ structure, pattern: pdfParsed.pattern });
+const pdfStart = tools.compute_partial_pdf({ structure, pattern: pdfParsed.pattern, parameters: pdfBuilt0.parameters, bindings: pdfBuilt0.bindings });
+const pdfPattern = {
+  ...pdfParsed.pattern,
+  points: pdfParsed.pattern.points.map((p, i) => ({ r: p.r, gObs: pdfStart.partials.reduce((s, q) => s + (q.g[i] ?? 0), 0) })),
+};
+const pdfBuilt = tools.build_pdf_model({ structure, pattern: pdfPattern });
+
 /** Canned args + the pinned top-level output keys for every tool. */
 const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   parse_structure: { args: { cif: CIF }, keys: ["magnetic", "structure"] },
@@ -178,6 +192,20 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
       k: [0.25, 0, 0.25],
     },
     keys: ["dataset", "kInteger", "multiplicity", "reflections"],
+  },
+  parse_pdf_data: { args: { text: GR, filename: "t.gr" }, keys: ["detected", "pattern", "summary"] },
+  build_pdf_model: { args: { structure, pattern: pdfPattern }, keys: ["bindings", "freeCount", "parameters", "restraints"] },
+  refine_pdf: {
+    args: { structure, pattern: pdfPattern, parameters: pdfBuilt.parameters, bindings: pdfBuilt.bindings, maxIterations: 2 },
+    keys: ["observationCount", "parallel", "residual", "result", "warnings"],
+  },
+  compute_partial_pdf: {
+    args: { structure, pattern: pdfPattern, parameters: pdfBuilt.parameters, bindings: pdfBuilt.bindings },
+    keys: ["kind", "partials", "r"],
+  },
+  calibrate_qdamp: {
+    args: { structure, pattern: pdfPattern, maxIterations: 2 },
+    keys: ["esd", "iterations", "qbroad", "qdamp", "rw"],
   },
 };
 

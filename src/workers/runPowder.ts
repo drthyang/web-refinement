@@ -23,6 +23,14 @@ import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
  * single construction path.
  */
 export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
+  if (spec.kind === "pdf") {
+    const phases = spec.extraPhases && spec.extraPhases.length > 0
+      ? [{ structure: spec.structure, id: spec.structure.id }, ...spec.extraPhases.map((s) => ({ structure: s, id: s.id }))]
+      : null;
+    return phases
+      ? buildMultiPhasePdfProblem(phases, spec.pattern, spec.parameters, spec.bindings, spec.restraints ?? [], spec.fitRange)
+      : buildPdfProblem(spec.structure, spec.pattern, spec.parameters, spec.bindings, spec.restraints ?? [], spec.fitRange);
+  }
   if (spec.kind === "multiPhasePowder") {
     return buildMultiPhasePowderProblem([...spec.phases], spec.pattern, spec.parameters, spec.bindings, {
       shape: spec.shape,

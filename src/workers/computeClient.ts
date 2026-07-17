@@ -344,6 +344,37 @@ export class ComputeClient {
         };
   }
 
+  /**
+   * PDF refinement with the Jacobian parallelized over the evaluator pool —
+   * same replica-construction guarantee as the powder path (both sides build
+   * from `buildProblemForSpec`, so pooled and serial are bit-identical). The
+   * staged sequence runs each stage's Jacobian on the pool too; falls back to
+   * the single-worker `refinePdf` when pooling is unavailable.
+   */
+  async refinePdfParallel(
+    req: Omit<RefinePdfRequest, "requestId" | "type">,
+    onProgress?: PowderProgress,
+  ): Promise<RefinementResult> {
+    const size = this.poolSize();
+    if (size < 2) {
+      return this.refinePdf(req, onProgress);
+    }
+    const spec: EvaluatorSpec = {
+      kind: "pdf",
+      structure: req.structure,
+      ...(req.extraPhases && req.extraPhases.length ? { extraPhases: req.extraPhases } : {}),
+      pattern: req.pattern,
+      parameters: req.parameters,
+      bindings: req.bindings,
+      ...(req.restraints && req.restraints.length ? { restraints: req.restraints } : {}),
+      ...(req.fitRange ? { fitRange: req.fitRange } : {}),
+    };
+    if (req.staged && req.staged.length > 0) {
+      return this.runStagedParallel(spec, req.staged, req.options ?? {}, req.pattern.points.length, onProgress);
+    }
+    return this.runParallel(spec, req.options ?? {}, req.pattern.points.length, onProgress, false);
+  }
+
   async refinePowderParallel(
     req: Omit<RefinePowderRequest, "requestId" | "type">,
     onProgress?: PowderProgress,

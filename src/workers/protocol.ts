@@ -155,6 +155,17 @@ export type EvaluatorSpec =
       readonly fitRange?: { readonly min?: number; readonly max?: number };
     }
   | {
+      readonly kind: "pdf";
+      readonly structure: StructureModel;
+      /** Additional phases → the multi-phase G(r) sum. */
+      readonly extraPhases?: readonly StructureModel[];
+      readonly pattern: PdfPattern;
+      readonly parameters: RefinementParameter[];
+      readonly bindings: ParameterBinding[];
+      readonly restraints?: readonly LinearRestraint[];
+      readonly fitRange?: { readonly min?: number; readonly max?: number };
+    }
+  | {
       readonly kind: "singleCrystal";
       readonly structure: StructureModel;
       readonly dataset: SingleCrystalDataset;

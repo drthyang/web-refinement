@@ -417,7 +417,20 @@ app + a validation gate**, no broken intermediate state.
   irrep dimension; refining ξ recovers a correlation length consistent with peak
   fall-off; symmetry-illegal spin directions stay identically zero.
 
-### P6 — Agent tools, UI polish, uncertainty quantification ⬜  *(medium)*
+### P6 — Agent tools, UI polish, uncertainty quantification 🚧  *(medium)*
+
+> **Status (2026-07-17):** the nuclear agent slice is live. Five PDF tools on
+> the contract-tested registry (30 tools total): `parse_pdf_data`,
+> `build_pdf_model` (single + multi-phase, scale-seeded), `refine_pdf`
+> (flat/staged, fit range, node-pool parallel fast path, correlated-motion
+> conflict in `warnings`), `compute_partial_pdf` (element pairs / per-phase),
+> and `calibrate_qdamp` (standard → instrument constants). The P6 gate for the
+> nuclear track passes: an agent completes parse → build → staged refine →
+> partials → calibrate via the registry only (`pdfAgentLoop.test.ts`), and the
+> `{kind:"pdf"}` EvaluatorSpec arm gives pooled/parallel refinement in both the
+> browser workbench and the node MCP server, pooled ≡ serial bit-for-bit.
+> Remaining for P6: mPDF tools (with P4), PDF-aware `assess_refinement` bands,
+> next-step suggestions for PDF, resampling uncertainty, multi-dataset UI.
 - **Goal:** the browser + agent experience is first-class.
 - **Deliverables:** the full MCP tool set (§4) with `CONTRACTS`; `pdf`/`mpdf`
   `EvaluatorSpec` arms for pooled/parallel refine; PDF-aware `assess_refinement`
