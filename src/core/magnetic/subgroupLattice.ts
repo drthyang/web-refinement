@@ -76,7 +76,7 @@ export interface LatticeCandidate {
   readonly settingMatch?: TransformedIdentification;
 }
 
-interface CosetContext {
+export interface CosetContext {
   /** One representative op per rotation coset, identity first. */
   readonly cosets: readonly SymmetryOperation[];
   /** cosets[i] ∘ cosets[j] lies in coset comp[i][j]. */
@@ -85,7 +85,14 @@ interface CosetContext {
   readonly inv: readonly number[];
 }
 
-function buildCosetContext(lgOps: readonly SymmetryOperation[]): CosetContext {
+/**
+ * The rotation-coset composition context of a finite crystallographic group —
+ * the input `allSubgroups` needs. Generic (no magnetic content): pass any
+ * group's operations (a space group's general positions, or a little group)
+ * and it dedupes to one representative per rotation coset, builds the
+ * composition table, and records inverse cosets.
+ */
+export function buildCosetContext(lgOps: readonly SymmetryOperation[]): CosetContext {
   const cosets = distinctCosets(lgOps);
   const index = new Map<string, number>();
   cosets.forEach((op, i) => index.set(rotationKey(op), i));
