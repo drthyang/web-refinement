@@ -200,7 +200,7 @@ function FormChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | null 
   const form = technique === null ? null : technique === "sc" ? "sc" : "powder";
   const chips = [
     { id: "powder", label: "Powder", hint: "Powder sample — Bragg profile (Rietveld) or total-scattering (PDF) data" },
-    { id: "sc", label: "Single crystal", hint: "Single-crystal sample — integrated-intensity F² reflection data (.hkl/.fcf/.int)" },
+    { id: "sc", label: "Crystal", hint: "Single-crystal sample — integrated-intensity F² reflection data (.hkl/.fcf/.int)" },
   ] as const;
   return (
     <ChipGroup
