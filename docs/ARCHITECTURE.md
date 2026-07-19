@@ -30,7 +30,7 @@ the reverse. Scientific code never imports React.
 ┌───────────────────┬───────────────────────┬─────────────────────┐
 │ Web app UI        │ MCP agent server      │ Web workers         │  three thin consumer
 │ src/app,          │ src/mcp               │ src/workers         │  surfaces over the
-│ src/components    │ (18-tool registry)    │ (long solves)       │  same core functions
+│ src/components    │ (32-tool registry)    │ (long solves)       │  same core functions
 ├───────────────────┴───────────────────────┴─────────────────────┤
 │ Import & presentation   src/parsers, src/visualization           │  CIF/hkl/powder in,
 ├──────────────────────────────────────────────────────────────────┤  plot data out
@@ -39,8 +39,10 @@ the reverse. Scientific code never imports React.
 │   workflow      problem builders (powder, magnetic, multi-phase) │
 │   refinement    Levenberg–Marquardt driver, esds, diagnostics    │
 │   diffraction   structure factors, reflections, peak profiles    │
-│   magnetic      MSG candidates, k-search, moments, |F_M|²        │
-│   crystal       cells, symmetry, site/ADP constraints            │
+│   pdf           G(r) forward model, pair enumeration, partials   │
+│   magnetic      MSG candidates, k-search, moments, |F_M|², mPDF  │
+│   crystal       cells, symmetry, site/ADP constraints,           │
+│                 distortion modes, isotropy + subgroup lattices   │
 │   scattering    neutron b, X-ray f(Q), magnetic ⟨j0⟩/⟨j2⟩ tables │
 │   diagnostics   assess / suggest / interpret (judgment as code)  │
 │   export        CIF, mCIF, FullProf + GSAS-II bundles, reports   │
@@ -71,7 +73,8 @@ src/
     crystal/         unit cell, symmetry, structure model, constraints
     scattering/      neutron b, X-ray f(Q), magnetic ⟨j0⟩/⟨j2⟩ tables
     diffraction/     reflections, structure factors, peak profiles
-    magnetic/        MSG/k machinery, moment models, magnetic |F|²
+    pdf/             G(r) forward model, pair enumeration, partials
+    magnetic/        MSG/k machinery, moment models, magnetic |F|², mPDF
     refinement/      parameters, constraints, least-squares engine
     workflow/        problem builders: powder, magnetic, multi-phase, SC
     diagnostics/     assessment / next-steps / interpretation (judgment)

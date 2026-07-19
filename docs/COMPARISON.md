@@ -90,36 +90,39 @@ None of the three has a browser build — that is the niche this project targets
 ## 3. Where this workbench stands
 
 This is an early **browser-native** workbench. It does not compete on breadth,
-but it implements a correct, tested core of the shared fundamentals and one
-capability the mature tools present as a multi-tool workflow (magnetic candidate
-generation + comparison) as a single in-app flow.
+but it implements a correct, tested core of the shared fundamentals — and a few
+workflows the mature tools split across several programs (magnetic candidate
+generation + comparison; the symmetry-mode distortion workflow) as single
+in-app flows.
 
-| Area | This app | Mature packages |
+| Area | This app | Mature packages still add |
 | --- | --- | --- |
-| Data types | CW X-ray/neutron powder + single crystal; TOF↔d conversion | + full TOF profiles, ED, PDF |
-| Profile | Gaussian / pseudo-Voigt; polynomial background; March-Dollase PO | + TCH, spherical harmonics, Fourier bkg, absorption/extinction |
-| Symmetry | operations parsed from CIF/mCIF; multiplicity; absences; **k=0 magnetic candidate generation** | + full 230/1651 built-in tables, superspace |
-| Engine | Levenberg-Marquardt, esds, fixed/free/bounds/ties/**groups** | + full-Hessian, rigid bodies, restraints library |
-| Multi-phase | **Yes** (tested on 2-phase Mn₃Ga+MnO shape) | Yes |
-| Intensity extraction | **Le Bail** | Le Bail + Pawley |
-| Magnetism | mCIF, F_M, single-crystal + **powder** moment refinement, moment-size restraint, **candidate generation & comparison (k=0)** | + representation analysis, incommensurate/helical, full BNS labels |
-| Validation | GSAS-II golden values (metric tensors, moments, d-spacings) | decades of validation |
-| Platform | **Static web app, no install** | desktop |
+| Data types | CW + **TOF** X-ray/neutron powder; single-crystal F² (`.hkl`/`.fcf`/`.int`); **PDF** `G(r)` (`.gr`/`.sq`/`.fq`) | electron diffraction |
+| Profile | Gaussian / pseudo-Voigt / **TCH** + FCJ asymmetry; TOF back-to-back exponential; Chebyshev / Fourier / power backgrounds; March-Dollase PO; displacement / transparency / absorption / roughness corrections; Stephens microstrain, uniaxial size | spherical-harmonic texture, Ikeda–Carpenter TOF shape |
+| Symmetry | **all 230 built-in tables** + CIF/mCIF operations; Wyckoff/site constraints; absences; magnetic subgroup enumeration with **BNS/OG labels**; isotropy + t-subgroup (Bärnighausen) lattices | superspace (3+d), full 1651 magnetic tables incl. type IV |
+| Engine | Levenberg-Marquardt (SVD, esds, correlations), bounds/ties/restraints, staged controller, **multi-start**, worker pool, opt-in WebGPU | full-Hessian options, rigid bodies, restraint libraries |
+| Multi-phase / multi-dataset | Yes (powder 2-phase; PDF multi-phase + multi-dataset co-refinement; sequential Rietveld + PDF) | larger joint-histogram breadth |
+| Intensity extraction | **Le Bail** | + Pawley |
+| Magnetism | mCIF in/out, single-crystal + powder moment refinement, k = 0 **and** k ≠ 0 commensurate, k-search, subgroup candidates + comparison | representation analysis (built-in), incommensurate/helical |
+| Validation | GSAS-II golden values + real-data benchmarks; PDFfit2/PDFgui and diffpy.mpdf goldens | decades of community validation |
+| Platform / API | **Static web app, no install**; **32 MCP agent tools** | desktop; Python scripting ecosystems |
 
-**Honest gaps** (the road to maturity): built-in space-group and magnetic-group
-tables with standard labels; incommensurate / non-zero-k and helical/conical
-magnetism; full TOF and TCH profile functions; spherical-harmonic texture;
-absorption/extinction; rigid bodies and a restraints library; multi-histogram
-joint refinement; a scripting API. These are laid out in
-[ROADMAP.md](./ROADMAP.md).
+**Honest gaps** (the road to maturity): incommensurate / multi-k and
+helical/conical magnetism; built-in representation analysis for the magnetic
+workflow; spherical-harmonic texture; powder extinction and anomalous
+dispersion; twinning and absolute structure (single crystal); rigid bodies and
+a restraints library; Pawley extraction. These are laid out in
+[ROADMAP.md](./ROADMAP.md) and [LIMITATIONS.md](./LIMITATIONS.md).
 
 ## 4. Performance notes
 
 The mature tools are compiled (Fortran/C cores; GSAS-II wraps C/Fortran under
 NumPy/SciPy) with full-matrix solvers; their scaling story is automation and
-multi-dataset throughput rather than single-fit speed, and none publishes formal
-benchmarks. This app runs a numerical-Jacobian Levenberg-Marquardt in a Web
-Worker in pure TypeScript: fine for the reflection counts and parameter numbers
-of the examples here, but a numerical Jacobian is O(N_params × N_obs) per
-iteration — analytic derivatives and (later) WebAssembly/WebGPU are the planned
-path to competitive performance on large patterns.
+multi-dataset throughput rather than single-fit speed, and none publishes
+formal benchmarks. This app runs Levenberg-Marquardt in Web Workers in pure
+TypeScript, with reflection-windowed evaluation, dependency caching, a
+parallel-Jacobian worker pool (bit-identical to the serial driver), analytic
+columns for a validated subset of parameters, and opt-in WebGPU f32 kernels for
+the structure-factor sums — adequate for the pattern sizes shown here;
+WebAssembly is deliberately skipped (see
+[ARCHITECTURE.md](./ARCHITECTURE.md)).

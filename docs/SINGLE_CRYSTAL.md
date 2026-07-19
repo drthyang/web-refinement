@@ -189,7 +189,10 @@ What differs is only the **observable and its corrections**, isolated in
   (f′, f″; Friedel-pair splitting for absolute structure).
 - ⬜ **Full WGHT scheme** — iterative a,b reweighting on Fc² (currently σ-only in
   the solve; a,b honored in the reported wR2/GooF).
-- ⬜ **Absorption correction tool** — the major forward piece, planned in §3.
+- 🚧 **Absorption correction tool** — the pure-core spine of §3 is built and
+  validated against WinGX (μ from composition, transmission engine, habit/forms,
+  orientation, face indexing — [`core/absorption/`](../src/core/absorption/));
+  the UI and the multi-scan empirical correction remain.
 - ⬜ **Validation gate:** reproduce a published F² refinement (SHELXL/GSAS-II)
   within tolerance on a real HKL file.
 

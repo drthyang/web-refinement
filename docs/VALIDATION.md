@@ -21,7 +21,7 @@ comparison recorded here.
 > reimplement independently (no code copied), but its outputs are our correctness
 > gate and must be cited. Full bibliography in [`REFERENCES.md`](./REFERENCES.md).
 
-## Test matrix (734 passing, 48 real-data/slow tests skipped without local `data/`)
+## Test matrix (1072 passing, 59 real-data/slow tests skipped without local `data/`)
 
 | Area | Test kind | Status |
 | --- | --- | --- |

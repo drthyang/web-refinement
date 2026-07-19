@@ -110,7 +110,7 @@ powder) plus a commensurate single-k magnetic workflow — and a first agent-too
 layer over the same core. The scientific core, Levenberg–Marquardt refinement
 engine, symmetry-adapted constrained parameters, CIF parsing, a 3D
 structure/moment viewer, plots, and Web Worker compute are implemented and
-tested (**1006 passing tests**). Crystallographic and scattering foundations are
+tested (**1072 passing tests**). Crystallographic and scattering foundations are
 validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
 As with any beta, results intended for publication must be validated against
@@ -130,9 +130,10 @@ refinement** (k = 0 *and* k ≠ 0, CW and TOF, on one shared scale). Occupancy-
 disorder sites refine with tied position/ADP, a Σ(occupancy) restraint (optionally
 = 1), and an optional shared moment. Fit quality is judged with **F_obs vs F_calc
 and normal-probability plots**, not just wR. Candidate magnetic groups carry
-their standard **BNS/OG labels** (bundled ISO-MAG table). The star of k /
-multi-k, representation analysis, and refined CIF/mCIF export are the next
-milestones; see [docs/ROADMAP.md](docs/ROADMAP.md) and
+their standard **BNS/OG labels** (bundled ISO-MAG table), and refined structures
+export as CIF/mCIF with esds (k ≠ 0 writes the magnetic supercell). The star of
+k / multi-k and full representation analysis are the next milestones; see
+[docs/ROADMAP.md](docs/ROADMAP.md) and
 [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
 **Real-space PDF (pair distribution function).** A local-structure track now
@@ -141,24 +142,27 @@ G(r) fitting** (Proffen–Billinge forward model, δ1/δ2 and sratio/rcut correl
 motion, Qdamp/Qbroad envelopes, Qmax termination ripples, `spdiameter`
 nanoparticle envelope, Faber–Ziman element-pair partials), **multi-phase** and
 **multi-dataset** (temperature-series / joint X-ray+neutron) co-refinement, and
-`.gr`/`.sq`/`.fq` import (PDFgetX3 + Mantid dialects), plus **distortion-mode
-amplitude refinement** (AMPLIMODES-style: fit symmetry-adapted mode amplitudes
-instead of raw coordinates). It is cross-checked
+`.gr`/`.sq`/`.fq` import (PDFgetX3 + Mantid dialects). It is cross-checked
 against a **local PDFfit2 1.6.0** with committed CI golden fixtures — Ni and MnO
 X-ray G(r) to corr ≈ 0.9998 and refined cell recovery < 1 mÅ — plus a PDFgui
-`G_calc` golden. The nuclear track (P0–P3) and its agent slice are done;
-**magnetic PDF (mPDF)** and the symmetry-constrained local-spin model are the
-next milestones. Full plan in
+`G_calc` golden.
+
+The PDF track also carries a **symmetry-mode distortion workflow**
+(AMPLIMODES/ISODISTORT-style): refine symmetry-adapted mode **amplitudes**
+instead of raw coordinates — enumerated from the structure's own space group or
+decomposed against a parent CIF — activate a symmetry-breaking Γ mode from the
+**isotropy-subgroup tree**, or pick a target subgroup from the full
+**translationengleiche (Bärnighausen) subgroup lattice**; clicking a mode draws
+its eigenvector on the 3D model. The nuclear track (P0–P3) and its agent slice
+are done, and the **magnetic PDF (mPDF) core** is validated against
+diffpy.mpdf; the mPDF page and the symmetry-constrained local-spin model are
+the next milestones. Full plan in
 [docs/PDF_MPDF_ROADMAP.md](docs/PDF_MPDF_ROADMAP.md).
 
-The MCP tool surface has grown to **31 contract-tested tools** spanning the
+The MCP tool surface has grown to **32 contract-tested tools** spanning the
 powder, single-crystal, and PDF tracks (the PDF tools: `parse_pdf_data`,
-`build_pdf_model`, `refine_pdf`, `compute_partial_pdf`, `calibrate_qdamp`,
-plus `build_distortion_modes` for mode-amplitude fits).
-
-The agent-tools layer and the LLM-guided refinement loop (the vision above)
-are documented in [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) and ship
-incrementally with each milestone.
+`build_pdf_model`, `refine_pdf`, `compute_partial_pdf`, `calibrate_qdamp`, plus
+`build_distortion_modes` / `build_symmetry_modes` for mode-amplitude fits).
 
 ## Commands
 

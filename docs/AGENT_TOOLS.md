@@ -206,4 +206,4 @@ just execute it — all in tested pure core.
 `diagnose-fit`); add richer per-tool JSON schemas; single-crystal + magnetic
 assessment variants (in the single-crystal convention — R1/wR2/GooF, per the
 quality-panel boundary); and an in-app tool registry so the chat panel calls the
-same functions the buttons do. Tracked in [ROADMAP §7](./ROADMAP.md).
+same functions the buttons do. Tracked in [ROADMAP §5](./ROADMAP.md).

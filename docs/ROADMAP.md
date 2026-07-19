@@ -43,7 +43,7 @@ only symmetry-allowed parameters, use global search only for starting models.
 
 ## 2. Current state (honest baseline)
 
-What genuinely works today (1006 passing tests; real-data validated):
+What genuinely works today (1072 passing tests; real-data validated):
 
 - **Refinement engine** — Levenberg–Marquardt with diagonal preconditioning,
   SVD-truncated pseudo-inverse, per-cycle shift limiting, bound projection,
@@ -76,11 +76,20 @@ What genuinely works today (1006 passing tests; real-data validated):
   same engine: neutron + X-ray `G(r)` forward model and refinement (Proffen–
   Billinge sum, δ1/δ2, Qdamp/Qbroad, Qmax termination, `spdiameter`), multi-phase
   and multi-dataset co-refinement, Faber–Ziman element-pair partials,
-  `.gr`/`.sq`/`.fq` import, and five PDF agent tools — cross-checked against a
+  `.gr`/`.sq`/`.fq` import, and the PDF agent tools — cross-checked against a
   local **PDFfit2 1.6.0** / PDFgui with committed CI golden fixtures (Ni/MnO
-  X-ray `G(r)` corr ≈ 0.9998, refined cell < 1 mÅ). The full phased plan (nuclear
-  P0–P3 + agent slice done; mPDF next) lives in
+  X-ray `G(r)` corr ≈ 0.9998, refined cell < 1 mÅ). The **mPDF core** is
+  validated against diffpy.mpdf. The full phased plan (nuclear P0–P3 + agent
+  slice done; P4 mPDF core done, UI next) lives in
   [`PDF_MPDF_ROADMAP.md`](./PDF_MPDF_ROADMAP.md).
+- **Symmetry-mode distortion workflow** (PDF page) — AMPLIMODES/ISODISTORT-style
+  mode-amplitude refinement: symmetry-adapted displacement modes from the
+  structure's own space group ([`crystal/distortionModes.ts`](../src/core/crystal/distortionModes.ts))
+  or a parent-CIF decomposition; Γ isotropy-subgroup activation
+  ([`crystal/isotropyTree.ts`](../src/core/crystal/isotropyTree.ts)); the full
+  translationengleiche (Bärnighausen) subgroup lattice with conjugacy/domain
+  grouping ([`crystal/subgroupTree.ts`](../src/core/crystal/subgroupTree.ts));
+  and mode-eigenvector visualization on the 3D model.
 - **Validation** — GSAS-II golden values; the real GaNb₄Se₈ 28-ID synchrotron
   XRD regression reaches wR ≈ 36.5% (see [`archive/POWDER_ROADMAP.md`](./archive/POWDER_ROADMAP.md)).
 
@@ -366,15 +375,16 @@ agent tool it exposes.**
 
 - **Goal:** reproducible, publishable, machine-readable outputs.
 - **Exists:** versioned project JSON round-trip; agreement factors; refinement
-  history; assorted exporters.
-- **Needed:** **refined CIF / mCIF export** (cell, positions, occ, ADPs, moments
-  + esds) that external tools can read; a **report generator** (atom table,
-  geometry, plots, correlation/failure-mode summary); and a **headless scripting
-  API** mirroring `GSASIIscriptable` — which is also the substrate the agent
-  tools sit on (§5).
+  history; **refined CIF export with esds** and **mCIF export** (k ≠ 0 writes
+  the magnetic supercell) ([`export/cif.ts`](../src/core/export/cif.ts));
+  markdown **report generators**; the one-click **FullProf + GSAS-II
+  cross-check bundle** (CW + TOF `.pcr`, original data/instrument files
+  verbatim). The MCP tool registry (§5) is the headless API substrate.
+- **Needed:** single-crystal and multi-phase `.pcr` export; a fuller report
+  (geometry tables, correlation/failure-mode summary); `export_cif` /
+  `generate_report` as MCP tools.
 - **Validation gate:** CIF/mCIF round-trip; an external tool (VESTA/GSAS-II)
   reads the exported files.
-- **Tool exposed:** `export_cif(model) `, `generate_report(result)`.
 
 ### M6 — Powder microstructure & texture 🚧
 
@@ -444,23 +454,25 @@ agent tool it exposes.**
   Validated by scale + displaced-atom recovery (wR2/R1 → ~0) and format/merge
   golden cases. Design logic, units, and the fixed-on-load convention are in
   [`SINGLE_CRYSTAL.md`](./SINGLE_CRYSTAL.md).
+  The **single-crystal workbench UI** is live (load `.hkl`/`.fcf`/`.int` →
+  merge report → free parameters → refine → F_obs vs F_calc, wR2/R1, GoF, with
+  per-reflection outlier diagnostics), sharing the workbench-engine contract
+  with the powder page. The **absorption-correction core** (μ from composition,
+  transmission engine, habit/forms, orientation, face indexing) is built and
+  validated against WinGX ([`core/absorption/`](../src/core/absorption/)).
 - **Needed:**
-  - **Workflow + UI** — a single-crystal page mirroring the powder one
-    (load hkl → assign/confirm space group → merge report → free parameters →
-    refine → F_obs vs F_calc, wR2/R1, GoF), with per-reflection outlier
-    diagnostics (the core comparison already returns them).
   - **Completeness** vs a generated theoretical unique set; **twinning**
     (batch/BASF) and **anomalous dispersion** (f′/f″, absolute structure); the
     **iterative WGHT** a,b reweighting in the solve.
-  - **Absorption correction tool** — WinGX-class and beyond (μ from composition,
-    face-indexed Gaussian-grid analytical, spherical/cylindrical closed forms,
-    multi-scan spherical-harmonic empirical driven by R_int). Full forward plan
-    in [`SINGLE_CRYSTAL.md`](./SINGLE_CRYSTAL.md) §3.
+  - **Absorption UI + agent tool** over the validated core (multi-scan
+    spherical-harmonic empirical correction still to build). Forward plan in
+    [`SINGLE_CRYSTAL.md`](./SINGLE_CRYSTAL.md) §3.
 - **Validation gate:** reproduce a published single-crystal refinement (F²
   wR2 / R1) within tolerance; cross-check against SHELXL / GSAS-II on the same
   hkl file.
-- **Tool exposed:** `load_hkl(file)` (✅ parser), `refine_single_crystal(model, hkl)`
-  (✅ core), `correct_absorption(reflections, options)` (planned, §3).
+- **Tool exposed:** `parse_single_crystal_data` / `write_single_crystal_data`
+  (✅), `refine_single_crystal` via the core (✅);
+  `correct_absorption(reflections, options)` planned over the finished core.
 
 *M6 and M7 are extensions of the atomic→magnetic spine (M1–M5), not gates on it:
 both reuse the same engine, symmetry, and scattering core, so they can be built

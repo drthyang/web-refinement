@@ -2,20 +2,20 @@
 
 **Project:** MATERIA Workbench — a browser-native refinement workbench for
 atomic and magnetic structures.
-**Date:** 2026-07-11
 **Stack:** React 18 · TypeScript 5 (strict) · Vite 5 · Vitest · Web Workers.
-**Status:** Working static app; **656 tests passing** (53 real-data/slow tests
-skip without local `data/`); atomic **and magnetic**
-single-crystal + powder refinement, multi-phase, Le Bail extraction, and in-app
-magnetic space-group candidate generation & comparison; validated against the
-bundled GSAS-II refinements in `data/` (30 K / 200 K / 350 K).
+**Status (2026-07-19):** working static app; **1072 tests passing** (59
+real-data/slow tests skip without local `data/`); atomic **and magnetic**
+single-crystal + powder refinement, multi-phase, Le Bail extraction, magnetic
+space-group candidate generation & comparison, and a real-space PDF track;
+validated against the bundled GSAS-II refinements in `data/`
+(30 K / 200 K / 350 K) and a local PDFfit2/PDFgui.
 
-> **Update (maturity pass):** added multi-phase powder, Le Bail extraction,
-> anisotropic ADPs, March-Dollase preferred orientation, TOF/instrument support,
-> magnetic powder refinement, and grouped constraints; benchmarked against
-> GSAS-II / Jana2020 / FullProf ([COMPARISON.md](./COMPARISON.md)); remaining
-> maturity work is tracked in [ROADMAP.md](./ROADMAP.md). Earlier
-> magnetic work is in §3.
+> **How to read this document:** §1–5 are the **historical validation record**
+> from the first build passes — the golden-value comparisons there remain the
+> foundation tests and still pass, but the "not yet" statements describe the
+> state *at that time*. For current status see the [README](../README.md),
+> [ROADMAP.md](./ROADMAP.md), and [LIMITATIONS.md](./LIMITATIONS.md); §6 lists
+> what has landed since.
 
 ---
 
@@ -50,7 +50,7 @@ in `src/core/**` is pure, framework-free TypeScript.
 npm install     # deps
 npm run dev      # dev server (localhost:5173/web-refinement/)
 npm run build    # tsc -b && vite build → dist/ (worker bundled separately)
-npm run test     # vitest — 66 tests
+npm run test     # vitest (see §5 for the current counts)
 ```
 
 ---
@@ -154,11 +154,11 @@ in the app UI, README, and limitations doc.
 
 ---
 
-## 5. Test summary
+## 5. Test summary (current: 2026-07-19)
 
 ```
-Test Files  101 passed | 9 skipped (110)
-Tests       656 passed | 53 skipped (709)
+Test Files  153 passed | 9 skipped (162)
+Tests       1072 passed | 59 skipped (1131)
 ```
 
 Covering: linear algebra, unit-cell/metric/volume (GSAS golden), symmetry
@@ -169,14 +169,17 @@ crystal & powder workflow refinement, project round-trip, and plot math.
 
 ---
 
-## 6. Suggested next steps
+## 6. What has landed since (and what remains)
 
-Since this report was first written, magnetic powder refinement, the TOF
-back-to-back-exponential profile (the two-phase Mn₃Ga/MnO demo converges at
-wR ≈ 3.9 %), and one-click FullProf / GSAS-II cross-check export have all
-landed. Remaining:
+Since this report was first written: magnetic powder refinement (k = 0 and
+k ≠ 0), the TOF back-to-back-exponential profile (the two-phase Mn₃Ga/MnO demo
+converges at wR ≈ 3.9 %), the single-crystal F² workbench, refined CIF/mCIF
+export with esds, one-click FullProf / GSAS-II cross-check export, opt-in
+WebGPU structure-factor kernels, the real-space PDF track (PDFfit2-validated,
+with the symmetry-mode distortion workflow), a validated mPDF core, and the
+32-tool MCP agent layer. Remaining highlights (full ordering in
+[ROADMAP.md](./ROADMAP.md)):
 
 1. Single-crystal-mode and multi-phase FullProf `.pcr` export (powder is done).
 2. Representation analysis and the star of k / multi-k magnetic workflow.
-3. Parameter grouping and refinement presets (Phase 8 remainder).
-4. WebGPU acceleration for structure-factor summation once coverage is broader.
+3. The mPDF page and the symmetry-constrained local-spin model (PDF roadmap P5).
