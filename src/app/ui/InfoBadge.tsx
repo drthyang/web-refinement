@@ -3,9 +3,17 @@
  * the quiet way to keep explanatory prose off the resting layout. Extracted from
  * the summary cards so every panel (magnetic page, plot toolbars, …) shares one
  * look for inline help.
+ *
+ * The tooltip is `position: fixed` and placed from the badge's viewport rect:
+ * absolutely-positioned tips get clipped by any `overflow: auto/hidden`
+ * ancestor (the parameter panel's scrolling group list cut them off), while a
+ * fixed tip's containing block is the viewport — nothing in the app introduces
+ * a transform/filter ancestor that would re-capture it. First open renders the
+ * tip hidden for one layout pass to measure its real size, then clamps it
+ * inside the viewport and flips above the badge when there is no room below.
  */
 
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { color } from "@/app/theme";
 
 export function InfoBadge({
@@ -21,8 +29,27 @@ export function InfoBadge({
   align?: "left" | "right";
 }): JSX.Element {
   const [open, setOpen] = useState(false);
+  // Viewport coords for the tip; null = the hidden measuring pass.
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const anchorRef = useRef<HTMLSpanElement | null>(null);
+  const tipRef = useRef<HTMLSpanElement | null>(null);
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const a = anchorRef.current?.getBoundingClientRect();
+    const t = tipRef.current?.getBoundingClientRect();
+    if (!a || !t) return;
+    let left = align === "right" ? a.right + 2 - t.width : a.left - 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - t.width - 8));
+    let top = a.bottom + 7;
+    if (top + t.height > window.innerHeight - 8) top = Math.max(8, a.top - 7 - t.height);
+    setPos({ left, top });
+  }, [open, align, width]);
   return (
     <span
+      ref={anchorRef}
       style={{ position: "relative", display: "inline-flex" }}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
@@ -38,7 +65,11 @@ export function InfoBadge({
         ?
       </span>
       {open && (
-        <span role="tooltip" style={{ ...tip, width, ...(align === "right" ? { left: "auto", right: -2 } : {}) }}>
+        <span
+          role="tooltip"
+          ref={tipRef}
+          style={{ ...tip, width, ...(pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" }) }}
+        >
           {text}
         </span>
       )}
@@ -66,10 +97,8 @@ const badge: CSSProperties = {
 };
 
 const tip: CSSProperties = {
-  position: "absolute",
-  top: "calc(100% + 7px)",
-  left: -2,
-  zIndex: 60,
+  position: "fixed",
+  zIndex: 1000,
   padding: "9px 11px",
   background: color.ink,
   color: "#f4efe6",
