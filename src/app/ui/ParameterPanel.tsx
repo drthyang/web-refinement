@@ -10,6 +10,7 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { ParameterKind, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import { card, color, mono, primaryButton, secondaryButton, uppercaseLabel } from "@/app/theme";
+import { InfoBadge } from "@/app/ui/InfoBadge";
 
 const CATEGORY: Record<ParameterKind, string> = {
   scale: "Scale",
@@ -118,9 +119,23 @@ interface Props {
    * header when the group is expanded — where the parameters they govern live.
    */
   readonly groupControls?: Partial<Record<string, ReactNode>> | undefined;
+  /**
+   * Per-group explanatory prose (keyed by group name). Shown as a quiet "?"
+   * InfoBadge next to the group name — reveal-on-hover, so the physics stays off
+   * the resting layout instead of crowding every row. For descriptions, not
+   * controls (those go in `groupControls`).
+   */
+  readonly groupInfo?: Partial<Record<string, ReactNode>> | undefined;
+  /**
+   * Framework-level controls that switch the parameter set ITSELF (e.g. the
+   * atomic ↔ irrep-mode position parameterization). Rendered as a strip
+   * directly under the action bar — always visible, panel-wide — because such a
+   * switch reshapes the whole refinement, unlike the per-group `groupControls`.
+   */
+  readonly frameworkControls?: ReactNode;
 }
 
-export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, thoroughMode = "prefit", prefitTitle, onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls }: Props): JSX.Element {
+export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, thoroughMode = "prefit", prefitTitle, onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls, groupInfo, frameworkControls }: Props): JSX.Element {
   const groups = useMemo(() => {
     const byGroup = new Map<string, RefinementParameter[]>();
     for (const p of params) {
@@ -191,6 +206,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
         )}
         {extraActions}
       </div>
+      {frameworkControls && <div style={frameworkBar}>{frameworkControls}</div>}
       <div style={{ ...colHeader }}>
         <span>Parameter</span>
         <span>Value</span>
@@ -207,6 +223,12 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
               <div style={groupHeader} onClick={() => setOpen((o) => ({ ...o, [g.name]: !o[g.name] }))}>
                 <span style={{ color: color.primary, fontSize: 10 }}>{open[g.name] ? "▾" : "▸"}</span>
                 <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>{g.name}</span>
+                {groupInfo?.[g.name] && (
+                  // Clicking the badge must not toggle the group open/closed.
+                  <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
+                    <InfoBadge text={groupInfo[g.name]} width={272} align="right" />
+                  </span>
+                )}
                 <span style={{ fontFamily: mono, fontSize: 10.5, color: color.faint }}>{groupFree}/{togglable.length} free</span>
                 <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: color.faint }} onClick={(e) => e.stopPropagation()}>
                   <input type="checkbox" checked={allFree} disabled={disabled || togglable.length === 0} onChange={(e) => setGroupFree(g.rows, e.target.checked)} style={{ accentColor: color.primary }} />
@@ -317,6 +339,7 @@ const groupControlRow: CSSProperties = { display: "flex", alignItems: "center", 
 const valueInput: CSSProperties = { width: 88, border: `1px solid ${color.input}`, borderRadius: 7, fontSize: 12, fontFamily: mono, padding: "2px 6px", background: "#fff" };
 const pill: CSSProperties = { fontSize: 11, padding: "1px 8px", borderRadius: 999, textAlign: "center", justifySelf: "start" };
 const actionBar: CSSProperties = { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 14px", borderBottom: `1px solid ${color.border}`, background: color.muted2 };
+const frameworkBar: CSSProperties = { display: "flex", alignItems: "center", gap: 10, rowGap: 6, flexWrap: "wrap", padding: "8px 14px", borderBottom: `1px solid ${color.border}`, fontSize: 12, color: color.secondary };
 const footer: CSSProperties = { borderTop: `1px solid ${color.border}`, padding: "12px 14px", background: color.muted2, display: "flex", flexDirection: "column", gap: 8 };
 const banner: CSSProperties = { borderRadius: 8, padding: "6px 10px", fontSize: 12 };
 const hcell: CSSProperties = { padding: "1px 10px 1px 0", textAlign: "left", color: color.faint };

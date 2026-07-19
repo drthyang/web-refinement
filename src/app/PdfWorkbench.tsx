@@ -1001,9 +1001,9 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           result={result}
           title="PDF parameters"
           extraActions={refineActions}
-          groupControls={{
-            // Each PDF group is a distinct physical effect — spell it out under
-            // the header so they read as independent knobs, not one "PDF" blob.
+          groupInfo={{
+            // Each PDF group is a distinct physical effect — the "?" badge spells
+            // it out on hover so the physics stays off the resting parameter rows.
             Instrument: (
               <span>
                 Instrument Q-space resolution: <b>Qdamp</b> damps G(r) by a Gaussian
@@ -1026,49 +1026,53 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                 by hand before freeing it (it cannot climb up from 0).
               </span>
             ),
-            ...(multiPhase || !symModes || (symModes.modes.length === 0 && !modes)
-              ? {}
-              : {
-                  Positions: (
-                    <>
-                      <SegmentedToggle
-                        options={[
-                          {
-                            id: "atomic",
-                            label: "Constrained atomic",
-                            title: "Per-coordinate symmetry-allowed shifts — one row per free coordinate of each site",
-                          },
-                          {
-                            id: "irreps",
-                            label: "Irreps (modes)",
-                            title:
-                              "Symmetry-adapted distortion-mode amplitudes (whole-cell Å) computed from the structure's own space group — no parent CIF needed. Modes seed at 0 and enter fixed; free the ones you want active. The unobservable rigid-translation (acoustic) combinations are excluded, so freeing every mode stays well-posed.",
-                          },
-                        ]}
-                        value={positionMode}
-                        // Guard the input side of the mid-refine race too: a
-                        // flip while the worker runs would swap the spec under
-                        // the in-flight result (which the staleness check in
-                        // runRefine would then discard — better not to invite it).
-                        onChange={(id) => {
-                          if (!busy) setPositionMode(id);
-                        }}
-                      />
-                      {positionMode === "irreps" && modeSet && (
-                        <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
-                          {modes
-                            ? `vs ${modes.parentName}`
-                            : `from ${structure.spaceGroup.hermannMauguin ?? "own space group"}`}
-                          {` · ${modeSet.modes.length} mode${modeSet.modes.length === 1 ? "" : "s"}`}
-                          {(modeSet.acousticExcluded ?? 0) > 0
-                            ? ` · ${modeSet.acousticExcluded} acoustic (translation) excluded`
-                            : ""}
-                        </span>
-                      )}
-                    </>
-                  ),
-                }),
-            }}
+          }}
+          // The atomic ↔ irreps switch reshapes the whole parameter set (the
+          // Positions group swaps per-coordinate rows for whole-cell mode
+          // amplitudes), so it lives at panel level, not inside one group.
+          frameworkControls={
+            multiPhase || !symModes || (symModes.modes.length === 0 && !modes)
+              ? undefined
+              : (
+                  <>
+                    <span style={uppercaseLabel}>Parameterization</span>
+                    <SegmentedToggle
+                      options={[
+                        {
+                          id: "atomic",
+                          label: "Constrained atomic",
+                          title: "Per-coordinate symmetry-allowed shifts — one row per free coordinate of each site",
+                        },
+                        {
+                          id: "irreps",
+                          label: "Irreps (modes)",
+                          title:
+                            "Symmetry-adapted distortion-mode amplitudes (whole-cell Å) computed from the structure's own space group — no parent CIF needed. Modes seed at 0 and enter fixed; free the ones you want active. The unobservable rigid-translation (acoustic) combinations are excluded, so freeing every mode stays well-posed.",
+                        },
+                      ]}
+                      value={positionMode}
+                      // Guard the input side of the mid-refine race too: a
+                      // flip while the worker runs would swap the spec under
+                      // the in-flight result (which the staleness check in
+                      // runRefine would then discard — better not to invite it).
+                      onChange={(id) => {
+                        if (!busy) setPositionMode(id);
+                      }}
+                    />
+                    {positionMode === "irreps" && modeSet && (
+                      <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
+                        {modes
+                          ? `vs ${modes.parentName}`
+                          : `from ${structure.spaceGroup.hermannMauguin ?? "own space group"}`}
+                        {` · ${modeSet.modes.length} mode${modeSet.modes.length === 1 ? "" : "s"}`}
+                        {(modeSet.acousticExcluded ?? 0) > 0
+                          ? ` · ${modeSet.acousticExcluded} acoustic (translation) excluded`
+                          : ""}
+                      </span>
+                    )}
+                  </>
+                )
+          }
         />
       </div>
     </>
