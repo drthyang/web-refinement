@@ -56,6 +56,20 @@ Web resources accessed **2026-07-08**.
   The 5d W–Ir magnetic form factors — **not imported**. Cite only if/when those
   ions are added to the table.
 
+- **Segal, N., Subramanian, A., Li, M., Miller, B. K. & Gómez-Bombarelli, R.
+  (2026).** "The loss landscape of powder X-ray diffraction-based structure
+  optimization is too rough for gradient descent." *Digital Discovery* **5**,
+  1590–1599. doi:[10.1039/D6DD00017G](https://doi.org/10.1039/D6DD00017G) ·
+  arXiv:[2512.04036](https://arxiv.org/abs/2512.04036). Maps the loss landscape of
+  the *inverse* (diffraction → structure) problem: whole-pattern similarity
+  metrics (cosine / MSE / entropy) are too non-convex for gradient descent,
+  projecting onto the ground-truth crystal family markedly improves recovery, and
+  a universal-interatomic-potential energy landscape is a smooth complement.
+  **Not implemented** — it grounds the loss-landscape discussion in
+  [`../knowledge/refinement_fitting_algorithms_knowledge.md`](../knowledge/refinement_fitting_algorithms_knowledge.md)
+  §16, and motivates future symmetry-aware / energy-guided directions. Cite
+  if/when an inverse solver or MLIP-energy restraint is added.
+
 ## Physics formulas implemented (each tied to code)
 
 - **Neutron magnetic scattering length** p = γ_n·r_e/2 = 2.695 fm/μ_B, and the

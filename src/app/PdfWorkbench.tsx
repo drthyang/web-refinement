@@ -35,9 +35,15 @@ import {
   identifySubgroup,
   subgroupTypeKey,
   activateDisplacementMode,
+  realizeSubgroup,
   type DisplacementField,
   type SubgroupIdentity,
 } from "@/core/crystal/isotropyTree";
+import {
+  structuralSubgroupLattice,
+  subgroupClassRepresentatives,
+  type SubgroupNode,
+} from "@/core/crystal/subgroupTree";
 import { parseCif } from "@/parsers/cif";
 import { applyParameters } from "@/core/workflow/apply";
 
@@ -177,7 +183,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // Live calculated curve streamed from the worker during a refinement.
   const [live, setLive] = useState<number[] | null>(null);
   // Plot-card view: the fit, or the refined 3D structure (per phase).
-  const [viewTab, setViewTab] = useState<"fit" | "model3d">("fit");
+  const [viewTab, setViewTab] = useState<"fit" | "model3d" | "subgroups">("fit");
   const [viewPhase, setViewPhase] = useState(0);
   const [focusFitToken, setFocusFitToken] = useState(0);
   // Spec-swap reset, with FIT PRESERVATION across a position-parameterization
@@ -437,6 +443,55 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     return { dec, terms };
   }, [multiPhase, viewTab, structure, modes]);
 
+  // ---- Structural subgroup lattice (the "Subgroups" page) ------------------
+  // The full translationengleiche group–subgroup tree of the loaded space group
+  // (every t-subgroup named, with covering/Bärnighausen edges and conjugacy
+  // grouping) — the "search for subgroups" step: pick a target subgroup and
+  // activate the distortion modes it permits. Computed only when the Subgroups
+  // tab is visible; single-phase. Independent of `modes` (it is the parent's
+  // lattice, unchanged by an active distortion).
+  const subgroupLattice = useMemo(
+    () => (multiPhase || viewTab !== "subgroups" ? null : structuralSubgroupLattice(structure)),
+    [multiPhase, viewTab, structure],
+  );
+  const subgroupLevels = useMemo(() => {
+    if (!subgroupLattice) return [];
+    const reps = subgroupClassRepresentatives(subgroupLattice);
+    const byIndex = new Map<number, SubgroupNode[]>();
+    for (const n of reps) {
+      const list = byIndex.get(n.index);
+      if (list) list.push(n);
+      else byIndex.set(n.index, [n]);
+    }
+    return [...byIndex.entries()].sort((a, b) => a[0] - b[0]).map(([index, nodes]) => ({ index, nodes }));
+  }, [subgroupLattice]);
+
+  // Activate a chosen SUBGROUP (subgroup-driven, the inverse of the irrep-driven
+  // path): realize the child (split Wyckoff orbits) from the current refined
+  // geometry, then load the full symmetry-allowed displacement catalog of that
+  // child — every Γ distortion the subgroup permits — as amplitudes seeded at 0
+  // and fixed. The user frees the ones to refine (a polar mode needs a nudge off
+  // its χ² stationary point — Prefit escapes it).
+  function onActivateSubgroup(node: SubgroupNode): void {
+    const name = node.identity.hermannMauguin ?? node.identity.pointGroup ?? "subgroup";
+    const label = node.identity.number !== undefined ? `${name} #${node.identity.number}` : `${name} (index ${node.index})`;
+    const values: Record<string, number> = {};
+    for (const p of paramsRef.current) values[p.id] = p.value;
+    const refined = applyParameters(fitStructure, spec.bindings, values).model;
+    const child = realizeSubgroup(refined, node.operations, node.identity);
+    const set = buildSymmetryModes(child);
+    if (set.modes.length === 0) {
+      console.error(`[status] ${label}: this subgroup leaves every site symmetry-pinned — no refinable distortion modes`);
+      return;
+    }
+    skipPositionCarryoverOnce.current = true; // fresh child setting — carry nothing
+    setModes({ set, parentName: label, fromActivation: true });
+    setPositionMode("irreps");
+    console.info(
+      `[status] lowered to ${label}: ${child.sites.length} child site(s) · ${set.modes.length} distortion mode(s) — free the rows to refine (Positions group)`,
+    );
+  }
+
   // Activate one symmetry-breaking mode: realize the isotropy-subgroup child
   // (split Wyckoff orbits — parent ops would re-symmetrize the displacement
   // into a wrong orbit) and enter irreps mode with the activated field as the
@@ -630,7 +685,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 66vh, 900px)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
             <span style={uppercaseLabel}>
-              {viewTab === "fit" ? "PDF pattern — G(r)" : "Crystal structure — unit cell"}
+              {viewTab === "fit" ? "PDF pattern — G(r)" : viewTab === "model3d" ? "Crystal structure — unit cell" : "Group–subgroup tree"}
             </span>
             {viewTab === "fit" && (
               <span style={{ display: "flex", gap: 14, fontFamily: mono, fontSize: 12.5 }}>
@@ -669,6 +724,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                 options={[
                   { id: "fit", label: "Refinement", title: "Observed vs calculated G(r)" },
                   { id: "model3d", label: "3D Model", title: "3D crystal-structure model" },
+                  { id: "subgroups", label: "Subgroups", title: "Group–subgroup tree — pick a target subgroup to activate the distortion modes it permits" },
                 ] as const}
                 value={viewTab}
                 onChange={setViewTab}
@@ -695,7 +751,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                 <div style={{ marginTop: 6, fontSize: 12, color: color.warnInk }}>⚠ {motionConflict}</div>
               )}
             </>
-          ) : (
+          ) : viewTab === "model3d" ? (
             <>
               {multiPhase && (
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -852,6 +908,83 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                 {` · ${viewStructure.sites.length} site${viewStructure.sites.length === 1 ? "" : "s"} · refined values applied · drag to rotate, scroll to zoom.`}
               </p>
             </>
+          ) : (
+            <>
+              {multiPhase ? (
+                <div style={{ flex: 1, display: "grid", placeItems: "center", textAlign: "center", color: color.secondary, fontSize: 13, padding: 20 }}>
+                  Subgroup analysis is single-phase — the group–subgroup tree is built from one structure's space group.
+                </div>
+              ) : !subgroupLattice ? (
+                <div style={{ flex: 1, display: "grid", placeItems: "center", color: color.secondary, fontSize: 13 }}>
+                  No space-group operations to analyze.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+                    <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
+                      {structure.spaceGroup.hermannMauguin ?? "parent"} · {subgroupLattice.nodes.length} translationengleiche subgroups ·{" "}
+                      {subgroupLevels.reduce((s, l) => s + l.nodes.length, 0)} distinct types
+                    </span>
+                  </div>
+                  {modes?.fromActivation && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6, padding: "5px 9px", borderRadius: 6, background: "rgba(90, 130, 255, 0.08)", border: `1px solid ${color.border}`, fontSize: fz.micro }}>
+                      <span style={{ color: color.primary, fontFamily: mono }}>▼ lowered to {modes.parentName}</span>
+                      <span style={{ color: color.secondary }}>
+                        {modeSet?.modes.length ?? 0} distortion mode{(modeSet?.modes.length ?? 0) === 1 ? "" : "s"} in the Positions group — free the rows to refine
+                      </span>
+                      <button
+                        style={{ ...resetRangeBtn, marginLeft: "auto" }}
+                        onClick={() => { setModes(null); setPositionMode("atomic"); }}
+                        title="Discard the distortion and return to the parent's per-coordinate positions"
+                      >
+                        ✕ clear
+                      </button>
+                    </div>
+                  )}
+                  <div style={{ overflowY: "auto", border: `1px solid ${color.border}`, borderRadius: 6, flex: 1, minHeight: 120 }}>
+                    {subgroupLevels.map(({ index, nodes }) => (
+                      <div key={index}>
+                        <div style={{ position: "sticky", top: 0, padding: "3px 8px", background: color.subtle, borderTop: `1px solid ${color.border}`, borderBottom: `1px solid ${color.subtle2}`, fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
+                          index {index}{index === 1 ? " · parent group" : ""}
+                        </div>
+                        {nodes.map((n) => (
+                          <div key={n.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "4px 8px", borderTop: `1px solid ${color.subtle2}` }}>
+                            <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.ink, minWidth: 140 }}>
+                              {n.identity.hermannMauguin ?? n.pointGroup ?? "?"}
+                              {n.identity.hermannMauguin && n.pointGroup ? <span style={{ color: color.secondary }}> ({n.pointGroup})</span> : null}
+                              {n.identity.number !== undefined ? <span style={{ color: color.secondary }}> #{n.identity.number}</span> : null}
+                            </span>
+                            {n.domainCount > 1 && (
+                              <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }} title="symmetry-equivalent domains (conjugate subgroups of the same type)">
+                                ×{n.domainCount} domains
+                              </span>
+                            )}
+                            {n.identity.number === undefined && !n.isTrivial && (
+                              <span style={{ fontSize: fz.micro, color: color.secondary }} title="named by point group only — the origin-shifted/translation setting is not resolved yet">
+                                approx.
+                              </span>
+                            )}
+                            {!n.isParent && !n.isTrivial && (
+                              <button
+                                style={{ ...resetRangeBtn, marginLeft: "auto", ...(busy || modes !== null ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
+                                disabled={busy || modes !== null}
+                                onClick={() => onActivateSubgroup(n)}
+                                title={modes !== null ? "Clear the active distortion first" : "Lower to this subgroup: split the Wyckoff orbits and load the Γ distortion modes it permits into the Positions group as refinable amplitudes."}
+                              >
+                                Activate ↓
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                  <p style={{ marginTop: 6, marginBottom: 0, fontSize: 12, color: color.secondary }}>
+                    Translationengleiche (lattice-preserving) subgroups only. Activating one splits the Wyckoff orbits and exposes the Γ distortion modes that subgroup allows as amplitudes (all seed at 0 — a polar mode sits at a χ² stationary point, so free it and use Prefit to escape zero). Cell-multiplying (klassengleiche) subgroups arrive with the zone-boundary engine.
+                  </p>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -868,9 +1001,33 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           result={result}
           title="PDF parameters"
           extraActions={refineActions}
-          groupControls={
-            multiPhase || !symModes || (symModes.modes.length === 0 && !modes)
-              ? undefined
+          groupControls={{
+            // Each PDF group is a distinct physical effect — spell it out under
+            // the header so they read as independent knobs, not one "PDF" blob.
+            Instrument: (
+              <span>
+                Instrument Q-space resolution: <b>Qdamp</b> damps G(r) by a Gaussian
+                envelope, <b>Qbroad</b> broadens peaks ∝ r. Calibrate on a standard
+                (Ni/Si) and hold fixed — free only deliberately.
+              </span>
+            ),
+            "Correlated motion": (
+              <span>
+                Near-neighbor correlated thermal motion sharpens low-r peaks.{" "}
+                <b>δ1</b> (1/r) and <b>δ2</b> (1/r²) are the smooth laws;{" "}
+                <b>sratio/rcut</b> step-sharpens below a cutoff instead — refine one
+                family, not both.
+              </span>
+            ),
+            "Particle shape": (
+              <span>
+                Finite-size envelope for nanoparticles: the spherical-particle
+                diameter attenuates G(r) toward high r. 0 = bulk; set a starting Ø
+                by hand before freeing it (it cannot climb up from 0).
+              </span>
+            ),
+            ...(multiPhase || !symModes || (symModes.modes.length === 0 && !modes)
+              ? {}
               : {
                   Positions: (
                     <>
@@ -910,8 +1067,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                       )}
                     </>
                   ),
-                }
-          }
+                }),
+            }}
         />
       </div>
     </>

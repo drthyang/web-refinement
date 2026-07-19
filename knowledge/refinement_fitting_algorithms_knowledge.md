@@ -448,7 +448,95 @@ Never use global search as a substitute for a stable least-squares engine.
 
 ---
 
-## 16. Diagnostics to Implement
+## 16. The Loss Landscape of Structure-from-Diffraction Optimization
+
+This section is a caution about *which objective you optimize* when recovering a
+structure directly from a powder pattern, and why that choice governs whether any
+optimizer — gradient-based or global — can succeed. Two very different objectives
+appear in the literature, and they do **not** share a landscape:
+
+```text
+A. Point-by-point weighted profile residual   (what THIS engine minimizes, §1)
+     χ²(p) = Σ_i w_i [y_obs(i) - y_calc(i, p)]²
+   - compares intensities channel-by-channel over 2θ / TOF / Q
+   - analytic Jacobian available; Levenberg-Marquardt converges from a
+     good starting model
+
+B. Whole-pattern SIMILARITY metrics            (the ML "diffraction → structure"
+                                                inverse problem)
+   - negative cosine similarity, MSE on normalized patterns,
+     negative "entropy similarity"
+   - treats the pattern as a single vector/distribution and drives
+     gradient descent directly in structure space (coordinates or cell)
+```
+
+Segal et al. (2026) map the landscape of the type-B similarity metrics and show
+it is **too rough for gradient descent**: highly non-convex and riddled with
+spurious minima. The root cause is degeneracy — *high pattern similarity does not
+imply structural correctness*. Powder averaging projects to 1D and discards
+structure-factor phase, so distinct structures give nearly identical patterns
+whenever a handful of peaks happen to overlap. Plain gradient descent then slides
+into a configuration where a few peaks align (large similarity gain) while the
+structure is wrong. (They perturb either the cell or the fractional coordinates
+and try to optimize that same degree of freedom back.)
+
+Take-aways that reinforce this engine's design:
+
+```text
+1. Prefer the point-by-point weighted χ² (type A) with analytic derivatives.
+   Whole-pattern similarity (type B) is for coarse screening / ranking of
+   candidates, NOT for gradient refinement of coordinates or cell.
+
+2. A high pattern-similarity score is NOT evidence of a correct structure —
+   the same warning as §17 ("a lower Rwp does not prove the structure correct").
+   Never accept a solution on fit agreement alone; cross-check geometry,
+   symmetry, and physical plausibility.
+
+3. Even the RIGHT objective has a rough landscape. Hence, already in this doc:
+   Le Bail / profile matching first (§13), good starting models, staged
+   unlocking (§11), and global search ONLY for starting models (§15) — never as
+   the refiner.
+```
+
+**Symmetry is the strongest tamer of the landscape.** The same study shows that
+*projecting* the optimization onto the ground-truth crystal family — forcing the
+cell to obey the family's constraints at every step (e.g. a cubic projector that
+replaces a, b, c by their mean and pins all angles to 90°) — markedly improves
+recovery and raises the correlation between true structural similarity and pattern
+similarity. This is the identical principle used elsewhere here:
+
+```text
+- constrain to the correct crystal family / space-group cell (§9): do not refine
+  six free cell parameters when symmetry allows one or two;
+- refine symmetry-mode amplitudes, not free per-atom coordinates or moments
+  (§14 and the magnetic doc): a low-dimensional, symmetry-adapted basis removes
+  most of the spurious minima before the optimizer ever sees them.
+
+Residual non-convexity can persist ALONG symmetry-allowed directions even after
+projection — so symmetry constraints REDUCE, but do not eliminate, the need for
+multi-start / careful staging.
+```
+
+**Energy is a smooth complement.** For the *same* perturbations, the interatomic
+potential-energy landscape (evaluated with a universal ML interatomic potential)
+is smooth and locally convex, and energy relaxation recovers the ground truth
+where similarity-driven optimization fails. Practical implication:
+
+```text
+- Use an energy / geometry prior as a SMOOTH regularizer or final polish, not as
+  the primary fit target: bond-length / bond-angle restraints (§10) already do a
+  weak version of this; an MLIP-energy restraint is a natural future extension.
+- A robust structure-solution pipeline is multi-objective: symmetry-aware,
+  diffraction-driven candidate generation, with final refinement guided by BOTH
+  the profile χ² and an energy / geometry prior.
+```
+
+Source: Segal, Subramanian, Li, Miller & Gómez-Bombarelli, *Digital Discovery*
+**5**, 1590 (2026), doi:10.1039/D6DD00017G (arXiv:2512.04036). See §23.
+
+---
+
+## 17. Diagnostics to Implement
 
 Always report:
 
@@ -483,7 +571,7 @@ A lower Rwp does not automatically mean the structure is correct.
 
 ---
 
-## 17. Browser / WebGPU Implementation Notes
+## 18. Browser / WebGPU Implementation Notes
 
 Build CPU correctness first. Then accelerate expensive vector operations.
 
@@ -511,7 +599,7 @@ Browser refinement should prioritize correctness and reproducibility over raw sp
 
 ---
 
-## 18. Acceptance Tests
+## 19. Acceptance Tests
 
 Required tests before trusting the engine:
 
@@ -547,7 +635,7 @@ Required tests before trusting the engine:
 
 ---
 
-## 19. Implementation Priority
+## 20. Implementation Priority
 
 Build in this order:
 
@@ -568,7 +656,7 @@ Build in this order:
 
 ---
 
-## 20. Non-Negotiable Design Rules
+## 21. Non-Negotiable Design Rules
 
 ```text
 Never refine all parameters by default.
@@ -582,7 +670,7 @@ Never use global search as a substitute for least-squares refinement.
 
 ---
 
-## 21. Practical Target
+## 22. Practical Target
 
 A good refinement engine should be:
 
@@ -600,3 +688,23 @@ Main architectural decision:
 Build a constrained weighted nonlinear least-squares engine first.
 Everything else should plug into that engine.
 ```
+
+---
+
+## 23. Reference sources for implementation context
+
+- The solver mechanics — Levenberg–Marquardt, diagonal (Jacobi) scaling of the
+  normal matrix, SVD truncation of near-null directions, staged parameter
+  unlocking — follow standard nonlinear-least-squares and Rietveld practice as
+  implemented in **GSAS-II** (Toby & Von Dreele 2013), **FullProf**
+  (Rodríguez-Carvajal 1993) and **Jana2020** (Petříček et al. 2023). No source is
+  copied; full provenance in [`../docs/REFERENCES.md`](../docs/REFERENCES.md).
+- **Loss landscape / inverse problem (§16)** — Segal, N., Subramanian, A., Li, M.,
+  Miller, B. K. & Gómez-Bombarelli, R. (2026). "The loss landscape of powder
+  X-ray diffraction-based structure optimization is too rough for gradient
+  descent." *Digital Discovery* **5**, 1590–1599.
+  doi:[10.1039/D6DD00017G](https://doi.org/10.1039/D6DD00017G) ·
+  arXiv:[2512.04036](https://arxiv.org/abs/2512.04036). Why gradient descent on
+  whole-pattern *similarity* metrics is unreliable, why projecting onto the
+  correct crystal family helps, and why an interatomic-potential energy landscape
+  is a smooth complement.
