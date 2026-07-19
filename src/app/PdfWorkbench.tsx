@@ -114,6 +114,12 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // The mode parameters are anchored on the parentized structure; everything
   // downstream (spec, curves, worker refine, 3D view, CIF export) uses it.
   const fitStructure = modeSet ? modeSet.parentized : structure;
+  // Mode selected in the 3D card's table: its eigenvector (unit-amplitude
+  // displacement field) is drawn as green arrows on the 3D model. Click the
+  // row to toggle; any mode-set change invalidates the selection.
+  const [shownModeId, setShownModeId] = useState<string | null>(null);
+  useEffect(() => setShownModeId(null), [modeSet]);
+  const shownMode = (shownModeId !== null ? modeSet?.modes.find((m) => m.id === shownModeId) : undefined) ?? null;
   const phases = useMemo(
     () => [{ structure: fitStructure, id: fitStructure.id }, ...extraPhases.map((s) => ({ structure: s, id: s.id }))],
     [fitStructure, extraPhases],
@@ -769,13 +775,24 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                   </span>
                 </div>
               )}
-              <Suspense fallback={<div style={{ flex: 1, minHeight: 360, display: "grid", placeItems: "center", color: color.secondary, fontSize: 13 }}>Loading 3D viewer…</div>}>
-                <div style={{ minHeight: 360 }}>
-                  <StructureView key={viewStructure.id + viewPhase} structure={viewStructure} />
-                </div>
-              </Suspense>
+              {/* The viewer and the panels below share a FIXED-height card, so
+                  both regions are explicit flex partners: the viewer flexes but
+                  never bleeds (overflow hidden), the mode/tree stack scrolls
+                  internally. Before this, the wrapper shrank to its 360 px
+                  minimum while the viewer's own chrome (toolbar, view row,
+                  legend) overflowed it — painting over the modes table. */}
+              <div style={{ flex: "1 1 auto", minHeight: 320, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                <Suspense fallback={<div style={{ flex: 1, display: "grid", placeItems: "center", color: color.secondary, fontSize: 13 }}>Loading 3D viewer…</div>}>
+                  <StructureView
+                    key={viewStructure.id + viewPhase}
+                    structure={viewStructure}
+                    minCanvasHeight={200}
+                    {...(shownMode ? { displacements: shownMode.axes } : {})}
+                  />
+                </Suspense>
+              </div>
               {!multiPhase && (
-                <div style={{ marginTop: 6 }}>
+                <div style={{ flex: "0 1 auto", minHeight: 90, maxHeight: 300, overflowY: "auto", marginTop: 6 }}>
                   {modeSet ? (
                     <>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
@@ -792,6 +809,11 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                           Å
                           {(modeSet.acousticExcluded ?? 0) > 0 ? ` · ${modeSet.acousticExcluded} acoustic excluded` : ""}
                         </span>
+                        {shownMode && (
+                          <span style={{ fontFamily: mono, fontSize: fz.micro, color: "#15803d" }}>
+                            ▸ green arrows: {shownMode.label}
+                          </span>
+                        )}
                         <button
                           style={resetRangeBtn}
                           onClick={() => {
@@ -803,7 +825,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                           ✕ clear
                         </button>
                       </div>
-                      <div style={{ maxHeight: 150, overflowY: "auto", marginTop: 4, border: `1px solid ${color.border}`, borderRadius: 6 }}>
+                      <div style={{ marginTop: 4, border: `1px solid ${color.border}`, borderRadius: 6 }}>
                         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: mono, fontSize: fz.micro }}>
                           <thead>
                             <tr style={{ color: color.secondary, textAlign: "left" }}>
@@ -817,9 +839,21 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                             {modeSet.modes.map((m, i) => {
                               const p = params.find((q) => q.id === m.id);
                               const esd = result?.esd[m.id] ?? p?.esd;
+                              const shown = m.id === shownModeId;
                               return (
-                                <tr key={m.id} style={{ borderTop: `1px solid ${color.border}`, background: i === 0 ? "rgba(90, 130, 255, 0.06)" : "transparent" }}>
-                                  <td style={{ padding: "3px 8px", color: i === 0 ? color.primary : color.ink }}>{m.label}</td>
+                                <tr
+                                  key={m.id}
+                                  onClick={() => setShownModeId(shown ? null : m.id)}
+                                  title="Click to show/hide this mode's displacement pattern in the 3D model (green arrows, unit amplitude — the eigenvector, not the refined magnitude)"
+                                  style={{
+                                    borderTop: `1px solid ${color.border}`,
+                                    cursor: "pointer",
+                                    background: shown ? "rgba(22, 163, 74, 0.1)" : i === 0 ? "rgba(90, 130, 255, 0.06)" : "transparent",
+                                  }}
+                                >
+                                  <td style={{ padding: "3px 8px", color: shown ? "#15803d" : i === 0 ? color.primary : color.ink }}>
+                                    {shown ? "▸ " : ""}{m.label}
+                                  </td>
                                   <td style={{ padding: "3px 8px", textAlign: "right" }}>{(p?.value ?? 0).toFixed(5)}</td>
                                   <td style={{ padding: "3px 8px", textAlign: "right", color: color.secondary }}>{esd !== undefined ? esd.toFixed(5) : "—"}</td>
                                   <td style={{ padding: "3px 8px", color: color.secondary }}>{p?.fixed ? "fixed" : "free"}</td>
@@ -833,6 +867,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                         {modes
                           ? "Amplitudes are whole-cell displacement norms (Å); mode 1 is the frozen distortion — its fitted amplitude is the order parameter. Free/fix rows in the parameter panel (Positions group)."
                           : "Amplitudes are whole-cell displacement norms (Å), enumerated from the structure's own space group (symmetry-conserving Γ modes; rigid-translation gauge excluded). All seed at 0 — free the rows you want active in the parameter panel (Positions group), or load a parent CIF for the observed order-parameter decomposition."}
+                        {" Click a row to draw the mode's eigenvector on the 3D model (green arrows)."}
                       </p>
                     </>
                   ) : (
@@ -868,7 +903,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                           {subgroupTree.terms.length} symmetry-breaking irrep{subgroupTree.terms.length === 1 ? "" : "s"}
                         </span>
                       </div>
-                      <div style={{ maxHeight: 180, overflowY: "auto", marginTop: 4, border: `1px solid ${color.border}`, borderRadius: 6 }}>
+                      <div style={{ marginTop: 4, border: `1px solid ${color.border}`, borderRadius: 6 }}>
                         {subgroupTree.terms.map(({ term, subgroups }) => {
                           const dim = term.irrep.dim ?? 1;
                           const optic = term.multiplicity - term.acoustic;

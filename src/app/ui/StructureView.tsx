@@ -112,6 +112,8 @@ export function StructureView({
   propagation,
   magneticOperations,
   standardCell,
+  displacements,
+  minCanvasHeight = 360,
 }: {
   structure: StructureModel;
   /** Magnetic moment entries to overlay as arrows (one per site — or per split
@@ -128,6 +130,17 @@ export function StructureView({
    *  BNS identification needed a basis transformation) — drawn as an amber
    *  wireframe over the parent cell, toggleable. */
   standardCell?: StandardCellOverlay;
+  /**
+   * Per-site FRACTIONAL displacement field to overlay as green arrows — a
+   * distortion-mode eigenvector (`DistortionMode.axes`). Displacements are
+   * POLAR vectors: each symmetry copy's arrow is the site vector rotated by
+   * its placing operation, d′ = R·d (no det(R), no time reversal — unlike
+   * moments). Arrow lengths are relative (the pattern, not the amplitude).
+   */
+  displacements?: readonly { readonly siteLabel: string; readonly axis: Vec3 }[];
+  /** Canvas minimum height (px) — hosts that stack panels below the viewer in
+   *  a fixed-height card pass a smaller value so the layout can settle. */
+  minCanvasHeight?: number;
 }): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [showBondLengths, setShowBondLengths] = useState(false);
@@ -379,6 +392,37 @@ export function StructureView({
       }
     }
 
+    // Distortion-mode displacement arrows (polar vectors, green): the site's
+    // fractional eigenvector rotated by each copy's placing operation
+    // (d′ = R·d — no det/θ, displacements are polar, unlike moments), then
+    // fractional → Cartesian (a pure linear map, so valid for vectors).
+    // Tails sit ON the atoms: the arrow points where the mode moves the atom.
+    if (displacements && displacements.length > 0) {
+      const bySite = new Map(displacements.map((d) => [d.siteLabel, d.axis]));
+      let maxLen = 0;
+      for (const [, ax] of bySite) {
+        const c = fractionalToCartesian(structure.cell, ax);
+        maxLen = Math.max(maxLen, Math.hypot(c[0]!, c[1]!, c[2]!));
+      }
+      const unit = maxLen > 1e-9 ? (span * 0.34) / maxLen : 0;
+      for (const at of atoms) {
+        const ax = unit > 0 ? bySite.get(at.label) : undefined;
+        if (!ax) continue;
+        const df: Vec3 = [
+          at.rot[0]![0]! * ax[0]! + at.rot[0]![1]! * ax[1]! + at.rot[0]![2]! * ax[2]!,
+          at.rot[1]![0]! * ax[0]! + at.rot[1]![1]! * ax[1]! + at.rot[1]![2]! * ax[2]!,
+          at.rot[2]![0]! * ax[0]! + at.rot[2]![1]! * ax[1]! + at.rot[2]![2]! * ax[2]!,
+        ];
+        const cart = fractionalToCartesian(structure.cell, df);
+        const len = Math.hypot(cart[0]!, cart[1]!, cart[2]!);
+        if (len < 1e-9) continue;
+        const dir = new THREE.Vector3(cart[0]! / len, cart[1]! / len, cart[2]! / len);
+        const L = len * unit;
+        const start = new THREE.Vector3(at.xyz[0], at.xyz[1], at.xyz[2]);
+        scene.add(new THREE.ArrowHelper(dir, start, L, 0x16a34a, L * 0.3, L * 0.18));
+      }
+    }
+
     // Bonds — cylinders between atoms within 1.15×(sum of covalent radii).
     // Collect the pairs first so optional length labels reuse the same geometry.
     if (atoms.length <= 1600) {
@@ -537,7 +581,7 @@ export function StructureView({
     // lightLevel and finish are intentionally NOT dependencies: their knobs
     // mutate the live lights/materials below without rebuilding the scene.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [atoms, corners, center, span, showBondLengths, showAtomLabels, perspective, showAxes, structure, moments, propagation, standardCell, showParentCell, showStandardCell, cellView]);
+  }, [atoms, corners, center, span, showBondLengths, showAtomLabels, perspective, showAxes, structure, moments, propagation, standardCell, showParentCell, showStandardCell, cellView, displacements]);
 
   // Light knob → in-place intensity update (the rAF loop shows it next frame).
   useEffect(() => {
@@ -623,7 +667,7 @@ export function StructureView({
           </span>
         )}
       </div>
-      <div ref={mountRef} style={{ width: "100%", flex: 1, minHeight: 360, cursor: "grab", borderRadius: 10, overflow: "hidden" }} />
+      <div ref={mountRef} style={{ width: "100%", flex: 1, minHeight: minCanvasHeight, cursor: "grab", borderRadius: 10, overflow: "hidden" }} />
       {/* View presets (bottom-right, above the legend): look straight down an axis. */}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6, fontSize: 12, fontFamily: themeMono, color: theme.secondary }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 9px", borderRadius: 8, background: theme.chipBg }} title="Look straight down a crystallographic axis (keeps your zoom)">
