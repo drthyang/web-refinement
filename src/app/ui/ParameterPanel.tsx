@@ -52,16 +52,22 @@ const CATEGORY: Record<ParameterKind, string> = {
   momentY: "Magnetic",
   momentZ: "Magnetic",
   momentMode: "Magnetic",
-  // Real-space PDF fit: the G(r) scale joins "Scale"; the Qdamp/Qbroad envelope
-  // and δ1/δ2 correlated-motion sharpening get their own group.
+  // Real-space PDF fit: the G(r) scale joins "Scale"; the remaining PDF terms
+  // split by PHYSICS — they are independent effects that happen to share a page,
+  // so they get separate groups rather than one catch-all "PDF" bucket:
+  //   · instrument Q-resolution envelope (Qdamp/Qbroad) — calibrated, held fixed;
+  //   · near-neighbor correlated motion (δ1/δ2, or sratio/rcut) — sharpens low-r;
+  //   · finite-particle shape envelope (spdiameter) — nanoparticle size.
+  // "Instrument" only ever co-exists with the powder "Instrument / profile" in
+  // CATEGORY, never on one page — qdamp/qbroad appear only in PDF specs.
   pdfScale: "Scale",
-  qdamp: "PDF",
-  qbroad: "PDF",
-  delta1: "PDF",
-  delta2: "PDF",
-  spdiameter: "PDF",
-  sratio: "PDF",
-  rcut: "PDF",
+  qdamp: "Instrument",
+  qbroad: "Instrument",
+  delta1: "Correlated motion",
+  delta2: "Correlated motion",
+  sratio: "Correlated motion",
+  rcut: "Correlated motion",
+  spdiameter: "Particle shape",
   // Magnetic PDF (mPDF) scales/widths join the magnetic group with the moments.
   mpdfOrdScale: "Magnetic",
   mpdfParaScale: "Magnetic",
@@ -69,7 +75,7 @@ const CATEGORY: Record<ParameterKind, string> = {
   corrLength: "Magnetic",
 };
 
-const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "PDF", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic"];
+const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "Instrument", "Correlated motion", "Particle shape", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic"];
 
 /** difC/difA/difB come from instrument calibration — shown but not togglable. */
 const isLocked = (p: RefinementParameter): boolean => p.kind === "tofCalibration";

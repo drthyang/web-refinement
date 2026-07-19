@@ -1001,9 +1001,33 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           result={result}
           title="PDF parameters"
           extraActions={refineActions}
-          groupControls={
-            multiPhase || !symModes || (symModes.modes.length === 0 && !modes)
-              ? undefined
+          groupControls={{
+            // Each PDF group is a distinct physical effect — spell it out under
+            // the header so they read as independent knobs, not one "PDF" blob.
+            Instrument: (
+              <span>
+                Instrument Q-space resolution: <b>Qdamp</b> damps G(r) by a Gaussian
+                envelope, <b>Qbroad</b> broadens peaks ∝ r. Calibrate on a standard
+                (Ni/Si) and hold fixed — free only deliberately.
+              </span>
+            ),
+            "Correlated motion": (
+              <span>
+                Near-neighbor correlated thermal motion sharpens low-r peaks.{" "}
+                <b>δ1</b> (1/r) and <b>δ2</b> (1/r²) are the smooth laws;{" "}
+                <b>sratio/rcut</b> step-sharpens below a cutoff instead — refine one
+                family, not both.
+              </span>
+            ),
+            "Particle shape": (
+              <span>
+                Finite-size envelope for nanoparticles: the spherical-particle
+                diameter attenuates G(r) toward high r. 0 = bulk; set a starting Ø
+                by hand before freeing it (it cannot climb up from 0).
+              </span>
+            ),
+            ...(multiPhase || !symModes || (symModes.modes.length === 0 && !modes)
+              ? {}
               : {
                   Positions: (
                     <>
@@ -1043,8 +1067,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                       )}
                     </>
                   ),
-                }
-          }
+                }),
+            }}
         />
       </div>
     </>
