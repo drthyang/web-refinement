@@ -157,6 +157,104 @@ describe("ensemble sampler — measure correctness (gate f)", () => {
   });
 });
 
+describe("ensemble sampler — provenance-matched likelihoods", () => {
+  it("poisson: recovers the exact Gamma posterior for a scale on raw counts", () => {
+    // s·t_i counts with a flat prior: p(s|y) = Gamma(Σy+1, Σt) exactly —
+    // mean (Σy+1)/Σt, std √(Σy+1)/Σt. Deterministic pseudo-counts (rounded
+    // rates with a fixed ± pattern) keep the test reproducible; the analytic
+    // posterior formula holds for WHATEVER counts are supplied.
+    const n = 40;
+    const sTrue = 1.7;
+    const template = Array.from({ length: n }, (_, i) => 20 + 3 * i);
+    const yObs = new Float64Array(n);
+    let sumY = 0;
+    let sumT = 0;
+    for (let i = 0; i < n; i++) {
+      const y = Math.round(sTrue * template[i]!) + (i % 3 === 0 ? 4 : i % 3 === 1 ? -3 : 0);
+      yObs[i] = y;
+      sumY += y;
+      sumT += template[i]!;
+    }
+    const exactMean = (sumY + 1) / sumT;
+    const exactStd = Math.sqrt(sumY + 1) / sumT;
+
+    const problem: RefinementProblem = {
+      parameters: [param("s", exactMean, { min: 0.1, max: 10 })],
+      observations: yObs,
+      weights: new Float64Array(n).fill(1),
+      calculate: (values) => {
+        const out = new Float64Array(n);
+        for (let i = 0; i < n; i++) out[i] = values["s"]! * template[i]!;
+        return out;
+      },
+    };
+    const result = samplePosterior(problem, {
+      nSteps: 3000,
+      nWalkers: 24,
+      burnIn: 800,
+      seed: 314,
+      noiseModel: "poisson",
+    });
+    const p = result.posterior.parameters[0]!;
+    expect(Math.abs(p.mean - exactMean)).toBeLessThan(0.1 * exactStd);
+    expect(Math.abs(p.std - exactStd) / exactStd).toBeLessThan(0.15);
+  });
+
+  it("poisson: a non-positive modeled rate at a contributing point is impossible (−∞)", () => {
+    const n = 8;
+    const problem: RefinementProblem = {
+      parameters: [param("s", 0.5, { min: -2, max: 2 })],
+      observations: new Float64Array(n).fill(3),
+      weights: new Float64Array(n).fill(1),
+      // Rates go non-positive for s ≤ 0 — those walkers must always reject.
+      calculate: (values) => new Float64Array(n).fill(values["s"]!),
+    };
+    const result = samplePosterior(problem, {
+      nSteps: 400,
+      nWalkers: 12,
+      burnIn: 100,
+      seed: 11,
+      noiseModel: "poisson",
+      initialSpread: 0.2,
+    });
+    const p = result.posterior.parameters[0]!;
+    // Every kept draw must sit strictly in the physical region.
+    expect(p.q025).toBeGreaterThan(0);
+  });
+
+  it("studentT: outlier-contaminated data bias the Gaussian posterior, not the t", () => {
+    // Linear scale on a clean template plus 3 gross outliers (+40σ). The
+    // Gaussian ("fixed") posterior mean is dragged toward the outliers; the
+    // Student-t posterior shrugs them off.
+    const n = 60;
+    const sTrue = 2.0;
+    const template = Array.from({ length: n }, (_, i) => 5 + (i % 7));
+    const yObs = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const clean = sTrue * template[i]! + (i % 2 === 0 ? 0.4 : -0.4);
+      yObs[i] = clean + (i === 10 || i === 30 || i === 50 ? 40 : 0);
+    }
+    const problem: RefinementProblem = {
+      parameters: [param("s", sTrue, { min: 0.5, max: 5 })],
+      observations: yObs,
+      weights: new Float64Array(n).fill(1),
+      calculate: (values) => {
+        const out = new Float64Array(n);
+        for (let i = 0; i < n; i++) out[i] = values["s"]! * template[i]!;
+        return out;
+      },
+    };
+    const opts = { nSteps: 2000, nWalkers: 16, burnIn: 600, seed: 27 };
+    const gauss = samplePosterior(problem, { ...opts, noiseModel: "fixed" });
+    const robust = samplePosterior(problem, { ...opts, noiseModel: "studentT", nu: 4 });
+    const gErr = Math.abs(gauss.posterior.parameters[0]!.mean - sTrue);
+    const tErr = Math.abs(robust.posterior.parameters[0]!.mean - sTrue);
+    expect(tErr).toBeLessThan(gErr);
+    expect(gErr).toBeGreaterThan(0.02); // the outliers genuinely bias the Gaussian
+    expect(tErr).toBeLessThan(0.02); // ...and the t posterior stays on the truth
+  });
+});
+
 describe("ensemble sampler — structural invariants", () => {
   const { problem } = linearGaussianProblem();
   const opts: SampleOptions = { ...GAUSS_OPTS, nSteps: 200, burnIn: 50 };

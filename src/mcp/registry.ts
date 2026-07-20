@@ -363,7 +363,8 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       nChains: z.number().int().min(1).max(8).optional().describe("nuts only; default 4"),
       nWarmup: z.number().int().min(10).max(2000).optional().describe("nuts only: dual-averaging warmup per chain on a fresh start; default 100"),
       seed: z.number().int().optional(),
-      noiseModel: z.enum(["marginalized", "fixed"]).optional(),
+      noiseModel: z.enum(["marginalized", "fixed", "poisson", "studentT"]).optional().describe("MATCH THE DATA'S PROVENANCE — Poisson is not automatically better: raw independent counts → poisson (ensemble only; observations must be counts, no restraints); processed intensities with honest sigmas → fixed (Gaussian, w=1/σ²); outliers / imperfect model → studentT (ensemble only; heavy-tailed, see nu); unknown/unreliable error scale (e.g. PDF unit weights) → marginalized (default; scale integrated out). All models treat points as independent — for G(r) that is an approximation (Fourier-correlated neighbors)"),
+      nu: z.number().min(1).max(200).optional().describe("studentT degrees of freedom; default 5"),
       priors: z.record(z.string(), z.object({
         kind: z.enum(["uniform", "normal"]),
         mu: z.number().optional(),

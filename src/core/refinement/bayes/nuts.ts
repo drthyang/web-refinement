@@ -160,6 +160,14 @@ function buildTarget(
   const transforms = planTransforms(freeParams);
   const nUsed = nUsedOf(problem.weights);
   const noiseModel = options.noiseModel ?? "marginalized";
+  if (noiseModel !== "marginalized" && noiseModel !== "fixed") {
+    // gradChi2 is a scalar χ² gradient; Poisson and Student-t likelihoods need
+    // per-point residual gradients it cannot express. The ensemble sampler
+    // supports every noise model (it is gradient-free).
+    throw new Error(
+      `sampleNuts: noise model "${noiseModel}" is not χ²-expressible — use the ensemble sampler for it`,
+    );
+  }
   const priors = options.priors;
   let evals = 0;
 

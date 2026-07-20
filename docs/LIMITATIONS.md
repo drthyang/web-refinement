@@ -47,10 +47,18 @@ accidental gap — each is tracked as a roadmap item.
   geometry (cell, positions) busts the pair cache on every walker step, so
   those runs are markedly slower than envelope/scale sampling — the workbench's
   Posterior view runs bounded 400-step chunks with a Continue button for
-  exactly this reason. The default likelihood marginalizes an unknown noise
-  scale (`logL = −(N/2)·ln χ²`) because G(r) point errors are correlated —
-  credible intervals are relative to that noise model, not to true counting
-  statistics. No model-evidence / nested-sampling computation (posteriors
+  exactly this reason. Four noise models ship (`poisson` for raw counts,
+  `fixed` Gaussian for honest σ, `studentT` for outliers, `marginalized` for
+  an unknown error scale — the default), but **every one treats residuals as
+  per-point independent**: for G(r) that is an approximation, since the
+  finite-Qmax Fourier transform correlates neighboring r points. A
+  correlated-residual model and covariance propagated from the F(Q) reduction
+  are future steps (PDF roadmap §8); until then credible intervals are
+  relative to the declared noise model, not a rigorous likelihood. Poisson and
+  Student-t are ensemble-only (NUTS drives the scalar χ² gradient), and
+  `poisson` must not be combined with restraint rows (they are Gaussian
+  pseudo-observations). No model-evidence / nested-sampling computation
+  (posteriors
   compare parameters within one model, not models against each other), and the
   workbench view shows per-parameter marginals only — no corner plot for
   pairwise correlations yet (the sample correlation matrix is in the

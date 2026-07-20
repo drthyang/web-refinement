@@ -186,6 +186,15 @@ describe("NUTS — structural invariants", () => {
     );
   });
 
+  it("rejects non-χ²-expressible noise models (poisson/studentT are ensemble-only)", () => {
+    expect(() => sampleNuts(problem, gradChi2, { ...opts, noiseModel: "poisson" })).toThrow(
+      /not χ²-expressible/,
+    );
+    expect(() => sampleNuts(problem, gradChi2, { ...opts, noiseModel: "studentT" })).toThrow(
+      /not χ²-expressible/,
+    );
+  });
+
   it("reports divergences on a pathological step size instead of failing silently", () => {
     // Force a huge fixed step by resuming with a doctored token: leapfrog
     // explodes, divergences must be counted and status must not be "ok".

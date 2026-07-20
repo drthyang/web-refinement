@@ -989,6 +989,7 @@ export async function sample_posterior(args: {
   nWarmup?: number;
   seed?: number;
   noiseModel?: NoiseModel;
+  nu?: number;
   priors?: Record<string, PriorSpec>;
   linearizedEsd?: Record<string, number>;
   resume?: WalkerState | NutsState;
@@ -1025,6 +1026,7 @@ export async function sample_posterior(args: {
     nSteps: args.nSteps,
     ...(args.seed !== undefined ? { seed: args.seed } : {}),
     ...(args.noiseModel !== undefined ? { noiseModel: args.noiseModel } : {}),
+    ...(args.nu !== undefined ? { nu: args.nu } : {}),
     ...(args.priors !== undefined ? { priors: args.priors } : {}),
     ...(args.linearizedEsd !== undefined ? { linearizedEsd: args.linearizedEsd } : {}),
   };

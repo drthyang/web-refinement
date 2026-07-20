@@ -26,9 +26,9 @@
 
 import type { RefinementParameter } from "@/core/refinement/types";
 import type { BatchEvaluator, RefinementProblem } from "@/core/refinement/engine";
-import { chiSquared } from "@/core/refinement/factors";
 import {
-  logLikelihood,
+  DEFAULT_STUDENT_NU,
+  logLikelihoodCurve,
   logPrior,
   nUsedOf,
   type NoiseModel,
@@ -93,8 +93,13 @@ export interface SampleOptions {
   readonly thin?: number;
   /** RNG seed (ignored on resume — the token carries it). Default 0xbae5ea. */
   readonly seed?: number;
-  /** Likelihood noise model. Default "marginalized" (see logPosterior.ts). */
+  /** Likelihood noise model — match it to the data's provenance: raw counts →
+   *  "poisson", processed intensities with honest σ → "fixed", outliers /
+   *  imperfect model → "studentT", unknown error scale (PDF unit weights) →
+   *  "marginalized" (the default; see logPosterior.ts). */
   readonly noiseModel?: NoiseModel;
+  /** Student-t degrees of freedom for noiseModel "studentT". Default 5. */
+  readonly nu?: number;
   /** Priors by parameter id (bounded space). Default: uniform within bounds. */
   readonly priors?: Readonly<Record<string, PriorSpec>>;
   /** Stretch scale a > 1. Default 2 (the standard choice). */
@@ -136,6 +141,7 @@ interface Prep {
   readonly transforms: TransformSpec[];
   readonly nUsed: number;
   readonly noiseModel: NoiseModel;
+  readonly nu: number;
 }
 
 function prepare(problem: RefinementProblem, options: SampleOptions): Prep {
@@ -147,6 +153,7 @@ function prepare(problem: RefinementProblem, options: SampleOptions): Prep {
     transforms: planTransforms(freeParams),
     nUsed: nUsedOf(problem.weights),
     noiseModel: options.noiseModel ?? "marginalized",
+    nu: options.nu ?? DEFAULT_STUDENT_NU,
   };
 }
 
@@ -162,15 +169,18 @@ function valuesRecord(
   return rec;
 }
 
-/** log-posterior in UNBOUNDED space (likelihood + prior + transform Jacobian). */
+/** log-posterior in UNBOUNDED space (likelihood + prior + transform Jacobian).
+ *  Curve-based so every noise model is expressible (Poisson and Student-t need
+ *  the per-point residuals, not just χ²). */
 function logPostOf(
-  chi2: number,
+  problem: RefinementProblem,
+  yCalc: Float64Array,
   q: readonly number[],
   bounded: readonly number[],
   prep: Prep,
   priors: Readonly<Record<string, PriorSpec>> | undefined,
 ): number {
-  let lp = logLikelihood(chi2, prep.nUsed, prep.noiseModel);
+  let lp = logLikelihoodCurve(problem.observations, yCalc, problem.weights, prep.nUsed, prep.noiseModel, prep.nu);
   if (!Number.isFinite(lp)) return Number.NEGATIVE_INFINITY;
   lp += logPrior(prep.freeParams, bounded, priors);
   for (let j = 0; j < q.length; j++) lp += logJacobian(q[j]!, prep.transforms[j]!);
@@ -192,9 +202,6 @@ export function* sampleCore(
   const nFree = freeParams.length;
   const a = options.a ?? DEFAULT_A;
   if (!(a > 1)) throw new Error(`samplePosterior: stretch scale a must be > 1, got ${a}`);
-
-  const chi2Of = (yCalc: Float64Array): number =>
-    chiSquared(problem.observations, yCalc, problem.weights);
 
   // --- Ensemble state: fresh start or rehydrated resume token -----------------
   let q: number[][];
@@ -246,7 +253,7 @@ export function* sampleCore(
     const boundedRows = q.map((row) => row.map((qj, j) => toBounded(qj, transforms[j]!)));
     const initCurves = yield boundedRows.map((b) => valuesRecord(problem, freeIds, b));
     logP = boundedRows.map((b, w) =>
-      logPostOf(chi2Of(initCurves[w]!), q[w]!, b, prep, options.priors),
+      logPostOf(problem, initCurves[w]!, q[w]!, b, prep, options.priors),
     );
     stepIndex = 0;
     rngDraws = rng.count();
@@ -302,7 +309,7 @@ export function* sampleCore(
       for (let k = 0; k < half; k++) {
         proposed++;
         const w = start + k;
-        const lpNew = logPostOf(chi2Of(curves[k]!), proposals[k]!, proposalBounded[k]!, prep, options.priors);
+        const lpNew = logPostOf(problem, curves[k]!, proposals[k]!, proposalBounded[k]!, prep, options.priors);
         // Stretch-move acceptance: min(1, z^(D−1)·exp(Δ logP)).
         const logAccept = (nFree - 1) * Math.log(zs[k]!) + lpNew - logP[w]!;
         if (Number.isFinite(lpNew) && Math.log(acceptU[k]!) < logAccept) {

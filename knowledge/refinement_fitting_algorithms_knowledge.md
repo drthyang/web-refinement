@@ -719,14 +719,42 @@ Recommended sampler: affine-invariant ensemble MCMC (the Goodman–Weare
   add the log-Jacobian to the log-posterior, or the sampled measure is wrong
 ```
 
-The error model matters more than the sampler choice:
+The error model matters more than the sampler choice — and the likelihood must
+match how the data were PRODUCED AND PROCESSED. Poisson is not automatically
+better for diffraction; it is only right when the data really are raw counts:
 
 ```text
-if σ_i are trusted counting statistics:
-    logL = −½ Σ w_i [y_obs(i) − y_calc(i)]²
-if the error scale is unknown, or weights are deliberately uniform
-(e.g. reduced-PDF G(r), whose point errors are correlated):
+raw independent counts (never rebinned/corrected/subtracted):
+    Poisson →  logL = Σ [y_i·ln μ_i − μ_i]        (μ = modeled rate > 0)
+processed intensities with known, trusted uncertainties:
+    Gaussian →  logL = −½ Σ w_i [y_obs(i) − y_calc(i)]²
+outliers, or a model known to be imperfect:
+    Student-t →  logL = −((ν+1)/2) Σ ln(1 + w_i·r_i²/ν)   (heavy tails)
+unknown / unreliable error scale (e.g. reduced-PDF G(r), unit weights):
     marginalize the unknown scale →  logL = −(N/2) · ln χ²
+correlated errors from detector corrections or data reduction:
+    a correlated-Gaussian (covariance) model — see the caveat below
+```
+
+Once counts have been corrected, normalized, rebinned, or background-subtracted
+they are no longer Poisson — switch to the Gaussian family with the propagated
+σ. Mixing likelihoods needs care: restraint rows are Gaussian pseudo-
+observations by construction, so do not run a Poisson likelihood over a
+residual vector that contains them.
+
+**The PDF caveat — independence is an approximation.** Every per-point
+likelihood above treats residuals as independent, but G(r) comes from a
+finite-Q Fourier transform: neighboring r points share information and their
+errors are correlated. The marginalized scale absorbs the overall
+misweighting, not the correlation structure — describe the result as an
+approximate likelihood, never a rigorous one. The rigorous development path,
+in order of effort:
+
+```text
+1. independent Gaussian residuals                       (baseline)
+2. fitted / marginalized overall noise scale            (implemented — default)
+3. a simple correlated-residual model (e.g. AR(1)-like) (future)
+4. covariance propagated from the F(Q) reduction stage  (future; the full fix)
 ```
 
 Fancher et al. (2016) is the crystallographic precedent: MCMC posterior

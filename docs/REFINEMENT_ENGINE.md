@@ -183,18 +183,31 @@ prototype status, currently exercised on PDF problems.
   emcee's conventions) — no proposal covariance to tune, and invariant under
   exactly the parameter-scaling pathologies the LM preconditioner exists to
   fight.
-- **Noise model** (`logPosterior.ts`). Default `marginalized`: treat the
-  global error scale as unknown with a Jeffreys prior and integrate it out,
-  giving
+- **Noise model** (`logPosterior.ts`) — chosen to **match the data's
+  provenance**, because no likelihood is automatically right:
 
-  ```
-  log L = −(N/2) · ln χ²(p)   (+ const)
-  ```
+  | model | when | log L |
+  | --- | --- | --- |
+  | `poisson` | raw independent counts (never rebinned / corrected / subtracted); ensemble sampler only | Σ [yᵢ·ln μᵢ − μᵢ] |
+  | `fixed` | processed intensities with honest σ (w = 1/σ²) | −χ²/2 |
+  | `studentT` | outliers or a knowingly imperfect model (ν = `nu`, default 5); ensemble only | −((ν+1)/2)·Σ ln(1 + wᵢrᵢ²/ν) |
+  | `marginalized` | unknown / unreliable error scale — the default | −(N/2)·ln χ² |
 
-  This is deliberate for PDF G(r), which is fit with **unit weights** because
-  its point errors are correlated — an absolute Gaussian likelihood would
-  overstate the information content. A plain `fixed` model
-  (log L = −χ²/2) is available when the weights are honest.
+  The `marginalized` default is deliberate for PDF G(r), which is fit with
+  **unit weights** because its point errors are correlated — an absolute
+  Gaussian likelihood would overstate the information content. Processed
+  powder data stops being Poisson the moment it is corrected or rebinned;
+  restraint rows are Gaussian pseudo-observations, so `poisson` must not run
+  over a residual vector containing them. NUTS consumes the scalar χ²
+  gradient, so it supports the two χ²-expressible models (`marginalized`,
+  `fixed`) only.
+
+  **Approximation notice:** every model treats residuals as per-point
+  independent. For G(r) that is an approximation — the finite-Qmax Fourier
+  transform correlates neighboring r points, and the marginalized scale
+  absorbs only the overall misweighting. The rigorous ladder (correlated-
+  residual model → covariance propagated from the F(Q) reduction) is future
+  work, recorded in PDF_MPDF_ROADMAP §8.
 - **Bounds** (`transform.ts`). Each `[min, max]` parameter samples in an
   unbounded logit-transformed space, with the log-Jacobian of the transform
   added to the log posterior — so the prior is uniform over the *original*

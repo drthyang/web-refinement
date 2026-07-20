@@ -584,6 +584,12 @@ In the spirit of `LIMITATIONS.md` — the deliberate, still-standing constraints
   G(r)** (not the Bragg Rwp), count independent points on the **Nyquist grid
   Δr = π/Qmax**, and label esd/GoF as *relative* indicators only. The LM
   *minimization* is unaffected; only the *interpretation* of the covariance is.
+  The same caveat governs the **Bayesian likelihood**: every shipped noise
+  model treats G(r) points as independent, so the posterior is an
+  *approximation*, not a rigorous likelihood. The rigorous ladder, in order:
+  (1) independent Gaussian residuals ✅ → (2) fitted/marginalized overall
+  noise scale ✅ (the default) → (3) a simple correlated-residual model ⬜ →
+  (4) covariance propagated from the F(Q) reduction stage ⬜ (the full fix).
 - **`σ=√yObs` fallback is invalid for G(r)** (the shared observation contract
   defaults to it and skips `yObs≤0`). PDF needs its own weight path.
 - **X-ray model weight is `f(0)=Z`, Q-independent** — matching PDFfit2. This is an
