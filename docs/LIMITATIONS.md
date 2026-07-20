@@ -13,7 +13,7 @@ This statement appears in the app UI and the README, not only here.
 
 A working static app performs **atomic/nuclear structure refinement** for
 single-crystal and powder data, **commensurate single-k magnetic refinement**
-(k = 0 and k ≠ 0), and **real-space PDF fitting** (1072 passing tests). The
+(k = 0 and k ≠ 0), and **real-space PDF fitting** (1101 passing tests). The
 Levenberg–Marquardt engine, symmetry-adapted constrained parameters,
 Chebyshev / cosine / power-series backgrounds, CW + TOF profiles, Le Bail
 extraction, multi-phase powder, magnetic space-group candidate generation, the
@@ -28,12 +28,30 @@ accidental gap — each is tracked as a roadmap item.
 
 - **Optimizer.** Local Levenberg–Marquardt. Linear parameters (scale, background,
   magnetic scale) get exact columns; non-linear parameters use a **central
-  finite-difference Jacobian by default**, with **opt-in analytic derivatives for
-  occupancy and isotropic B_iso** (validated against FD; other kinds are still FD
-  — roadmap F1.1). No global optimization, so a reasonable starting model is
+  finite-difference Jacobian by default**, with **opt-in analytic derivatives
+  where validated**: occupancy and isotropic B_iso on the powder path, and on
+  the PDF path a fused analytic ∂G/∂p kernel covering Qdamp/Qbroad, δ1/δ2,
+  spdiameter, occupancy, B_iso, anisotropic U, and symmetry-mode position
+  shifts (cell, sratio/rcut, tie-referenced parameters, and multi-phase /
+  multi-dataset problems still fall back to FD — the F1.1 remainder). No
+  global optimization, so a reasonable starting model is
   assumed — but auto-background + zero-shift starting values (F1.3) and a staged
   controller that re-fixes degenerate/harmful parameter additions (F1.4) reduce
   the false-minimum risk. (Roadmap F1.)
+- **Bayesian posterior sampling (prototype, PDF-first).** The ensemble sampler
+  is stretch-move MCMC only — no NUTS/HMC yet (the scalar `gradChi2` contract
+  it would consume exists, but cell, sratio/rcut, tie-referenced, and
+  multi-phase/multi-dataset gradients are still finite-difference; the analytic
+  columns are single-phase, single-dataset only). Sampling parameters that move
+  geometry (cell, positions) busts the pair cache on every walker step, so
+  those runs are markedly slower than envelope/scale sampling. The default
+  likelihood marginalizes an unknown noise scale (`logL = −(N/2)·ln χ²`)
+  because G(r) point errors are correlated — credible intervals are relative to
+  that noise model, not to true counting statistics. No model-evidence /
+  nested-sampling computation (posteriors compare parameters within one model,
+  not models against each other), and no corner-plot UI — results surface
+  through the `sample_posterior` MCP tool's diagnostics (split-R̂, ESS,
+  quantiles, esdRatio), not the workbench.
 - **GPU acceleration (optional, approximate).** WebGPU kernels can accelerate the
   structure-factor sum (nuclear and magnetic) and profile synthesis. They compute
   in **f32 and are APPROXIMATE — not bit-identical** to the CPU f64 path: validated

@@ -44,7 +44,9 @@ where `J_ij = ∂r_i/∂p_j`, `r_i = sqrt(w_i) * (y_obs,i - y_calc,i)`.
 - **Jacobian:** exact one-evaluation columns for affine parameters (scale,
   magnetic scale, background); central finite differences for non-linear
   parameters by default, with opt-in **analytic derivatives for occupancy and
-  isotropic B_iso** (validated against FD — roadmap F1.1).
+  isotropic B_iso** (validated against FD — roadmap F1.1); the real-space PDF
+  model supplies a much larger analytic set through the same hook (see
+  "Analytic derivatives" below).
 - **Scaling:** the normal matrix is diagonal-preconditioned before each LM solve,
   so scale factors, cell lengths, ADPs, and background coefficients can coexist
   without one unit system dominating the linear algebra.
@@ -66,6 +68,42 @@ where `J_ij = ∂r_i/∂p_j`, `r_i = sqrt(w_i) * (y_obs,i - y_calc,i)`.
   stay inside `[min, max]`.
 - **Fixed parameters** are removed from `p` entirely (not just zero-weighted), so
   the normal-equations matrix stays well-conditioned.
+
+## Analytic derivatives: the real-space (PDF) fused pass
+
+`jacobianPlan` consults `RefinementProblem.analyticColumns` per free parameter
+and falls back to the central finite difference for any column the problem
+does not supply — analytic columns are purely additive, and every kind is
+gated by an analytic-vs-FD agreement test. The powder template supplies
+occupancy and isotropic B_iso; the PDF forward model now supplies a full
+analytic layer ([`pdf/gradients.ts`](../src/core/pdf/gradients.ts)):
+
+- **Fused single pass.** One traversal of the pair list produces G(r) *and*
+  every requested ∂G/∂p column. The value path is **bit-identical** to
+  `computeGofR` (pinned by test), so enabling gradients cannot change a fit.
+- **Geometry-aware pairs.** Each `PdfPair` carries the bond unit vector n̂, and
+  atoms are expanded with provenance (site index + generating-operation
+  rotation `R` — `expandStructureAtomsWithProvenance`), so a derivative with
+  respect to a symmetry-mode amplitude v transforms correctly for every orbit
+  image: ∂pos/∂v = M·R·axis, and U images transform as R·U_basis·Rᵀ.
+- **Supported kinds:** Qdamp, Qbroad, δ1, δ2, `spdiameter` (> 0), occupancy,
+  isotropic B_iso, anisotropic U, and position-shift mode amplitudes.
+  Returning `null` falls back to FD: cell, sratio/rcut, tie-referenced
+  parameters, and multi-phase / multi-dataset problems.
+- **`gradChi2` contract.** `buildPdfProblem` also returns a complete scalar
+  gradient ∇χ²(p) — analytic columns where available, central-FD fill-in
+  elsewhere — the interface a gradient-based sampler (NUTS) or a gradient-only
+  minimizer consumes. Unlike the powder template, the PDF `analyticColumns`
+  path supports restraints.
+- **Measured effect:** 2.3× faster LM refinement on the Ni golden, same basin.
+- **Gate test:**
+  [`pdfAnalyticJacobian.test.ts`](../src/core/workflow/pdfAnalyticJacobian.test.ts)
+  compares analytic vs FD columns with a Richardson h-vs-h/2 consistency
+  filter. The ±5σ evaluation window is quantized to the r grid, which puts
+  O(1/h) spikes in the *FD oracle* at window edges, and `bandLimit`
+  termination delocalizes them across r — so the tight tolerances run with
+  termination off, and grid points whose two FD step sizes disagree are
+  excluded as oracle noise rather than analytic error.
 
 ## Interfaces (target shape)
 
@@ -129,6 +167,55 @@ also carries diagnostics:
 - `conditionNumber` and `maxLambda`: numerical health indicators for the final
   Hessian and LM search.
 
+## Posterior sampling: ensemble MCMC (prototype)
+
+The covariance above is a *linearization*. `refinement/bayes/` adds a second
+driver behind the same problem seam that samples the posterior directly —
+prototype status, currently exercised on PDF problems.
+
+- **Architecture.** `sampler.ts` is a **sans-io generator** mirroring
+  `refineCore`: it yields batches of walker log-posterior evaluations and
+  receives the results; all randomness lives inside the generator. The serial
+  driver and the worker-pool driver therefore produce **bit-identical**
+  chains, and the full walker state serializes to a resume token, so a
+  bounded run (e.g. one MCP call) can be continued exactly.
+- **Move.** Affine-invariant ensemble stretch move (Goodman & Weare 2010;
+  emcee's conventions) — no proposal covariance to tune, and invariant under
+  exactly the parameter-scaling pathologies the LM preconditioner exists to
+  fight.
+- **Noise model** (`logPosterior.ts`). Default `marginalized`: treat the
+  global error scale as unknown with a Jeffreys prior and integrate it out,
+  giving
+
+  ```
+  log L = −(N/2) · ln χ²(p)   (+ const)
+  ```
+
+  This is deliberate for PDF G(r), which is fit with **unit weights** because
+  its point errors are correlated — an absolute Gaussian likelihood would
+  overstate the information content. A plain `fixed` model
+  (log L = −χ²/2) is available when the weights are honest.
+- **Bounds** (`transform.ts`). Each `[min, max]` parameter samples in an
+  unbounded logit-transformed space, with the log-Jacobian of the transform
+  added to the log posterior — so the prior is uniform over the *original*
+  bounded parameter, not the transformed one.
+- **Diagnostics** (`diagnostics.ts`): split-R̂ (Gelman–Rubin, split chains),
+  ESS via Geyer's initial-monotone-sequence truncation of the autocorrelation
+  sum, quantiles / credible intervals, the sample correlation matrix, and
+  **esdRatio** — posterior standard deviation over the linearized LM esd, per
+  parameter. In the Gaussian limit esdRatio → 1; the Ni PDFfit2 golden gives
+  0.99–1.01, validating the sampler and the LM covariance against each other.
+  Reporting follows McCluskey et al. (2023), *J. Appl. Cryst.* **56**, 12:
+  priors (bounds), chain/step counts, autocorrelation-aware ESS, and credible
+  intervals are all first-class output fields. Fancher et al. (2016), *Sci.
+  Rep.* **6**, 31625 is the crystallographic precedent for the
+  posterior-width-vs-esd comparison.
+- **Tool.** Exposed as the `sample_posterior` MCP tool: bounded `nSteps` per
+  call with resume-token continuation; agents run a converged refine first and
+  seed the walkers from its values.
+- **Next:** a gradient-based NUTS v2 consuming the PDF `gradChi2`; a posterior
+  UI panel; analytic cell gradients.
+
 ## Sequential (series) refinement
 
 `refinement/sequential.ts` adds the third residual topology next to
@@ -155,8 +242,9 @@ project shows how it got where it is.
 ## What is intentionally *not* here yet
 
 - Analytic derivatives for the *full* crystallographic model — affine parameters
-  have exact columns, and occupancy/isotropic-B_iso have opt-in validated analytic
-  columns (F1.1); coordinates, cell, profile, zero-shift and moments are still
+  have exact columns; occupancy/isotropic-B_iso have opt-in validated analytic
+  columns, and the real-space PDF model has the fused analytic pass above
+  (F1.1); powder coordinates, cell, profile, zero-shift and moments are still
   finite-difference (see [ROADMAP.md](./ROADMAP.md)).
 - Symbolic constraint language — Phase 8 starts with direct tying and grouping
   via `RefinementParameter.group` / `expression`, not a full expression compiler.

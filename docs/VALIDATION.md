@@ -21,7 +21,7 @@ comparison recorded here.
 > reimplement independently (no code copied), but its outputs are our correctness
 > gate and must be cited. Full bibliography in [`REFERENCES.md`](./REFERENCES.md).
 
-## Test matrix (1072 passing, 59 real-data/slow tests skipped without local `data/`)
+## Test matrix (1101 passing, 59 real-data/slow tests skipped without local `data/`)
 
 | Area | Test kind | Status |
 | --- | --- | --- |
@@ -80,6 +80,10 @@ comparison recorded here.
 | GPU nuclear kernel: WGSL strides + f64 formula ≡ CPU `F_N` | unit (CI) | ✅ `workers/gpuStructureFactor.test.ts` |
 | GPU magnetic kernel: WGSL strides + f64 formula ≡ CPU `F_M` | unit (CI) | ✅ `workers/gpuMagneticStructureFactor.test.ts` |
 | GPU batch evaluator plumbing (grouping/order/injection) | unit | ✅ `workers/gpuPowderEvaluator.test.ts` |
+| Ensemble MCMC: exact linear-Gaussian posterior, flat-posterior measure, serial ≡ pool bit-identical, resume token | unit | ✅ `core/refinement/bayes/sampler.test.ts` |
+| Bounded-parameter transforms (logit/log round-trip + logJacobian vs FD) | unit | ✅ `core/refinement/bayes/transform.test.ts` |
+| PDF posterior std vs LM esd (esdRatio ≈ 1) | golden (PDFfit2 Ni fixture) | ✅ `core/workflow/pdfPosterior.test.ts` |
+| PDF analytic ∂G/∂p columns vs central FD + `gradChi2` | unit (F1.1) | ✅ `core/workflow/pdfAnalyticJacobian.test.ts` |
 
 ## Golden examples
 
@@ -134,6 +138,59 @@ instrument profile functions, background, and profile coefficients beyond this
 minimal engine's scope (see [LIMITATIONS.md](./LIMITATIONS.md)). Our
 refinement is validated only as *self-consistent* (recovers known parameters
 from synthetic data), not against GSAS-II's wR.
+
+## Bayesian posterior sampling
+
+The ensemble MCMC sampler (`core/refinement/bayes/`) is validated on three
+levels before any posterior is trusted:
+
+1. **Exact-posterior recovery (analytic truth):** on a linear-Gaussian problem
+   the posterior is known in closed form; the sampler recovers the exact mean
+   within 0.1σ, the exact std within 15%, and the exact pairwise correlation
+   within ±0.05 — and a flat posterior inside bounds is sampled uniformly,
+   pinning the logit-transform `logJacobian` measure term end-to-end.
+2. **Structural invariants:** serial and worker-pool drivers produce
+   bit-identical chains (RNG lives only in the sans-io generator); one 400-step
+   run equals 200+200 steps through the resume token; the same seed reproduces
+   and a different seed differs.
+3. **Gaussian-limit consistency with LM (Ni golden):** sampling the PDFfit2 Ni
+   fixture around the converged LM minimum gives posterior std / linearized LM
+   esd (`esdRatio`) of **0.99–1.01** per parameter — the sampler and the
+   least-squares esds validate each other in the limit where both must agree.
+
+The default likelihood is **marginalized noise** — `logL = −(N/2)·ln χ²`, the
+unknown error scale integrated out under a Jeffreys prior — because reduced-PDF
+data carry correlated point errors and are fitted with deliberate unit weights
+(see [LIMITATIONS.md](./LIMITATIONS.md)). Convergence is reported the way
+McCluskey et al. (2023, *J. Appl. Cryst.* **56**, 12) advise for Bayesian
+analysis of scattering data: split-R̂ (Gelman–Rubin), ESS (Geyer
+initial-monotone truncation), and quantile credible intervals — never a bare
+std. The crystallographic precedent for MCMC posterior refinement is Fancher
+et al. (2016, *Sci. Rep.* **6**, 31625).
+
+## PDF analytic gradients
+
+The fused-pass gradient kernel (`core/pdf/gradients.ts`) is gated by
+`pdfAnalyticJacobian.test.ts`:
+
+- the fused value curve is **bit-identical** to `computeGofR` on the Ni golden;
+- every analytic ∂G/∂p column (envelopes, widths, occupancy, B_iso, U_aniso,
+  symmetry-mode position shifts — including orbit images under rotated
+  operations) matches a central finite difference;
+- unsupported kinds (`cell`, `sratio`/`rcut`, tie-referenced parameters)
+  correctly return null and fall back to FD, and restraint rows carry the term
+  coefficients;
+- FD-driven and analytic-driven refinements land in the **same basin** on the
+  Ni golden (analytic is 2.3× faster);
+- the scalar `gradChi2` (analytic columns + central-FD fill-in) matches central
+  differences of χ².
+
+**FD-oracle caveat (methodology):** the ±5σ Gaussian evaluation window is
+quantized on the r-grid, so the *finite-difference oracle* — not the analytic
+column — shows 1/h spikes when a pair crosses a window edge, and the Qmax
+band-limit delocalizes those spikes across the whole grid. The gates therefore
+apply a **Richardson h-vs-h/2 consistency filter** (only h-stable FD points are
+compared) and run the tight tolerances with termination off.
 
 ## GPU acceleration precision
 

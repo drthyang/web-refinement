@@ -101,11 +101,12 @@ in-app flows.
 | Profile | Gaussian / pseudo-Voigt / **TCH** + FCJ asymmetry; TOF back-to-back exponential; Chebyshev / Fourier / power backgrounds; March-Dollase PO; displacement / transparency / absorption / roughness corrections; Stephens microstrain, uniaxial size | spherical-harmonic texture, Ikeda–Carpenter TOF shape |
 | Symmetry | **all 230 built-in tables** + CIF/mCIF operations; Wyckoff/site constraints; absences; magnetic subgroup enumeration with **BNS/OG labels**; isotropy + t-subgroup (Bärnighausen) lattices | superspace (3+d), full 1651 magnetic tables incl. type IV |
 | Engine | Levenberg-Marquardt (SVD, esds, correlations), bounds/ties/restraints, staged controller, **multi-start**, worker pool, opt-in WebGPU | full-Hessian options, rigid bodies, restraint libraries |
+| Uncertainty | LM esds + correlations; **Bayesian posterior sampling** (affine-invariant ensemble MCMC on the same problem seam — prototype, PDF-first; split-R̂/ESS/credible intervals; posterior-vs-esd ratio ≈ 1 validated on the Ni golden) | — (none of the three ships posterior sampling; their uncertainties are the least-squares covariance) |
 | Multi-phase / multi-dataset | Yes (powder 2-phase; PDF multi-phase + multi-dataset co-refinement; sequential Rietveld + PDF) | larger joint-histogram breadth |
 | Intensity extraction | **Le Bail** | + Pawley |
 | Magnetism | mCIF in/out, single-crystal + powder moment refinement, k = 0 **and** k ≠ 0 commensurate, k-search, subgroup candidates + comparison | representation analysis (built-in), incommensurate/helical |
 | Validation | GSAS-II golden values + real-data benchmarks; PDFfit2/PDFgui and diffpy.mpdf goldens | decades of community validation |
-| Platform / API | **Static web app, no install**; **32 MCP agent tools** | desktop; Python scripting ecosystems |
+| Platform / API | **Static web app, no install**; **33 MCP agent tools** | desktop; Python scripting ecosystems |
 
 **Honest gaps** (the road to maturity): incommensurate / multi-k and
 helical/conical magnetism; built-in representation analysis for the magnetic
@@ -122,7 +123,9 @@ multi-dataset throughput rather than single-fit speed, and none publishes
 formal benchmarks. This app runs Levenberg-Marquardt in Web Workers in pure
 TypeScript, with reflection-windowed evaluation, dependency caching, a
 parallel-Jacobian worker pool (bit-identical to the serial driver), analytic
-columns for a validated subset of parameters, and opt-in WebGPU f32 kernels for
+columns for a validated subset of parameters (on the PDF path a fused
+single-pass ∂G/∂p kernel, measured 2.3× faster on the Ni golden), and opt-in
+WebGPU f32 kernels for
 the structure-factor sums — adequate for the pattern sizes shown here;
 WebAssembly is deliberately skipped (see
 [ARCHITECTURE.md](./ARCHITECTURE.md)).

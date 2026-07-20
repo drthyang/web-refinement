@@ -199,6 +199,13 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
     args: { structure, pattern: pdfPattern, parameters: pdfBuilt.parameters, bindings: pdfBuilt.bindings, maxIterations: 2 },
     keys: ["observationCount", "parallel", "residual", "result", "warnings"],
   },
+  sample_posterior: {
+    // A deliberately tiny chain: the contract pins the output SHAPE, not
+    // convergence (a 5-step chain reports not-converged with a resume token —
+    // itself part of the contract).
+    args: { structure, pattern: pdfPattern, parameters: pdfBuilt.parameters, bindings: pdfBuilt.bindings, nSteps: 5, nWalkers: 4, burnIn: 1, seed: 7 },
+    keys: ["acceptanceFraction", "converged", "correlations", "freeIds", "message", "nSamples", "parallel", "posterior", "resume", "status"],
+  },
   compute_partial_pdf: {
     args: { structure, pattern: pdfPattern, parameters: pdfBuilt.parameters, bindings: pdfBuilt.bindings },
     keys: ["kind", "partials", "r"],

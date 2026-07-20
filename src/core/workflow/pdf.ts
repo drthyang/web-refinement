@@ -29,12 +29,20 @@ import type { StageKinds } from "@/core/workflow/structureRefinement";
 import type { FitRange } from "@/core/workflow/powder";
 import type { PdfPair } from "@/core/pdf/pairEnumerator";
 import { applyExclusionMask, fitRangeMask } from "@/core/refinement/factors";
-import { resolveTies } from "@/core/refinement/constraints";
+import { parseTie, resolveTies } from "@/core/refinement/constraints";
 import { applyParameters } from "@/core/workflow/apply";
 import { buildStructureRefinement } from "@/core/workflow/structureRefinement";
-import { expandStructureAtoms, type ExpandedAtom } from "@/core/diffraction/structureFactor";
-import { enumeratePairs } from "@/core/pdf/pairEnumerator";
+import {
+  expandStructureAtoms,
+  expandStructureAtomsWithProvenance,
+  type ExpandedAtom,
+} from "@/core/diffraction/structureFactor";
+import { cartesianAdpTensor, enumeratePairs } from "@/core/pdf/pairEnumerator";
 import { computeGofR, PAIR_REACH_MARGIN, type PdfModelParams } from "@/core/pdf/forwardModel";
+import { computeGofRWithColumns, DUISO_DBISO, type PdfColumnRequest } from "@/core/pdf/gradients";
+import { rotateUAniso } from "@/core/crystal/adp";
+import { orthogonalizationMatrix } from "@/core/crystal/unitCell";
+import { mulVec } from "@/core/math/mat3";
 import { computePartialsGofR } from "@/core/pdf/partials";
 import { bandLimit, extendGridForTermination, terminationActive, uniformStep } from "@/core/pdf/termination";
 
@@ -85,6 +93,21 @@ export function windowFor(rValues: readonly number[], fitRange?: FitRange): { i0
   return { i0, i1 };
 }
 
+/**
+ * The single-phase PDF problem, extended with the differentiable-model surface
+ * (roadmap F1.1 real-space): `analyticColumns` feeds the LM engine exact
+ * Jacobian columns for the supported kinds, and `gradChi2` is the scalar
+ * χ²-gradient contract a gradient-based sampler (NUTS) consumes — analytic
+ * columns where supported, central-difference fill-in elsewhere, so the
+ * gradient is always complete.
+ */
+export interface PdfRefinementProblem extends RefinementProblem {
+  readonly gradChi2: (
+    freeParams: readonly RefinementParameter[],
+    freeValues: readonly number[],
+  ) => { chi2: number; grad: Float64Array };
+}
+
 export function buildPdfProblem(
   structure: StructureModel,
   pattern: PdfPattern,
@@ -92,7 +115,7 @@ export function buildPdfProblem(
   bindings: readonly ParameterBinding[],
   restraints: readonly LinearRestraint[] = [],
   fitRange?: FitRange,
-): RefinementProblem {
+): PdfRefinementProblem {
   const rValues = pattern.points.map((p) => p.r);
   const gObs = pattern.points.map((p) => p.gObs);
   const observations = Float64Array.from([...gObs, ...restraints.map((r) => r.target)]);
@@ -160,8 +183,210 @@ export function buildPdfProblem(
     return out;
   };
 
-  return { parameters, observations, weights, calculate };
+  // Free parameters referenced BY a tie expression: moving them moves the tied
+  // parameter too — an indirect model path the analytic columns don't carry, so
+  // those fall back to finite differences (null).
+  const tieReferencedIds = new Set<string>();
+  for (const p of parameters) {
+    if (!p.expression) continue;
+    try {
+      tieReferencedIds.add(parseTie(p.expression).refId);
+    } catch {
+      // An unparsable tie fails loudly in resolveTies; nothing to guard here.
+    }
+  }
+
+  /** Analytic ∂calc/∂p for every free parameter the fused gradient pass can
+   *  differentiate, null (→ engine FD) elsewhere. Restraint rows are affine in
+   *  the parameters, so their derivative entries are the term coefficients —
+   *  restraints are supported, not refused (unlike the powder template). */
+  const columnsFor = (
+    freeParams: readonly RefinementParameter[],
+    freeValues: readonly number[],
+  ): (Float64Array | null)[] => {
+    const record: Record<string, number> = {};
+    for (const p of parameters) record[p.id] = p.value;
+    for (let j = 0; j < freeParams.length; j++) record[freeParams[j]!.id] = freeValues[j]!;
+    const resolved = resolveTies(parameters, record);
+    const applied = applyParameters(structure, bindings, resolved);
+    const { atoms, provenance } = expandStructureAtomsWithProvenance(applied.model);
+    const cell = applied.model.cell;
+    const pairs = pairsFor(cell, atoms, resolved);
+    const M = orthogonalizationMatrix(cell);
+    const pdf = applied.pdf ?? PDF_DEFAULTS;
+
+    const siteIndexByLabel = new Map(applied.model.sites.map((s, i) => [s.label, i] as const));
+    const orbit: number[][] = applied.model.sites.map(() => []);
+    for (let a = 0; a < provenance.length; a++) orbit[provenance[a]!.siteIndex]!.push(a);
+
+    const requests: (PdfColumnRequest | null)[] = freeParams.map((p) => {
+      if (tieReferencedIds.has(p.id)) return null;
+      const bs = bindings.filter((b) => b.parameterId === p.id);
+      if (bs.length === 0) return null;
+      const kind = bs[0]!.kind;
+      if (bs.some((b) => b.kind !== kind)) return null;
+      switch (kind) {
+        case "qdamp":
+          return { kind: "qdamp" };
+        case "qbroad":
+          return { kind: "sigma", target: "qbroad" };
+        case "delta1":
+          return { kind: "sigma", target: "delta1" };
+        case "delta2":
+          return { kind: "sigma", target: "delta2" };
+        case "spdiameter":
+          // At diameter 0 the envelope is disabled (bulk) and the derivative is
+          // one-sided — leave that boundary to FD.
+          return pdf.spdiameter > 0 ? { kind: "spdiameter" } : null;
+        case "occupancy": {
+          const dOcc = new Float64Array(atoms.length);
+          for (const b of bs) {
+            const si = b.targetKey !== undefined ? siteIndexByLabel.get(b.targetKey) : undefined;
+            if (si === undefined) return null;
+            for (const a of orbit[si]!) dOcc[a] = dOcc[a]! + 1;
+          }
+          return { kind: "occupancy", dOcc };
+        }
+        case "bIso": {
+          const constant = new Float64Array(atoms.length);
+          for (const b of bs) {
+            const si = b.targetKey !== undefined ? siteIndexByLabel.get(b.targetKey) : undefined;
+            if (si === undefined) return null;
+            // apply.ts writes bIso only onto an isotropic site — an anisotropic
+            // target is a no-op, so its derivative is exactly zero.
+            if (applied.model.sites[si]!.adp.kind !== "isotropic") continue;
+            for (const a of orbit[si]!) constant[a] = constant[a]! + DUISO_DBISO;
+          }
+          return { kind: "msd", constant, tensors: atoms.map(() => null) };
+        }
+        case "uAniso": {
+          const constant = new Float64Array(atoms.length);
+          const tensors: (Mat3Like | null)[] = atoms.map(() => null);
+          for (const b of bs) {
+            const si = b.targetKey !== undefined ? siteIndexByLabel.get(b.targetKey) : undefined;
+            if (si === undefined || !b.uBasis) return null;
+            for (const a of orbit[si]!) {
+              // The orbit image sees the mode basis through its operation:
+              // dU_image = R·uBasis·Rᵀ, then to Cartesian (linear in U).
+              const rotated = rotateUAniso(b.uBasis, provenance[a]!.rotation);
+              const dU = cartesianAdpTensor(cell, { kind: "anisotropic", uAniso: rotated });
+              const prev = tensors[a];
+              tensors[a] = prev
+                ? (prev.map((row, ri) => row.map((v, ci) => v + dU[ri]![ci]!)) as unknown as Mat3Like)
+                : dU;
+            }
+          }
+          return { kind: "msd", constant, tensors: tensors as (import("@/core/math/types").Mat3 | null)[] };
+        }
+        case "positionShift": {
+          const velocity: ([number, number, number] | null)[] = atoms.map(() => null);
+          for (const b of bs) {
+            const si = b.targetKey !== undefined ? siteIndexByLabel.get(b.targetKey) : undefined;
+            if (si === undefined || !b.axis) return null;
+            for (const a of orbit[si]!) {
+              // du_image/dv = M·(R·axis): the fractional mode axis, carried to
+              // the image by its operation's rotation, then to Cartesian.
+              const R = provenance[a]!.rotation;
+              const rAxis: [number, number, number] = [
+                R[0]![0]! * b.axis[0] + R[0]![1]! * b.axis[1] + R[0]![2]! * b.axis[2],
+                R[1]![0]! * b.axis[0] + R[1]![1]! * b.axis[1] + R[1]![2]! * b.axis[2],
+                R[2]![0]! * b.axis[0] + R[2]![1]! * b.axis[1] + R[2]![2]! * b.axis[2],
+              ];
+              const cartV = mulVec(M, rAxis);
+              const prev = velocity[a];
+              velocity[a] = prev
+                ? [prev[0] + cartV[0], prev[1] + cartV[1], prev[2] + cartV[2]]
+                : [cartV[0], cartV[1], cartV[2]];
+            }
+          }
+          return { kind: "position", velocity };
+        }
+        default:
+          // pdfScale rides the engine's exact linear-column path; cell,
+          // sratio/rcut and raw coordinates stay on FD in v1.
+          return null;
+      }
+    });
+
+    const out: (Float64Array | null)[] = requests.map(() => null);
+    const activeIdx: number[] = [];
+    const activeReqs: PdfColumnRequest[] = [];
+    for (let j = 0; j < requests.length; j++) {
+      const r = requests[j];
+      if (r) {
+        activeIdx.push(j);
+        activeReqs.push(r);
+      }
+    }
+    if (activeReqs.length === 0) return out;
+
+    const params: PdfModelParams = { scatteringType: pattern.scatteringType, ...pdf };
+    const { columns } = computeGofRWithColumns(cell, atoms, modelGrid, params, pairs, activeReqs);
+    for (let c = 0; c < activeIdx.length; c++) {
+      const j = activeIdx[c]!;
+      const col = columns[c]!;
+      // Columns live in calculated-pattern space: same termination convolution
+      // (bandLimit is linear) and window splice as the value path.
+      const colWindow = terminate
+        ? bandLimit(col, modelGrid[0]!, step, qmax).subarray(sliceOffset, sliceOffset + rWindow.length)
+        : col;
+      const full = new Float64Array(rValues.length + restraints.length);
+      full.set(colWindow.subarray(0, rWindow.length), i0);
+      const pid = freeParams[j]!.id;
+      for (let t = 0; t < restraints.length; t++) {
+        let coeff = 0;
+        for (const term of restraints[t]!.terms) if (term.parameterId === pid) coeff += term.coefficient;
+        full[rValues.length + t] = coeff;
+      }
+      out[j] = full;
+    }
+    return out;
+  };
+
+  const gradChi2 = (
+    freeParams: readonly RefinementParameter[],
+    freeValues: readonly number[],
+  ): { chi2: number; grad: Float64Array } => {
+    const record: Record<string, number> = {};
+    for (const p of parameters) record[p.id] = p.value;
+    for (let j = 0; j < freeParams.length; j++) record[freeParams[j]!.id] = freeValues[j]!;
+    const yCalc = calculate(record);
+    let chi2 = 0;
+    for (let k = 0; k < observations.length; k++) {
+      const d = observations[k]! - yCalc[k]!;
+      chi2 += weights[k]! * d * d;
+    }
+    const cols = columnsFor(freeParams, freeValues);
+    const grad = new Float64Array(freeParams.length);
+    for (let j = 0; j < freeParams.length; j++) {
+      let col = cols[j];
+      if (!col) {
+        // Central-difference fill-in (engine step recipe) — the gradient is
+        // complete even for kinds the analytic pass declines.
+        const base = freeValues[j]!;
+        const h = Math.max(1e-6, Math.abs(base) * 1e-5);
+        record[freeParams[j]!.id] = base + h;
+        const fwd = calculate(record);
+        record[freeParams[j]!.id] = base - h;
+        const bwd = calculate(record);
+        record[freeParams[j]!.id] = base;
+        col = new Float64Array(observations.length);
+        for (let k = 0; k < col.length; k++) col[k] = (fwd[k]! - bwd[k]!) / (2 * h);
+      }
+      let s = 0;
+      for (let k = 0; k < observations.length; k++) {
+        s += weights[k]! * (observations[k]! - yCalc[k]!) * col[k]!;
+      }
+      grad[j] = -2 * s;
+    }
+    return { chi2, grad };
+  };
+
+  return { parameters, observations, weights, calculate, analyticColumns: columnsFor, gradChi2 };
 }
+
+/** Structural alias for a 3×3 tensor built row-wise in the uAniso accumulation. */
+type Mat3Like = readonly (readonly number[])[];
 
 /** Obs/calc/difference G(r) curves for the current parameter values. The field
  *  names match `PowderCurves` so the same plot component consumes both. */

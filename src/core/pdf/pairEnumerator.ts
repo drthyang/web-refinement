@@ -31,6 +31,13 @@ export interface PdfPair {
   readonly j: number;
   /** Uncorrelated along-bond mean-square displacement σ′² = n̂ᵀ(U_i+U_j)n̂ (Å²). */
   readonly msd: number;
+  /** Cartesian bond unit vector n̂ = (cart_j + T − cart_i)/r_ij, components
+   *  stored flat (non-optional keeps the pair objects monomorphic). Needed by
+   *  the analytic-gradient pass (pdf/gradients.ts): d r/d(position) = n̂·Δu and
+   *  the ADP projection derivative both live along the bond. */
+  readonly nx: number;
+  readonly ny: number;
+  readonly nz: number;
 }
 
 /** Cartesian atomic displacement tensor U_cart (Å²) from a CIF ADP. */
@@ -115,7 +122,7 @@ export function enumeratePairs(cell: UnitCell, atoms: readonly ExpandedAtom[], r
             const rij = Math.sqrt(r2);
             const nHat: Vec3 = [dx / rij, dy / rij, dz / rij];
             const msd = msdAlong(uCart[i]!, nHat) + msdAlong(uCart[j]!, nHat);
-            pairs.push({ rij, i, j, msd });
+            pairs.push({ rij, i, j, msd, nx: nHat[0], ny: nHat[1], nz: nHat[2] });
           }
         }
       }

@@ -217,7 +217,8 @@ average ordered structure before P5 adds local (short-range-order) freedom.
 9. **Incommensurate mPDF** (helices, SDW) needs the `fourierMoment.ts` complex-
    coefficient route, not the commensurate supercell expander.
 10. **Uncertainty quantification** beyond esd (residual-based, resampling) is a
-    modern differentiator over PDFgui.
+    modern differentiator over PDFgui — delivered as Bayesian posterior
+    sampling (ensemble MCMC; see P6).
 
 ---
 
@@ -448,7 +449,26 @@ app + a validation gate**, no broken intermediate state.
 > `{kind:"pdf"}` EvaluatorSpec arm gives pooled/parallel refinement in both the
 > browser workbench and the node MCP server, pooled ≡ serial bit-for-bit.
 > Remaining for P6: mPDF tools (with P4), PDF-aware `assess_refinement` bands,
-> next-step suggestions for PDF, resampling uncertainty, multi-dataset UI.
+> next-step suggestions for PDF, multi-dataset UI.
+>
+> **Update (2026-07-19):** the uncertainty-quantification item shipped, beyond
+> the planned resampling: **Bayesian posterior sampling**. An affine-invariant
+> ensemble MCMC sampler (Goodman & Weare stretch move, emcee-style) lives in
+> `core/refinement/bayes/` as a sans-io generator mirroring the LM engine's
+> `refineCore` — RNG only in the generator, so the serial and worker-pool
+> drivers are bit-identical and a run resumes from a serializable walker-state
+> token. The default noise model is **marginalized** — `logL = −(N/2)·ln χ²`
+> (unknown error scale integrated out under a Jeffreys prior) — exactly
+> because G(r) is fitted with deliberate unit weights (§8's correlated-error
+> caveat). Logit transforms handle [min, max] bounds with the log-Jacobian
+> measure term. Diagnostics: split-R̂ (Gelman–Rubin), ESS (Geyer
+> initial-monotone truncation), quantile credible intervals, the sample
+> correlation matrix, and `esdRatio` (posterior std / linearized LM esd) —
+> validated at **0.99–1.01** on the Ni PDFfit2 golden in the Gaussian limit.
+> Exposed as the `sample_posterior` MCP tool (33 tools total) with bounded
+> `nSteps` + resume-token continuation; agents run `refine_pdf` first and seed
+> walkers from the converged values. See VALIDATION.md and Fancher et al.
+> (2016) / McCluskey et al. (2023) in §9.
 >
 > **UI status (2026-07-17):** the PDF page is design-unified with the powder
 > page (same plot-card layout, toolbar, segmented Refinement | 3D Model view,
@@ -504,6 +524,19 @@ following the existing acceleration ladder:
    `wgslFieldCount == STRIDE` and an f64-kernel-vs-CPU-G(r) precision harness
    (≤1e-6). Note a real-space accumulation of many small Gaussians can be *more*
    f32-sensitive than the reflection sum — validate carefully.
+4. **Analytic gradients (F1.1 real-space — shipped).** A fused single-pass
+   pair loop (`pdf/gradients.ts`) returns G(r) **and** every requested analytic
+   ∂G/∂p column in one traversal — the value curve is bit-identical to
+   `computeGofR`, pinned by test. Covered kinds: `qdamp`, `qbroad`,
+   `delta1`/`delta2`, `spdiameter` (> 0), `occupancy`, `bIso`, `uAniso`, and
+   symmetry-mode `positionShift` — orbit-image derivatives transform correctly
+   via per-atom op provenance (d pos/dv = M·R·axis, U → R·U·Rᵀ). `cell`,
+   `sratio`/`rcut`, tie-referenced parameters, and multi-phase/multi-dataset
+   problems fall back to FD (null column). `buildPdfProblem` feeds these to the
+   LM engine as `analyticColumns` (restraints supported, unlike the powder
+   template) and also exposes a complete scalar `gradChi2` (analytic columns +
+   central-FD fill-in) — the contract a future NUTS sampler consumes. Measured
+   **2.3× faster** LM refinement on the Ni golden, same basin.
 
 ---
 
@@ -520,6 +553,15 @@ Adopt the project's golden-value + external-cross-check convention:
 - **Cross-checks:** partial-PDF weights sum to 1 (Faber–Ziman); termination
   ripple reproduces a known low-Qmax artifact; `⟨b⟩` sign handling for
   negative-`b` elements (Mn, H, Ti).
+- **FD oracles need filtering, not the analytic columns:** the ±5σ Gaussian
+  evaluation window is quantized on the r-grid, so a finite-difference *oracle*
+  picks up spurious 1/h spikes when a pair crosses a window edge — and the Qmax
+  band-limit **delocalizes** those spikes across the whole grid. The gate tests
+  (`pdfAnalyticJacobian.test.ts`) therefore apply a **Richardson h-vs-h/2
+  consistency filter** (compare only grid points where the FD estimate is
+  h-stable) and run the tight tolerances with termination off. Recorded here so
+  the lesson is not re-learned: when an analytic-vs-FD gate fails, suspect the
+  oracle's discretization before the derivative.
 - Fixtures live under the git-ignored `data/` folder via `testSupport`, skipping
   gracefully when absent, exactly like the GSAS-II suites.
 
@@ -571,4 +613,8 @@ Frandsen & Billinge, *Acta Cryst.* **A71** (2015) 325 (mPDF fitting, MnO) ·
 Paddison, Stewart & Goodwin, *J. Phys.: Condens. Matter* **25** (2013) 454220
 (SPINVERT) · Waasmaier & Kirfel, *Acta Cryst.* **A51** (1995) 416 (5-Gaussian
 f(Q)) · Toby & Billinge, *Acta Cryst.* **A60** (2004) 315 (PDF uncertainties) ·
-Egami & Billinge, *Underneath the Bragg Peaks*, 2nd ed. (2012).
+Egami & Billinge, *Underneath the Bragg Peaks*, 2nd ed. (2012) ·
+Goodman & Weare, *Commun. Appl. Math. Comput. Sci.* **5** (2010) 65
+(affine-invariant ensemble MCMC) · Fancher et al., *Sci. Rep.* **6** (2016)
+31625 (Bayesian MCMC full-profile refinement) · McCluskey et al., *J. Appl.
+Cryst.* **56** (2023) 12 (reporting Bayesian analysis of scattering data).

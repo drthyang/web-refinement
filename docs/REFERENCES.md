@@ -97,6 +97,22 @@ Web resources accessed **2026-07-08**.
   → [`refinement/factors.ts`](../src/core/refinement/factors.ts).
 - **Normal probability plot** — Abrahams, S. C. & Keve, E. T. (1971).
   *Acta Cryst.* **A27**, 157. → [`refinement/diagnostics.ts`](../src/core/refinement/diagnostics.ts).
+- **Affine-invariant ensemble MCMC (stretch move)** — Goodman, J. & Weare, J.
+  (2010). "Ensemble samplers with affine invariance." *Commun. Appl. Math.
+  Comput. Sci.* **5**, 65–80.
+  doi:[10.2140/camcos.2010.5.65](https://doi.org/10.2140/camcos.2010.5.65);
+  Foreman-Mackey, D., Hogg, D. W., Lang, D. & Goodman, J. (2013). "emcee: The
+  MCMC Hammer." *Publ. Astron. Soc. Pac.* **125**, 306–312.
+  doi:[10.1086/670067](https://doi.org/10.1086/670067) (the walker / stretch-move
+  conventions). → [`refinement/bayes/sampler.ts`](../src/core/refinement/bayes/sampler.ts).
+- **MCMC convergence diagnostics — split-R̂ and ESS** — Gelman, A., Carlin,
+  J. B., Stern, H. S., Dunson, D. B., Vehtari, A. & Rubin, D. B., *Bayesian
+  Data Analysis*, 3rd ed. (CRC, 2013), §11.4–11.5 (split-chain R̂, effective
+  sample size); Geyer, C. J. (1992). "Practical Markov Chain Monte Carlo."
+  *Statist. Sci.* **7**, 473–483.
+  doi:[10.1214/ss/1177011137](https://doi.org/10.1214/ss/1177011137)
+  (initial-monotone-sequence truncation of the autocorrelation sum).
+  → [`refinement/bayes/diagnostics.ts`](../src/core/refinement/bayes/diagnostics.ts).
 - **Magnetic representation analysis** — Bertaut, E. F. (1968). *Acta Cryst.*
   **A24**, 217; Izyumov, Naish & Ozerov, *Neutron Diffraction of Magnetic
   Materials*; Bradley, C. J. & Cracknell, A. P. (1972), *The Mathematical Theory
@@ -141,3 +157,26 @@ Web resources accessed **2026-07-08**.
   practice distilled in [`../knowledge/`](../knowledge/). No single paper is the
   source. If a specific scaling/Jacobian-conditioning paper is later attached, it
   belongs here, tied to [`REFINEMENT_ENGINE.md`](./REFINEMENT_ENGINE.md).
+
+- **Bayesian refinement precedent** — Fancher, C. M., Han, Z., Levin, I.,
+  Page, K., Reich, B. J., Smith, R. C., Wilson, A. G. & Jones, J. L. (2016).
+  "Use of Bayesian inference in crystallographic structure refinement via full
+  diffraction profile analysis." *Sci. Rep.* **6**, 31625.
+  doi:[10.1038/srep31625](https://doi.org/10.1038/srep31625). The
+  crystallographic precedent for the posterior sampler: MCMC posterior sampling
+  over a full-profile model, explicit treatment of the error model
+  (heteroskedastic, correlated residuals), and posterior widths compared
+  against Rietveld esds — the comparison our `esdRatio` diagnostic automates.
+  We implement the ensemble sampler above, not this paper's specific
+  sampler/error model; it motivates the marginalized noise model and the
+  posterior-vs-esd check in [`REFINEMENT_ENGINE.md`](./REFINEMENT_ENGINE.md).
+- **Reporting Bayesian analyses** — McCluskey, A. R., Caruana, A. J., Kinane,
+  C. J., Armstrong, A. J., Arnold, T., Cooper, J. F. K., Cortie, D. L.,
+  Hughes, A. V., Moulin, J.-F., Nelson, A. R. J., Potrzebowski, W. &
+  Starostin, V. (2023). "Advice on describing Bayesian analysis of neutron and
+  X-ray reflectometry." *J. Appl. Cryst.* **56**, 12–17.
+  doi:[10.1107/S1600576722011426](https://doi.org/10.1107/S1600576722011426).
+  The reporting checklist the sampler's output follows: state the priors
+  (bounds), the sampler and its chains/steps, autocorrelation-aware ESS, and
+  credible intervals rather than bare point estimates — all first-class fields
+  of the `sample_posterior` result.

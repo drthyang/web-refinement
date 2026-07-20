@@ -532,7 +532,7 @@ where similarity-driven optimization fails. Practical implication:
 ```
 
 Source: Segal, Subramanian, Li, Miller & Gómez-Bombarelli, *Digital Discovery*
-**5**, 1590 (2026), doi:10.1039/D6DD00017G (arXiv:2512.04036). See §23.
+**5**, 1590 (2026), doi:10.1039/D6DD00017G (arXiv:2512.04036). See §24.
 
 ---
 
@@ -691,7 +691,79 @@ Everything else should plug into that engine.
 
 ---
 
-## 23. Reference sources for implementation context
+## 23. Bayesian Posterior Sampling
+
+Least-squares esds are a linearization: the covariance of a Gaussian
+approximation at the χ² minimum. They are only as good as three assumptions —
+the posterior is Gaussian, the weights are true statistical weights, and no
+bound is active. Posterior sampling (MCMC) removes the linearization and tests
+the assumptions.
+
+What a sampled posterior gives that esds cannot:
+
+```text
+- the full parameter distribution: skew, heavy tails, multi-modality visible
+- credible intervals read from quantiles — no Gaussian assumption
+- the joint sample correlation structure, not just the local covariance
+- honest behavior at bounds (probability mass piling on a bound is visible)
+```
+
+Recommended sampler: affine-invariant ensemble MCMC (the Goodman–Weare
+"stretch move", popularized by emcee). Reasons it fits a refinement engine:
+
+```text
+- no per-parameter step-size tuning
+- affine invariance → robust to the strong correlations refinements always have
+- walkers evaluate independently → maps onto an existing worker pool
+- transform bounded parameters (logit for [min, max], log for one-sided) and
+  add the log-Jacobian to the log-posterior, or the sampled measure is wrong
+```
+
+The error model matters more than the sampler choice:
+
+```text
+if σ_i are trusted counting statistics:
+    logL = −½ Σ w_i [y_obs(i) − y_calc(i)]²
+if the error scale is unknown, or weights are deliberately uniform
+(e.g. reduced-PDF G(r), whose point errors are correlated):
+    marginalize the unknown scale →  logL = −(N/2) · ln χ²
+```
+
+Fancher et al. (2016) is the crystallographic precedent: MCMC posterior
+sampling of a full diffraction profile, showing posterior widths depart from
+Rietveld esds exactly when the error model (heteroskedasticity, correlation)
+is treated honestly.
+
+Never report a posterior without convergence evidence (McCluskey et al. 2023):
+
+```text
+- split-R̂ (Gelman–Rubin): ≈ 1.00–1.01 converged; > 1.05 → do not report
+- ESS (effective sample size): quantile claims need ESS of several hundred+
+- state priors/bounds, seed, walker count, steps, burn-in — reproducibility
+```
+
+A cheap two-way consistency check against least squares:
+
+```text
+esdRatio = posterior std / linearized LM esd
+
+≈ 1   Gaussian limit — the sampler and the esds validate each other
+≫ 1   non-Gaussian / bound-limited / correlated-error posterior — report the
+      credible interval, not the esd
+≪ 1   suspect the run: unconverged chains or an over-tight prior
+```
+
+Sampling complements least squares; it never replaces it:
+
+```text
+1. refine to convergence with staged LM (§11)
+2. seed walkers in a small ball around the minimum
+3. sample; check R̂ and ESS; report credible intervals + esdRatio
+```
+
+---
+
+## 24. Reference sources for implementation context
 
 - The solver mechanics — Levenberg–Marquardt, diagonal (Jacobi) scaling of the
   normal matrix, SVD truncation of near-null directions, staged parameter
@@ -708,3 +780,19 @@ Everything else should plug into that engine.
   whole-pattern *similarity* metrics is unreliable, why projecting onto the
   correct crystal family helps, and why an interatomic-potential energy landscape
   is a smooth complement.
+- **Bayesian posterior sampling (§23)** — Fancher, C. M., Han, Z., Levin, I.,
+  Page, K., Reich, B. J., Smith, R. C., Wilson, A. G. & Jones, J. L. (2016).
+  "Use of Bayesian inference in crystallographic structure refinement via full
+  diffraction profile analysis." *Sci. Rep.* **6**, 31625.
+  doi:[10.1038/srep31625](https://doi.org/10.1038/srep31625) — the
+  crystallographic precedent: MCMC posterior sampling of a full diffraction
+  profile, and why an honest error model (heteroskedasticity, correlated
+  errors) changes posterior widths relative to Rietveld esds. McCluskey, A. R.
+  et al. (2023). "Advice on describing Bayesian analysis of neutron and X-ray
+  reflectometry." *J. Appl. Cryst.* **56**, 12–17.
+  doi:[10.1107/S1600576722011426](https://doi.org/10.1107/S1600576722011426) —
+  the reporting checklist §23 follows: state priors, seeds and chain counts,
+  autocorrelation/ESS, and credible intervals. The stretch-move sampler itself
+  is Goodman & Weare (2010), *Commun. Appl. Math. Comput. Sci.* **5**, 65, and
+  Foreman-Mackey et al. (2013), *PASP* **125**, 306 (emcee) — both already
+  cited in `src/core/refinement/bayes/sampler.ts`.

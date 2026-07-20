@@ -43,13 +43,19 @@ only symmetry-allowed parameters, use global search only for starting models.
 
 ## 2. Current state (honest baseline)
 
-What genuinely works today (1072 passing tests; real-data validated):
+What genuinely works today (1101 passing tests; real-data validated):
 
 - **Refinement engine** — Levenberg–Marquardt with diagonal preconditioning,
   SVD-truncated pseudo-inverse, per-cycle shift limiting, bound projection,
   exact one-evaluation Jacobian columns for linear parameters, and
   covariance/esd + correlation/singular-direction reporting.
   ([`refinement/engine.ts`](../src/core/refinement/engine.ts))
+- **Posterior sampling (prototype)** — an affine-invariant ensemble MCMC
+  driver behind the same problem seam
+  ([`refinement/bayes/`](../src/core/refinement/bayes/)): marginalized noise
+  model, logit bounds transforms, split-R̂/ESS diagnostics, and
+  posterior-vs-LM-esd validation on the Ni PDF golden (esdRatio 0.99–1.01);
+  exposed as the `sample_posterior` MCP tool.
 - **Staged structure refinement** — the expert unlock order
   (scale → background → cell → profile → ADP → positions) driven by
   [`workflow/structureRefinement.ts`](../src/core/workflow/structureRefinement.ts).
@@ -121,6 +127,22 @@ The engine is capable but still fragile on hard real data. Close these, in order
    derivative intensities). Remaining as follow-ups behind the same gate:
    coordinates, cell, profile width, zero-shift (couples to width via Caglioti),
    and moment components.
+
+   **Landed — the real-space (PDF) analytic-gradient layer**
+   ([`pdf/gradients.ts`](../src/core/pdf/gradients.ts)): a fused single-pass
+   pair loop computes G(r) *and* every requested ∂G/∂p column in one traversal
+   (the value path is bit-identical to `computeGofR`, pinned by test).
+   Supported kinds: Qdamp, Qbroad, δ1, δ2, `spdiameter`, occupancy, B_iso,
+   anisotropic U, and symmetry-mode position amplitudes (orbit images carry
+   their generating operation, so image derivatives transform correctly); cell,
+   sratio/rcut, tie-referenced parameters, and multi-phase/multi-dataset stay
+   finite-difference. `buildPdfProblem` now also emits `analyticColumns`
+   (restraint-compatible, unlike the powder template) plus `gradChi2` — the
+   complete scalar ∇χ² (analytic columns + central-FD fill-in) a future
+   gradient-based sampler consumes. Measured **2.3× faster** LM refinement on
+   the Ni golden, same basin; gated by
+   [`pdfAnalyticJacobian.test.ts`](../src/core/workflow/pdfAnalyticJacobian.test.ts).
+   Remaining real-space follow-ups: cell gradients, sratio/rcut.
 2. **Reflection-window evaluation + dependency caching** ✅ — each reflection is
    accumulated only over its local `±20·FWHM` window (binary-searched on the
    monotonic grid), and the structure-factor stage is reused whenever no
@@ -192,9 +214,33 @@ The engine is capable but still fragile on hard real data. Close these, in order
    and, for the gradient-only methods, **ESD parity** with the LM covariance after
    the final Hessian pass.
 
+8. **Bayesian posterior sampling (ensemble MCMC)** 🚧 — the first non-LM driver
+   behind the `RefinementProblem` seam, for *uncertainty*, not descent — and a
+   proof of item 7's drop-in claim. Landed as a prototype
+   ([`refinement/bayes/`](../src/core/refinement/bayes/)): an affine-invariant
+   ensemble sampler (Goodman & Weare 2010 stretch move, emcee-style) written as
+   a sans-io generator mirroring `refineCore` — all RNG lives in the generator,
+   so the serial and worker-pool drivers are **bit-identical**, and a
+   serializable walker-state token makes runs resumable. Default noise model is
+   *marginalized*: logL = −(N/2)·ln χ² (Jeffreys-marginalized unknown error
+   scale — the right likelihood for PDF unit weights); logit transforms handle
+   [min, max] bounds with the log-Jacobian measure term. Diagnostics: split-R̂,
+   ESS (Geyer initial-monotone truncation), credible intervals, the sample
+   correlation matrix, and **esdRatio** = posterior std / linearized LM esd —
+   validated at 0.99–1.01 on the Ni PDFfit2 golden in the Gaussian limit.
+   Exposed as the `sample_posterior` MCP tool (bounded nSteps + resume-token
+   continuation; agents seed from a converged `refine_pdf`). References:
+   Fancher et al. (2016), *Sci. Rep.* **6**, 31625 (Bayesian MCMC full-profile
+   refinement precedent); McCluskey et al. (2023), *J. Appl. Cryst.* **56**, 12
+   (reporting conventions). **Next:** a gradient-based NUTS v2 consuming item
+   1's `gradChi2`; a posterior panel in the UI; analytic cell gradients so cell
+   posteriors sample at full speed.
+
 *Validation gate:* the GaNb₄Se₈ regression tightens toward the GSAS-II wR (✅
 staged wR 5.8% vs GSAS-II 7.34%); analytic-vs-finite-difference Jacobian
-agreement test (✅ occupancy, B_iso); SVD duplicate-parameter suppression test
+agreement test (✅ occupancy, B_iso; ✅ the real-space PDF kinds in
+[`pdfAnalyticJacobian.test.ts`](../src/core/workflow/pdfAnalyticJacobian.test.ts));
+SVD duplicate-parameter suppression test
 (✅ [`engine.test.ts`](../src/core/refinement/engine.test.ts)).
 
 ### F2 — Symmetry-constrained parameterization

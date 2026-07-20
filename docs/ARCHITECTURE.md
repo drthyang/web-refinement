@@ -30,16 +30,16 @@ the reverse. Scientific code never imports React.
 ┌───────────────────┬───────────────────────┬─────────────────────┐
 │ Web app UI        │ MCP agent server      │ Web workers         │  three thin consumer
 │ src/app,          │ src/mcp               │ src/workers         │  surfaces over the
-│ src/components    │ (32-tool registry)    │ (long solves)       │  same core functions
+│ src/components    │ (33-tool registry)    │ (long solves)       │  same core functions
 ├───────────────────┴───────────────────────┴─────────────────────┤
 │ Import & presentation   src/parsers, src/visualization           │  CIF/hkl/powder in,
 ├──────────────────────────────────────────────────────────────────┤  plot data out
 │ src/core — pure TypeScript, no DOM, no React, no side effects    │
 │                                                                  │
 │   workflow      problem builders (powder, magnetic, multi-phase) │
-│   refinement    Levenberg–Marquardt driver, esds, diagnostics    │
+│   refinement    LM driver + MCMC sampler, esds, diagnostics      │
 │   diffraction   structure factors, reflections, peak profiles    │
-│   pdf           G(r) forward model, pair enumeration, partials   │
+│   pdf           G(r) forward model, analytic gradients, partials │
 │   magnetic      MSG candidates, k-search, moments, |F_M|², mPDF  │
 │   crystal       cells, symmetry, site/ADP constraints,           │
 │                 distortion modes, isotropy + subgroup lattices   │
@@ -73,9 +73,9 @@ src/
     crystal/         unit cell, symmetry, structure model, constraints
     scattering/      neutron b, X-ray f(Q), magnetic ⟨j0⟩/⟨j2⟩ tables
     diffraction/     reflections, structure factors, peak profiles
-    pdf/             G(r) forward model, pair enumeration, partials
+    pdf/             G(r) forward model + analytic gradients, partials
     magnetic/        MSG/k machinery, moment models, magnetic |F|², mPDF
-    refinement/      parameters, constraints, least-squares engine
+    refinement/      parameters, constraints, LM engine; bayes/ MCMC sampler
     workflow/        problem builders: powder, magnetic, multi-phase, SC
     diagnostics/     assessment / next-steps / interpretation (judgment)
     export/          CIF, mCIF, FullProf + GSAS-II bundles, reports
@@ -134,6 +134,16 @@ Data-agnostic least-squares driver (Levenberg–Marquardt) operating on a flat
 `RefinementParameter[]`. It sees only numbers, bounds, and a residual function
 supplied by the active workflow. Bindings map each parameter back onto a field
 in the domain model. Full design in [REFINEMENT_ENGINE.md](./REFINEMENT_ENGINE.md).
+
+A **Bayesian posterior sampler** (`core/refinement/bayes/`) sits beside the
+least-squares driver on the same `RefinementProblem` seam: an affine-invariant
+ensemble MCMC (Goodman–Weare stretch move) with logit/log transforms for
+bounded parameters, a marginalized-noise default likelihood, and convergence
+diagnostics (split-R̂, ESS, credible intervals, `esdRatio` = posterior std /
+linearized LM esd). It mirrors the LM core's sans-io generator design — RNG
+lives only in the generator, so the serial and worker-pool drivers are
+bit-identical and a run is resumable from a serialized walker-state token.
+Prototype, PDF-first; gates in [VALIDATION.md](./VALIDATION.md).
 
 ## Worker / compute layer
 

@@ -159,25 +159,49 @@ export interface ExpandedAtom {
   readonly adp: DisplacementParameters;
 }
 
+/** Where an expanded atom came from: which asymmetric-unit site, through which
+ *  operation. A parameter bound to a SITE moves every orbit atom, but each
+ *  image's derivative transforms by its operation's rotation (positions:
+ *  d pos/dv = R·axis; ADPs: dU = R·uBasis·Rᵀ) — the analytic PDF gradient pass
+ *  (pdf/gradients.ts) needs this to route site derivatives to pair atoms. */
+export interface ExpandedAtomProvenance {
+  /** Index of the originating site in `model.sites`. */
+  readonly siteIndex: number;
+  /** Fractional rotation R of the generating operation (translation drops out
+   *  of every derivative). */
+  readonly rotation: SymmetryOperation["rotation"];
+}
+
 /** Expand a structure's asymmetric unit over each site's distinct orbit. Each
  *  image carries the site's ADP AS SEEN BY ITS OPERATION — an anisotropic
  *  tensor rotates with the orbit (U′ = R·U·Rᵀ), so real-space displacement
  *  projections and per-atom Debye–Waller factors are correct off the
- *  asymmetric unit. */
-export function expandStructureAtoms(model: StructureModel): ExpandedAtom[] {
-  const out: ExpandedAtom[] = [];
-  for (const site of model.sites) {
+ *  asymmetric unit. The provenance array is index-aligned with the atoms. */
+export function expandStructureAtomsWithProvenance(
+  model: StructureModel,
+): { atoms: ExpandedAtom[]; provenance: ExpandedAtomProvenance[] } {
+  const atoms: ExpandedAtom[] = [];
+  const provenance: ExpandedAtomProvenance[] = [];
+  for (let s = 0; s < model.sites.length; s++) {
+    const site = model.sites[s]!;
     for (const op of distinctSiteOps(model.spaceGroup.operations, site.position)) {
-      out.push({
+      atoms.push({
         position: applyOperation(op, site.position),
         occupancy: site.occupancy,
         element: site.element,
         ...(site.isotope !== undefined ? { isotope: site.isotope } : {}),
         adp: adpForOperation(site.adp, op.rotation),
       });
+      provenance.push({ siteIndex: s, rotation: op.rotation });
     }
   }
-  return out;
+  return { atoms, provenance };
+}
+
+/** The plain orbit expansion — delegates to the provenance variant so the two
+ *  can never disagree on atom ordering. */
+export function expandStructureAtoms(model: StructureModel): ExpandedAtom[] {
+  return expandStructureAtomsWithProvenance(model).atoms;
 }
 
 /**

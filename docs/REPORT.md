@@ -3,10 +3,11 @@
 **Project:** MATERIA Workbench — a browser-native refinement workbench for
 atomic and magnetic structures.
 **Stack:** React 18 · TypeScript 5 (strict) · Vite 5 · Vitest · Web Workers.
-**Status (2026-07-19):** working static app; **1072 tests passing** (59
+**Status (2026-07-19):** working static app; **1101 tests passing** (59
 real-data/slow tests skip without local `data/`); atomic **and magnetic**
 single-crystal + powder refinement, multi-phase, Le Bail extraction, magnetic
-space-group candidate generation & comparison, and a real-space PDF track;
+space-group candidate generation & comparison, a real-space PDF track, and a
+prototype Bayesian posterior sampler (ensemble MCMC + analytic PDF gradients);
 validated against the bundled GSAS-II refinements in `data/`
 (30 K / 200 K / 350 K) and a local PDFfit2/PDFgui.
 
@@ -157,8 +158,8 @@ in the app UI, README, and limitations doc.
 ## 5. Test summary (current: 2026-07-19)
 
 ```
-Test Files  153 passed | 9 skipped (162)
-Tests       1072 passed | 59 skipped (1131)
+Test Files  157 passed | 9 skipped (166)
+Tests       1101 passed | 59 skipped (1160)
 ```
 
 Covering: linear algebra, unit-cell/metric/volume (GSAS golden), symmetry
@@ -176,8 +177,11 @@ k ≠ 0), the TOF back-to-back-exponential profile (the two-phase Mn₃Ga/MnO de
 converges at wR ≈ 3.9 %), the single-crystal F² workbench, refined CIF/mCIF
 export with esds, one-click FullProf / GSAS-II cross-check export, opt-in
 WebGPU structure-factor kernels, the real-space PDF track (PDFfit2-validated,
-with the symmetry-mode distortion workflow), a validated mPDF core, and the
-32-tool MCP agent layer. Remaining highlights (full ordering in
+with the symmetry-mode distortion workflow), a validated mPDF core, the
+33-tool MCP agent layer, and the Bayesian posterior-sampling prototype
+(`sample_posterior` + the fused analytic-gradient PDF pass; posterior widths
+validated at esdRatio 0.99–1.01 against the LM esds on the Ni golden).
+Remaining highlights (full ordering in
 [ROADMAP.md](./ROADMAP.md)):
 
 1. Single-crystal-mode and multi-phase FullProf `.pcr` export (powder is done).

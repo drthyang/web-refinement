@@ -67,6 +67,13 @@ import {
   type ModulatedIon,
 } from "@/core/magnetic/magneticSupercell";
 import { createNodeEvaluatorPool } from "@/mcp/nodeEvaluator";
+import {
+  samplePosterior,
+  samplePosteriorParallel,
+  type SampleResult,
+  type WalkerState,
+} from "@/core/refinement/bayes/sampler";
+import type { NoiseModel, PriorSpec } from "@/core/refinement/bayes/logPosterior";
 import { buildProblemForSpec } from "@/workers/runPowder";
 import type { EvaluatorSpec } from "@/workers/protocol";
 import type { SymmetryOperation } from "@/core/crystal/types";
@@ -951,6 +958,111 @@ export async function refine_pdf(args: {
     observationCount,
     residual: { r: [...curves.x], gObs: [...curves.yObs], gCalc: [...curves.yCalc] },
     warnings: conflict ? [conflict] : [],
+    parallel,
+  };
+}
+
+/**
+ * Draw Bayesian posterior samples over the FREED parameters of a PDF fit with
+ * the affine-invariant ensemble sampler. Where refine_pdf returns a point
+ * estimate + linearized esds, this returns the full posterior: credible
+ * intervals, true correlations, and the esdRatio verdict on whether the
+ * least-squares error bars were honest. Bounded per call; the returned resume
+ * token continues the same chain in a later call.
+ */
+export async function sample_posterior(args: {
+  structure: StructureModel;
+  pattern: PdfPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  restraints?: LinearRestraint[];
+  extraPhases?: StructureModel[];
+  fitRange?: { min?: number; max?: number };
+  nSteps: number;
+  nWalkers?: number;
+  burnIn?: number;
+  thin?: number;
+  seed?: number;
+  noiseModel?: NoiseModel;
+  priors?: Record<string, PriorSpec>;
+  linearizedEsd?: Record<string, number>;
+  resume?: WalkerState;
+  includeChains?: boolean;
+}): Promise<{
+  posterior: SampleResult["posterior"]["parameters"];
+  correlations: { parameterIdA: string; parameterIdB: string; coefficient: number }[];
+  acceptanceFraction: number;
+  converged: boolean;
+  status: SampleResult["status"];
+  message?: string;
+  nSamples: number;
+  freeIds: string[];
+  resume: WalkerState;
+  chains?: number[][][];
+  parallel: { workers: number } | null;
+}> {
+  const multi = args.extraPhases && args.extraPhases.length > 0;
+  const spec: EvaluatorSpec = {
+    kind: "pdf",
+    structure: args.structure,
+    ...(multi ? { extraPhases: args.extraPhases } : {}),
+    pattern: args.pattern,
+    parameters: args.parameters,
+    bindings: args.bindings,
+    ...(args.restraints && args.restraints.length ? { restraints: args.restraints } : {}),
+    ...(args.fitRange ? { fitRange: args.fitRange } : {}),
+  };
+  const problem = buildProblemForSpec(spec);
+  const options = {
+    nSteps: args.nSteps,
+    ...(args.nWalkers !== undefined ? { nWalkers: args.nWalkers } : {}),
+    ...(args.burnIn !== undefined ? { burnIn: args.burnIn } : {}),
+    ...(args.thin !== undefined ? { thin: args.thin } : {}),
+    ...(args.seed !== undefined ? { seed: args.seed } : {}),
+    ...(args.noiseModel !== undefined ? { noiseModel: args.noiseModel } : {}),
+    ...(args.priors !== undefined ? { priors: args.priors } : {}),
+    ...(args.linearizedEsd !== undefined ? { linearizedEsd: args.linearizedEsd } : {}),
+    ...(args.resume !== undefined ? { init: args.resume } : {}),
+  };
+
+  // Pool fast path: half-ensemble batches fan out over the node worker threads;
+  // bit-identical to the serial path (the RNG never leaves the generator).
+  let parallel: { workers: number } | null = null;
+  let result: SampleResult | null = null;
+  const pool = await createNodeEvaluatorPool(spec);
+  if (pool) {
+    try {
+      result = await samplePosteriorParallel(problem, options, pool);
+      parallel = { workers: pool.size };
+    } finally {
+      await pool.dispose();
+    }
+  }
+  if (!result) result = samplePosterior(problem, options);
+
+  const ids = result.freeIds;
+  const correlations: { parameterIdA: string; parameterIdB: string; coefficient: number }[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      const c = result.posterior.correlation[i]![j]!;
+      if (Math.abs(c) >= 0.3) {
+        correlations.push({ parameterIdA: ids[i]!, parameterIdB: ids[j]!, coefficient: c });
+      }
+    }
+  }
+  correlations.sort((a, b) => Math.abs(b.coefficient) - Math.abs(a.coefficient));
+
+  return {
+    posterior: result.posterior.parameters,
+    correlations: correlations.slice(0, 20),
+    acceptanceFraction: result.acceptanceFraction,
+    converged: result.status === "ok",
+    status: result.status,
+    ...(result.message !== undefined ? { message: result.message } : {}),
+    nSamples: result.diagnostics.nSamples,
+    freeIds: [...ids],
+    resume: result.resume,
+    ...(args.includeChains ? { chains: result.chains.map((w) => w.map((r) => [...r])) } : {}),
     parallel,
   };
 }

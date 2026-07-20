@@ -15,7 +15,8 @@ workbench; the same pure core is exposed to agents as tools (see
 fully static GitHub Pages app; nothing to install, and your data never leaves
 your machine. Two bundled demos open converged from the start page: a two-phase
 **Mn₃Ga neutron TOF Rietveld** fit (wR 3.9%) and a **GaTa₄Se₈ X-ray PDF** fit
-(Rw 8.1%).
+of the local structure, where the average-structure model is deliberately
+left to disagree with the data at short range.
 
 <p align="center">
   <img src="docs/screenshots/desktop.png" alt="Two-phase Mn₃Ga + MnO Rietveld refinement of POWGEN time-of-flight data, converged at wR 3.86%: observed/calculated/difference curves, per-phase Bragg ticks, and the symmetry-allowed parameter table with esds" width="100%" />
@@ -110,7 +111,7 @@ powder) plus a commensurate single-k magnetic workflow — and a first agent-too
 layer over the same core. The scientific core, Levenberg–Marquardt refinement
 engine, symmetry-adapted constrained parameters, CIF parsing, a 3D
 structure/moment viewer, plots, and Web Worker compute are implemented and
-tested (**1072 passing tests**). Crystallographic and scattering foundations are
+tested (**1101 passing tests**). Crystallographic and scattering foundations are
 validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
 As with any beta, results intended for publication must be validated against
@@ -159,9 +160,23 @@ diffpy.mpdf; the mPDF page and the symmetry-constrained local-spin model are
 the next milestones. Full plan in
 [docs/PDF_MPDF_ROADMAP.md](docs/PDF_MPDF_ROADMAP.md).
 
-The MCP tool surface has grown to **32 contract-tested tools** spanning the
+**Bayesian uncertainty (new — prototype).** The engine can now *sample the
+posterior*, not just linearize it: an affine-invariant ensemble MCMC sampler
+(Goodman–Weare stretch move) runs behind the same pure-core seam as the
+least-squares driver, with a noise model suited to PDF unit weights, split-R̂ /
+ESS convergence diagnostics, and credible intervals. On the Ni PDF golden the
+posterior widths match the linearized LM esds to 1% (esdRatio 0.99–1.01) —
+uncertainty an agent can reason about, not just a scalar esd. It rides on the
+first **analytic PDF gradients** (a fused ∂G/∂p pass, bit-identical G(r),
+measured 2.3× faster LM refinement on the same golden) and is exposed to
+agents as `sample_posterior`. Approach after Fancher et al. (2016, *Sci. Rep.*
+**6**, 31625); reporting per McCluskey et al. (2023, *J. Appl. Cryst.* **56**,
+12) — see [docs/REFERENCES.md](docs/REFERENCES.md).
+
+The MCP tool surface has grown to **33 contract-tested tools** spanning the
 powder, single-crystal, and PDF tracks (the PDF tools: `parse_pdf_data`,
-`build_pdf_model`, `refine_pdf`, `compute_partial_pdf`, `calibrate_qdamp`, plus
+`build_pdf_model`, `refine_pdf`, `compute_partial_pdf`, `calibrate_qdamp`,
+`sample_posterior`, plus
 `build_distortion_modes` / `build_symmetry_modes` for mode-amplitude fits).
 
 ## Commands
