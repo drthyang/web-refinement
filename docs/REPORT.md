@@ -158,7 +158,7 @@ in the app UI, README, and limitations doc.
 ## 5. Test summary (current: 2026-07-19)
 
 ```
-Test Files  159 passed | 9 skipped (168)
+Test Files  158 passed | 9 skipped (167)
 Tests       1111 passed | 59 skipped (1170)
 ```
 

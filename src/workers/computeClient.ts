@@ -429,20 +429,16 @@ export class ComputeClient {
   }
 
   /**
-   * Bayesian posterior sampling over a PDF problem (ensemble MCMC): the
-   * sans-io sampler generator runs on THIS thread, and every half-ensemble
-   * batch of `calculate` evaluations fans out over the evaluator pool — the
-   * exact contract `refineParallel` uses, so pooled and serial chains are
-   * bit-identical (RNG never leaves the generator). Falls back to fully
-   * in-thread sampling when pooling is unavailable. `options.onStep` fires on
-   * the driver thread each ensemble step (progress display); `options.init`
-   * continues a previous run's chain from its resume token.
+   * Bayesian posterior sampling over any evaluator-spec problem (ensemble
+   * MCMC): the sans-io sampler generator runs on THIS thread, and every
+   * half-ensemble batch of `calculate` evaluations fans out over the evaluator
+   * pool — the exact contract `refineParallel` uses, so pooled and serial
+   * chains are bit-identical (RNG never leaves the generator). Falls back to
+   * fully in-thread sampling when pooling is unavailable. `options.onStep`
+   * fires on the driver thread each ensemble step (progress display);
+   * `options.init` continues a previous run's chain from its resume token.
    */
-  async samplePdfPosterior(
-    req: Omit<RefinePdfRequest, "requestId" | "type">,
-    options: SampleOptions,
-  ): Promise<SampleResult> {
-    const spec = this.pdfSpec(req);
+  private async sampleForSpec(spec: EvaluatorSpec, options: SampleOptions): Promise<SampleResult> {
     const problem = buildProblemForSpec(spec);
     if (this.poolSize() < 2) {
       return samplePosterior(problem, options);
@@ -456,6 +452,30 @@ export class ComputeClient {
       pool.dispose();
       if (this.activePool === pool) this.activePool = null;
     }
+  }
+
+  /** Posterior sampling over a PDF problem (single- or multi-phase). */
+  async samplePdfPosterior(
+    req: Omit<RefinePdfRequest, "requestId" | "type">,
+    options: SampleOptions,
+  ): Promise<SampleResult> {
+    return this.sampleForSpec(this.pdfSpec(req), options);
+  }
+
+  /** Posterior sampling over a nuclear powder problem (single- or multi-phase). */
+  async samplePowderPosterior(
+    req: Omit<RefinePowderRequest, "requestId" | "type">,
+    options: SampleOptions,
+  ): Promise<SampleResult> {
+    return this.sampleForSpec(this.powderSpec(req), options);
+  }
+
+  /** Posterior sampling over a nuclear+magnetic powder co-refinement problem. */
+  async sampleMagneticPowderPosterior(
+    spec: Omit<Extract<EvaluatorSpec, { kind: "magneticPowder" }>, "kind">,
+    options: SampleOptions,
+  ): Promise<SampleResult> {
+    return this.sampleForSpec({ kind: "magneticPowder", ...spec }, options);
   }
 
   async refinePowderParallel(

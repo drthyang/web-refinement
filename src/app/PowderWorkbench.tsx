@@ -40,6 +40,8 @@ import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from 
 import { isMomentParameterKind } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
 import { CANCELLED } from "@/workers/computeClient";
+import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
+import type { SampleResult } from "@/core/refinement/bayes/sampler";
 import { KSearchPanel, type MagneticPatternView, type ResidualPeak } from "@/components/KSearchPanel";
 import { withAdpModel } from "@/core/crystal/adp";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
@@ -128,7 +130,17 @@ export function PowderWorkbench({
   const [fitRange, setFitRange] = useState<FitRangeSelection | null>(null);
   // Display-only x-axis unit; null = the pattern's native unit. Reset on load.
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit | null>(null);
-  const [plotMode, setPlotMode] = useState<"curves" | "structure" | "validation">("curves");
+  const [plotMode, setPlotMode] = useState<"curves" | "structure" | "validation" | "posterior">("curves");
+  // Bayesian posterior sampling state: the last run's result plus a rerun
+  // closure capturing the EXACT request it sampled — Continue must re-pose the
+  // identical problem or the chain's resume token would silently target a
+  // different posterior.
+  const [sample, setSample] = useState<{
+    result: SampleResult;
+    rerun: (init?: SampleResult["resume"]) => Promise<SampleResult>;
+  } | null>(null);
+  const [sampleBusy, setSampleBusy] = useState(false);
+  const [sampleProgress, setSampleProgress] = useState<{ step: number; total: number } | null>(null);
   // Reflection clicked in the F_obs/F_calc plot, spotlighted in the pattern
   // plot; null = nothing highlighted.
   const [highlight, setHighlight] = useState<{ hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null>(null);
@@ -160,6 +172,11 @@ export function PowderWorkbench({
     setFitRange(null);
     setDisplayUnit(null);
   }, [pattern]);
+  // A new problem (structure/data/phases/magnetic model) invalidates a sampled
+  // posterior: its free-parameter ids and resume token belong to the old one.
+  useEffect(() => {
+    setSample(null);
+  }, [structure, pattern, session.extraPhases, session.magnetic]);
   const powderIsTof = pattern.xUnit === "tof";
   // A TOF pattern refines only when a back-to-back-exponential profile was built
   // (i.e. a TOF calibration was available). A GSAS overlay or an uncalibrated TOF
@@ -617,6 +634,63 @@ export function PowderWorkbench({
   }
 
   /**
+   * Sample the Bayesian posterior of the currently-free parameters (ensemble
+   * MCMC over the worker pool), seeded at the present values — refine first.
+   * Mirrors runPowder's magnetic-aware routing: nuclear-only problems go
+   * through the powder spec, nuclear+magnetic co-refinement through the
+   * magneticPowder spec. Continue re-runs the stored closure with the resume
+   * token, so the chain keeps targeting the identical posterior.
+   */
+  async function runSample(continueRun: boolean): Promise<void> {
+    setSampleBusy(true);
+    const prior = continueRun ? sample : null;
+    const total = (prior ? prior.result.resume.stepIndex : 0) + 400;
+    setSampleProgress({ step: prior ? prior.result.resume.stepIndex : 0, total });
+    try {
+      const baseOptions = {
+        nSteps: 400,
+        seed: 0xbae5,
+        ...(powderResult?.esd ? { linearizedEsd: powderResult.esd } : {}),
+        onStep: (step: number) => {
+          if (step % 5 === 0 || step === total) setSampleProgress({ step, total });
+        },
+      };
+      let rerun: (init?: SampleResult["resume"]) => Promise<SampleResult>;
+      if (prior) {
+        rerun = prior.rerun;
+      } else if (session.magnetic && powderParams.some((p) => isMomentParameterKind(p.kind))) {
+        const spec = {
+          structure, magnetic: session.magnetic, pattern,
+          parameters: [...powderParams], bindings: [...pBindings],
+          ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
+          shape: session.powderProfile.shape,
+          ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+          ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
+        };
+        rerun = (init) => client.sampleMagneticPowderPosterior(spec, { ...baseOptions, ...(init ? { init } : {}) });
+      } else {
+        const req = {
+          structure, pattern, parameters: [...powderParams], bindings: pBindings, ...profileReq(),
+          ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
+          ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
+        };
+        rerun = (init) => client.samplePowderPosterior(req, { ...baseOptions, ...(init ? { init } : {}) });
+      }
+      const res = await rerun(prior?.result.resume);
+      setSample({ result: res, rerun });
+      setMessage(
+        `Posterior ${prior ? "continued" : "sampled"} (${res.status}): R̂max ${res.diagnostics.maxRHat.toFixed(3)} · ESSmin ${Math.round(res.diagnostics.minEss)} · ${res.diagnostics.nSamples} samples.`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessage(msg === CANCELLED ? "Posterior sampling cancelled." : `Posterior sampling failed: ${msg}`);
+    } finally {
+      setSampleProgress(null);
+      setSampleBusy(false);
+    }
+  }
+
+  /**
    * Thorough refine — the robust, local-minimum-resistant path, in two stages:
    *  1. Le Bail cell pre-fit (single-phase): refine the cell against peak
    *     positions with free intensities, so a wrong starting cell can't trap the
@@ -1047,7 +1121,7 @@ export function PowderWorkbench({
               <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 66vh, 900px)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
                   <span style={themeLabel}>
-                    {plotMode === "structure" ? "Crystal structure — unit cell" : plotMode === "validation" ? "Validation plots" : "Powder pattern"}
+                    {plotMode === "structure" ? "Crystal structure — unit cell" : plotMode === "validation" ? "Validation plots" : plotMode === "posterior" ? "Bayesian posterior — free parameters" : "Powder pattern"}
                   </span>
                   {plotMode !== "structure" && (
                     <span style={{ display: "flex", gap: 14, fontFamily: themeMono, fontSize: 12.5 }}>
@@ -1150,6 +1224,17 @@ export function PowderWorkbench({
                         setFocusPeakToken((t) => t + 1);
                       }}
                       fitRange={fitRangeActive ? { min: fitRange!.min, max: fitRange!.max } : null}
+                    />
+                  </div>
+                ) : plotMode === "posterior" ? (
+                  <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                    <PosteriorPanel
+                      result={sample?.result ?? null}
+                      busy={sampleBusy}
+                      progress={sampleProgress}
+                      onRun={(continueRun) => void runSample(continueRun)}
+                      hasRefined={powderResult !== null && !busy}
+                      labels={new Map(powderParams.map((p) => [p.id, p.label]))}
                     />
                   </div>
                 ) : (
@@ -1421,8 +1506,8 @@ function ViewModeToggle({
   value,
   onChange,
 }: {
-  value: "curves" | "structure" | "validation";
-  onChange: (m: "curves" | "structure" | "validation") => void;
+  value: "curves" | "structure" | "validation" | "posterior";
+  onChange: (m: "curves" | "structure" | "validation" | "posterior") => void;
 }): JSX.Element {
   return (
     <SegmentedToggle
@@ -1430,6 +1515,7 @@ function ViewModeToggle({
         { id: "curves", label: "Refinement", title: "Observed vs calculated pattern" },
         { id: "validation", label: "Validation", title: "F_obs vs F_calc + normal-probability plot" },
         { id: "structure", label: "3D Model", title: "3D crystal-structure model" },
+        { id: "posterior", label: "Posterior", title: "Bayesian posterior of the free parameters (ensemble MCMC) — credible intervals, convergence diagnostics, and the posterior-vs-esd check" },
       ] as const}
       value={value}
       onChange={onChange}
