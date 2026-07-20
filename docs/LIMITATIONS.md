@@ -13,7 +13,7 @@ This statement appears in the app UI and the README, not only here.
 
 A working static app performs **atomic/nuclear structure refinement** for
 single-crystal and powder data, **commensurate single-k magnetic refinement**
-(k = 0 and k ≠ 0), and **real-space PDF fitting** (1101 passing tests). The
+(k = 0 and k ≠ 0), and **real-space PDF fitting** (1111 passing tests). The
 Levenberg–Marquardt engine, symmetry-adapted constrained parameters,
 Chebyshev / cosine / power-series backgrounds, CW + TOF profiles, Le Bail
 extraction, multi-phase powder, magnetic space-group candidate generation, the
@@ -38,20 +38,23 @@ accidental gap — each is tracked as a roadmap item.
   assumed — but auto-background + zero-shift starting values (F1.3) and a staged
   controller that re-fixes degenerate/harmful parameter additions (F1.4) reduce
   the false-minimum risk. (Roadmap F1.)
-- **Bayesian posterior sampling (prototype, PDF-first).** The ensemble sampler
-  is stretch-move MCMC only — no NUTS/HMC yet (the scalar `gradChi2` contract
-  it would consume exists, but cell, sratio/rcut, tie-referenced, and
-  multi-phase/multi-dataset gradients are still finite-difference; the analytic
-  columns are single-phase, single-dataset only). Sampling parameters that move
+- **Bayesian posterior sampling (prototype, PDF-first).** Two samplers ship —
+  the stretch-move ensemble (pool-parallel, any problem) and a gradient-based
+  NUTS (`sampler: "nuts"`; single-phase PDF only, in-process, sequential
+  chains — not yet behind the worker pool). Cell, sratio/rcut, tie-referenced,
+  and multi-phase/multi-dataset gradients are still finite-difference (NUTS
+  fills them in through `gradChi2`, at FD cost). Sampling parameters that move
   geometry (cell, positions) busts the pair cache on every walker step, so
-  those runs are markedly slower than envelope/scale sampling. The default
-  likelihood marginalizes an unknown noise scale (`logL = −(N/2)·ln χ²`)
-  because G(r) point errors are correlated — credible intervals are relative to
-  that noise model, not to true counting statistics. No model-evidence /
-  nested-sampling computation (posteriors compare parameters within one model,
-  not models against each other), and no corner-plot UI — results surface
-  through the `sample_posterior` MCP tool's diagnostics (split-R̂, ESS,
-  quantiles, esdRatio), not the workbench.
+  those runs are markedly slower than envelope/scale sampling — the workbench's
+  Posterior view runs bounded 400-step chunks with a Continue button for
+  exactly this reason. The default likelihood marginalizes an unknown noise
+  scale (`logL = −(N/2)·ln χ²`) because G(r) point errors are correlated —
+  credible intervals are relative to that noise model, not to true counting
+  statistics. No model-evidence / nested-sampling computation (posteriors
+  compare parameters within one model, not models against each other), and the
+  workbench view shows per-parameter marginals only — no corner plot for
+  pairwise correlations yet (the sample correlation matrix is in the
+  `sample_posterior` output).
 - **GPU acceleration (optional, approximate).** WebGPU kernels can accelerate the
   structure-factor sum (nuclear and magnetic) and profile synthesis. They compute
   in **f32 and are APPROXIMATE — not bit-identical** to the CPU f64 path: validated

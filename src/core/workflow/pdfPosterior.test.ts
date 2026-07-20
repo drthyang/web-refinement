@@ -4,6 +4,7 @@ import type { PdfPattern } from "@/core/diffraction/types";
 import { IDENTITY3 } from "@/core/math/mat3";
 import { refine } from "@/core/refinement/engine";
 import { samplePosterior } from "@/core/refinement/bayes/sampler";
+import { sampleNuts } from "@/core/refinement/bayes/nuts";
 import { buildPdfProblem, buildPdfSpec } from "@/core/workflow/pdf";
 import { PDFFIT2_GOLDEN } from "@/core/pdf/pdffit2Golden";
 
@@ -107,4 +108,53 @@ describe("PDF posterior sampling — Ni golden (gate b)", () => {
         .join(", ")} acc=${result.acceptanceFraction.toFixed(2)} R̂=${result.diagnostics.maxRHat.toFixed(3)}`,
     );
   }, 120_000);
+
+  it("NUTS via gradChi2 reproduces the same posterior (esdRatio ≈ 1)", () => {
+    // The gradient-based path end-to-end: the fused analytic ∂G/∂p pass feeds
+    // gradChi2, the LM esds seed the mass matrix, and the resulting posterior
+    // must agree with both the LM esds and (implicitly) the ensemble result.
+    const { c, structure, pattern } = niProblemParts();
+    const spec = buildPdfSpec(structure, pattern);
+    const params = spec.params.map((p) => {
+      if (p.id === "delta2") return { ...p, value: c.delta2, fixed: false };
+      if (p.kind === "cellLength" || p.kind === "cellAngle") return { ...p, fixed: true };
+      return { ...p };
+    });
+    const problem = buildPdfProblem(structure, pattern, params, spec.bindings, spec.restraints, {
+      min: 1.0,
+    });
+    const lm = refine(problem, { maxIterations: 50, convergenceTolerance: 1e-8 });
+    expect(["converged", "stalled"]).toContain(lm.status);
+
+    const seeded = params.map((p) =>
+      p.fixed ? p : { ...p, value: lm.parameters[p.id]!, initialValue: lm.parameters[p.id]! },
+    );
+    const posteriorProblem = buildPdfProblem(structure, pattern, seeded, spec.bindings, spec.restraints, {
+      min: 1.0,
+    });
+    const result = sampleNuts(posteriorProblem, posteriorProblem.gradChi2, {
+      nSteps: 250,
+      nChains: 2,
+      nWarmup: 60,
+      seed: 42,
+      noiseModel: "marginalized",
+      linearizedEsd: lm.esd,
+    });
+
+    expect(result.nuts.divergences).toBe(0);
+    for (const p of result.posterior.parameters) {
+      const lmValue = lm.parameters[p.id]!;
+      const esd = lm.esd[p.id]!;
+      expect(Math.abs(p.median - lmValue), p.id).toBeLessThan(0.25 * esd);
+      expect(p.esdRatio!, p.id).toBeGreaterThan(0.7);
+      expect(p.esdRatio!, p.id).toBeLessThan(1.4);
+    }
+    // eslint-disable-next-line no-console
+    console.log(
+      `[posterior:ni:nuts] ${result.posterior.parameters
+        .map((p) => `${p.id}=${p.median.toPrecision(4)}±${p.std.toPrecision(2)} (esdRatio ${p.esdRatio!.toFixed(2)})`)
+        .join(", ")} acc=${result.acceptanceFraction.toFixed(2)} R̂=${result.diagnostics.maxRHat.toFixed(3)} ` +
+        `ESS=${Math.round(result.diagnostics.minEss)} gradEvals=${result.nuts.gradEvals}`,
+    );
+  }, 240_000);
 });

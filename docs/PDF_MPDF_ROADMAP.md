@@ -468,7 +468,11 @@ app + a validation gate**, no broken intermediate state.
 > Exposed as the `sample_posterior` MCP tool (33 tools total) with bounded
 > `nSteps` + resume-token continuation; agents run `refine_pdf` first and seed
 > walkers from the converged values. See VALIDATION.md and Fancher et al.
-> (2016) / McCluskey et al. (2023) in §9.
+> (2016) / McCluskey et al. (2023) in §9. **Since then:** a gradient-based
+> **NUTS** sampler (`sampler:"nuts"`, consuming §6's `gradChi2`; LM-esd-seeded
+> mass matrix, R̂ ≈ 1.001 on Ni in ~5× fewer evaluations) and the workbench
+> **Posterior view** (ensemble over the worker pool; marginals, credible
+> intervals, esdRatio, R̂/ESS, resume-token Continue).
 >
 > **UI status (2026-07-17):** the PDF page is design-unified with the powder
 > page (same plot-card layout, toolbar, segmented Refinement | 3D Model view,

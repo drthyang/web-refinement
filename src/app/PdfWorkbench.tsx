@@ -50,6 +50,8 @@ import { applyParameters } from "@/core/workflow/apply";
 // Lazy so three.js stays out of the main bundle until the 3D view is opened.
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
+import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
+import type { SampleResult } from "@/core/refinement/bayes/sampler";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
@@ -61,6 +63,12 @@ import { card as themeCard, color, mono, secondaryButton, uppercaseLabel, fz, to
 const DATA_ACCEPT = ".gr,.sgr,.sq,.fq,.dat,.txt,text/plain";
 const noop = (): void => {};
 const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
+
+/** The request shape a posterior-sampling run poses (and Continue re-poses). */
+type SamplePdfRequest = Parameters<ComputeClient["samplePdfPosterior"]>[0];
+
+/** Ensemble steps per posterior run/continue (each = one proposal per walker). */
+const SAMPLE_STEPS = 400;
 
 /** Rw quality bands for a PDF (fraction): <15 % good · <30 % mediocre · else
  *  poor. PDF Rw runs much higher than Bragg Rwp for equally good fits — and with
@@ -188,8 +196,15 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   const [busy, setBusy] = useState(false);
   // Live calculated curve streamed from the worker during a refinement.
   const [live, setLive] = useState<number[] | null>(null);
-  // Plot-card view: the fit, or the refined 3D structure (per phase).
-  const [viewTab, setViewTab] = useState<"fit" | "model3d" | "subgroups">("fit");
+  // Plot-card view: the fit, the refined 3D structure (per phase), the
+  // subgroup tree, or the Bayesian posterior of the free parameters.
+  const [viewTab, setViewTab] = useState<"fit" | "model3d" | "subgroups" | "posterior">("fit");
+  // Posterior sampling state: the last run's result plus the exact request it
+  // sampled (Continue must re-pose the IDENTICAL problem or the chain's resume
+  // token would silently target a different posterior).
+  const [sample, setSample] = useState<{ result: SampleResult; req: SamplePdfRequest } | null>(null);
+  const [sampleBusy, setSampleBusy] = useState(false);
+  const [sampleProgress, setSampleProgress] = useState<{ step: number; total: number } | null>(null);
   const [viewPhase, setViewPhase] = useState(0);
   const [focusFitToken, setFocusFitToken] = useState(0);
   // Spec-swap reset, with FIT PRESERVATION across a position-parameterization
@@ -405,6 +420,62 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     } finally {
       setLive(null);
       setBusy(false);
+    }
+  }
+
+  // A spec swap (new structure/data/parameterization) invalidates a posterior:
+  // its free-parameter ids and resume token belong to the old problem.
+  useEffect(() => {
+    setSample(null);
+  }, [spec]);
+
+  /**
+   * Sample the Bayesian posterior of the free parameters. A fresh run poses the
+   * CURRENT problem (seeded at the refined values, LM esds as the esdRatio
+   * reference); Continue re-poses the run's own stored request with the resume
+   * token, so the chain keeps targeting the identical posterior even if the
+   * user edited parameters meanwhile.
+   */
+  async function runSample(continueRun: boolean): Promise<void> {
+    setSampleBusy(true);
+    const specAtCall = specRef.current;
+    const prior = continueRun ? sample : null;
+    const req: SamplePdfRequest = prior
+      ? prior.req
+      : {
+          structure: fitStructure,
+          ...(multiPhase ? { extraPhases: [...extraPhases] } : {}),
+          pattern,
+          parameters: [...params],
+          bindings: [...spec.bindings],
+          restraints: spec.restraints,
+          fitRange,
+        };
+    const total = (prior ? prior.result.resume.stepIndex : 0) + SAMPLE_STEPS;
+    setSampleProgress({ step: prior ? prior.result.resume.stepIndex : 0, total });
+    try {
+      const res = await client.samplePdfPosterior(req, {
+        nSteps: SAMPLE_STEPS,
+        seed: 0xbae5,
+        ...(prior ? { init: prior.result.resume } : {}),
+        ...(result?.esd ? { linearizedEsd: result.esd } : {}),
+        onStep: (step) => {
+          if (step % 5 === 0 || step === total) setSampleProgress({ step, total });
+        },
+      });
+      if (specRef.current !== specAtCall) {
+        console.info("[status] posterior result discarded — the parameter spec changed while it ran");
+        return;
+      }
+      setSample({ result: res, req });
+      console.info(
+        `[status] posterior ${prior ? "continued" : "sampled"}: ${res.status} · R̂max ${res.diagnostics.maxRHat.toFixed(3)} · ESSmin ${Math.round(res.diagnostics.minEss)} · ${res.diagnostics.nSamples} samples`,
+      );
+    } catch (e) {
+      console.error(`[status] posterior sampling failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSampleProgress(null);
+      setSampleBusy(false);
     }
   }
 
@@ -691,7 +762,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 66vh, 900px)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
             <span style={uppercaseLabel}>
-              {viewTab === "fit" ? "PDF pattern — G(r)" : viewTab === "model3d" ? "Crystal structure — unit cell" : "Group–subgroup tree"}
+              {viewTab === "fit" ? "PDF pattern — G(r)" : viewTab === "model3d" ? "Crystal structure — unit cell" : viewTab === "posterior" ? "Bayesian posterior — free parameters" : "Group–subgroup tree"}
             </span>
             {viewTab === "fit" && (
               <span style={{ display: "flex", gap: 14, fontFamily: mono, fontSize: 12.5 }}>
@@ -731,6 +802,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                   { id: "fit", label: "Refinement", title: "Observed vs calculated G(r)" },
                   { id: "model3d", label: "3D Model", title: "3D crystal-structure model" },
                   { id: "subgroups", label: "Subgroups", title: "Group–subgroup tree — pick a target subgroup to activate the distortion modes it permits" },
+                  { id: "posterior", label: "Posterior", title: "Bayesian posterior of the free parameters (ensemble MCMC) — credible intervals, convergence diagnostics, and the posterior-vs-esd check" },
                 ] as const}
                 value={viewTab}
                 onChange={setViewTab}
@@ -943,6 +1015,15 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                 {` · ${viewStructure.sites.length} site${viewStructure.sites.length === 1 ? "" : "s"} · refined values applied · drag to rotate, scroll to zoom.`}
               </p>
             </>
+          ) : viewTab === "posterior" ? (
+            <PosteriorPanel
+              result={sample?.result ?? null}
+              busy={sampleBusy}
+              progress={sampleProgress}
+              onRun={(continueRun) => void runSample(continueRun)}
+              hasRefined={result !== null && !busy}
+              labels={new Map(params.map((p) => [p.id, p.label]))}
+            />
           ) : (
             <>
               {multiPhase ? (

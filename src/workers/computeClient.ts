@@ -32,6 +32,12 @@ import { runPowderRefinement, runPdfRefinement, buildProblemForSpec, type Powder
 import { refineStagedAsync } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
 import { refineMultiStart, type MultiStartOptions, type MultiStartResult } from "@/core/refinement/multiStart";
+import {
+  samplePosterior,
+  samplePosteriorParallel,
+  type SampleOptions,
+  type SampleResult,
+} from "@/core/refinement/bayes/sampler";
 import { isMomentParameterKind } from "@/core/refinement/types";
 import { canonicalizeMomentValues, momentDegeneracies, type MomentDegeneracy } from "@/core/magnetic/canonicalize";
 
@@ -416,6 +422,36 @@ export class ComputeClient {
         return { parameters: applyResultToParams(start, result), final: result };
       };
       return await refineMultiStart(spec.parameters, runOnce, multiStart);
+    } finally {
+      pool.dispose();
+      if (this.activePool === pool) this.activePool = null;
+    }
+  }
+
+  /**
+   * Bayesian posterior sampling over a PDF problem (ensemble MCMC): the
+   * sans-io sampler generator runs on THIS thread, and every half-ensemble
+   * batch of `calculate` evaluations fans out over the evaluator pool — the
+   * exact contract `refineParallel` uses, so pooled and serial chains are
+   * bit-identical (RNG never leaves the generator). Falls back to fully
+   * in-thread sampling when pooling is unavailable. `options.onStep` fires on
+   * the driver thread each ensemble step (progress display); `options.init`
+   * continues a previous run's chain from its resume token.
+   */
+  async samplePdfPosterior(
+    req: Omit<RefinePdfRequest, "requestId" | "type">,
+    options: SampleOptions,
+  ): Promise<SampleResult> {
+    const spec = this.pdfSpec(req);
+    const problem = buildProblemForSpec(spec);
+    if (this.poolSize() < 2) {
+      return samplePosterior(problem, options);
+    }
+    const pool = new EvaluatorPool(this.poolSize());
+    this.activePool = pool;
+    try {
+      await pool.init(spec);
+      return await samplePosteriorParallel(problem, options, pool);
     } finally {
       pool.dispose();
       if (this.activePool === pool) this.activePool = null;

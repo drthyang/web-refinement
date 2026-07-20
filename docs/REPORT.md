@@ -3,7 +3,7 @@
 **Project:** MATERIA Workbench — a browser-native refinement workbench for
 atomic and magnetic structures.
 **Stack:** React 18 · TypeScript 5 (strict) · Vite 5 · Vitest · Web Workers.
-**Status (2026-07-19):** working static app; **1101 tests passing** (59
+**Status (2026-07-19):** working static app; **1111 tests passing** (59
 real-data/slow tests skip without local `data/`); atomic **and magnetic**
 single-crystal + powder refinement, multi-phase, Le Bail extraction, magnetic
 space-group candidate generation & comparison, a real-space PDF track, and a
@@ -158,8 +158,8 @@ in the app UI, README, and limitations doc.
 ## 5. Test summary (current: 2026-07-19)
 
 ```
-Test Files  157 passed | 9 skipped (166)
-Tests       1101 passed | 59 skipped (1160)
+Test Files  159 passed | 9 skipped (168)
+Tests       1111 passed | 59 skipped (1170)
 ```
 
 Covering: linear algebra, unit-cell/metric/volume (GSAS golden), symmetry

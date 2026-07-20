@@ -43,7 +43,7 @@ only symmetry-allowed parameters, use global search only for starting models.
 
 ## 2. Current state (honest baseline)
 
-What genuinely works today (1101 passing tests; real-data validated):
+What genuinely works today (1111 passing tests; real-data validated):
 
 - **Refinement engine** — Levenberg–Marquardt with diagonal preconditioning,
   SVD-truncated pseudo-inverse, per-cycle shift limiting, bound projection,
@@ -232,9 +232,16 @@ The engine is capable but still fragile on hard real data. Close these, in order
    continuation; agents seed from a converged `refine_pdf`). References:
    Fancher et al. (2016), *Sci. Rep.* **6**, 31625 (Bayesian MCMC full-profile
    refinement precedent); McCluskey et al. (2023), *J. Appl. Cryst.* **56**, 12
-   (reporting conventions). **Next:** a gradient-based NUTS v2 consuming item
-   1's `gradChi2`; a posterior panel in the UI; analytic cell gradients so cell
-   posteriors sample at full speed.
+   (reporting conventions). **Landed since:** the gradient-based **NUTS v2**
+   ([`refinement/bayes/nuts.ts`](../src/core/refinement/bayes/nuts.ts)) —
+   Hoffman–Gelman tree doubling + dual averaging, mass matrix seeded from the
+   LM esds, divergence counting; consumes item 1's `gradChi2` and reaches
+   R̂ ≈ 1.001 on the Ni golden in ~5× fewer evaluations than the ensemble
+   (`sampler: "nuts"` on the tool) — and the **Posterior view** in the PDF
+   workbench (ensemble sampling over the worker pool; marginals, credible
+   intervals, esdRatio, R̂/ESS, resume-token Continue). **Next:** analytic
+   cell gradients so cell posteriors sample at full speed; NUTS behind the
+   worker pool; a corner plot.
 
 *Validation gate:* the GaNb₄Se₈ regression tightens toward the GSAS-II wR (✅
 staged wR 5.8% vs GSAS-II 7.34%); analytic-vs-finite-difference Jacobian

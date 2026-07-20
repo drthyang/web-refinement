@@ -40,12 +40,14 @@ export function nUsedOf(weights: Float64Array): number {
 
 /** Log-likelihood from χ² under the chosen noise model. */
 export function logLikelihood(chi2: number, nUsed: number, model: NoiseModel): number {
-  if (!Number.isFinite(chi2) || chi2 <= 0) {
-    // χ² = 0 (exact fit) is a measure-zero degenerate point for the marginalized
-    // model; treat non-finite/non-positive χ² as an impossible state.
-    return chi2 === 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  if (!Number.isFinite(chi2) || chi2 < 0) return Number.NEGATIVE_INFINITY;
+  if (model === "marginalized") {
+    // χ² = 0 (exact fit) is a measure-zero degenerate point when the error
+    // scale is marginalized (−(N/2)·ln χ² → +∞); the fixed model is finite
+    // there (−χ²/2 = 0).
+    return chi2 > 0 ? -(nUsed / 2) * Math.log(chi2) : Number.POSITIVE_INFINITY;
   }
-  return model === "marginalized" ? -(nUsed / 2) * Math.log(chi2) : -chi2 / 2;
+  return -chi2 / 2;
 }
 
 /**

@@ -210,11 +210,24 @@ prototype status, currently exercised on PDF problems.
   intervals are all first-class output fields. Fancher et al. (2016), *Sci.
   Rep.* **6**, 31625 is the crystallographic precedent for the
   posterior-width-vs-esd comparison.
-- **Tool.** Exposed as the `sample_posterior` MCP tool: bounded `nSteps` per
-  call with resume-token continuation; agents run a converged refine first and
-  seed the walkers from its values.
-- **Next:** a gradient-based NUTS v2 consuming the PDF `gradChi2`; a posterior
-  UI panel; analytic cell gradients.
+- **NUTS (gradient-based v2, `nuts.ts`).** A No-U-Turn sampler (Hoffman &
+  Gelman 2014, the slice variant with dual-averaging step-size adaptation)
+  consuming the PDF `gradChi2` contract: leapfrog in the unbounded space with
+  a **diagonal mass matrix seeded from the linearized LM esds** (the kinetic
+  metric matches the posterior scales out of the box, so warmup only tunes the
+  step size), tree doubling with U-turn termination, and divergence counting
+  (a nonzero divergence count means the tails cannot be trusted). Sequential
+  gradient evaluations — in-process, chains run one after another; on the Ni
+  golden it reaches R̂ ≈ 1.001 in ~5× fewer evaluations than the ensemble.
+  Selected via `sample_posterior`'s `sampler: "nuts"` (single-phase PDF only —
+  the kinds still on FD fill in through `gradChi2` transparently).
+- **Surfaces.** The `sample_posterior` MCP tool (bounded `nSteps` per call,
+  resume-token continuation; agents run a converged refine first and seed from
+  its values), and the PDF workbench's **Posterior** view (ensemble sampling
+  over the worker pool: per-parameter marginals, credible intervals, esdRatio,
+  R̂/ESS, and a Continue button driving the same resume token).
+- **Next:** analytic cell gradients (cell posteriors at full speed); NUTS
+  behind the worker pool; a corner plot for pairwise correlations.
 
 ## Sequential (series) refinement
 

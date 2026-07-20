@@ -111,7 +111,7 @@ powder) plus a commensurate single-k magnetic workflow — and a first agent-too
 layer over the same core. The scientific core, Levenberg–Marquardt refinement
 engine, symmetry-adapted constrained parameters, CIF parsing, a 3D
 structure/moment viewer, plots, and Web Worker compute are implemented and
-tested (**1101 passing tests**). Crystallographic and scattering foundations are
+tested (**1111 passing tests**). Crystallographic and scattering foundations are
 validated against bundled GSAS-II refinements (see
 [docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
 As with any beta, results intended for publication must be validated against
@@ -168,10 +168,14 @@ ESS convergence diagnostics, and credible intervals. On the Ni PDF golden the
 posterior widths match the linearized LM esds to 1% (esdRatio 0.99–1.01) —
 uncertainty an agent can reason about, not just a scalar esd. It rides on the
 first **analytic PDF gradients** (a fused ∂G/∂p pass, bit-identical G(r),
-measured 2.3× faster LM refinement on the same golden) and is exposed to
-agents as `sample_posterior`. Approach after Fancher et al. (2016, *Sci. Rep.*
-**6**, 31625); reporting per McCluskey et al. (2023, *J. Appl. Cryst.* **56**,
-12) — see [docs/REFERENCES.md](docs/REFERENCES.md).
+measured 2.3× faster LM refinement on the same golden), which also power a
+**gradient-based NUTS sampler** (mass matrix seeded from the LM esds — R̂ ≈
+1.001 in ~5× fewer evaluations). Surfaced two ways: the `sample_posterior`
+agent tool (ensemble or NUTS, resume-token continuation) and a **Posterior
+view** in the PDF workbench (marginals, credible intervals, esd ratio, R̂/ESS).
+Approach after Fancher et al. (2016, *Sci. Rep.* **6**, 31625); reporting per
+McCluskey et al. (2023, *J. Appl. Cryst.* **56**, 12) — see
+[docs/REFERENCES.md](docs/REFERENCES.md).
 
 The MCP tool surface has grown to **33 contract-tested tools** spanning the
 powder, single-crystal, and PDF tracks (the PDF tools: `parse_pdf_data`,

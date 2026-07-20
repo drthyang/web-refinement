@@ -98,3 +98,33 @@ export function logJacobian(q: number, t: TransformSpec): number {
       return q;
   }
 }
+
+/** SIGNED derivative dx/dq of the unbounded→bounded map (logUpper decreases). */
+export function dxdq(q: number, t: TransformSpec): number {
+  switch (t.kind) {
+    case "identity":
+      return 1;
+    case "logit": {
+      const s = sigmoid(q);
+      return (t.max! - t.min!) * s * (1 - s);
+    }
+    case "logLower":
+      return Math.exp(q);
+    case "logUpper":
+      return -Math.exp(q);
+  }
+}
+
+/** d(logJacobian)/dq — the gradient of the measure term (NUTS needs it). */
+export function dLogJacobianDq(q: number, t: TransformSpec): number {
+  switch (t.kind) {
+    case "identity":
+      return 0;
+    case "logit":
+      // d/dq [ln σ(q) + ln(1−σ(q))] = 1 − 2σ(q)
+      return 1 - 2 * sigmoid(q);
+    case "logLower":
+    case "logUpper":
+      return 1;
+  }
+}

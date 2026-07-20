@@ -73,7 +73,9 @@ import {
   type SampleResult,
   type WalkerState,
 } from "@/core/refinement/bayes/sampler";
+import { sampleNuts, type NutsState } from "@/core/refinement/bayes/nuts";
 import type { NoiseModel, PriorSpec } from "@/core/refinement/bayes/logPosterior";
+import type { PdfRefinementProblem } from "@/core/workflow/pdf";
 import { buildProblemForSpec } from "@/workers/runPowder";
 import type { EvaluatorSpec } from "@/workers/protocol";
 import type { SymmetryOperation } from "@/core/crystal/types";
@@ -979,16 +981,20 @@ export async function sample_posterior(args: {
   extraPhases?: StructureModel[];
   fitRange?: { min?: number; max?: number };
   nSteps: number;
+  sampler?: "ensemble" | "nuts";
   nWalkers?: number;
   burnIn?: number;
   thin?: number;
+  nChains?: number;
+  nWarmup?: number;
   seed?: number;
   noiseModel?: NoiseModel;
   priors?: Record<string, PriorSpec>;
   linearizedEsd?: Record<string, number>;
-  resume?: WalkerState;
+  resume?: WalkerState | NutsState;
   includeChains?: boolean;
 }): Promise<{
+  sampler: "ensemble" | "nuts";
   posterior: SampleResult["posterior"]["parameters"];
   correlations: { parameterIdA: string; parameterIdB: string; coefficient: number }[];
   acceptanceFraction: number;
@@ -997,11 +1003,13 @@ export async function sample_posterior(args: {
   message?: string;
   nSamples: number;
   freeIds: string[];
-  resume: WalkerState;
+  resume: WalkerState | NutsState;
   chains?: number[][][];
+  nuts?: { divergences: number; maxTreeDepthHits: number; gradEvals: number; stepSize: number[] };
   parallel: { workers: number } | null;
 }> {
   const multi = args.extraPhases && args.extraPhases.length > 0;
+  const sampler = args.sampler ?? "ensemble";
   const spec: EvaluatorSpec = {
     kind: "pdf",
     structure: args.structure,
@@ -1013,32 +1021,60 @@ export async function sample_posterior(args: {
     ...(args.fitRange ? { fitRange: args.fitRange } : {}),
   };
   const problem = buildProblemForSpec(spec);
-  const options = {
+  const common = {
     nSteps: args.nSteps,
-    ...(args.nWalkers !== undefined ? { nWalkers: args.nWalkers } : {}),
-    ...(args.burnIn !== undefined ? { burnIn: args.burnIn } : {}),
-    ...(args.thin !== undefined ? { thin: args.thin } : {}),
     ...(args.seed !== undefined ? { seed: args.seed } : {}),
     ...(args.noiseModel !== undefined ? { noiseModel: args.noiseModel } : {}),
     ...(args.priors !== undefined ? { priors: args.priors } : {}),
     ...(args.linearizedEsd !== undefined ? { linearizedEsd: args.linearizedEsd } : {}),
-    ...(args.resume !== undefined ? { init: args.resume } : {}),
   };
 
-  // Pool fast path: half-ensemble batches fan out over the node worker threads;
-  // bit-identical to the serial path (the RNG never leaves the generator).
   let parallel: { workers: number } | null = null;
-  let result: SampleResult | null = null;
-  const pool = await createNodeEvaluatorPool(spec);
-  if (pool) {
-    try {
-      result = await samplePosteriorParallel(problem, options, pool);
-      parallel = { workers: pool.size };
-    } finally {
-      await pool.dispose();
+  let result: Omit<SampleResult, "resume"> & { resume: WalkerState | NutsState };
+  let nutsInfo:
+    | { divergences: number; maxTreeDepthHits: number; gradEvals: number; stepSize: number[] }
+    | undefined;
+
+  if (sampler === "nuts") {
+    // Gradient-based path: needs the problem's scalar χ² gradient (single-phase
+    // PDF today). Sequential leapfrog cannot batch over the pool — in-process.
+    const gradChi2 = (problem as Partial<PdfRefinementProblem>).gradChi2;
+    if (!gradChi2 || multi) {
+      throw new Error(
+        "sample_posterior: sampler \"nuts\" needs the scalar gradient contract (gradChi2) — " +
+          "available for single-phase PDF problems only. Use sampler \"ensemble\" here.",
+      );
     }
+    const nutsResult = sampleNuts(problem, gradChi2, {
+      ...common,
+      ...(args.nChains !== undefined ? { nChains: args.nChains } : {}),
+      ...(args.nWarmup !== undefined ? { nWarmup: args.nWarmup } : {}),
+      ...(args.resume !== undefined ? { init: args.resume as NutsState } : {}),
+    });
+    nutsInfo = nutsResult.nuts;
+    result = nutsResult;
+  } else {
+    const options = {
+      ...common,
+      ...(args.nWalkers !== undefined ? { nWalkers: args.nWalkers } : {}),
+      ...(args.burnIn !== undefined ? { burnIn: args.burnIn } : {}),
+      ...(args.thin !== undefined ? { thin: args.thin } : {}),
+      ...(args.resume !== undefined ? { init: args.resume as WalkerState } : {}),
+    };
+    // Pool fast path: half-ensemble batches fan out over the node worker
+    // threads; bit-identical to the serial path (RNG never leaves the generator).
+    let pooled: SampleResult | null = null;
+    const pool = await createNodeEvaluatorPool(spec);
+    if (pool) {
+      try {
+        pooled = await samplePosteriorParallel(problem, options, pool);
+        parallel = { workers: pool.size };
+      } finally {
+        await pool.dispose();
+      }
+    }
+    result = pooled ?? samplePosterior(problem, options);
   }
-  if (!result) result = samplePosterior(problem, options);
 
   const ids = result.freeIds;
   const correlations: { parameterIdA: string; parameterIdB: string; coefficient: number }[] = [];
@@ -1053,6 +1089,7 @@ export async function sample_posterior(args: {
   correlations.sort((a, b) => Math.abs(b.coefficient) - Math.abs(a.coefficient));
 
   return {
+    sampler,
     posterior: result.posterior.parameters,
     correlations: correlations.slice(0, 20),
     acceptanceFraction: result.acceptanceFraction,
@@ -1063,6 +1100,7 @@ export async function sample_posterior(args: {
     freeIds: [...ids],
     resume: result.resume,
     ...(args.includeChains ? { chains: result.chains.map((w) => w.map((r) => [...r])) } : {}),
+    ...(nutsInfo ? { nuts: nutsInfo } : {}),
     parallel,
   };
 }

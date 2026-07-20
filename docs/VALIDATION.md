@@ -21,7 +21,7 @@ comparison recorded here.
 > reimplement independently (no code copied), but its outputs are our correctness
 > gate and must be cited. Full bibliography in [`REFERENCES.md`](./REFERENCES.md).
 
-## Test matrix (1101 passing, 59 real-data/slow tests skipped without local `data/`)
+## Test matrix (1111 passing, 59 real-data/slow tests skipped without local `data/`)
 
 | Area | Test kind | Status |
 | --- | --- | --- |
@@ -82,7 +82,8 @@ comparison recorded here.
 | GPU batch evaluator plumbing (grouping/order/injection) | unit | ✅ `workers/gpuPowderEvaluator.test.ts` |
 | Ensemble MCMC: exact linear-Gaussian posterior, flat-posterior measure, serial ≡ pool bit-identical, resume token | unit | ✅ `core/refinement/bayes/sampler.test.ts` |
 | Bounded-parameter transforms (logit/log round-trip + logJacobian vs FD) | unit | ✅ `core/refinement/bayes/transform.test.ts` |
-| PDF posterior std vs LM esd (esdRatio ≈ 1) | golden (PDFfit2 Ni fixture) | ✅ `core/workflow/pdfPosterior.test.ts` |
+| PDF posterior std vs LM esd (esdRatio ≈ 1), ensemble AND NUTS | golden (PDFfit2 Ni fixture) | ✅ `core/workflow/pdfPosterior.test.ts` |
+| NUTS: exact linear-Gaussian posterior, flat-measure, determinism/resume, divergence reporting | unit | ✅ `core/refinement/bayes/nuts.test.ts` |
 | PDF analytic ∂G/∂p columns vs central FD + `gradChi2` | unit (F1.1) | ✅ `core/workflow/pdfAnalyticJacobian.test.ts` |
 
 ## Golden examples
