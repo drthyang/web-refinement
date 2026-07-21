@@ -63,6 +63,32 @@ describe("structureToCif — round-trips through parseCif", () => {
   });
 });
 
+describe("structureToCif — writes the model's own values, never the parameters'", () => {
+  // The writer takes `params` ONLY for their esds; the numbers it prints come
+  // straight off the model. Callers must therefore hand it a structure with the
+  // refinement already applied. Every workbench used to pass its *starting*
+  // model here, so exported CIFs carried pre-refinement coordinates annotated
+  // with post-refinement uncertainties. Pinning the contract in both directions.
+  const params: RefinementParameter[] = [
+    { id: "cell_a", label: "a", kind: "cellLength", value: 5.9, initialValue: 5.4321, fixed: false, esd: 0.0006 },
+  ];
+  const bindings: ParameterBinding[] = [
+    { parameterId: "cell_a", kind: "cellLength", targetId: "s", targetKey: "a" },
+  ];
+
+  it("does NOT pick up a refined value the caller left in the parameters", () => {
+    const cif = structureToCif(structure, { params, bindings });
+    expect(cif).toContain("_cell_length_a    5.43210(60)"); // the model's 5.4321
+    expect(cif).not.toContain("5.90000");
+  });
+
+  it("writes the refined value once the caller applies it to the model", () => {
+    const refined: StructureModel = { ...structure, cell: { ...structure.cell, a: 5.9 } };
+    const cif = structureToCif(refined, { params, bindings });
+    expect(cif).toContain("_cell_length_a    5.90000(60)");
+  });
+});
+
 describe("structureToCif — standard uncertainties", () => {
   it("annotates cell and position with value(su) from refined esds", () => {
     const params: RefinementParameter[] = [

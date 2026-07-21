@@ -48,11 +48,14 @@ import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { InfoBadge } from "@/app/ui/InfoBadge";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
 import { magneticReportHtml, type MagneticReportGroup } from "@/core/export/magneticReport";
+import { structureToCif, magneticStructureToMcif } from "@/core/export/cif";
 import { downloadText } from "@/app/download";
 import { card as themeCard, color as theme, mono as themeMono, uppercaseLabel as themeLabel } from "@/app/theme";
 
 // Lazy so three.js stays in its own chunk (only loaded when a group is previewed).
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
+// Type-only — erased at build, so it does not pull the viewer out of its chunk.
+import type { StructureExport } from "@/app/ui/StructureView";
 
 /**
  * Parse one k component, accepting fractions ("1/2", "-1/3") as well as
@@ -488,6 +491,30 @@ export function KSearchPanel({
     [appliedMagnetic],
   );
 
+  // The 3D card's own download. This view is where the moments live, so it
+  // writes mCIF as soon as a group is previewed: the refined nuclear structure
+  // plus the magnetic symmetry and the moment loop at the current amplitudes
+  // (`appliedMagnetic` — the very model drawn as arrows, so file and picture
+  // agree). Before a group is picked there are no moments and it is plain CIF.
+  // No `magneticLabel`: the BNS symbol is assembled inside the report export,
+  // so the writer falls back to naming the parent group, as the header mCIF does.
+  const viewerCifExport = useMemo<StructureExport>(() => {
+    const mag = appliedMagnetic && appliedMagnetic.moments.length > 0 ? appliedMagnetic : null;
+    return {
+      label: mag ? "mCIF" : "CIF",
+      title: mag
+        ? `Download ${structure.name || structure.id} as mCIF — refined cell and sites plus the magnetic moment loop at the current amplitudes`
+        : "Download the refined nuclear structure as CIF — pick a magnetic group to include the moments",
+      run: () => {
+        if (mag) {
+          downloadText(`${structure.id}.mcif`, magneticStructureToMcif(structure, mag), "chemical/x-cif");
+        } else {
+          downloadText(`${structure.id}.cif`, structureToCif(structure), "chemical/x-cif");
+        }
+      },
+    };
+  }, [appliedMagnetic, structure]);
+
   // Tick rows for the pattern preview: every crystallographic phase (from the
   // refinement page, so impurity peaks index correctly), then where this k CAN
   // put magnetic intensity (satellite positions G ± k), where the selected
@@ -799,6 +826,7 @@ export function KSearchPanel({
             {...(magBuild ? { magneticOperations: magBuild.magnetic.operations ?? [] } : {})}
             {...(momentEntries ? { moments: momentEntries } : {})}
             {...(standardCell ? { standardCell } : {})}
+            exports={[viewerCifExport]}
           />
         </Suspense>
       </section>

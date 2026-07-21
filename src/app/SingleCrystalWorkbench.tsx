@@ -385,7 +385,10 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       nRef: activeDataset.reflections.length,
       nParam: nFree,
     };
-    downloadText(`${structure.id}.cif`, structureToCif(structure, { params: withEsd, bindings, refinement: meta }), "chemical/x-cif");
+    // `refinedStructure`, not `structure`: structureToCif reads coordinates and
+    // cell off the model and takes the parameters only for their esds, so the
+    // starting model would export pre-refinement values with refined esds.
+    downloadText(`${structure.id}.cif`, structureToCif(refinedStructure, { params: withEsd, bindings, refinement: meta }), "chemical/x-cif");
   }
 
   // Export the reflection data as FullProf `.int`. When a joint session is loaded
