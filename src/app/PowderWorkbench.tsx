@@ -80,6 +80,8 @@ import type { EngineExportsRef } from "@/app/workbenchEngine";
 
 // Lazy so three.js (~550 kB) only loads when the user opens the 3D view.
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
+// Type-only — erased at build, so it does not pull the viewer out of its chunk.
+import type { StructureExport } from "@/app/ui/StructureView";
 
 const UNIT_LABEL: Record<string, string> = { twoTheta: "2θ", q: "Q (Å⁻¹)", dSpacing: "d (Å)", tof: "TOF (µs)" };
 
@@ -904,10 +906,16 @@ export function PowderWorkbench({
     downloadText(`${pattern.id}.csv`, powderPatternCsv(curves), "text/csv");
   }
 
-  // Refined CIF / mCIF (M5): the current structure with refined values, esds
-  // merged from the last result, and agreement recorded. mCIF when a magnetic
-  // model with moments is present, plain CIF otherwise.
-  function exportCif(): void {
+  // Refined CIF / mCIF (M5): esds merged from the last result and agreement
+  // recorded. mCIF when a magnetic model with moments is present, plain CIF
+  // otherwise.
+  //
+  // `target` MUST be a phase with the parameters already applied (refinedPhases),
+  // never the session's starting `structure`: structureToCif reads coordinates
+  // and cell straight off the model and takes the parameters only for their
+  // esds, so passing the starting model writes pre-refinement values annotated
+  // with post-refinement uncertainties.
+  function exportPhaseCif(target: StructureModel, withMoments: boolean): void {
     const withEsd = powderParams.map((p) => {
       const e = powderResult?.esd[p.id];
       return e !== undefined ? { ...p, esd: e } : { ...p };
@@ -916,13 +924,37 @@ export function PowderWorkbench({
     const refinement: CifRefinementMeta | undefined = powderResult
       ? { rwp: Number(wRpct), ...(s !== undefined ? { gof: s } : {}), nParam: withEsd.filter((p) => !p.fixed && !p.expression).length }
       : undefined;
-    const opts = { params: withEsd, bindings: pBindings, ...(refinement ? { refinement } : {}) };
+    // Route the bindings by phase exactly as `refinedPhases` does: in a
+    // multi-phase session two phases can carry the same site label, so the
+    // unfiltered set would attach another phase's esds to this one's sites.
+    const bindings = session.extraPhases.length > 0 ? pBindings.filter((b) => b.targetId === target.id) : pBindings;
+    const opts = { params: withEsd, bindings, ...(refinement ? { refinement } : {}) };
     const mag = session.magnetic;
-    if (mag && mag.moments.length > 0) {
-      downloadText(`${structure.id}.mcif`, magneticStructureToMcif(structure, mag, opts), "chemical/x-cif");
+    if (withMoments && mag && mag.moments.length > 0) {
+      downloadText(`${target.id}.mcif`, magneticStructureToMcif(target, mag, opts), "chemical/x-cif");
     } else {
-      downloadText(`${structure.id}.cif`, structureToCif(structure, opts), "chemical/x-cif");
+      downloadText(`${target.id}.cif`, structureToCif(target, opts), "chemical/x-cif");
     }
+  }
+
+  // The header export always writes the primary phase; the moments belong to it.
+  function exportCif(): void {
+    exportPhaseCif(refinedStructure, true);
+  }
+
+  // The 3D card's own download: whichever phase the viewer is showing, so a
+  // multi-phase session can export the secondary phase the header never offers.
+  // Only the primary phase carries the magnetic model, so only it writes mCIF.
+  function viewerCifExport(target: StructureModel, isPrimary: boolean): StructureExport {
+    const magnetic = isPrimary && !!session.magnetic && session.magnetic.moments.length > 0;
+    const name = target.name || target.id;
+    return {
+      label: magnetic ? "mCIF" : "CIF",
+      title: magnetic
+        ? `Download ${name} as mCIF — refined cell and sites (with esds) plus the magnetic moment loop`
+        : `Download ${name} as CIF — refined cell and sites, with esds`,
+      run: () => exportPhaseCif(target, isPrimary),
+    };
   }
 
   // A one-click cross-check bundle (.zip) for an established package: the refined
@@ -1197,6 +1229,7 @@ export function PowderWorkbench({
                         {...(isPrimary && sessionMoments ? { moments: sessionMoments } : {})}
                         {...(isPrimary && session.magnetic?.propagation[0] ? { propagation: session.magnetic.propagation[0] } : {})}
                         {...(isPrimary && session.magnetic?.operations ? { magneticOperations: session.magnetic.operations } : {})}
+                        exports={[viewerCifExport(viewStructure, isPrimary)]}
                       />
                     </Suspense>
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>

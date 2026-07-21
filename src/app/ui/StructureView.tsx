@@ -97,6 +97,67 @@ function makeLabelSprite(text: string, worldHeight: number, colorCss: string): T
   return sprite;
 }
 
+/**
+ * Builder for a set of solid arrows sharing one look: a cylinder shaft capped
+ * by a cone head, both lit by the scene exactly like the atoms and bonds.
+ *
+ * This exists because `THREE.ArrowHelper` — the obvious choice — draws its
+ * shaft with `LineBasicMaterial`, which WebGL rasterizes at a single device
+ * pixel however close the camera gets. Against a lit sphere the stem reads as a
+ * hairline (or disappears under the atom entirely); a mesh shaft has real
+ * world-space thickness that zooms with everything else.
+ *
+ * Shaft and head are the SAME size for every arrow a builder makes: only the
+ * length varies, so length alone carries the amplitude and the shortest arrow
+ * of a pattern is still legible. Head length is capped at a fraction of a short
+ * arrow so a small one keeps a shaft instead of collapsing to a bare cone.
+ *
+ * The unit geometries (radius 1, height 1, along +Y with the base at the
+ * origin) and the material are built once per set and shared by every arrow —
+ * N arrows cost N meshes, not N geometries.
+ */
+function arrowBuilder(opts: {
+  readonly color: number;
+  /** World-space shaft radius, shared across the set. */
+  readonly shaftRadius: number;
+  /** World-space head radius and length, shared across the set. */
+  readonly headRadius: number;
+  readonly headLength: number;
+}): (dir: THREE.Vector3, origin: THREE.Vector3, length: number) => THREE.Object3D {
+  const shaftGeo = new THREE.CylinderGeometry(1, 1, 1, 16);
+  shaftGeo.translate(0, 0.5, 0); // base at the origin, tip at +Y
+  const headGeo = new THREE.ConeGeometry(1, 1, 20);
+  headGeo.translate(0, 0.5, 0);
+  const mat = new THREE.MeshPhongMaterial({ color: new THREE.Color(opts.color), shininess: 55, specular: 0x333333 });
+  const Y0 = new THREE.Vector3(0, 1, 0);
+  return (dir, origin, length) => {
+    const head = Math.min(opts.headLength, length * 0.55);
+    const shaft = Math.max(length - head, 1e-4);
+    const group = new THREE.Group();
+    const s = new THREE.Mesh(shaftGeo, mat);
+    s.scale.set(opts.shaftRadius, shaft, opts.shaftRadius);
+    group.add(s);
+    const h = new THREE.Mesh(headGeo, mat);
+    h.scale.set(opts.headRadius, head, opts.headRadius);
+    h.position.y = shaft;
+    group.add(h);
+    group.position.copy(origin);
+    group.quaternion.setFromUnitVectors(Y0, dir); // dir must be normalized
+    return group;
+  };
+}
+
+/** A download the host offers from the viewer's toolbar (see `exports`). */
+export interface StructureExport {
+  /** Format shown on the button, e.g. "CIF" or "mCIF". */
+  readonly label: string;
+  /** Tooltip — say exactly what the file will contain. */
+  readonly title: string;
+  /** Serialize and download. The host owns this: only it holds the refined
+   *  parameters, their esds and the agreement factors the file should carry. */
+  readonly run: () => void;
+}
+
 export interface StandardCellOverlay {
   /** Columns = standard-setting basis vectors in parent fractional coords. */
   readonly P: readonly (readonly number[])[];
@@ -113,6 +174,7 @@ export function StructureView({
   magneticOperations,
   standardCell,
   displacements,
+  exports,
   minCanvasHeight = 360,
 }: {
   structure: StructureModel;
@@ -138,6 +200,14 @@ export function StructureView({
    * moments). Arrow lengths are relative (the pattern, not the amplitude).
    */
   displacements?: readonly { readonly siteLabel: string; readonly axis: Vec3 }[];
+  /**
+   * Downloads offered from the viewer's toolbar for the structure on screen —
+   * normally a single CIF. Host-supplied descriptors rather than a flag, so the
+   * viewer never has to know which flavour is being written: a magnetic page
+   * hands it an mCIF (moment loop) under an "mCIF" label, and the PDF page will
+   * hand it one carrying the mode displacements, with no change here.
+   */
+  exports?: readonly StructureExport[];
   /** Canvas minimum height (px) — hosts that stack panels below the viewer in
    *  a fixed-height card pass a smaller value so the layout can settle. */
   minCanvasHeight?: number;
@@ -404,7 +474,27 @@ export function StructureView({
         const c = fractionalToCartesian(structure.cell, ax);
         maxLen = Math.max(maxLen, Math.hypot(c[0]!, c[1]!, c[2]!));
       }
-      const unit = maxLen > 1e-9 ? (span * 0.34) / maxLen : 0;
+      // Longest arrow ≈ one bond, not a traverse of the cell. The eigenvector
+      // is a *pattern* — unit amplitude, arbitrary scale — so the scale's only
+      // job is to read as a local displacement of the atom it sits on; at the
+      // old span·0.34 the tip landed well past the neighbouring site and the
+      // pattern read as a vector field over the cell instead. Tied to the
+      // shortest cell edge so it does not grow with the supercell, and clamped
+      // by the box diagonal so a very flat cell keeps its arrows in bounds.
+      const minEdge = Math.min(structure.cell.a, structure.cell.b, structure.cell.c);
+      const longest = Math.min(minEdge * 0.26, span * 0.12);
+      const unit = maxLen > 1e-9 ? longest / maxLen : 0;
+      const arrow = arrowBuilder({
+        color: 0x16a34a,
+        // Nearly twice a bond's radius (bonds are 0.09) at a typical cell size,
+        // so the stem is unmistakably solid against the spheres it crosses.
+        // The tail sits at the atom centre, so roughly a sphere radius of every
+        // arrow is buried — the head takes a modest share of the length to keep
+        // the visible stem longer than the cone that caps it.
+        shaftRadius: longest * 0.075,
+        headRadius: longest * 0.165,
+        headLength: longest * 0.28,
+      });
       for (const at of atoms) {
         const ax = unit > 0 ? bySite.get(at.label) : undefined;
         if (!ax) continue;
@@ -419,7 +509,7 @@ export function StructureView({
         const dir = new THREE.Vector3(cart[0]! / len, cart[1]! / len, cart[2]! / len);
         const L = len * unit;
         const start = new THREE.Vector3(at.xyz[0], at.xyz[1], at.xyz[2]);
-        scene.add(new THREE.ArrowHelper(dir, start, L, 0x16a34a, L * 0.3, L * 0.18));
+        scene.add(arrow(dir, start, L));
       }
     }
 
@@ -664,6 +754,37 @@ export function StructureView({
                 </button>
               ))}
             </span>
+          </span>
+        )}
+        {exports && exports.length > 0 && (
+          <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {exports.map((x) => (
+              <button
+                key={x.label}
+                onClick={x.run}
+                title={x.title}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 6,
+                  padding: "1px 8px",
+                  fontSize: 11.5,
+                  fontFamily: "inherit",
+                  cursor: "pointer",
+                  background: "#fff",
+                  color: theme.ink,
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M12 3v12" />
+                  <path d="M7 12l5 5 5-5" />
+                  <path d="M4 21h16" />
+                </svg>
+                {x.label}
+              </button>
+            ))}
           </span>
         )}
       </div>

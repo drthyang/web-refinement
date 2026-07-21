@@ -667,8 +667,13 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     const rows = curves.x.map((r, i) => `${r},${curves.yObs[i]},${curves.yCalc[i]},${curves.diff[i]}`);
     downloadText(`${pattern.id}.csv`, `r,Gobs,Gcalc,diff\n${rows.join("\n")}\n`, "text/csv");
   };
-  const exportCifRef = useRef<() => void>(noop);
-  exportCifRef.current = (): void => {
+  // CIF for one phase. `target` MUST already have the parameters applied (as
+  // `viewStructure` does), never `phase.structure`: structureToCif reads the
+  // coordinates and cell straight off the model and takes the parameters only
+  // for their esds, so the starting model would be written with pre-refinement
+  // values annotated by post-refinement uncertainties.
+  const exportPhaseCifRef = useRef<(target: StructureModel, id: string) => void>(() => {});
+  exportPhaseCifRef.current = (target: StructureModel, id: string): void => {
     const withEsd = params.map((p) => {
       const esd = result?.esd[p.id] ?? p.esd;
       return esd !== undefined ? { ...p, esd } : { ...p };
@@ -678,9 +683,18 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       nRef: curves.x.filter((r) => r >= fitRange.min && r <= fitRange.max).length,
       nParam: nFree,
     };
+    const cif = structureToCif(target, { params: withEsd, bindings: spec.bindings, refinement: meta });
+    downloadText(`${target.name || id}_pdf.cif`, cif, "chemical/x-cif");
+  };
+  const exportCifRef = useRef<() => void>(noop);
+  exportCifRef.current = (): void => {
+    // The header export writes every phase; each one needs its own bindings so
+    // a multi-phase fit does not cross-apply another phase's cell.
+    const values: Record<string, number> = {};
+    for (const p of activeParams) values[p.id] = p.value;
     for (const phase of phases) {
-      const cif = structureToCif(phase.structure, { params: withEsd, bindings: spec.bindings, refinement: meta });
-      downloadText(`${phase.structure.name || phase.id}_pdf.cif`, cif, "chemical/x-cif");
+      const b = multiPhase ? pdfPhaseBindingsFor(spec.bindings, phase.id) : spec.bindings;
+      exportPhaseCifRef.current(applyParameters(phase.structure, b, values).model, phase.id);
     }
   };
   const exportReportRef = useRef<() => void>(noop);
@@ -860,6 +874,14 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                     structure={viewStructure}
                     minCanvasHeight={200}
                     {...(shownMode ? { displacements: shownMode.axes } : {})}
+                    exports={[{
+                      label: "CIF",
+                      title: `Download ${viewStructure.name || viewStructure.id} as CIF — refined cell and sites, with esds`,
+                      // The phase on screen, not every phase (that is the
+                      // header export). Displacement modes are not in the file
+                      // yet; they land here as mCIF when the writer supports them.
+                      run: () => exportPhaseCifRef.current(viewStructure, phases[Math.min(viewPhase, phases.length - 1)]!.id),
+                    }]}
                   />
                 </Suspense>
               </div>
