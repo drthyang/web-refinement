@@ -4,11 +4,12 @@
  * (guided) sequence, rebuilding the profile from the request fields.
  */
 
-import type { EvaluatorSpec, RefinePdfRequest, RefinePowderRequest } from "@/workers/protocol";
-import type { AgreementFactors, RefinementOptions, RefinementResult } from "@/core/refinement/types";
+import type { EvaluatorSpec, RefineMpdfRequest, RefinePdfRequest, RefinePowderRequest } from "@/workers/protocol";
+import type { AgreementFactors, RefinementOptions, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import { refine, type RefinementProblem } from "@/core/refinement/engine";
 import { buildPowderProblem, type PowderProfile } from "@/core/workflow/powder";
 import { buildPdfProblem, buildMultiPhasePdfProblem } from "@/core/workflow/pdf";
+import { buildMpdfProblem } from "@/core/workflow/mpdf";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
@@ -30,6 +31,9 @@ export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
     return phases
       ? buildMultiPhasePdfProblem(phases, spec.pattern, spec.parameters, spec.bindings, spec.restraints ?? [], spec.fitRange)
       : buildPdfProblem(spec.structure, spec.pattern, spec.parameters, spec.bindings, spec.restraints ?? [], spec.fitRange);
+  }
+  if (spec.kind === "mpdf") {
+    return buildMpdfProblem(spec.structure, spec.magnetic, spec.pattern, spec.parameters, spec.bindings, spec.restraints ?? [], spec.fitRange);
   }
   if (spec.kind === "multiPhasePowder") {
     return buildMultiPhasePowderProblem([...spec.phases], spec.pattern, spec.parameters, spec.bindings, {
@@ -101,6 +105,26 @@ export function runPdfRefinement(req: RefinePdfRequest, onProgress?: PowderProgr
       ? buildMultiPhasePdfProblem(phases, req.pattern, params, req.bindings, req.restraints ?? [], req.fitRange)
       : buildPdfProblem(req.structure, req.pattern, params, req.bindings, req.restraints ?? [], req.fitRange);
 
+  return runFromBuilder(req, build, onProgress);
+}
+
+/** Magnetic-PDF co-refinement runner (worker + in-thread fallback): the nuclear
+ *  G(r) and the magnetic d_mag(r) in one residual, flat or staged. Mirrors
+ *  `runPdfRefinement` — only the problem builder differs. */
+export function runMpdfRefinement(req: RefineMpdfRequest, onProgress?: PowderProgress): RefinementResult {
+  const build = (params: readonly RefineMpdfRequest["parameters"][number][]) =>
+    buildMpdfProblem(req.structure, req.magnetic, req.pattern, params, req.bindings, req.restraints ?? [], req.fitRange);
+  return runFromBuilder(req, build, onProgress);
+}
+
+/** The flat-or-staged drive shared by the two real-space runners: stream each
+ *  accepted cycle's data-point window, then run the staged sequence if one was
+ *  requested and fall back to a single co-refinement. */
+function runFromBuilder(
+  req: RefinePdfRequest | RefineMpdfRequest,
+  build: (params: readonly RefinementParameter[]) => RefinementProblem,
+  onProgress?: PowderProgress,
+): RefinementResult {
   const patternLen = req.pattern.points.length;
   const onIteration = onProgress
     ? (yCalc: Float64Array, agreement: AgreementFactors): void =>

@@ -98,6 +98,81 @@ describe("mpdfComponents", () => {
   });
 });
 
+/**
+ * Regression: the spin field must be a pure function of the GEOMETRY, never of
+ * the moment values. `buildSpinField` used to drop spins whose |m| fell below
+ * 1e-9, so N (and the pair indices, ρ₀, ⟨m²⟩ and the spins-per-atom scale)
+ * jumped as a refined moment crossed zero — while the spin-PAIR cache is keyed
+ * on the geometry alone. Reusing one problem across such a step gave a magnetic
+ * curve 22 % off in one direction and read out of bounds in the other, which
+ * would also break the pooled ≡ serial contract (pool members prime their
+ * caches from different value-sets) and poison every FD Jacobian column of a
+ * moment mode seeded at zero — which is the default seed.
+ */
+describe("spin-field cache is value-independent", () => {
+  const twoSublattices: StructureModel = {
+    id: "mn", name: "Mn2", cell: { a: 4.4, b: 4.4, c: 4.4, alpha: 90, beta: 90, gamma: 90 },
+    spaceGroup: { operations: [IDENTITY_OP] },
+    sites: [
+      { label: "Mn1", element: "Mn", position: [0, 0, 0], occupancy: 1, adp: { kind: "isotropic", bIso: 0.4 } },
+      { label: "Mn2", element: "Mn", position: [0.5, 0.5, 0.5], occupancy: 1, adp: { kind: "isotropic", bIso: 0.4 } },
+    ],
+  };
+  const twoSublatticeMagnetic: MagneticModel = {
+    id: "mn-mag", structureId: "mn", propagation: [[0, 0, 0]],
+    moments: [
+      { siteLabel: "Mn1", frame: "crystallographic", components: [3, 0, 0], formFactorId: "Mn2" },
+      { siteLabel: "Mn2", frame: "crystallographic", components: [0, 0, 0], formFactorId: "Mn2" },
+    ],
+  };
+  const momentParams: RefinementParameter[] = [
+    { id: "m1", label: "Mn1", kind: "momentMode", value: 3, initialValue: 3, min: -12, max: 12, fixed: false },
+    { id: "m2", label: "Mn2", kind: "momentMode", value: 0, initialValue: 0, min: -12, max: 12, fixed: false },
+  ];
+  const momentBindings: ParameterBinding[] = [
+    { parameterId: "m1", kind: "momentMode", targetId: "mn-mag", targetKey: "Mn1", momentBasis: [1, 0, 0] },
+    { parameterId: "m2", kind: "momentMode", targetId: "mn-mag", targetKey: "Mn2", momentBasis: [1, 0, 0] },
+  ];
+  const shell: PdfPattern = {
+    id: "p", name: "p", scatteringType: "neutron",
+    points: Array.from({ length: 300 }, (_, k) => ({ r: 0.5 + k * 0.02, gObs: 0 })), qdamp: 0.02,
+  };
+  const spec = buildMpdfSpec(twoSublattices, shell, {
+    magnetic: twoSublatticeMagnetic, params: momentParams, bindings: momentBindings,
+  });
+  const base: Record<string, number> = {};
+  for (const p of spec.params) base[p.id] = p.value;
+  const fresh = (): ReturnType<typeof buildMpdfProblem> =>
+    buildMpdfProblem(twoSublattices, twoSublatticeMagnetic, shell, spec.params, spec.bindings);
+
+  // Each direction crosses the old magnitude threshold the other way: 0 → 1
+  // grew the spin list under a stale pair cache, 1 → 0 shrank it (out of bounds).
+  for (const [first, second] of [[0, 1], [1, 0]] as const) {
+    it(`a reused problem matches a fresh one across m2 ${first} → ${second}`, () => {
+      const reusedProblem = fresh();
+      reusedProblem.calculate({ ...base, m1: 3, m2: first }); // prime the caches
+      const reused = Array.from(reusedProblem.calculate({ ...base, m1: 3, m2: second }));
+      const clean = Array.from(fresh().calculate({ ...base, m1: 3, m2: second }));
+      expect(Math.max(...clean.map(Math.abs))).toBeGreaterThan(0);
+      for (let i = 0; i < clean.length; i++) {
+        expect(Object.is(reused[i], clean[i]), `point ${i}`).toBe(true);
+      }
+    });
+  }
+
+  it("a sublattice refining through zero moves the magnetic curve continuously", () => {
+    const problem = fresh();
+    const peakAt = (m2: number): number =>
+      Math.max(...Array.from(problem.calculate({ ...base, m1: 3, m2 })).map(Math.abs));
+    // A discontinuous N would make these three differ in steps, not smoothly.
+    const below = peakAt(-1e-7);
+    const zero = peakAt(0);
+    const above = peakAt(1e-7);
+    expect(Math.abs(below - zero)).toBeLessThan(1e-6 * zero);
+    expect(Math.abs(above - zero)).toBeLessThan(1e-6 * zero);
+  });
+});
+
 describe("mPDF co-refinement round trip", () => {
   it("recovers a perturbed moment amplitude against synthetic G(r)", () => {
     const s = structure();

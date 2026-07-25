@@ -18,6 +18,7 @@ import type {
   EvaluatorSpec,
   LeBailPrefitRequest,
   RefineMagneticRequest,
+  RefineMpdfRequest,
   RefinePdfRequest,
   RefinePowderRequest,
   RefineSingleCrystalRequest,
@@ -28,7 +29,7 @@ import type { RefinementResult, RefinementOptions, AgreementFactors, RefinementP
 import { refine, refineParallel, type BatchEvaluator } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem, applyMagneticMoments } from "@/core/workflow/magnetic";
-import { runPowderRefinement, runPdfRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
+import { runPowderRefinement, runPdfRefinement, runMpdfRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
 import { refineStagedAsync } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
 import { refineMultiStart, type MultiStartOptions, type MultiStartResult } from "@/core/refinement/multiStart";
@@ -209,7 +210,16 @@ class EvaluatorPool implements BatchEvaluator {
   dispose(): void {
     for (const w of this.workers) w.terminate();
     this.workers.length = 0;
-    this.pending.clear();
+    // SETTLE every in-flight request, don't just forget it. `cancel()` disposes
+    // the active pool, and a terminated worker will never answer — so dropping
+    // the resolvers leaves `evaluate` awaiting forever, which strands
+    // refineParallel → refineMultiStart → the caller's promise, and the UI sits
+    // on "Refining…" with no way out. Resolving with an error makes `evaluate`
+    // throw, which the callers already handle. Mirrors the worker `error` path.
+    for (const [id, entry] of this.pending) {
+      this.pending.delete(id);
+      entry.resolve({ requestId: id, ok: false, error: CANCELLED });
+    }
   }
 }
 
@@ -219,6 +229,12 @@ class EvaluatorPool implements BatchEvaluator {
 export interface MagneticMultiStartResult extends MultiStartResult {
   readonly degeneracies: MomentDegeneracy[];
 }
+
+/** The evaluator specs that carry a magnetic model over a fitted pattern — the
+ *  reciprocal-space powder co-refinement and its real-space mPDF twin. Both
+ *  expose `structure`/`magnetic`/`bindings`/`pattern.points`, which is all the
+ *  shared moment-degeneracy multi-start needs. */
+type MagneticEvaluatorSpec = Extract<EvaluatorSpec, { kind: "magneticPowder" | "mpdf" }>;
 
 export class ComputeClient {
   private worker: Worker | null = null;
@@ -279,6 +295,11 @@ export class ComputeClient {
   /** Real-space PDF refinement off the main thread (inline in node/tests). */
   refinePdf(req: Omit<RefinePdfRequest, "requestId" | "type">, onProgress?: PowderProgress): Promise<RefinementResult> {
     return this.run({ ...req, type: "refinePdf", requestId: this.nextId++ }, onProgress);
+  }
+
+  /** Nuclear + magnetic real-space (mPDF) co-refinement off the main thread. */
+  refineMpdf(req: Omit<RefineMpdfRequest, "requestId" | "type">, onProgress?: PowderProgress): Promise<RefinementResult> {
+    return this.run({ ...req, type: "refineMpdf", requestId: this.nextId++ }, onProgress);
   }
 
   /**
@@ -370,6 +391,64 @@ export class ComputeClient {
       return this.runStagedParallel(spec, req.staged, req.options ?? {}, req.pattern.points.length, onProgress);
     }
     return this.runParallel(spec, req.options ?? {}, req.pattern.points.length, onProgress, false);
+  }
+
+  /**
+   * Nuclear + magnetic real-space (mPDF) co-refinement with the Jacobian
+   * parallelized over the evaluator pool — the real-space twin of
+   * `refineMagneticPowderParallel`, built from the same `buildProblemForSpec`
+   * so pooled and serial are bit-identical. Falls back to the single-worker
+   * `refineMpdf` when pooling is unavailable.
+   */
+  async refineMpdfParallel(
+    req: Omit<RefineMpdfRequest, "requestId" | "type">,
+    onProgress?: PowderProgress,
+  ): Promise<RefinementResult> {
+    if (this.poolSize() < 2) {
+      return this.refineMpdf(req, onProgress);
+    }
+    const spec = this.mpdfSpec(req);
+    if (req.staged && req.staged.length > 0) {
+      return this.runStagedParallel(spec, req.staged, req.options ?? {}, req.pattern.points.length, onProgress);
+    }
+    return this.runParallel(spec, req.options ?? {}, req.pattern.points.length, onProgress, false);
+  }
+
+  /** The mpdf EvaluatorSpec for a refine request. */
+  private mpdfSpec(req: Omit<RefineMpdfRequest, "requestId" | "type">): Extract<EvaluatorSpec, { kind: "mpdf" }> {
+    return {
+      kind: "mpdf",
+      structure: req.structure,
+      magnetic: req.magnetic,
+      pattern: req.pattern,
+      parameters: req.parameters,
+      bindings: req.bindings,
+      ...(req.restraints && req.restraints.length ? { restraints: req.restraints } : {}),
+      ...(req.fitRange ? { fitRange: req.fitRange } : {}),
+    };
+  }
+
+  /**
+   * Local-minimum-resistant mPDF refinement — the real-space "Escape min". The
+   * moment-sign (±m) and sublattice-partition degeneracies are properties of the
+   * magnetic model, not of the observable, so this is the SAME strategy the
+   * magnetic powder path uses (see {@link refineMagneticPowderMultiStart}),
+   * shared verbatim through {@link magneticMultiStartForSpec}.
+   */
+  async refineMpdfMultiStart(
+    req: Omit<RefineMpdfRequest, "requestId" | "type">,
+    multiStart: MultiStartOptions = {},
+    onProgress?: PowderProgress,
+  ): Promise<MagneticMultiStartResult> {
+    return this.magneticMultiStartForSpec(this.mpdfSpec(req), multiStart, req.options ?? {}, onProgress);
+  }
+
+  /** Posterior sampling over an mPDF (nuclear + magnetic real-space) problem. */
+  async sampleMpdfPosterior(
+    req: Omit<RefineMpdfRequest, "requestId" | "type">,
+    options: SampleOptions,
+  ): Promise<SampleResult> {
+    return this.sampleForSpec(this.mpdfSpec(req), options);
   }
 
   /** The pdf EvaluatorSpec for a refine request (single- or multi-phase). */
@@ -613,10 +692,27 @@ export class ComputeClient {
     options: Partial<RefinementOptions> = {},
     onProgress?: PowderProgress,
   ): Promise<MagneticMultiStartResult> {
+    return this.magneticMultiStartForSpec({ kind: "magneticPowder", ...spec }, multiStart, options, onProgress);
+  }
+
+  /**
+   * The moment-degeneracy-aware multi-start shared by every magnetic engine
+   * (reciprocal-space powder and real-space mPDF). Both observables see the same
+   * ±m sign and sublattice-partition flat directions, because those live in the
+   * magnetic MODEL — so the strategy documented on
+   * {@link refineMagneticPowderMultiStart} is applied once, here, over whichever
+   * evaluator spec carries a magnetic model.
+   */
+  private async magneticMultiStartForSpec(
+    spec: MagneticEvaluatorSpec,
+    multiStart: MultiStartOptions,
+    options: Partial<RefinementOptions>,
+    onProgress?: PowderProgress,
+  ): Promise<MagneticMultiStartResult> {
     const params = spec.parameters;
     const isMoment = (p: RefinementParameter): boolean => isMomentParameterKind(p.kind);
-    const specWith = (parameters: readonly RefinementParameter[]): Extract<EvaluatorSpec, { kind: "magneticPowder" }> =>
-      ({ kind: "magneticPowder", ...spec, parameters: [...parameters] });
+    const specWith = (parameters: readonly RefinementParameter[]): MagneticEvaluatorSpec =>
+      ({ ...spec, parameters: [...parameters] });
 
     // (1) Freeze the nuclear scaffold for the restart search: only the moment
     // modes move. Fixed/tied parameters are left as-is.
@@ -624,44 +720,81 @@ export class ComputeClient {
       !isMoment(p) && !p.fixed && !p.expression ? { ...p, fixed: true } : { ...p },
     );
 
-    // Each restart is a moment-only solve, run in-thread: the moment subspace is
-    // a handful of columns, so the parallel Jacobian would spend more on pool
-    // spin-up than it saves — and in-thread keeps the search bit-reproducible.
-    const runOnce = (start: readonly RefinementParameter[]): { parameters: RefinementParameter[]; final: RefinementResult } => {
-      const result = refine(buildProblemForSpec(specWith(start)), options);
-      return { parameters: applyResultToParams(start, result), final: result };
-    };
-    const ms = await refineMultiStart(frozenNuclear, runOnce, {
-      // Cold moment search: kick modes (often seeded at 0) by a µ_B-scale amount.
+    // Each restart is a moment-only solve. The moment subspace is a handful of
+    // columns, so on a CHEAP observable (a powder profile) an in-thread solve
+    // beats paying for a pool. A real-space mPDF evaluation is not cheap — it
+    // re-sums the spin pairs and convolves over an extended grid — and eight
+    // restarts of it froze the browser for ~a minute. So the restarts run on ONE
+    // pool (init once, reused across every start, as refinePdfMultiStart does)
+    // whenever workers exist, and in-thread otherwise. This does not change the
+    // search: `refineParallel` reproduces `refine` bit-for-bit (the pooled ≡
+    // serial contract), and the RNG lives in the multi-start driver either way.
+    const restartOptions: MultiStartOptions = {
+      // Cold moment search: kick modes (often seeded at 0) by a µ_B-scale
+      // amount. d(r)/I_mag are QUADRATIC in the moments, so m = 0 is a
+      // stationary point an unkicked LM can never leave.
       escapeSigma: 6,
       relFraction: 1,
       ...multiStart,
       shouldPerturb: isMoment,
-    });
-
-    // (2) Final joint LM from the best moment partition over the caller's full
-    // freed set (nuclear un-frozen). Pool-accelerated when workers are present —
-    // this is the one solve with many nuclear columns.
-    const jointStart = params.map((p) => {
-      const best = ms.parameters.find((q) => q.id === p.id);
-      return isMoment(p) && best ? { ...p, value: best.value } : { ...p };
-    });
-    const joint = await this.refineMagneticPowderParallel(specWith(jointStart), options, onProgress);
-
-    // (3) Canonicalize the global sign and collect degeneracies from the final
-    // diagnostics (built on the engine's existing SVD/correlation output).
-    const refinedMag = applyMagneticMoments(spec.magnetic, spec.bindings, joint.parameters);
-    const canonValues = canonicalizeMomentValues(joint.parameters, refinedMag, spec.structure.cell, params);
-    const finalResult: RefinementResult = { ...joint, parameters: canonValues };
-    return {
-      final: finalResult,
-      parameters: applyResultToParams(jointStart, finalResult),
-      restartsRun: ms.restartsRun,
-      bestStartIndex: ms.bestStartIndex,
-      improved: ms.improved,
-      costByStart: ms.costByStart,
-      degeneracies: momentDegeneracies(joint.diagnostics, params),
     };
+    // ONE pool serves the restart search AND the joint solve below. Re-initing
+    // between them would double the worker spin-up for nothing: replicas
+    // evaluate from the full values record and never read a parameter's `fixed`
+    // flag, so the frozen-nuclear restart spec and the un-frozen joint spec need
+    // the same replica — exactly the invariant `runStagedParallel` relies on.
+    const pool = this.poolSize() >= 2 ? new EvaluatorPool(this.poolSize()) : null;
+    try {
+      if (pool) {
+        this.activePool = pool;
+        await pool.init(specWith(frozenNuclear));
+      }
+      const ms = pool
+        ? await refineMultiStart(frozenNuclear, async (start) => {
+            const result = await refineParallel(buildProblemForSpec(specWith(start)), options, pool);
+            return { parameters: applyResultToParams(start, result), final: result };
+          }, restartOptions)
+        : await refineMultiStart(frozenNuclear, (start) => {
+            const result = refine(buildProblemForSpec(specWith(start)), options);
+            return { parameters: applyResultToParams(start, result), final: result };
+          }, restartOptions);
+
+      // (2) Final joint LM from the best moment partition over the caller's full
+      // freed set (nuclear un-frozen). Pool-accelerated when workers are present —
+      // this is the one solve with many nuclear columns.
+      const jointStart = params.map((p) => {
+        const best = ms.parameters.find((q) => q.id === p.id);
+        return isMoment(p) && best ? { ...p, value: best.value } : { ...p };
+      });
+      const jointSpec = specWith(jointStart);
+      const patternLen = spec.pattern.points.length;
+      const onIteration = onProgress
+        ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
+            onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
+        : undefined;
+      const jointOptions = { ...options, ...(onIteration ? { onIteration } : {}) };
+      const joint = pool
+        ? await refineParallel(buildProblemForSpec(jointSpec), jointOptions, pool)
+        : refine(buildProblemForSpec(jointSpec), jointOptions);
+
+      // (3) Canonicalize the global sign and collect degeneracies from the final
+      // diagnostics (built on the engine's existing SVD/correlation output).
+      const refinedMag = applyMagneticMoments(spec.magnetic, spec.bindings, joint.parameters);
+      const canonValues = canonicalizeMomentValues(joint.parameters, refinedMag, spec.structure.cell, params);
+      const finalResult: RefinementResult = { ...joint, parameters: canonValues };
+      return {
+        final: finalResult,
+        parameters: applyResultToParams(jointStart, finalResult),
+        restartsRun: ms.restartsRun,
+        bestStartIndex: ms.bestStartIndex,
+        improved: ms.improved,
+        costByStart: ms.costByStart,
+        degeneracies: momentDegeneracies(joint.diagnostics, params),
+      };
+    } finally {
+      pool?.dispose();
+      if (this.activePool === pool) this.activePool = null;
+    }
   }
 
   private async runParallel(
@@ -832,6 +965,9 @@ function runInline(req: ComputeRequest, onProgress?: PowderProgress): Refinement
   }
   if (req.type === "refinePdf") {
     return runPdfRefinement(req, onProgress);
+  }
+  if (req.type === "refineMpdf") {
+    return runMpdfRefinement(req, onProgress);
   }
   if (req.type === "refineMagnetic") {
     const problem = buildMagneticSingleCrystalProblem(

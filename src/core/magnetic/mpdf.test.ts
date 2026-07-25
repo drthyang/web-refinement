@@ -6,6 +6,9 @@ import {
   averageMomentSq,
   netMomentPerSpin,
   mpdfExtendedGrid,
+  formFactorEnvelope,
+  j0Profile,
+  computeUnnormalizedMpdf,
   MPDF_GRID_EXTENSION,
   type MpdfSpin,
 } from "@/core/magnetic/mpdf";
@@ -93,5 +96,52 @@ describe("mPDF kernel physics", () => {
     // The transverse config has a deep sharp peak at 4 Å; the longitudinal one
     // must be far smaller there (baseline only).
     expect(Math.abs(f[at(4)]!)).toBeLessThan(0.2 * Math.abs(transverse[at(4)]!));
+  });
+});
+
+/**
+ * Regression: the form-factor envelope's r = 0 must be located by its own
+ * `center` index, not re-derived as round(rHalfWidth / step). `formFactorEnvelope`
+ * builds its grid from nHalf = round(rMax / rStep), so for a step that does not
+ * divide rMax (0.03 Å: 2·nHalf = 334 but round(10/0.03) = 333) the two disagree
+ * by one bin — which slid the WHOLE ordered mPDF term one r-step against the
+ * nuclear peaks. Every committed golden uses rStep = 0.01, which divides evenly,
+ * so none of them could see it.
+ */
+describe("form-factor envelope centering", () => {
+  for (const step of [0.01, 0.02, 0.025, 0.03, 0.015, 0.04]) {
+    it(`r = 0 is the reported center at step ${step} Å`, () => {
+      const env = formFactorEnvelope(j0Profile(["Mn2"]), 5, step);
+      // The self-convolution of an even function is even about r = 0, and peaks
+      // there — so the true center is both the maximum and the symmetry point.
+      let argmax = 0;
+      for (let k = 1; k < env.s.length; k++) if (env.s[k]! > env.s[argmax]!) argmax = k;
+      expect(env.center).toBe(argmax);
+      for (const d of [1, 5, 20]) {
+        expect(env.s[env.center + d]!).toBeCloseTo(env.s[env.center - d]!, 12);
+      }
+    });
+  }
+
+  it("the magnetic peak lands at the same r whatever the grid step", () => {
+    // The AFM 4 Å bond must stay at 4 Å: a mis-centered envelope shifts d(r)
+    // by one step, which a step-dependent peak position exposes.
+    const peakR = (step: number): number => {
+      const grid = mpdfExtendedGrid(10, step);
+      const f = computeNormalizedMpdf(CELL, AFM, grid, { psigma: 0.1 });
+      const env = formFactorEnvelope(j0Profile(["Mn2"]), 5, step);
+      const d = computeUnnormalizedMpdf(grid, f, env, 0, averageMomentSq(AFM));
+      // Most-negative point in 3–5 Å (the transverse AFM bond).
+      let best = -1;
+      for (let k = 0; k < grid.length; k++) {
+        const r = grid[k]!;
+        if (r < 3 || r > 5) continue;
+        if (best < 0 || d[k]! < d[best]!) best = k;
+      }
+      return grid[best]!;
+    };
+    for (const step of [0.02, 0.03, 0.015]) {
+      expect(Math.abs(peakR(step) - peakR(0.01)), `step ${step}`).toBeLessThan(0.031);
+    }
   });
 });

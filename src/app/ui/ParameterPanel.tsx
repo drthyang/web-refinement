@@ -69,14 +69,18 @@ const CATEGORY: Record<ParameterKind, string> = {
   sratio: "Correlated motion",
   rcut: "Correlated motion",
   spdiameter: "Particle shape",
-  // Magnetic PDF (mPDF) scales/widths join the magnetic group with the moments.
-  mpdfOrdScale: "Magnetic",
-  mpdfParaScale: "Magnetic",
-  mpdfPsigma: "Magnetic",
-  corrLength: "Magnetic",
+  // Magnetic-PDF envelope rows get their OWN group rather than joining the
+  // moments in "Magnetic": mpdfOrdScale scales d_mag(r) exactly as the moment
+  // magnitude does, so the two are perfectly degenerate. Sharing a group would
+  // let one click of the group's "all free" checkbox free the degenerate pair
+  // and fit a flat valley.
+  mpdfOrdScale: "mPDF",
+  mpdfParaScale: "mPDF",
+  mpdfPsigma: "mPDF",
+  corrLength: "mPDF",
 };
 
-const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "Instrument", "Correlated motion", "Particle shape", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic"];
+const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "Instrument", "Correlated motion", "Particle shape", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic", "mPDF"];
 
 /** difC/difA/difB come from instrument calibration — shown but not togglable. */
 const isLocked = (p: RefinementParameter): boolean => p.kind === "tofCalibration";

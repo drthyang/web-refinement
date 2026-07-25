@@ -58,11 +58,21 @@ const STEPS: readonly Step[] = [
 // Single crystal shares the same two-step flow: F² refinement, then the (shared,
 // structure-driven) magnetic symmetry analysis fitting moments against F² data.
 const SC_STEPS: readonly Step[] = STEPS;
-// PDF is nuclear-only for now; mPDF (roadmap P4) enables the magnetic chip —
-// shown dimmed so the workflow shape stays visible.
-const PDF_STEPS: readonly Step[] = [
+// PDF's second chip is the magnetic PDF (mPDF) page. It needs NEUTRON data:
+// X-rays have no dipole coupling to spins, so d_mag(r) is identically zero and
+// the moment parameters would be unconstrained (the bundled GaTa₄Se₈ demo is
+// X-ray — hence a live-but-dimmed chip rather than an unconditional one).
+// It is also single-phase only: `buildMpdfSpec` wraps the single-phase nuclear
+// builder. The chip must carry BOTH guards, or it would open a page whose
+// Apply/Continue silently do nothing (PdfWorkbench's own `magneticCapable`
+// check is the stricter one, and would refuse the model without saying why).
+const pdfSteps = (pdf: PdfPattern, extraPhases: number): readonly Step[] => [
   STEPS[0]!,
-  { label: "Magnetic", disabled: true, hint: "Magnetic PDF (mPDF) is the next milestone — arrives with roadmap P4" },
+  extraPhases > 0
+    ? { label: "Magnetic", disabled: true, hint: "Magnetic PDF is single-phase — remove the additional phases to analyse the spin structure" }
+    : pdf.scatteringType === "neutron"
+      ? { label: "Magnetic", hint: "Magnetic PDF (mPDF): spin model + moment refinement against the magnetic G(r)" }
+      : { label: "Magnetic", disabled: true, hint: "Magnetic PDF needs neutron total-scattering data — an X-ray G(r) carries no magnetic signal" },
 ];
 // Before any data loads, the steps preview the workflow but aren't clickable.
 const IDLE_STEPS: readonly Step[] = STEPS.map((s) => ({
@@ -522,7 +532,7 @@ export function App(): JSX.Element {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <WorkbenchHeader
-        steps={hasContent ? (pdfDataset ? PDF_STEPS : scDataset ? SC_STEPS : STEPS) : IDLE_STEPS}
+        steps={hasContent ? (pdfDataset ? pdfSteps(pdfDataset, session.extraPhases.length) : scDataset ? SC_STEPS : STEPS) : IDLE_STEPS}
         active={step}
         onStep={setStep}
         version={`v${APP_VERSION}`}
@@ -567,7 +577,7 @@ export function App(): JSX.Element {
         // PDF mode (auto-switched on loading a reduced .gr). Keyed on the dataset
         // id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <PdfWorkbench key={pdfDataset.id} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} />
+          <PdfWorkbench key={pdfDataset.id} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} />
         </main>
       )}
       {scDataset && (

@@ -385,7 +385,85 @@ app + a validation gate**, no broken intermediate state.
   fit; termination ripples match a low-Qmax reference (the PDFgetN Ni r≈3 Å
   spurious-peak case).
 
-### P4 — Magnetic PDF (mPDF) ✅ *(core)*  🚧 *(UI/agent surface)*
+### P4 — Magnetic PDF (mPDF) ✅  *(core + surface)*
+
+> **Status (2026-07-25): P4 is complete — the surface landed.** The mPDF core is
+> now reachable from the worker pool, the agent registry, and the UI:
+>
+> - **Worker arm.** `{kind:"mpdf"}` joins the `EvaluatorSpec` union with a
+>   `RefineMpdfRequest` alongside it, so the no-pool path stays off the main
+>   thread and still streams per-cycle curves (the `pdf` shape, not the
+>   `magneticPowder` one, which drops progress). `ComputeClient` gained
+>   `refineMpdf` / `refineMpdfParallel` / `refineMpdfMultiStart` /
+>   `sampleMpdfPosterior`. The moment-degeneracy multi-start (freeze the nuclear
+>   scaffold → kicked moment-only restarts → one joint LM → ±m canonicalization)
+>   is now **shared** by the powder and mPDF engines through
+>   `magneticMultiStartForSpec` — the ±m and sublattice-partition flat
+>   directions live in the magnetic *model*, not in the observable. Gate:
+>   `workers/mpdfEvaluatorSpec.test.ts` pins pooled ≡ serial bit-identity,
+>   including a **two-sublattice** case whose moment passes through zero.
+> - **Agent surface.** Three tools (36 total): `build_mpdf_model`,
+>   `refine_mpdf`, `compute_mpdf_components` (whose `magneticFraction` tells an
+>   agent whether there is enough magnetic signal to be worth fitting).
+>   `mcp/mpdfAgentLoop.test.ts` is the registry-only gate: parse → spin model →
+>   component check → co-refine recovers the truth moment, and an X-ray pattern
+>   is refused a magnetic term loudly.
+> - **UI.** The PDF page's second target chip is live (neutron data only —
+>   X-ray G(r) carries no magnetic signal, and the bundled demo is X-ray), and
+>   step 1 mounts the shared `KSearchPanel` with a real-space `MagneticFit`
+>   backend. The spin model flows through the `spec` memo, so moment rows,
+>   the nuclear/magnetic overlay, the mCIF export and the posterior all follow.
+>   The four mPDF rows get their **own** parameter group: `mpdfOrdScale` is
+>   exactly degenerate with the moment magnitude, and sharing a group with the
+>   moments would let one "all free" click fit a flat valley.
+>
+> **Bug found and fixed en route (real, not cosmetic).** `buildSpinField`
+> dropped spins whose |m| fell below 1e-9, making the spin list a function of
+> the *moment values* while the spin-pair cache was keyed on geometry alone.
+> Reusing one problem across a moment crossing zero gave a magnetic curve 22 %
+> off in one direction and read out of bounds in the other; it also broke the
+> pooled ≡ serial contract (pool members prime their caches from different
+> value-sets) and poisoned the FD Jacobian of any moment mode seeded at zero —
+> which is the default seed. Whether an atom carries a moment is now decided by
+> symmetry alone. Four regression gates cover it, all verified to fail against
+> the pre-fix code.
+>
+> **Known bug, found by the adversarial review of this milestone and NOT yet
+> fixed — split-orbit moment anchors drift off refined positions.** A magnetic
+> model's split-orbit entries carry the site position *frozen at build time*
+> (`momentModel.ts` `u.orbitPos`), while `expandMagneticBox` matches anchors
+> against the *refined* positions through `placingFor`/`coincide`, whose
+> tolerance is a hard 1e-3 fractional. Past that cliff nothing matches and the
+> whole split sublattice silently loses its moments. Measured on P2₁/c,
+> k = (0,0,⅓): at a 0.0011 fractional shift the 1×1×3 box drops 12 spins → 6 and
+> the magnetic component of G(r) falls 5× discontinuously, then goes flat in the
+> parameter. The engine's FD step (1e-5·|p|) never sees the cliff, but an LM
+> trial step crosses it easily — and `MPDF_STAGE_KINDS` refines moments
+> immediately before positions, so the guided sequence walks right into it. The
+> defect predates this milestone (it is in the shared magnetic-model anchoring,
+> so the powder path is exposed too); shipping the mPDF surface is what made it
+> reachable. Fixing it means making moment PRESENCE independent of refined
+> position values — re-derive the anchors, or match by orbit identity rather
+> than by coordinate coincidence — with the Mn₃Ga, diffpy.mpdf and mCIF
+> supercell goldens as the gates.
+>
+> **Fixed by the same review:** the form-factor envelope was mis-centered
+> whenever the r-step does not divide 5 Å (`nHalf = round(rMax/rStep)` gives a
+> true centre of 2·nHalf, while the caller re-derived `round(2·rMax/step)` —
+> 334 vs 333 at 0.03 Å), sliding the whole ordered mPDF term one r-bin against
+> the nuclear peaks. Every committed golden uses 0.01 Å, which divides evenly,
+> so none of them could see it. `formFactorEnvelope` now reports its own
+> `center`, with a step-sweep regression gate.
+>
+> **Known cost.** One mPDF evaluation is much more expensive than one powder
+> profile (spin-pair re-sum + direct convolution against the form-factor
+> envelope over the extended grid). On a 10 000-point neutron `.gr` with a
+> 1.5–30 Å window and 9 free moment modes, an 8-restart moment search took
+> ~100 s. The restart Jacobians now run on the evaluator pool (one init reused
+> across starts) and the panel's exploratory fit uses 3 restarts, but the direct
+> `convolveFull` in `magnetic/mpdf.ts` is the real bottleneck — swapping it for
+> an FFT (as `diffpy.mpdf` does) behind the same seam is the next perf step, and
+> must keep the goldens and the bit-identity contract intact.
 
 > **Status (2026-07-17):** the core is done and externally gated. Shipped:
 > `magnetic/mpdf.ts` (Frandsen A/B spin-pair kernel with the exact reference
@@ -448,7 +526,14 @@ app + a validation gate**, no broken intermediate state.
 > partials → calibrate via the registry only (`pdfAgentLoop.test.ts`), and the
 > `{kind:"pdf"}` EvaluatorSpec arm gives pooled/parallel refinement in both the
 > browser workbench and the node MCP server, pooled ≡ serial bit-for-bit.
-> Remaining for P6: mPDF tools (with P4), PDF-aware `assess_refinement` bands,
+> ~~Remaining for P6: mPDF tools (with P4)~~ — **the three mPDF tools shipped
+> with P4 (2026-07-25), 36 tools total.** Still open: extending
+> `sample_posterior` to accept a magnetic model
+> (`ComputeClient.sampleMpdfPosterior` already exists, and the PDF page's
+> Posterior tab already routes to it; the tool's NUTS arm must keep throwing,
+> because `buildMpdfProblem` returns a bare `RefinementProblem` with no
+> `gradChi2` — mPDF is ensemble-only until analytic mPDF derivatives exist),
+> PDF-aware `assess_refinement` bands,
 > next-step suggestions for PDF, multi-dataset UI.
 >
 > **Update (2026-07-19):** the uncertainty-quantification item shipped, beyond

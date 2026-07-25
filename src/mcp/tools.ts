@@ -24,7 +24,7 @@ import { parsePdfData } from "@/parsers/pdfData";
 import { detectDataFormat } from "@/parsers/detectFormat";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 import { buildPowderSpec, type MustrainModel } from "@/app/powderSpec";
-import { runPowderRefinement, runPdfRefinement } from "@/workers/runPowder";
+import { runPowderRefinement, runPdfRefinement, runMpdfRefinement } from "@/workers/runPowder";
 import { powderCurves } from "@/core/workflow/powder";
 import {
   buildPdfSpec,
@@ -39,6 +39,7 @@ import {
   PDF_STAGE_KINDS,
 } from "@/core/workflow/pdf";
 import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
+import { buildMpdfSpec, mpdfComponents, MPDF_STAGE_KINDS } from "@/core/workflow/mpdf";
 import { computeAgreementFactors, excludedPointMask, weightsFromSigma } from "@/core/refinement/factors";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
 import { generateReflections } from "@/core/diffraction/reflections";
@@ -962,6 +963,226 @@ export async function refine_pdf(args: {
     warnings: conflict ? [conflict] : [],
     parallel,
   };
+}
+
+/**
+ * Build the magnetic-PDF parameter set: the nuclear PDF rows (scale seeded to
+ * the least-squares optimum of the NUCLEAR curve, as build_pdf_model does), the
+ * four mPDF rows, and the caller's symmetry-allowed moment modes.
+ *
+ * The mPDF rows start FIXED on purpose: `mpdfOrdScale` is degenerate with the
+ * moment magnitude (both scale d_mag linearly), so freeing both fits a flat
+ * valley. Free the moments OR the ordered scale, not both.
+ */
+export function build_mpdf_model(args: {
+  structure: StructureModel;
+  pattern: PdfPattern;
+  magnetic: MagneticModel;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+}): {
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  restraints: LinearRestraint[];
+  magnetic: MagneticModel;
+  freeCount: number;
+  warnings: string[];
+} {
+  const spec = buildMpdfSpec(args.structure, args.pattern, {
+    magnetic: args.magnetic,
+    params: args.parameters,
+    bindings: args.bindings,
+  });
+  // Seed the nuclear scale. `pdfScale` multiplies ONLY the nuclear term — the
+  // magnetic term rides alongside with its own scales — so the conditional
+  // least-squares optimum is κ = Σ(obs − mag)·nuc / Σnuc², not build_pdf_model's
+  // Σobs·nuc / Σnuc². Seeding off the raw observed would inflate κ to absorb the
+  // magnetic signal, which matters: a neutron PDF over a strong moment can carry
+  // a magnetic peak comparable to the nuclear one.
+  //
+  // "Conditional" is the honest word: `mag` is evaluated at the moments the
+  // caller guessed, so an over-estimated starting moment under-seeds κ. It is a
+  // SEED — the co-refinement solves κ and the moments together — and a joint
+  // 2-parameter linear solve is deliberately not done here, because the second
+  // amplitude (ordScale) is exactly degenerate with the moment magnitude.
+  // `mpdfComponents` returns the unit-scale nuclear curve and the magnetic curve
+  // from one evaluation, both band-limited exactly as the fitted model is.
+  const start = mpdfComponents(args.structure, spec.magnetic, args.pattern, spec.params, spec.bindings);
+  const kappa = optimalPdfScale(start.yObs.map((o, i) => o - (start.yMagnetic[i] ?? 0)), start.yNuclear);
+  const parameters = spec.params.map((p) => (p.kind === "pdfScale" ? { ...p, value: kappa, initialValue: kappa } : p));
+  const warnings: string[] = [];
+  if (args.pattern.scatteringType !== "neutron") {
+    warnings.push(`Pattern scatteringType is "${args.pattern.scatteringType}": X-rays carry no magnetic dipole term, so d_mag(r) is identically zero and the moment parameters are unconstrained.`);
+  }
+  if (args.magnetic.moments.length === 0) {
+    warnings.push("The magnetic model has no moments — the magnetic component is identically zero.");
+  }
+  const empty = emptySpinFieldWarning(args.pattern, spec.magnetic, start.yMagnetic);
+  if (empty) warnings.push(empty);
+  // The caller's rows are concatenated onto a freshly built nuclear spec, so
+  // re-feeding this tool its OWN output (instead of build_magnetic_model's)
+  // would duplicate every id and silently produce an ill-posed problem.
+  const seen = new Set<string>();
+  const duplicated = [...new Set(spec.params.filter((p) => (seen.has(p.id) ? true : (seen.add(p.id), false))).map((p) => p.id))];
+  if (duplicated.length > 0) {
+    warnings.push(`Duplicate parameter ids (${duplicated.join(", ")}): \`parameters\`/\`bindings\` must be build_magnetic_model's MOMENT rows, not another build_mpdf_model result.`);
+  }
+  return {
+    parameters,
+    bindings: spec.bindings,
+    restraints: spec.restraints,
+    magnetic: spec.magnetic,
+    freeCount: parameters.filter((p) => !p.fixed && !p.expression).length,
+    warnings,
+  };
+}
+
+/**
+ * Co-refine the nuclear G(r) and the magnetic d_mag(r) against one observed
+ * neutron PDF (real-space Rietveld with a magnetic term, Frandsen &
+ * Billinge 2015). Returns the result, the refined magnetic model, and the
+ * separated nuclear/magnetic component curves.
+ */
+export async function refine_mpdf(args: {
+  structure: StructureModel;
+  magnetic: MagneticModel;
+  pattern: PdfPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  restraints?: LinearRestraint[];
+  staged?: boolean;
+  fitRange?: { min?: number; max?: number };
+  maxIterations?: number;
+}): Promise<{
+  result: RefinementResult;
+  magnetic: MagneticModel;
+  observationCount: number;
+  components: { r: number[]; gObs: number[]; gNuclear: number[]; gMagnetic: number[]; gCalc: number[] };
+  warnings: string[];
+  parallel: { workers: number } | null;
+}> {
+  const options = { maxIterations: args.maxIterations ?? 30 };
+
+  // Parallel fast path (flat fits): the Jacobian fans out over the node
+  // worker-thread pool when the runtime supports it; bit-identical to serial.
+  let parallel: { workers: number } | null = null;
+  let result: RefinementResult | null = null;
+  if (!args.staged) {
+    const spec: EvaluatorSpec = {
+      kind: "mpdf",
+      structure: args.structure,
+      magnetic: args.magnetic,
+      pattern: args.pattern,
+      parameters: args.parameters,
+      bindings: args.bindings,
+      ...(args.restraints && args.restraints.length ? { restraints: args.restraints } : {}),
+      ...(args.fitRange ? { fitRange: args.fitRange } : {}),
+    };
+    const pool = await createNodeEvaluatorPool(spec);
+    if (pool) {
+      try {
+        result = await refineParallel(buildProblemForSpec(spec), options, pool);
+        parallel = { workers: pool.size };
+      } finally {
+        await pool.dispose();
+      }
+    }
+  }
+  if (!result) {
+    result = runMpdfRefinement({
+      type: "refineMpdf",
+      requestId: 0,
+      structure: args.structure,
+      magnetic: args.magnetic,
+      pattern: args.pattern,
+      parameters: args.parameters,
+      bindings: args.bindings,
+      ...(args.restraints && args.restraints.length ? { restraints: args.restraints } : {}),
+      ...(args.staged ? { staged: MPDF_STAGE_KINDS } : {}),
+      ...(args.fitRange ? { fitRange: args.fitRange } : {}),
+      options,
+    });
+  }
+
+  const refined = args.parameters.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value }));
+  // The protocol never carries the refined magnetic model back; every caller
+  // reconstructs it from the converged values (the magnetic powder convention).
+  const refinedMagnetic = applyMagneticMoments(args.magnetic, args.bindings, Object.fromEntries(refined.map((p) => [p.id, p.value])));
+  const c = mpdfComponents(args.structure, refinedMagnetic, args.pattern, refined, args.bindings, args.fitRange);
+  const inRange = (r: number): boolean =>
+    (args.fitRange?.min === undefined || r >= args.fitRange.min) &&
+    (args.fitRange?.max === undefined || r <= args.fitRange.max);
+  const conflict = correlatedMotionConflict(args.parameters);
+  const warnings = conflict ? [conflict] : [];
+  if (args.pattern.scatteringType !== "neutron") {
+    warnings.push(`Pattern scatteringType is "${args.pattern.scatteringType}": no magnetic term was added (X-rays have no dipole coupling to spins).`);
+  }
+  if (args.magnetic.moments.length === 0) {
+    warnings.push("The magnetic model has no moments — this was a nuclear-only refinement.");
+  }
+  const empty = emptySpinFieldWarning(args.pattern, refinedMagnetic, c.yMagnetic);
+  if (empty) warnings.push(empty);
+  return {
+    result,
+    magnetic: refinedMagnetic,
+    observationCount: c.x.filter(inRange).length,
+    components: { r: [...c.x], gObs: [...c.yObs], gNuclear: [...c.yNuclear], gMagnetic: [...c.yMagnetic], gCalc: [...c.yCalc] },
+    warnings,
+    parallel,
+  };
+}
+
+/**
+ * Separate the observed G(r) into its nuclear and magnetic calculated parts at
+ * the CURRENT parameter values — no refinement. The way to check whether a
+ * candidate spin model produces a magnetic signal large enough to fit before
+ * spending a refinement on it.
+ */
+export function compute_mpdf_components(args: {
+  structure: StructureModel;
+  magnetic: MagneticModel;
+  pattern: PdfPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  fitRange?: { min?: number; max?: number };
+}): {
+  components: { r: number[]; gObs: number[]; gNuclear: number[]; gMagnetic: number[]; gCalc: number[]; diff: number[] };
+  /** Peak |magnetic| as a RATIO of peak |nuclear| (0.01 = 1 %). Below ~0.01 the
+   *  moments are effectively unconstrained by this data. Read it together with
+   *  the two peaks below: a zero nuclear peak makes the ratio undefined (it is
+   *  reported as 0), which is a degenerate nuclear model, NOT weak magnetism. */
+  magneticFraction: number;
+  /** Peak |nuclear| G(r) in the window — 0 means a degenerate nuclear model. */
+  nuclearPeak: number;
+  /** Peak |magnetic| G(r) in the window — 0 means no magnetic term at all. */
+  magneticPeak: number;
+} {
+  const c = mpdfComponents(args.structure, args.magnetic, args.pattern, args.parameters, args.bindings, args.fitRange);
+  const nuclearPeak = peakAbs(c.yNuclear);
+  const magneticPeak = peakAbs(c.yMagnetic);
+  return {
+    components: { r: [...c.x], gObs: [...c.yObs], gNuclear: [...c.yNuclear], gMagnetic: [...c.yMagnetic], gCalc: [...c.yCalc], diff: [...c.diff] },
+    magneticFraction: nuclearPeak > 0 ? magneticPeak / nuclearPeak : 0,
+    nuclearPeak,
+    magneticPeak,
+  };
+}
+
+/** Largest |y| over a curve — the peak-height helper the mPDF tools share. */
+function peakAbs(ys: readonly number[]): number {
+  return ys.reduce((m, y) => Math.max(m, Math.abs(y)), 0);
+}
+
+/**
+ * The magnetic term is dropped entirely when no site in the expanded box carries
+ * a moment — which happens silently when the magnetic model's `siteLabel`s do
+ * not match the structure's site labels. The refinement then "succeeds" with an
+ * identically-zero moment Jacobian, so this has to be said out loud.
+ */
+function emptySpinFieldWarning(pattern: PdfPattern, magnetic: MagneticModel, gMagnetic: readonly number[]): string | null {
+  if (pattern.scatteringType !== "neutron" || magnetic.moments.length === 0) return null;
+  if (peakAbs(gMagnetic) > 0) return null;
+  return `The magnetic model declares ${magnetic.moments.length} moment(s) but the calculated magnetic G(r) is identically zero — no site in the structure carries a moment under it. Check that the model's siteLabel values match the structure's site labels; the moment parameters are unconstrained as it stands.`;
 }
 
 /**

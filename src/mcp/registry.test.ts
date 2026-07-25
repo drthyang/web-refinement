@@ -107,6 +107,56 @@ const pdfPattern = {
 };
 const pdfBuilt = tools.build_pdf_model({ structure, pattern: pdfPattern });
 
+// Magnetic-PDF fixture: mPDF needs a NEUTRON pattern over an element that has
+// both a tabulated scattering length and a magnetic form factor — Po has
+// neither, so the mPDF contracts get their own one-atom Mn cell with
+// k = (0,0,½) AFM stacking. Same trick as the nuclear PDF fixture: fill gObs
+// with the model's own starting curve so a 2-iteration refine is cheap.
+// Spelled out rather than derived from CIF: this one needs a realistic U_iso.
+// Without it the parser's default ADP gives delta-sharp nuclear peaks that
+// dwarf d_mag(r) by ~2000×, and the fixture would exercise the magnetic path
+// only nominally.
+const MN_CIF = `data_mn
+_cell_length_a 4.40
+_cell_length_b 4.40
+_cell_length_c 4.40
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_space_group_symop_operation_xyz
+'x,y,z'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_U_iso_or_equiv
+Mn1 Mn 0 0 0 1.0 0.005
+`;
+const { structure: mnStructure } = tools.parse_structure({ cif: MN_CIF });
+const MGR = `mode = neutron\nqdamp = 0.03\n#### start data\n${Array.from({ length: 120 }, (_, i) => `${(0.5 + i * 0.05).toFixed(2)} 0`).join("\n")}\n`;
+const mpdfParsed = tools.parse_pdf_data({ text: MGR, filename: "m.gr" });
+const magBuild = tools.build_magnetic_model({ structure: mnStructure, ionLabels: ["Mn1"], k: [0, 0, 0.5], moment: 2 });
+const mpdfBuilt0 = tools.build_mpdf_model({
+  structure: mnStructure, pattern: mpdfParsed.pattern,
+  magnetic: magBuild.magnetic, parameters: magBuild.parameters, bindings: magBuild.bindings,
+});
+const mpdfStart = tools.compute_mpdf_components({
+  structure: mnStructure, magnetic: mpdfBuilt0.magnetic, pattern: mpdfParsed.pattern,
+  parameters: mpdfBuilt0.parameters, bindings: mpdfBuilt0.bindings,
+});
+const mpdfPattern = {
+  ...mpdfParsed.pattern,
+  points: mpdfParsed.pattern.points.map((p, i) => ({ r: p.r, gObs: mpdfStart.components.gCalc[i] ?? 0 })),
+};
+const mpdfBuilt = tools.build_mpdf_model({
+  structure: mnStructure, pattern: mpdfPattern,
+  magnetic: magBuild.magnetic, parameters: magBuild.parameters, bindings: magBuild.bindings,
+});
+
 /** Canned args + the pinned top-level output keys for every tool. */
 const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   parse_structure: { args: { cif: CIF }, keys: ["magnetic", "structure"] },
@@ -231,6 +281,27 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   build_symmetry_modes: {
     args: { structure },
     keys: ["acousticExcluded", "bindings", "modes", "parameters", "structure"],
+  },
+  build_mpdf_model: {
+    args: {
+      structure: mnStructure, pattern: mpdfPattern,
+      magnetic: magBuild.magnetic, parameters: magBuild.parameters, bindings: magBuild.bindings,
+    },
+    keys: ["bindings", "freeCount", "magnetic", "parameters", "restraints", "warnings"],
+  },
+  refine_mpdf: {
+    args: {
+      structure: mnStructure, magnetic: mpdfBuilt.magnetic, pattern: mpdfPattern,
+      parameters: mpdfBuilt.parameters, bindings: mpdfBuilt.bindings, maxIterations: 2,
+    },
+    keys: ["components", "magnetic", "observationCount", "parallel", "result", "warnings"],
+  },
+  compute_mpdf_components: {
+    args: {
+      structure: mnStructure, magnetic: mpdfBuilt.magnetic, pattern: mpdfPattern,
+      parameters: mpdfBuilt.parameters, bindings: mpdfBuilt.bindings,
+    },
+    keys: ["components", "magneticFraction", "magneticPeak", "nuclearPeak"],
   },
 };
 
