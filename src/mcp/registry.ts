@@ -320,7 +320,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "build_pdf_model",
     title: "Build PDF parameter set",
-    description: "Build the SYMMETRY-ALLOWED PDF parameter set for a structure (plus optional extra phases) against an observed G(r): the PDF scale (seeded to the least-squares optimum), the Qdamp/Qbroad instrument envelope (seeded from the header, fixed), correlated-motion δ1/δ2 and sratio/rcut, the particle-diameter envelope, and the symmetry-reduced cell/positions/ADPs/occupancies. Feed `parameters`/`bindings`/`restraints` to refine_pdf.",
+    description: "Build the SYMMETRY-ALLOWED PDF parameter set for a structure (plus optional extra phases) against an observed G(r): the PDF scale (seeded to the least-squares optimum), the Qdamp/Qbroad instrument envelope (seeded from the header, fixed), correlated-motion δ1/δ2 and sratio/rcut, the particle-diameter envelope, and the symmetry-reduced cell/positions/ADPs/occupancies. Feed `parameters`/`bindings`/`restraints` to refine_pdf. CHECK `warnings`: it names any site with no displacement parameter (B_iso = 0, e.g. a CIF with no U_iso/B_iso column) — that gives delta-sharp G(r) peaks and a collapsed scale, so the fit converges on a meaningless model. Set a B_iso before refining.",
     inputSchema: {
       structure: anyObj.describe("StructureModel from parse_structure"),
       pattern: anyObj.describe("PdfPattern from parse_pdf_data"),
@@ -331,7 +331,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "refine_pdf",
     title: "Refine against G(r) (real space)",
-    description: "Run the deterministic least-squares PDF refinement of the FREED parameters against an observed G(r) — real-space Rietveld with uniform weights (G(r) errors are correlated; Rw is a relative indicator). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → positions); single- or multi-phase; restrict with `fitRange` (low r below r_poly is reduction artifact). Returns refined values, esds, agreement, diagnostics, the r-space residual, and any correlated-motion model conflict in `warnings`.",
+    description: "Run the deterministic least-squares PDF refinement of the FREED parameters against an observed G(r) — real-space Rietveld with uniform weights (G(r) errors are correlated; Rw is a relative indicator). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → positions); single- or multi-phase; restrict with `fitRange` (low r below r_poly is reduction artifact). Returns refined values, esds, agreement, diagnostics, the r-space residual, and — in `warnings` — any correlated-motion model conflict or missing-ADP defect that makes the reported convergence meaningless.",
     inputSchema: {
       structure: anyObj, pattern: anyObj,
       parameters: anyArr.describe("RefinementParameter[] (set fixed:true/false to choose what refines)"),

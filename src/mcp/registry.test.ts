@@ -194,7 +194,7 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
     keys: ["dataset", "kInteger", "multiplicity", "reflections"],
   },
   parse_pdf_data: { args: { text: GR, filename: "t.gr" }, keys: ["detected", "pattern", "summary"] },
-  build_pdf_model: { args: { structure, pattern: pdfPattern }, keys: ["bindings", "freeCount", "parameters", "restraints"] },
+  build_pdf_model: { args: { structure, pattern: pdfPattern }, keys: ["bindings", "freeCount", "parameters", "restraints", "warnings"] },
   refine_pdf: {
     args: { structure, pattern: pdfPattern, parameters: pdfBuilt.parameters, bindings: pdfBuilt.bindings, maxIterations: 2 },
     keys: ["observationCount", "parallel", "residual", "result", "warnings"],

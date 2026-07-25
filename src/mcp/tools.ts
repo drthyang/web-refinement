@@ -36,6 +36,7 @@ import {
   pdfPhaseCurves,
   optimalPdfScale,
   correlatedMotionConflict,
+  zeroAdpWarning,
   PDF_STAGE_KINDS,
 } from "@/core/workflow/pdf";
 import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
@@ -850,12 +851,16 @@ export function parse_pdf_data(args: { text: string; filename?: string }): {
  * phases) + observed G(r): PDF scale (seeded to the least-squares optimum) and
  * envelope terms plus the symmetry-reduced structural set. Only
  * symmetry-allowed parameters are created.
+ *
+ * `warnings` carries model defects that would make the fit meaningless without
+ * failing — currently sites with no displacement parameter at all, which give
+ * delta-sharp G(r) peaks and a collapsed scale (see zeroAdpWarning).
  */
 export function build_pdf_model(args: {
   structure: StructureModel;
   pattern: PdfPattern;
   extraPhases?: StructureModel[];
-}): { parameters: RefinementParameter[]; bindings: ParameterBinding[]; restraints: LinearRestraint[]; freeCount: number } {
+}): { parameters: RefinementParameter[]; bindings: ParameterBinding[]; restraints: LinearRestraint[]; freeCount: number; warnings: string[] } {
   const multi = args.extraPhases && args.extraPhases.length > 0;
   const spec = multi
     ? buildMultiPhasePdfSpec([args.structure, ...args.extraPhases!], args.pattern)
@@ -868,11 +873,13 @@ export function build_pdf_model(args: {
     : pdfCurves(args.structure, args.pattern, spec.params, spec.bindings);
   const kappa = optimalPdfScale(start.yObs, start.yCalc) / (phases ? phases.length : 1);
   const parameters = spec.params.map((p) => (p.kind === "pdfScale" ? { ...p, value: kappa, initialValue: kappa } : p));
+  const noAdp = zeroAdpWarning([args.structure, ...(args.extraPhases ?? [])]);
   return {
     parameters,
     bindings: spec.bindings,
     restraints: spec.restraints,
     freeCount: parameters.filter((p) => !p.fixed && !p.expression).length,
+    warnings: noAdp ? [noAdp] : [],
   };
 }
 
@@ -954,12 +961,17 @@ export async function refine_pdf(args: {
     (args.fitRange?.min === undefined || r >= args.fitRange.min) &&
     (args.fitRange?.max === undefined || r <= args.fitRange.max);
   const observationCount = curves.x.filter(inRange).length;
+  // Model defects that do not stop the fit but invalidate its verdict: the
+  // correlated-motion clash, and a missing ADP (which "converges" on a
+  // delta-sharp model with a collapsed scale — warn at the point where the
+  // status is reported, not only at build time).
   const conflict = correlatedMotionConflict(args.parameters);
+  const noAdp = zeroAdpWarning([args.structure, ...(args.extraPhases ?? [])]);
   return {
     result,
     observationCount,
     residual: { r: [...curves.x], gObs: [...curves.yObs], gCalc: [...curves.yCalc] },
-    warnings: conflict ? [conflict] : [],
+    warnings: [...(conflict ? [conflict] : []), ...(noAdp ? [noAdp] : [])],
     parallel,
   };
 }
