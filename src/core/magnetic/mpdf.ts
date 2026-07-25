@@ -36,6 +36,7 @@ import type { UnitCell } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
 import { orthogonalizationMatrix, reciprocalMetricTensor, fractionalToCartesian, cellVolume } from "@/core/crystal/unitCell";
 import { mulVec } from "@/core/math/mat3";
+import { convolveFullFft, nextPowerOfTwo } from "@/core/math/fft";
 import { magneticFormFactorJ0 } from "@/core/scattering/magnetic";
 
 /** (γ·r₀/2)² — γ = 1.913, r₀ = 0.281794·10⁻¹² cm — in 10⁻²⁴ cm² (barn). */
@@ -170,8 +171,10 @@ function gaussKernel(rStep: number, psigma: number): Float64Array {
   return y;
 }
 
-/** Direct full convolution (numpy `convolve(a, b, 'full')`). */
-function convolveFull(a: ArrayLike<number>, b: ArrayLike<number>): Float64Array {
+/** Direct full convolution (numpy `convolve(a, b, 'full')`), skipping zero
+ *  terms of `a` — the delta histograms fed to the Gaussian broadening are mostly
+ *  zero, which is what makes the direct sum competitive there at all. */
+function convolveDirect(a: ArrayLike<number>, b: ArrayLike<number>): Float64Array {
   const out = new Float64Array(a.length + b.length - 1);
   for (let i = 0; i < a.length; i++) {
     const ai = a[i]!;
@@ -179,6 +182,52 @@ function convolveFull(a: ArrayLike<number>, b: ArrayLike<number>): Float64Array 
     for (let j = 0; j < b.length; j++) out[i + j] = out[i + j]! + ai * b[j]!;
   }
   return out;
+}
+
+/**
+ * Full convolution (numpy `convolve(a, b, 'full')`), direct or FFT — whichever
+ * is cheaper for the given shapes.
+ *
+ * Cost model: the direct sum costs nnz(a)·|b| multiply-adds; the two length-N
+ * transforms of the FFT path cost ≈ 5·N·log₂N flops. Measured on Node 22 /
+ * Apple silicon the two run at close enough to the same rate that the crossover
+ * sits at a ratio of ≈ 1 (at 0.98 the FFT is 1.28× faster; at 0.53 it is 0.66×,
+ * i.e. the direct sum wins), which is what this compares. On the FeCoSn
+ * workload (3401-point grid at Δr = 0.01 Å) that routes:
+ *
+ *   ordered term, 3401 × 2001 dense    ratio 12.8   direct 3.65 ms → FFT 0.31 ms
+ *   envelope self-conv, 1001 × 1001    ratio  8.9   direct 0.54 ms → FFT 0.06 ms
+ *   peak broadening, 45 nnz × 600      ratio  0.11  stays direct, at ~27 k MACs
+ *
+ * — the broadening histograms are only as dense as the structure has distinct
+ * pair distances (45 for that high-symmetry cubic cell, 1000+ for a low-symmetry
+ * one), so that last row flips to the FFT on its own when it is worth it.
+ *
+ * **Why the FFT is safe HERE but not in `pdf/termination`**, which stayed a
+ * direct sum for exactly this reason: FFT convolution's error scales with
+ * ‖a‖₁·‖b‖∞ over the whole array rather than with Σ|aᵢbⱼ| at the output point.
+ * That is ruinous when the kernel is a long alternating 1/x tail and the output
+ * is a small difference of large terms (termination's sinc: 70× the error of
+ * the direct sum). The form-factor envelope is the opposite — smooth, compact,
+ * single-signed — so nothing cancels: measured against a Kahan-compensated
+ * direct convolution, d(r)'s ordered term carries 8.7e-15 of absolute error on
+ * a 0.46 peak, i.e. 1.9e-14 relative.
+ *
+ * That margin has to cover finite differences, not just the goldens, because
+ * the mPDF problem exposes no analytic gradient — its LM Jacobian is FD all the
+ * way down. At the engine's 1e-5·|p| step a moment column's Richardson spread
+ * |FD(h) − FD(h/2)| is 1.8e-10 of the column max, five orders below the
+ * analytic-vs-FD gates. The branch is a pure function of the input lengths and
+ * sparsity, so results stay deterministic across workers, as the pooled ≡
+ * serial evaluator contract requires.
+ */
+function convolveFull(a: ArrayLike<number>, b: ArrayLike<number>): Float64Array {
+  const nOut = a.length + b.length - 1;
+  if (nOut < 1) return new Float64Array(0);
+  let nnz = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] !== 0) nnz++;
+  const n = nextPowerOfTwo(nOut);
+  return nnz * b.length <= 5 * n * Math.log2(n) ? convolveDirect(a, b) : convolveFullFft(a, b);
 }
 
 /**

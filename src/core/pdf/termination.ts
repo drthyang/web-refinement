@@ -11,15 +11,41 @@
  * between-peak residual is pure artifact.
  *
  * Implementation: direct discrete convolution with the exact sampled kernel on
- * a UNIFORM grid — deliberately not FFT (correctness first: no padding or
- * wrap-around pitfalls; O(N²) with a precomputed kernel is a few ms at typical
- * grid sizes; an FFT path can later replace it behind this same seam with a
- * bit-comparison gate). Two correctness details the tests pin down:
+ * a UNIFORM grid — by DEFAULT, and the default is load-bearing. Swapping the
+ * whole thing to a cyclic FFT was tried; the numbers, so nobody rediscovers
+ * them on a 3103-point grid:
+ *
+ *   speed                                    6.2 ms → 0.5 ms
+ *   accuracy vs a Kahan-compensated sum      1.7e-14 → 1.2e-12 absolute
+ *
+ * A 12× speedup for 70× the error, and the error decides it. FFT convolution's
+ * error scales with ‖g‖₁·‖K‖∞ — every point of the array — where the direct
+ * sum's scales with Σ|K_j g_j| at the output point; the sinc's long alternating
+ * 1/x tail makes the output a small difference of large terms, which is the
+ * worst case for the former. That gap is invisible to the physics gates below
+ * (1e-13 against tolerances of 1e-3) but not to a FINITE DIFFERENCE, which
+ * divides it by a step of ~1e-6. Two consequences, one in production:
+ *
+ *  - `workflow/pdfAnalyticJacobian.test.ts` loses its oracle: 42 % of the
+ *    `mode_1` positionShift column becomes FD artifact points (limit 2 %).
+ *  - the mPDF arm has NO analytic gradient, so its LM Jacobian is finite
+ *    differences all the way down — this noise would land in real magnetic
+ *    refinements, not just in a test.
+ *
+ * What DOES work is splitting the operator rather than approximating it: see
+ * {@link BandLimitMethod}. Linearity lets a caller keep the large term exact
+ * and pay the FFT only on a small one, where the same relative error is a
+ * proportionally smaller absolute one. Three correctness details the tests pin
+ * down:
  *
  *  - **Range extension.** The convolution needs G on both sides of every output
  *    point, so the caller evaluates the model on a grid extended by
  *    {@link terminationMargin} (= 6·(2π/Qmax)) each way and slices back
  *    (`extendGridForTermination`).
+ *  - **No wrap-around** (`"fft"` only). The kernel is symmetric, so the main
+ *    term becomes a cyclic convolution against K laid out forward at 0…n−1 and
+ *    mirrored at N−d. That equals the linear sum only while the two halves do
+ *    not collide, i.e. N ≥ 2n − 1.
  *  - **Odd reflection at r → 0.** G(r) is an odd function; for output points
  *    within the kernel's reach of the origin the convolution integral over
  *    r′ < 0 contributes −G(−r′). On a 0-aligned grid (r_k = k·h — every
@@ -31,6 +57,8 @@
  * is exactly δ_k0 and the convolution is the identity — data reduced on the
  * Nyquist grid Δr = π/Qmax carries no resolvable ripple.
  */
+
+import { convolveCyclicFft, nextPowerOfTwo } from "@/core/math/fft";
 
 const TWO_PI = 2 * Math.PI;
 
@@ -47,13 +75,37 @@ export function terminationActive(qmax: number, h: number): boolean {
 }
 
 /**
+ * How the main convolution is summed. `"exact"` is the direct O(n²) sum and the
+ * default — see the module header for why the FFT is not.
+ *
+ * `"fft"` is opt-in for ONE situation, and the condition is not a matter of
+ * taste: the operator is linear, so a caller may split g = g_big + g_small,
+ * band-limit g_big exactly (once, cached) and g_small by FFT. The FFT's error
+ * scales with ‖g_small‖₁, so splitting off a term that is a few per cent of the
+ * total scales the error down by that same factor and lands it back in the
+ * direct sum's class — while the large term, which is what a finite difference
+ * would otherwise amplify, never goes near a transform. `workflow/mpdf` is the
+ * caller: nuclear exact and cached, magnetic by FFT.
+ *
+ * Do NOT reach for it to speed up a whole G(r). That is the case the module
+ * header measured and rejected.
+ */
+export type BandLimitMethod = "exact" | "fft";
+
+/**
  * Band-limit `g` (samples of G on the uniform grid r_k = r0 + k·h, r0 > 0) to
- * Q ≤ qmax by direct convolution with the sampled termination kernel. Returns a
- * new array of the same length. Interior points (≥ margin from either end) are
+ * Q ≤ qmax by convolution with the sampled termination kernel. Returns a new
+ * array of the same length. Interior points (≥ margin from either end) are
  * exact up to the kernel's 1/x tail beyond the array; the caller supplies the
  * extension (see `extendGridForTermination`) so its fitted window is interior.
  */
-export function bandLimit(g: ArrayLike<number>, r0: number, h: number, qmax: number): Float64Array {
+export function bandLimit(
+  g: ArrayLike<number>,
+  r0: number,
+  h: number,
+  qmax: number,
+  method: BandLimitMethod = "exact",
+): Float64Array {
   const n = g.length;
   const out = new Float64Array(n);
   if (n === 0 || !terminationActive(qmax, h)) {
@@ -76,12 +128,30 @@ export function bandLimit(g: ArrayLike<number>, r0: number, h: number, qmax: num
     kernel[d] = Math.sin(qmax * x) / (Math.PI * x) * h;
   }
 
-  for (let i = 0; i < n; i++) {
-    let acc = 0;
-    for (let j = 0; j < n; j++) {
-      acc += kernel[Math.abs(i - j)]! * g[j]!;
+  // Main term Σ_j K[|i−j|]·g[j].
+  const nFft = nextPowerOfTwo(2 * n - 1);
+  if (method === "fft" && n * n > 5 * nFft * Math.log2(nFft)) {
+    const gPad = new Float64Array(nFft);
+    for (let i = 0; i < n; i++) gPad[i] = g[i]!;
+    // K as a cyclic kernel: forward half at 0…n−1, mirrored half at N−d. The
+    // two cannot collide because N ≥ 2n − 1, which is what keeps the cyclic
+    // transform equal to the linear sum above.
+    const kPad = new Float64Array(nFft);
+    kPad[0] = kernel[0]!;
+    for (let d = 1; d < n; d++) {
+      kPad[d] = kernel[d]!;
+      kPad[nFft - d] = kernel[d]!;
     }
-    out[i] = acc;
+    const conv = convolveCyclicFft(gPad, kPad);
+    for (let i = 0; i < n; i++) out[i] = conv[i]!;
+  } else {
+    for (let i = 0; i < n; i++) {
+      let acc = 0;
+      for (let j = 0; j < n; j++) {
+        acc += kernel[Math.abs(i - j)]! * g[j]!;
+      }
+      out[i] = acc;
+    }
   }
 
   // Odd reflection G(−r) = −G(r): only reaches output points within the
