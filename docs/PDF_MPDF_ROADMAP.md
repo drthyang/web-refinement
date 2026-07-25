@@ -445,6 +445,31 @@ app + a validation gate**, no broken intermediate state.
 > f has a 1/r divergence and we substitute a small positive r; it is bounded,
 > not exempted.
 >
+> **End-to-end workflow gates (data-gated, `workflow/mpdfTutorialData.test.ts`).**
+> Where the golden above gates the KERNEL, these gate the whole workflow against
+> real measured data and the tutorial's own refined answers:
+> **MnO** (tutorial 02) — the experimental mPDF is the residual of a converged
+> PDFgui structural fit; refining the two affine scales against it recovers
+> ordScale **1.6716 vs diffpy's 1.6685 (0.2 %)** at Rw 25.1 % / 93.7 % of the
+> residual explained (diffpy: 23.6 % / 94.4 %).
+> **MnTe** (tutorial 09) — a genuine nuclear + magnetic co-refinement of real
+> NOMAD 320 K data through `refine_mpdf`: converged at Rw 10.5 %, a = 4.1524 Å,
+> |m| = 0.55 µ_B with the magnetic term 1.6 % of the nuclear — physically right
+> for 13 K above T_N, where only short-range order survives. Note MATERIA
+> refuses the tutorial's unconstrained spin direction: at the 2a site of
+> P6₃/mmc the full grey group forbids every moment, so the test enumerates
+> magnetic subgroups and takes one that permits it (P6₃′/m′m′c).
+> **MnSb** (tutorial 07) — the ferromagnetic net-moment line, which is what
+> cancels the runaway B_ij baseline so f(r) oscillates about zero (mean 0.9 vs
+> rms 40, against an analytic line of 63 — the gate cannot pass with the line
+> omitted), plus the SRO exp(−r/ξ) envelope.
+>
+> **A second trap that exercise surfaced (not an mPDF bug):** a CIF with NO
+> displacement-parameter column parses to `bIso = 0` on every site, giving
+> delta-sharp peaks ~50× the data; the scale collapses to ~5e-4 and the fit
+> "converges" at Rw ≈ 97 % with no warning. Seeding U = 0.006 Å² takes the same
+> fit to Rw ≈ 10 %. Flagged for a warning in the model builders.
+>
 > **REAL BUG found by that exercise — the mCIF parser dropped every centering
 > operation.** magCIF defines a magnetic space group across TWO loops and the
 > group is their PRODUCT: `_space_group_symop_magn_operation.xyz` (coset
