@@ -27,6 +27,7 @@ import {
   buildCellAtoms,
   displayMoment,
   magneticSupercell,
+  momentAnchorPosition,
   momentEntriesFrom,
   type CellAtom,
 } from "@/core/crystal/cellExpansion";
@@ -260,7 +261,16 @@ export function magneticReportHtml(input: MagneticReportInput): string {
   const momentRows = magnetic.moments
     .map((m) => {
       const site = structure.sites.find((s) => s.label === m.siteLabel);
-      const pos = m.position ?? site?.position ?? [0, 0, 0];
+      // Report the anchor of the structure AS REFINED, not the build-time one.
+      const pos = site
+        ? momentAnchorPosition(
+            structure.spaceGroup.operations,
+            magnetic.operations ?? structure.spaceGroup.operations,
+            site.position,
+            m.orbitIndex,
+            m.position,
+          )
+        : m.position ?? [0, 0, 0];
       const cart = crystalComponentsToCartesian(cell, m.components);
       const mag = Math.hypot(cart[0]!, cart[1]!, cart[2]!);
       const key = m.orbitIndex && m.orbitIndex > 1 ? `${m.siteLabel}#${m.orbitIndex}` : m.siteLabel;
