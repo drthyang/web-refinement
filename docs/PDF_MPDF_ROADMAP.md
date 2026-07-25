@@ -428,8 +428,41 @@ app + a validation gate**, no broken intermediate state.
 > symmetry alone. Four regression gates cover it, all verified to fail against
 > the pre-fix code.
 >
-> **Known bug, found by the adversarial review of this milestone and NOT yet
-> fixed — split-orbit moment anchors drift off refined positions.** A magnetic
+> **The MnO gate is CLOSED (2026-07-25).** §7 named "golden MnO neutron
+> PDF+mPDF (the Frandsen & Billinge 2015 reference case)" as the external
+> validation; `magnetic/mnoGolden.test.ts` now meets it. The structure is
+> MAGNDATA **1.31** (MnO, BNS C_c2/c, k = (½,½,½), atomic positions ICSD 9864)
+> as distributed with the Frandsen group's mPDF tutorial — 32 Mn in the 2×2×2
+> magnetic cell, type-II AFM, 16 up / 16 down, 5.66 µ_B. Against
+> `diffpy.mpdf`'s own `calculatemPDF`/`calculateDr` (a real compiled
+> `diffpy.srreal`, no stubs) in our documented conventions (sxyz = moments
+> m = g·S, gfactors = 1, K1 = (2/3)(γr₀/2)², normalized over the 32 central-cell
+> atoms of a 32 Å cluster so N matches our periodic box): **f(r) agrees to
+> 3.2e-13 of peak** — floating-point noise, three orders tighter than the
+> synthetic goldens — and D(r) to corr > 0.9999 / κ within 0.5 %, the residual
+> being our exact direct quadrature standing in for their FFT + interpolation
+> form-factor transform. The one point that differs is r = 0 exactly, where
+> f has a 1/r divergence and we substitute a small positive r; it is bounded,
+> not exempted.
+>
+> **REAL BUG found by that exercise — the mCIF parser dropped every centering
+> operation.** magCIF defines a magnetic space group across TWO loops and the
+> group is their PRODUCT: `_space_group_symop_magn_operation.xyz` (coset
+> representatives) × `_space_group_symop_magn_centering.xyz` (centering
+> translations, including anti-translations with θ = −1, which is how a
+> black-and-white lattice is written). We read only the first loop. MnO lists 4
+> operations and 32 centerings, so its 32-Mn magnetic cell came out with **4 Mn
+> — one eighth of the structure — with no error raised anywhere**: wrong 3D
+> view, wrong mCIF round-trip, wrong |F_M|², wrong mPDF, for every
+> Bilbao/MAGNDATA file with a centered magnetic lattice. Fixed in
+> `parsers/cif.ts` (compose, dedupe with θ in the key); three regression gates,
+> each verified to fail against the pre-fix parser. Nothing else in the suite
+> moved — the composition is a no-op for files with no centering loop, which is
+> exactly why no existing test caught it.
+>
+> **Known bug, found by the adversarial review of this milestone and since
+> FIXED (commit 9314152) — split-orbit moment anchors drift off refined
+> positions.** A magnetic
 > model's split-orbit entries carry the site position *frozen at build time*
 > (`momentModel.ts` `u.orbitPos`), while `expandMagneticBox` matches anchors
 > against the *refined* positions through `placingFor`/`coincide`, whose
@@ -442,10 +475,9 @@ app + a validation gate**, no broken intermediate state.
 > immediately before positions, so the guided sequence walks right into it. The
 > defect predates this milestone (it is in the shared magnetic-model anchoring,
 > so the powder path is exposed too); shipping the mPDF surface is what made it
-> reachable. Fixing it means making moment PRESENCE independent of refined
-> position values — re-derive the anchors, or match by orbit identity rather
-> than by coordinate coincidence — with the Mn₃Ga, diffpy.mpdf and mCIF
-> supercell goldens as the gates.
+> reachable. Fixed by making moment PRESENCE independent of refined values: the
+> anchor is now an orbit INDEX re-derived from the site's current position, so a
+> refined site carries its split orbits with it.
 >
 > **Fixed by the same review:** the form-factor envelope was mis-centered
 > whenever the r-step does not divide 5 Å (`nHalf = round(rMax/rStep)` gives a

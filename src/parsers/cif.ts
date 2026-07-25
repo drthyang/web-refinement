@@ -7,10 +7,11 @@
  * holds for the files this workbench consumes. Unknown items are ignored.
  */
 
-import type { AtomSite, DisplacementParameters, SpaceGroup, StructureModel, UnitCell } from "@/core/crystal/types";
+import type { AtomSite, DisplacementParameters, SpaceGroup, StructureModel, SymmetryOperation, UnitCell } from "@/core/crystal/types";
 import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import type { Vec3 } from "@/core/math/types";
-import { parseMagneticSymmetryOperation, parseSymmetryOperation } from "@/core/crystal/symmetry";
+import { composeOperations, operationKey, parseMagneticSymmetryOperation, parseSymmetryOperation } from "@/core/crystal/symmetry";
+import { IDENTITY3 } from "@/core/math/mat3";
 import { completeSpaceGroup } from "@/core/crystal/spaceGroups";
 
 /** Strip the parenthetical esd and parse: "5.41317(8)" → 5.41317. */
@@ -278,16 +279,56 @@ export function parseCif(text: string, id = "structure"): StructureModel {
   };
 }
 
-/** Parse magnetic (BNS) symmetry operations from an mCIF, if present. */
+/**
+ * Parse magnetic (BNS) symmetry operations from an mCIF, if present.
+ *
+ * magCIF splits a magnetic space group across TWO loops, and the group is their
+ * product: `_space_group_symop_magn_operation.xyz` holds the coset
+ * representatives, `_space_group_symop_magn_centering.xyz` the centering
+ * translations — including ANTI-translations (θ = −1), which is how a black-and-
+ * white lattice is written. Reading only the operation loop silently yields a
+ * fraction of the group: MnO (MAGNDATA 1.31, BNS C_c2/c) lists 4 operations and
+ * 32 centerings, so its 32-Mn magnetic cell came out with 4 Mn — one eighth of
+ * the structure, with no error anywhere.
+ */
+const IDENTITY_OPERATION: SymmetryOperation = {
+  rotation: IDENTITY3, translation: [0, 0, 0], xyz: "x,y,z", timeReversal: 1,
+};
+
 function parseMagneticSpaceGroup(items: Map<string, string>, loops: Loop[]): SpaceGroup | null {
   const magLoop = findLoop(loops, (h) =>
     h.some((k) => k.includes("space_group_symop_magn_operation.xyz")),
   );
   if (!magLoop) return null;
   const idx = magLoop.headers.findIndex((h) => h.toLowerCase().includes("magn_operation.xyz"));
-  const operations = magLoop.rows.map((row) =>
+  const representatives = magLoop.rows.map((row) =>
     parseMagneticSymmetryOperation(row[idx >= 0 ? idx : row.length - 1]!),
   );
+
+  const centLoop = findLoop(loops, (h) =>
+    h.some((k) => k.includes("space_group_symop_magn_centering.xyz")),
+  );
+  const centerings = centLoop
+    ? centLoop.rows.map((row) => {
+        const ci = centLoop.headers.findIndex((h) => h.toLowerCase().includes("magn_centering.xyz"));
+        return parseMagneticSymmetryOperation(row[ci >= 0 ? ci : row.length - 1]!);
+      })
+    : [];
+
+  // The full group, deduped mod lattice. θ must be part of the key: an
+  // operation and its anti-operation share a rotation and translation and would
+  // otherwise collapse onto each other, halving a black-and-white group.
+  const operations: SymmetryOperation[] = [];
+  const seen = new Set<string>();
+  for (const rep of representatives) {
+    for (const c of centerings.length > 0 ? centerings : [IDENTITY_OPERATION]) {
+      const op = composeOperations(c, rep);
+      const key = `${operationKey(op)}|${op.timeReversal ?? 1}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      operations.push(op);
+    }
+  }
   // Only strip surrounding double-quotes; apostrophes are part of BNS names.
   const bns = items.get("_space_group_magn.name_bns")?.replace(/^"|"$/g, "");
   const parent = items.get("_parent_space_group.name_h-m_alt")?.replace(/^"|"$/g, "");
