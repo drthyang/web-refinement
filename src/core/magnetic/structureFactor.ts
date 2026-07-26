@@ -19,6 +19,7 @@ import type { MagneticFormFactorTable } from "@/core/scattering/types";
 import { add, expι, scale as cscale, ZERO } from "@/core/math/complex";
 import { dSpacing } from "@/core/crystal/unitCell";
 import { applyOperation } from "@/core/crystal/symmetry";
+import { momentAnchorPosition } from "@/core/crystal/cellExpansion";
 import { magneticTable } from "@/core/scattering/magnetic";
 import { crystalComponentsToCartesian, perpendicularMoment, qCartesian } from "@/core/magnetic/moment";
 import { determinant } from "@/core/math/mat3";
@@ -102,7 +103,7 @@ export function expandMagneticAtoms(structure: StructureModel, magnetic: Magneti
     if (!site) continue;
     const ffId = formFactorId(structure, moment.siteLabel, moment.formFactorId);
     const seen: Vec3[] | null = dedup ? [] : null;
-    const basePos = moment.position ?? site.position;
+    const basePos = momentAnchorPosition(structure.spaceGroup.operations, ops, site.position, moment.orbitIndex, moment.position);
     // Anisotropic ADP anchored at the orbit representative, rotated per image —
     // mirrors magneticStructureFactor exactly (the GPU kernel marshals this).
     const adpAtRep: DisplacementParameters = site.adp.kind === "anisotropic"
@@ -184,8 +185,10 @@ export function magneticStructureFactor(
     const isoDw = site.adp.kind === "isotropic" ? debyeWaller(site.adp.bIso, s) : null;
     const seen: Vec3[] | null = dedup ? [] : null;
     // A split-orbit moment (magnetic subgroup ⊂ nuclear group) expands from its
-    // own orbit-representative position, not the site's asymmetric-unit one.
-    const basePos = moment.position ?? site.position;
+    // own orbit-representative position, not the site's asymmetric-unit one —
+    // re-derived from the site's CURRENT position, so the sublattice moves with
+    // the refinement instead of staying pinned where the model was built.
+    const basePos = momentAnchorPosition(structure.spaceGroup.operations, ops, site.position, moment.orbitIndex, moment.position);
     // The tensor AT the representative: the site's U carried by the nuclear
     // operation g₀ that maps the asymmetric position to basePos (identity when
     // the moment sits on the asymmetric site itself). Each image below then

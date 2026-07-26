@@ -73,6 +73,26 @@ export interface RefinePdfRequest {
   readonly options?: Partial<RefinementOptions>;
 }
 
+/** Magnetic PDF co-refinement: the nuclear G(r) plus the Frandsen unnormalized
+ *  magnetic d_mag(r) in ONE residual (see core/workflow/mpdf.ts). The magnetic
+ *  model rides along so moment parameters drive the spin field; the refined
+ *  model is recovered caller-side with `applyMagneticMoments`, exactly as on the
+ *  magnetic powder path. */
+export interface RefineMpdfRequest {
+  readonly type: "refineMpdf";
+  readonly requestId: number;
+  readonly structure: StructureModel;
+  readonly magnetic: MagneticModel;
+  readonly pattern: PdfPattern;
+  readonly parameters: RefinementParameter[];
+  readonly bindings: ParameterBinding[];
+  readonly restraints?: readonly LinearRestraint[];
+  readonly staged?: readonly StageKinds[];
+  /** Restrict the fit to an inclusive r-window (Å); omit for the full grid. */
+  readonly fitRange?: { readonly min?: number; readonly max?: number };
+  readonly options?: Partial<RefinementOptions>;
+}
+
 /** Le Bail cell pre-fit (escape local minima): refine the cell against peak
  *  positions with free intensities, off the main thread. See leBailPrefit.ts. */
 export interface LeBailPrefitRequest {
@@ -166,6 +186,16 @@ export type EvaluatorSpec =
       readonly fitRange?: { readonly min?: number; readonly max?: number };
     }
   | {
+      readonly kind: "mpdf";
+      readonly structure: StructureModel;
+      readonly magnetic: MagneticModel;
+      readonly pattern: PdfPattern;
+      readonly parameters: RefinementParameter[];
+      readonly bindings: ParameterBinding[];
+      readonly restraints?: readonly LinearRestraint[];
+      readonly fitRange?: { readonly min?: number; readonly max?: number };
+    }
+  | {
       readonly kind: "singleCrystal";
       readonly structure: StructureModel;
       readonly dataset: SingleCrystalDataset;
@@ -203,6 +233,7 @@ export interface EvaluateRequest {
 export type ComputeRequest =
   | RefinePowderRequest
   | RefinePdfRequest
+  | RefineMpdfRequest
   | RefineSingleCrystalRequest
   | RefineMagneticRequest
   | LeBailPrefitRequest

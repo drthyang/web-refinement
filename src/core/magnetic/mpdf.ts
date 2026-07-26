@@ -300,7 +300,7 @@ export function formFactorEnvelope(
   ff: { q: ArrayLike<number>; f: ArrayLike<number> },
   rMax = 5,
   rStep = 0.01,
-): { rHalfWidth: number; step: number; s: Float64Array } {
+): { rHalfWidth: number; step: number; center: number; s: Float64Array } {
   const nHalf = Math.round(rMax / rStep);
   const qStep = ff.q.length > 1 ? ff.q[1]! - ff.q[0]! : 1;
   // sr(r) = √(2/π)·Σ f(Q)cos(Qr)·ΔQ on r ∈ [−rMax, rMax] (even — mirror r > 0).
@@ -320,7 +320,14 @@ export function formFactorEnvelope(
   // Self-convolution (×step): S spans [−2rMax, 2rMax] on 4·nHalf + 1 points.
   const s = convolveFull(sr, sr);
   for (let k = 0; k < s.length; k++) s[k] = s[k]! * rStep;
-  return { rHalfWidth: 2 * rMax, step: rStep, s };
+  // `center` is the INDEX of r = 0 in `s`, reported explicitly rather than left
+  // for the caller to re-derive as round(rHalfWidth / step). The grid is built
+  // from nHalf = round(rMax / rStep), so when rStep does not divide rMax those
+  // two disagree by one bin (rStep = 0.03 Å → 2·nHalf = 334 but round(10/0.03)
+  // = 333), which would shift the whole ordered mPDF term by one r-step against
+  // the nuclear peaks. Every golden happens to use rStep = 0.01, which divides
+  // evenly — so this never showed up there.
+  return { rHalfWidth: 2 * rMax, step: rStep, center: 2 * nHalf, s };
 }
 
 /**
@@ -333,7 +340,7 @@ export function formFactorEnvelope(
 export function computeUnnormalizedMpdf(
   rGrid: ArrayLike<number>,
   fr: ArrayLike<number>,
-  envelope: { rHalfWidth: number; step: number; s: Float64Array },
+  envelope: { rHalfWidth: number; step: number; center?: number; s: Float64Array },
   paraScale: number,
   mSqAvg: number,
 ): Float64Array {
@@ -349,7 +356,10 @@ export function computeUnnormalizedMpdf(
   const scaled = new Float64Array(n);
   for (let k = 0; k < n; k++) scaled[k] = (K1 / (2 * Math.PI)) * fr[k]!;
   const conv = convolveFull(scaled, envelope.s);
-  const offset = Math.round(envelope.rHalfWidth / envelope.step);
+  // The index of r = 0 in the envelope. Prefer the envelope's own `center`;
+  // re-deriving it from the half-width is off by one whenever the step does not
+  // divide rMax (see formFactorEnvelope).
+  const offset = envelope.center ?? Math.round(envelope.rHalfWidth / envelope.step);
   for (let k = 0; k < n; k++) out[k] = step * conv[k + offset]!;
 
   // Paramagnetic self-term: −K₂/π · S′(r), with S′ by central differences on

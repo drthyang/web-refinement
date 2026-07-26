@@ -89,12 +89,21 @@ function buildSpinField(structure: StructureModel, magnetic: MagneticModel): Spi
   const box = expandSpinField(structure, magnetic);
   const spins: MpdfSpin[] = [];
   for (const atom of box.atoms) {
+    // Whether an atom carries a moment is decided by SYMMETRY (`displayMoment`
+    // returns null only when the magnetic group puts no arrow on the orbit
+    // member), never by the moment's current magnitude — so the spin list, its
+    // length N, the pair indices, ρ₀ and the spins-per-atom scale are all pure
+    // functions of the geometry. A magnitude filter here would make N jump as a
+    // refined moment crosses zero: the cached pair list (keyed on geometry
+    // alone) would then index a differently-sized spin array, giving a wrong
+    // magnetic curve in one direction and an out-of-bounds read in the other,
+    // and it would break the pooled ≡ serial contract because pool members
+    // prime their caches from different value-sets. A zero moment is a
+    // legitimate spin: it contributes exactly zero to A_ij/B_ij and ⟨m²⟩.
     if (!atom.moment) continue;
     // Crystal-axis (normalized â,b̂,ĉ) → Cartesian μ_B; the normalized axes of
     // an axis-diagonal supercell coincide with the parent's.
-    const m = crystalComponentsToCartesian(box.cell, atom.moment);
-    if (Math.hypot(m[0]!, m[1]!, m[2]!) < 1e-9) continue;
-    spins.push({ position: atom.site.position, moment: m });
+    spins.push({ position: atom.site.position, moment: crystalComponentsToCartesian(box.cell, atom.moment) });
   }
   return { spins, boxVolumeCells: box.n[0] * box.n[1] * box.n[2], cell: box.cell };
 }

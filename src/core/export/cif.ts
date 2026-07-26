@@ -28,7 +28,7 @@ import { orthogonalizationMatrix } from "@/core/crystal/unitCell";
 import { inverse, transpose } from "@/core/math/mat3";
 import { normalize } from "@/core/math/vec3";
 import type { Mat3, Vec3 } from "@/core/math/types";
-import { expandMagneticSupercell } from "@/core/crystal/cellExpansion";
+import { expandMagneticSupercell, momentAnchorPosition } from "@/core/crystal/cellExpansion";
 
 const EIGHT_PI2 = 8 * Math.PI * Math.PI;
 
@@ -325,11 +325,20 @@ function withOrbitSites(
 ): { structure: StructureModel; magnetic: MagneticModel } {
   const extra: AtomSite[] = [];
   const moments = magnetic.moments.map((m) => {
-    if (!m.orbitIndex || m.orbitIndex <= 1 || !m.position) return m;
+    if (!m.orbitIndex || m.orbitIndex <= 1) return m;
     const base = structure.sites.find((s) => s.label === m.siteLabel);
     if (!base) return m;
     const label = `${m.siteLabel}_o${m.orbitIndex}`;
-    if (!extra.some((s) => s.label === label)) extra.push({ ...base, label, position: m.position });
+    // Re-derived from the site as refined, so the exported orbit row sits where
+    // the viewer draws it rather than where the model was first built.
+    const position = momentAnchorPosition(
+      structure.spaceGroup.operations,
+      magnetic.operations ?? structure.spaceGroup.operations,
+      base.position,
+      m.orbitIndex,
+      m.position,
+    );
+    if (!extra.some((s) => s.label === label)) extra.push({ ...base, label, position });
     return { ...m, siteLabel: label };
   });
   if (extra.length === 0) return { structure, magnetic };

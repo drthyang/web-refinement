@@ -27,7 +27,7 @@ import type { Vec3 } from "@/core/math/types";
 import { momentBindingKey, type MagneticModel, type MagneticMoment } from "@/core/magnetic/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
-import { applyOperation } from "@/core/crystal/symmetry";
+import { magneticOrbitRepresentatives } from "@/core/crystal/cellExpansion";
 import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
 
 export interface MagneticModelBuild {
@@ -102,62 +102,6 @@ function sameModeGeometry(cell: UnitCell, a: readonly Vec3[], b: readonly Vec3[]
     }
   }
   return true;
-}
-
-function wrap01(v: number): number {
-  return ((v % 1) + 1) % 1;
-}
-
-function samePosition(a: Vec3, b: Vec3): boolean {
-  for (let i = 0; i < 3; i++) {
-    let d = Math.abs(a[i]! - b[i]!);
-    d = Math.min(d, 1 - d);
-    if (d > 1e-3) return false;
-  }
-  return true;
-}
-
-/**
- * Representative positions of the orbits into which the magnetic subgroup
- * splits a site's crystallographic orbit. The nuclear group G generates the
- * full orbit of `position`; the (possibly smaller) magnetic group G_M — for
- * k ≠ 0 the little group — partitions it into G_M-orbits. Each is an
- * independent magnetic sublattice: its moment is NOT related by any magnetic
- * operation to the others', so it needs its own allowed-moment basis and
- * amplitudes. (Without the split, split-orbit atoms would silently carry no
- * moment at all — zero magnetic intensity and no arrow in the viewer.)
- *
- * The first representative is the site position itself, so single-orbit cases
- * reduce to the pre-existing behaviour and parameter naming.
- */
-function magneticOrbitRepresentatives(
-  nuclearOps: readonly SymmetryOperation[],
-  magneticOps: readonly SymmetryOperation[],
-  position: Vec3,
-): Vec3[] {
-  const orbit: Vec3[] = [];
-  for (const op of nuclearOps) {
-    const raw = applyOperation(op, position);
-    const p: Vec3 = [wrap01(raw[0]), wrap01(raw[1]), wrap01(raw[2])];
-    if (!orbit.some((q) => samePosition(q, p))) orbit.push(p);
-  }
-  const site: Vec3 = [wrap01(position[0]!), wrap01(position[1]!), wrap01(position[2]!)];
-  const assigned = orbit.map(() => false);
-  const reps: Vec3[] = [];
-  const claim = (rep: Vec3): void => {
-    reps.push(rep);
-    for (const op of magneticOps) {
-      const raw = applyOperation(op, rep);
-      const p: Vec3 = [wrap01(raw[0]), wrap01(raw[1]), wrap01(raw[2])];
-      const idx = orbit.findIndex((q) => samePosition(q, p));
-      if (idx >= 0) assigned[idx] = true;
-    }
-  };
-  claim(site);
-  for (let i = 0; i < orbit.length; i++) {
-    if (!assigned[i]) claim(orbit[i]!);
-  }
-  return reps;
 }
 
 /** Group sites that share a fractional position (periodic, per-component). */

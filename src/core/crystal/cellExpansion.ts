@@ -41,8 +41,15 @@ export interface MomentPlacing {
 export interface MomentEntry {
   readonly key: string;
   readonly siteLabel: string;
-  /** Orbit-representative fractional position (defaults to the site position). */
+  /**
+   * Build-time orbit-representative position. Kept for provenance and as the
+   * degenerate-case fallback only — the anchor actually used is re-derived from
+   * the site's CURRENT position via {@link momentAnchorPosition}, so a refined
+   * site carries its split orbits with it.
+   */
   readonly position?: Vec3;
+  /** Which G_M-orbit of the site this entry is (1-based); absent ⇒ orbit 1. */
+  readonly orbitIndex?: number;
   /** Crystal-axis moment components (µ_B). */
   readonly components: Vec3;
 }
@@ -53,6 +60,7 @@ export function momentEntriesFrom(magnetic: MagneticModel): MomentEntry[] {
     key: momentBindingKey(m),
     siteLabel: m.siteLabel,
     ...(m.position ? { position: m.position } : {}),
+    ...(m.orbitIndex !== undefined ? { orbitIndex: m.orbitIndex } : {}),
     components: [...m.components] as Vec3,
   }));
 }
@@ -200,6 +208,91 @@ function coincide(a: Vec3, b: Vec3): boolean {
   return true;
 }
 
+/**
+ * Representative positions of the orbits into which the magnetic subgroup
+ * splits a site's crystallographic orbit. The nuclear group G generates the
+ * full orbit of `position`; the (possibly smaller) magnetic group G_M — for
+ * k ≠ 0 the little group — partitions it into G_M-orbits, each an independent
+ * magnetic sublattice with its own allowed-moment basis and amplitudes.
+ *
+ * The first representative is the site position itself, so single-orbit cases
+ * reduce to the pre-existing behaviour and parameter naming.
+ *
+ * The result is a **pure function of `position` and the two operation lists**,
+ * and (at a generic position) a continuous one: which orbit members share a
+ * G_M-orbit is decided by group theory, not by coordinates, so representative
+ * `i` tracks the site as it is refined. That is what lets a moment entry
+ * identify its sublattice by orbit INDEX rather than by a frozen coordinate —
+ * see {@link momentAnchorPosition}.
+ */
+export function magneticOrbitRepresentatives(
+  nuclearOps: readonly SymmetryOperation[],
+  magneticOps: readonly SymmetryOperation[],
+  position: Vec3,
+): Vec3[] {
+  const orbit: Vec3[] = [];
+  for (const op of nuclearOps) {
+    const raw = applyOperation(op, position);
+    const p: Vec3 = [wrap01(raw[0]), wrap01(raw[1]), wrap01(raw[2])];
+    if (!orbit.some((q) => coincide(q, p))) orbit.push(p);
+  }
+  const site: Vec3 = [wrap01(position[0]!), wrap01(position[1]!), wrap01(position[2]!)];
+  const assigned = orbit.map(() => false);
+  const reps: Vec3[] = [];
+  const claim = (rep: Vec3): void => {
+    reps.push(rep);
+    for (const op of magneticOps) {
+      const raw = applyOperation(op, rep);
+      const p: Vec3 = [wrap01(raw[0]), wrap01(raw[1]), wrap01(raw[2])];
+      const idx = orbit.findIndex((q) => coincide(q, p));
+      if (idx >= 0) assigned[idx] = true;
+    }
+  };
+  claim(site);
+  for (let i = 0; i < orbit.length; i++) {
+    if (!assigned[i]) claim(orbit[i]!);
+  }
+  return reps;
+}
+
+/**
+ * The anchor a moment entry expands its sublattice from, RE-DERIVED against the
+ * structure as it currently stands.
+ *
+ * A magnetic model is built once and then the refinement moves the atoms
+ * underneath it: `applyParameters` shifts `site.position`, while the moment
+ * entries keep the components the refinement drives and nothing else. So the
+ * entry must name its sublattice by **orbit identity** — "the n-th G_M-orbit of
+ * this site" — and the coordinate must be recomputed here from the site's
+ * current position. Storing the build-time coordinate instead pinned the
+ * sublattice in place: past the 1e-3 {@link coincide} tolerance the orbit-2
+ * atoms matched nothing, so an entire split-orbit sublattice silently lost its
+ * moments (no arrows, no magnetic intensity, no error), while on the powder
+ * path its atoms stayed frozen at stale positions and |F_M|² stopped responding
+ * to the very parameter being refined.
+ *
+ * Orbit 1 is the site position itself, so the common (unsplit) case is a plain
+ * pass-through. `frozen` is the entry's stored coordinate; it is used
+ *  - when there is no `orbitIndex` at all — a caller naming its anchor purely
+ *    by coordinate, which we have no orbit identity to re-derive from, so the
+ *    legacy meaning is kept; and
+ *  - if the orbit count itself shrinks (a site refined onto a special
+ *    position), a genuinely different structure where preserving the old
+ *    anchor is the conservative choice.
+ */
+export function momentAnchorPosition(
+  nuclearOps: readonly SymmetryOperation[],
+  magneticOps: readonly SymmetryOperation[],
+  sitePosition: Vec3,
+  orbitIndex: number | undefined,
+  frozen?: Vec3,
+): Vec3 {
+  if (orbitIndex === undefined) return frozen ?? sitePosition;
+  if (orbitIndex <= 1) return sitePosition;
+  const reps = magneticOrbitRepresentatives(nuclearOps, magneticOps, sitePosition);
+  return reps[orbitIndex - 1] ?? frozen ?? sitePosition;
+}
+
 /** The distinct wrapped equivalent positions of `position` under `ops`, each
  *  with the rotation of the (first) operation that produced it. */
 export function distinctPlacedPositions(
@@ -235,14 +328,28 @@ export function placingFor(
   return undefined;
 }
 
-/** Anchors a site's arrows can derive from: its moment entries (one per split
- *  orbit) or, absent a model, the site position itself. */
+/**
+ * Anchors a site's arrows can derive from: its moment entries (one per split
+ * orbit) or, absent a model, the site position itself.
+ *
+ * Each split orbit's anchor is re-derived from the site's CURRENT position
+ * ({@link momentAnchorPosition}), so the anchors and the `distinctPlacedPositions`
+ * they are matched against always come from the same coordinates — the
+ * `coincide` search below can never miss because the structure was refined.
+ */
 function anchorsForSite(
   site: AtomSite,
   momentEntries: readonly MomentEntry[] | undefined,
+  nuclearOps: readonly SymmetryOperation[],
+  magneticOps: readonly SymmetryOperation[],
 ): { key: string; pos: Vec3 }[] {
   return momentEntries
-    ? momentEntries.filter((e) => e.siteLabel === site.label).map((e) => ({ key: e.key, pos: e.position ?? site.position }))
+    ? momentEntries
+        .filter((e) => e.siteLabel === site.label)
+        .map((e) => ({
+          key: e.key,
+          pos: momentAnchorPosition(nuclearOps, magneticOps, site.position, e.orbitIndex, e.position),
+        }))
     : [{ key: site.label, pos: site.position }];
 }
 
@@ -377,7 +484,7 @@ export function buildCellAtoms(
     // Distinct equivalent positions (wrapped), each with its placing rotation.
     const placed = distinctPlacedPositions(ops, site.position);
     // The anchors this site's arrows can derive from.
-    const anchors = anchorsForSite(site, momentEntries);
+    const anchors = anchorsForSite(site, momentEntries, ops, magneticOps ?? ops);
     for (const { frac, rot } of placed) {
       let mag: MomentPlacing | undefined;
       for (const anchor of anchors) {
@@ -514,7 +621,7 @@ function expandMagneticBox(
   const atoms: SupercellAtom[] = [];
   for (const site of structure.sites) {
     const placed = distinctPlacedPositions(ops, site.position);
-    const anchors = anchorsForSite(site, entries);
+    const anchors = anchorsForSite(site, entries, ops, magOps);
     let copyIndex = 0;
     const multiCopy = placed.length * n[0] * n[1] * n[2] > 1;
     for (const { frac } of placed) {
