@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { StructureModel } from "@/core/crystal/types";
 import { parseCif, parseCifNumber } from "@/parsers/cif";
+import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { siteMultiplicity } from "@/core/crystal/symmetry";
 import { dataExists, readData } from "@/testSupport/data";
@@ -91,6 +92,16 @@ loop_
     const model = parseCif(cifWith("\n  _atom_site_U_iso_or_equiv", " 0.006"));
     const mn = model.sites[0]!;
     if (mn.adp.kind === "isotropic") expect(mn.adp.bIso).toBeCloseTo(8 * Math.PI * Math.PI * 0.006, 12);
+  });
+
+  // Precedence when a file carries both and both are populated: U is the
+  // refined quantity in the modern dialects, so a stale/bogus B column must
+  // never win. (Salvaged from an independent pass at this fix in the
+  // elated-albattani worktree, which pinned the same rule.)
+  it("prefers U_iso over B_iso when both columns carry a value", () => {
+    const model = parseCif(cifWith("\n  _atom_site_U_iso_or_equiv\n  _atom_site_B_iso_or_equiv", " 0.01 999"));
+    const mn = model.sites[0]!;
+    if (mn.adp.kind === "isotropic") expect(mn.adp.bIso).toBeCloseTo(EIGHT_PI_SQUARED * 0.01, 10);
   });
 
   it("falls back to the B column when this row's U_iso is the CIF null marker", () => {
