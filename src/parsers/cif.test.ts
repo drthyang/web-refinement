@@ -59,6 +59,56 @@ loop_
   });
 });
 
+describe("parseCif — isotropic displacement parameter column", () => {
+  const cifWith = (adpHeader: string, adpValue: string): string => `data_test
+_cell_length_a  4
+_cell_length_b  4
+_cell_length_c  4
+_cell_angle_alpha  90
+_cell_angle_beta   90
+_cell_angle_gamma  90
+loop_
+  _space_group_symop_operation_xyz
+  'x,y,z'
+loop_
+  _atom_site_label
+  _atom_site_type_symbol
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+  _atom_site_occupancy${adpHeader}
+  Mn1 Mn 0 0 0 1${adpValue}
+`;
+
+  it("reads _atom_site_B_iso_or_equiv verbatim (it is already B, not U)", () => {
+    const model = parseCif(cifWith("\n  _atom_site_B_iso_or_equiv", " 0.47"));
+    const mn = model.sites[0]!;
+    expect(mn.adp.kind).toBe("isotropic");
+    if (mn.adp.kind === "isotropic") expect(mn.adp.bIso).toBeCloseTo(0.47, 12);
+  });
+
+  it("converts _atom_site_U_iso_or_equiv with B = 8π²U", () => {
+    const model = parseCif(cifWith("\n  _atom_site_U_iso_or_equiv", " 0.006"));
+    const mn = model.sites[0]!;
+    if (mn.adp.kind === "isotropic") expect(mn.adp.bIso).toBeCloseTo(8 * Math.PI * Math.PI * 0.006, 12);
+  });
+
+  it("falls back to the B column when this row's U_iso is the CIF null marker", () => {
+    const model = parseCif(cifWith("\n  _atom_site_U_iso_or_equiv\n  _atom_site_B_iso_or_equiv", " ? 0.8"));
+    const mn = model.sites[0]!;
+    if (mn.adp.kind === "isotropic") expect(mn.adp.bIso).toBeCloseTo(0.8, 12);
+  });
+
+  // No column at all: B_iso = 0 is a MISSING ADP, not a cold one. The parser
+  // must not invent a default — callers warn instead (see zeroAdpWarning).
+  it("leaves B_iso = 0 when the loop carries no ADP column", () => {
+    const model = parseCif(cifWith("", ""));
+    const mn = model.sites[0]!;
+    expect(mn.adp.kind).toBe("isotropic");
+    if (mn.adp.kind === "isotropic") expect(mn.adp.bIso).toBe(0);
+  });
+});
+
 describe("parseCif — space group from H-M name only (no symop loop)", () => {
   // A CIF that names the group but lists no symmetry operations (e.g. the 11-BM
   // NAC file) must resolve the full group from the built-in table, not silently

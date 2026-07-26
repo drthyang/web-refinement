@@ -21,6 +21,7 @@ import {
   build_magnetic_model,
   refine_magnetic_powder,
   rank_next_parameters,
+  build_pdf_model,
 } from "@/mcp/tools";
 import { exampleStructure } from "@/examples/mn3ga";
 import { exampleMagnetic, magneticParameters, magneticBindings } from "@/examples/mn3gaMagnetic";
@@ -81,6 +82,28 @@ describe("MCP tool handlers", () => {
     });
   });
 });
+
+/** Hexagonal MnTe in the structure-report column set: no ADP column at all. */
+const NO_ADP_CIF = `data_mnte
+_cell_length_a  4.1429
+_cell_length_b  4.1429
+_cell_length_c  6.7031
+_cell_angle_alpha  90
+_cell_angle_beta   90
+_cell_angle_gamma  120
+loop_
+  _space_group_symop_operation_xyz
+  'x,y,z'
+loop_
+  _atom_site_label
+  _atom_site_type_symbol
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+  _atom_site_occupancy
+  Te Te 0.333333 0.666667 0.25 1
+  Mn Mn 0 0 0 1
+`;
 
 describe("MCP analysis primitives (no data files needed)", () => {
   const structure = exampleStructure(); // hexagonal Mn3Ga, P6₃/mmc
@@ -264,5 +287,24 @@ describe("MCP analysis primitives (no data files needed)", () => {
     for (let i = 0; i < 500; i += 50) {
       expect(ev.curves.yCalc[i]!).toBeCloseTo(ev.curves.yNuclear![i]! + ev.curves.yMagnetic![i]!, 6);
     }
+  });
+
+  // A CIF with no U_iso/B_iso column loads at B_iso = 0, which makes every G(r)
+  // peak delta-sharp and drives the PDF scale to a meaningless value — the tool
+  // must say so instead of handing back a parameter set that "converges".
+  it("build_pdf_model warns when a site has no displacement parameter", () => {
+    const bare = parse_structure({ cif: NO_ADP_CIF }).structure;
+    const pattern = {
+      id: "g", name: "g", scatteringType: "neutron" as const,
+      points: Array.from({ length: 400 }, (_, i) => ({ r: 0.5 + i * 0.02, gObs: 0 })),
+    };
+    const warned = build_pdf_model({ structure: bare, pattern });
+    expect(warned.warnings).toHaveLength(1);
+    expect(warned.warnings[0]).toMatch(/Mn/);
+    expect(warned.warnings[0]).toMatch(/B_iso = 0/);
+
+    // Same structure with the ADPs filled in: no warning.
+    const withAdp = { ...bare, sites: bare.sites.map((s) => ({ ...s, adp: { kind: "isotropic" as const, bIso: 0.47 } })) };
+    expect(build_pdf_model({ structure: withAdp, pattern }).warnings).toEqual([]);
   });
 });

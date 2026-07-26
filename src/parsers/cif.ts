@@ -13,6 +13,7 @@ import type { Vec3 } from "@/core/math/types";
 import { composeOperations, operationKey, parseMagneticSymmetryOperation, parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { IDENTITY3 } from "@/core/math/mat3";
 import { completeSpaceGroup } from "@/core/crystal/spaceGroups";
+import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
 
 /** Strip the parenthetical esd and parse: "5.41317(8)" → 5.41317. */
 export function parseCifNumber(raw: string): number {
@@ -241,18 +242,29 @@ function parseSites(loops: Loop[]): AtomSite[] {
   // `_atom_site_adp_type` (both hold "Uani"/"Uiso"); accept either so
   // anisotropic sites keep their U tensor instead of collapsing to isotropic.
   const iAdpType = col("_atom_site_adp_type") >= 0 ? col("_atom_site_adp_type") : col("_atom_site_thermal_displace_type");
+  // U_iso and B_iso are the same quantity in different units (B = 8π²U). Which
+  // one a file carries is a dialect choice — GSAS-II/VESTA write U, the
+  // structure-report dialects often write B — so read either. A file with no
+  // column at all leaves B_iso = 0, which is a *missing* ADP, not a cold one:
+  // callers warn (see zeroAdpWarning); substituting a default here would
+  // invent physics.
   const iU = col("_atom_site_u_iso_or_equiv");
+  const iB = col("_atom_site_b_iso_or_equiv");
   const iMult = col("_atom_site_site_symmetry_multiplicity");
 
   return atomLoop.rows.map((row) => {
-    const uIso = iU >= 0 ? parseCifNumberOr(row[iU], 0) : 0;
+    // Per row, not per column: a mixed loop can leave U_iso as `?` on the sites
+    // whose value sits in the B column (and vice versa).
+    const uIso = iU >= 0 ? parseCifNumberOr(row[iU], NaN) : NaN;
+    const bIsoRead = iB >= 0 ? parseCifNumberOr(row[iB], NaN) : NaN;
+    const bIso = !Number.isNaN(uIso) ? EIGHT_PI_SQUARED * uIso : !Number.isNaN(bIsoRead) ? bIsoRead : 0;
     const position: Vec3 = [parseCifNumber(row[iX]!), parseCifNumber(row[iY]!), parseCifNumber(row[iZ]!)];
     const element = iType >= 0 ? elementFromType(row[iType]!) : elementFromType(row[iLabel]!);
     const label = iLabel >= 0 ? row[iLabel]! : element;
     const adpType = iAdpType >= 0 ? row[iAdpType]?.toLowerCase() : undefined;
     const adp = adpType === "uani" && anisoAdps.has(label)
       ? anisoAdps.get(label)!
-      : { kind: "isotropic" as const, bIso: 8 * Math.PI * Math.PI * uIso };
+      : { kind: "isotropic" as const, bIso };
     const site: AtomSite = {
       label,
       element,

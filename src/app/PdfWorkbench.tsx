@@ -26,6 +26,7 @@ import {
   pdfPhaseBindingsFor,
   optimalPdfScale,
   correlatedMotionConflict,
+  zeroAdpWarning,
 } from "@/core/workflow/pdf";
 import { buildMpdfSpec, mpdfComponents } from "@/core/workflow/mpdf";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
@@ -438,6 +439,10 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
 
   const nFree = params.filter((p) => !p.fixed && !p.expression).length;
   const motionConflict = useMemo(() => correlatedMotionConflict(params), [params]);
+  // A CIF with no U_iso/B_iso column loads every site at B_iso = 0, which in
+  // real space wrecks the fit silently (delta-sharp peaks, collapsed scale) —
+  // say so on the plot card rather than letting it converge on nonsense.
+  const adpWarning = useMemo(() => zeroAdpWarning(phases.map((p) => p.structure)), [phases]);
 
   /** The refine request shared by the nuclear and magnetic paths. */
   function refineRequest(start: readonly RefinementParameter[], maxIterations: number) {
@@ -1039,6 +1044,11 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
               </p>
               {motionConflict && (
                 <div style={{ marginTop: 6, fontSize: 12, color: color.warnInk }}>⚠ {motionConflict}</div>
+              )}
+              {adpWarning && (
+                <div style={{ marginTop: 6, fontSize: 12, color: color.warnInk }}>
+                  ⚠ {adpWarning} Edit the “ADPs (thermal)” rows in the parameter panel.
+                </div>
               )}
             </>
           ) : viewTab === "model3d" ? (

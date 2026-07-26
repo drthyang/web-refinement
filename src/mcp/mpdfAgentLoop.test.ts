@@ -168,4 +168,23 @@ describe("agent loop — magnetic PDF study via MCP tools only", () => {
     });
     expect(c.magneticFraction).toBe(0);
   });
+
+  // A CIF with no ADP column loads at B_iso = 0, which makes the NUCLEAR term
+  // delta-sharp — and the moments are then fitted against whatever the
+  // collapsing nuclear scale leaves behind, so the magnetic answer is wrong
+  // too. Same guard as build_pdf_model (see zeroAdpWarning).
+  it("a structure with no displacement parameter is called out before the moments are fitted", () => {
+    const noAdpCif = cifFor(TRUE_A, 0.005)
+      .replace("_atom_site_U_iso_or_equiv\n", "")
+      .replace(" 0.005\n", "\n");
+    const s = call("parse_structure", { cif: noAdpCif });
+    expect(s.structure.sites[0].adp).toEqual({ kind: "isotropic", bIso: 0 });
+    const neutron = call("parse_pdf_data", { text: header + R_ROWS.join("\n") + "\n", filename: "mn.gr" });
+    const mag = call("build_magnetic_model", { structure: s.structure, ionLabels: ["Mn1"], k: K_AFM, moment: TRUE_MOMENT });
+    const model = call("build_mpdf_model", {
+      structure: s.structure, pattern: neutron.pattern,
+      magnetic: mag.magnetic, parameters: mag.parameters, bindings: mag.bindings,
+    });
+    expect(model.warnings.join(" ")).toMatch(/No displacement parameter on site Mn1 \(B_iso = 0\)/);
+  });
 });
