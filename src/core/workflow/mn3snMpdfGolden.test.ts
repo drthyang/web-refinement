@@ -5,7 +5,7 @@
  *
  * The first non-collinear, non-toy exercise of the mPDF kernel: 12 canted
  * triangular kagome moments in an orthorhombic (Ama2 → P1) cell, against real
- * neutron total-scattering data. Two gates:
+ * neutron total-scattering data. Three gates:
  *
  *  A. NUCLEAR — our G(r) forward model vs the Gcalc column PDFgui saved in the
  *     .fgr (same structure CIF, same dscale/Qdamp/Qbroad). A real-data sibling
@@ -16,10 +16,17 @@
  *     free — solved in closed form, no optimizer. If the kernel's A/B split,
  *     ⟨j0⟩ envelope, SRO damping, or net-moment line were wrong, the refined
  *     external model could not reproduce the measured residual.
+ *  C. POINTWISE — no data, no free scales: the same 12-spin configuration fed
+ *     to diffpy.mpdf's calculatemPDF/calculateDr in OUR conventions (g = 1
+ *     full-moment spins, K₁ = (2/3)(γr₀/2)², K₂ = K₁·⟨m²⟩, both scales 1),
+ *     compared point by point. f(r) must match to numerical noise — the
+ *     histogram/Gaussian/baseline/ξ-envelope path is a faithful port — while
+ *     D(r) gets the looser committed-dr-golden gates because our direct
+ *     cosine-sum quadrature differs from diffpy's FFT-based cv() convolution.
  */
 import { describe, it, expect } from "vitest";
-import type { Vec3 } from "@/core/math/types";
 import { dataExists, readData } from "@/testSupport/data";
+import { readMcifMomentLoop } from "@/testSupport/mn3snMcif";
 import { parseFgr, fgrToPattern, type FgrFit } from "@/parsers/fgrData";
 import { parseCif, parseMagneticCif } from "@/parsers/cif";
 import { buildPdfSpec, buildPdfProblem } from "@/core/workflow/pdf";
@@ -36,6 +43,9 @@ import {
 
 const DIR = "PDF/Mn3Sn_PG3";
 const MANIFEST = `${DIR}/golden.json`;
+/** diffpy.mpdf pointwise reference (Test C) — every numeric value lives in the
+ *  git-ignored JSON; only the filename is committed. */
+const POINTWISE = `${DIR}/diffpy_pointwise.json`;
 
 interface Golden {
   readonly fgr: string;
@@ -77,6 +87,21 @@ interface Golden {
   };
 }
 
+/** Shape of `diffpy_pointwise.json` — diffpy.mpdf's calculatemPDF f(r) and
+ *  calculateDr D(r) for the Test-B spin configuration, evaluated in our
+ *  conventions on the extended grid 0…fitMax+4 Å (see file comment, gate C). */
+interface PointwiseFixture {
+  readonly comment: string;
+  readonly rstep: number;
+  readonly n: number;
+  readonly psigma: number;
+  readonly qdamp: number;
+  readonly xi: number;
+  readonly mSqAvg: number;
+  readonly f: readonly number[];
+  readonly d: readonly number[];
+}
+
 const loadGolden = (): Golden => JSON.parse(readData(MANIFEST)) as Golden;
 const loadFgr = (g: Golden): FgrFit => parseFgr(readData(`${DIR}/${g.fgr}`));
 
@@ -102,25 +127,6 @@ function rwOf(obs: readonly number[], fit: readonly number[]): number {
   return Math.sqrt(num / den);
 }
 
-/**
- * The `_atom_site_moment` loop of an explicit-P1 mCIF (no BNS operations, so
- * parseMagneticCif carries no magnetic model — the moment rows are exactly the
- * label + 3 crystal-axis components with no symmetry to apply).
- */
-function readMomentLoop(text: string): Map<string, Vec3> {
-  const moments = new Map<string, Vec3>();
-  let inLoop = false;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (/^_atom_site_moment\.label/i.test(line)) inLoop = true;
-    if (!inLoop || line.startsWith("_") || line === "" || line.toLowerCase() === "loop_") continue;
-    const toks = line.split(/\s+/);
-    if (toks.length < 4) continue;
-    const v = toks.slice(1, 4).map(Number);
-    if (v.every(Number.isFinite)) moments.set(toks[0]!, v as [number, number, number]);
-  }
-  return moments;
-}
 
 describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF golden (POWGEN, local-only data)", () => {
   it("A: nuclear G(r) forward model reproduces PDFgui's saved Gcalc", () => {
@@ -159,7 +165,7 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF golden (POWGEN, local-on
     const g = loadGolden();
     const fgr = loadFgr(g);
     const { structure } = parseMagneticCif(readData(`${DIR}/${g.mcif}`), "mn3sn-mag");
-    const moments = readMomentLoop(readData(`${DIR}/${g.mcif}`));
+    const moments = readMcifMomentLoop(readData(`${DIR}/${g.mcif}`));
     expect(moments.size).toBe(12);
 
     const spins: MpdfSpin[] = structure.sites
@@ -230,5 +236,56 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF golden (POWGEN, local-on
     expect(Math.abs(rwVsObs - g.reference.rwFinalVsObs)).toBeLessThan(g.gates.maxRwVsObsDelta);
     expect(Math.abs(ordRef / g.reference.ordscale - 1)).toBeLessThan(g.gates.maxScaleRelErr);
     expect(Math.abs(paraRef / g.reference.parascale - 1)).toBeLessThan(g.gates.maxScaleRelErr);
+  });
+
+  it.skipIf(!dataExists(POINTWISE))("C: kernel matches diffpy.mpdf pointwise on the real spin configuration", () => {
+    const g = loadGolden();
+    const fx = JSON.parse(readData(POINTWISE)) as PointwiseFixture;
+
+    // Spins exactly as in Test B: mCIF crystal-axis components → Cartesian μB.
+    const { structure } = parseMagneticCif(readData(`${DIR}/${g.mcif}`), "mn3sn-mag");
+    const moments = readMcifMomentLoop(readData(`${DIR}/${g.mcif}`));
+    const spins: MpdfSpin[] = structure.sites
+      .filter((s) => moments.has(s.label))
+      .map((s) => ({ position: s.position, moment: crystalComponentsToCartesian(structure.cell, moments.get(s.label)!) }));
+    expect(spins.length).toBe(12);
+
+    const grid = mpdfExtendedGrid(g.fitMax, fx.rstep);
+    expect(grid.length).toBe(fx.n);
+
+    // f(r): histogram + Gaussian broadening + linear baseline + exp(−r/ξ) SRO
+    // envelope + net-moment line (ρ0/netMag derived internally). A faithful
+    // port of diffpy.mpdf's calculatemPDF, so the gate is numerical noise
+    // relative to the largest peak — NOT a fit tolerance.
+    const f = computeNormalizedMpdf(structure.cell, spins, grid, {
+      psigma: fx.psigma, qdamp: fx.qdamp, corrLength: fx.xi,
+    });
+    let peakF = 0, maxDiffF = 0;
+    for (let k = 0; k < fx.n; k++) {
+      peakF = Math.max(peakF, Math.abs(fx.f[k]!));
+      maxDiffF = Math.max(maxDiffF, Math.abs(f[k]! - fx.f[k]!));
+    }
+    // eslint-disable-next-line no-console
+    console.log(`[Mn3Sn pointwise f] maxdiff=${maxDiffF.toExponential(3)} peak=${peakF.toExponential(3)} rel=${(maxDiffF / peakF).toExponential(3)}`);
+    expect(maxDiffF).toBeLessThan(1e-6 * peakF);
+
+    // D(r) = cv(K₁/(2π)·f, S) + para term, ordScale = paraScale = 1 with the
+    // fixture's ⟨m²⟩. Our direct cosine-sum quadrature vs diffpy's FFT-based
+    // cv() convolution differ at the sub-percent level, so the gates here are
+    // the committed dr-golden convention (shape + amplitude + loose pointwise),
+    // not the f(r) noise floor.
+    const envelope = formFactorEnvelope(j0Profile([g.formFactorIon]), 5, fx.rstep);
+    const d = computeUnnormalizedMpdf(grid, f, envelope, 1, fx.mSqAvg);
+    let peakD = 0, maxDiffD = 0;
+    for (let k = 0; k < fx.n; k++) {
+      peakD = Math.max(peakD, Math.abs(fx.d[k]!));
+      maxDiffD = Math.max(maxDiffD, Math.abs(d[k]! - fx.d[k]!));
+    }
+    const { corr, kappa } = corrKappa(fx.d, d);
+    // eslint-disable-next-line no-console
+    console.log(`[Mn3Sn pointwise d] corr=${corr.toFixed(6)} κ=${kappa.toFixed(5)} maxdiff=${maxDiffD.toExponential(3)} peak=${peakD.toExponential(3)} rel=${(maxDiffD / peakD).toExponential(3)}`);
+    expect(corr).toBeGreaterThan(0.9999);
+    expect(Math.abs(kappa - 1)).toBeLessThan(0.005);
+    expect(maxDiffD).toBeLessThan(0.01 * peakD);
   });
 });
