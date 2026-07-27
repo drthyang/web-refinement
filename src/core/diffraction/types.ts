@@ -125,10 +125,12 @@ export interface PdfPattern {
   /**
    * What the loaded file actually contained. "gr" = the G(r) itself; "sq"/"fq"
    * = Q-space S(Q)/F(Q) that the app sine-transformed to G(r) at load time
-   * (with `qmax` taken from the data's own Q extent). Provenance for the UI
-   * and reports; absent means "gr".
+   * (with `qmax` taken from the data's own Q extent); "fgr" = a PDFgui fit
+   * export whose observed curve was rebuilt as Gcalc + Gdiff; "fgr-diff" = the
+   * RESIDUAL of that fit (the mPDF signal — not a total G(r)). Provenance for
+   * the UI and reports; absent means "gr".
    */
-  readonly sourceKind?: "gr" | "sq" | "fq";
+  readonly sourceKind?: "gr" | "sq" | "fq" | "fgr" | "fgr-diff";
 }
 
 /** Any diffraction dataset the engine can refine against. */

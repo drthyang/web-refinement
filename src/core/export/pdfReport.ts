@@ -24,6 +24,8 @@ const SOURCE_LABEL: Record<string, string> = {
   gr: "G(r) as loaded",
   sq: "S(Q), sine-transformed to G(r) at load",
   fq: "F(Q), sine-transformed to G(r) at load",
+  fgr: "PDFgui fit export, observed rebuilt as Gcalc + Gdiff",
+  "fgr-diff": "PDFgui fit RESIDUAL (Gdiff — the mPDF signal, not a total G(r))",
 };
 
 function fmt(v: number, digits = 5): string {

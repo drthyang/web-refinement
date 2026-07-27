@@ -313,8 +313,12 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "parse_pdf_data",
     title: "Parse reduced PDF G(r)",
-    description: "Parse a reduced pair-distribution-function file (.gr/.sq/.fq — diffpy PDFgetX3 or Mantid dialect) into a PdfPattern with its total-scattering metadata (Qmax, Qdamp, composition). The real-space entry point: feed `pattern` to build_pdf_model / refine_pdf.",
-    inputSchema: { text: z.string().describe("Reduced PDF file text"), filename: z.string().optional() },
+    description: "Parse a reduced pair-distribution-function file (.gr/.sq/.fq — diffpy PDFgetX3 or Mantid dialect) or a PDFgui fit export (.fgr) into a PdfPattern with its total-scattering metadata (Qmax, Qdamp, composition). For .fgr, `signal` picks the curve: 'observed' (default, Gcalc+Gdiff) or 'difference' (the fit residual — the mPDF signal for a neutron nuclear fit). The real-space entry point: feed `pattern` to build_pdf_model / refine_pdf.",
+    inputSchema: {
+      text: z.string().describe("Reduced PDF file text"),
+      filename: z.string().optional(),
+      signal: z.enum(["observed", "difference"]).optional().describe(".fgr only: which curve becomes the pattern"),
+    },
     handler: tools.parse_pdf_data,
   },
   {

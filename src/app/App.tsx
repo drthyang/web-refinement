@@ -26,6 +26,7 @@ import { parseGsasCsvPattern } from "@/parsers/gsasPattern";
 import { isGsasHistogram, parseGsasHistogramPattern } from "@/parsers/gsasHistogram";
 import { detectDataFormat, type DetectedFormat } from "@/parsers/detectFormat";
 import { parsePdfData } from "@/parsers/pdfData";
+import { looksLikeFgr, parseFgr, fgrToPattern } from "@/parsers/fgrData";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 import { startingPowderParams, loadReflectionDataset } from "@/app/loadData";
 import { powderBindings } from "@/examples/synthetic";
@@ -284,14 +285,19 @@ export function App(): JSX.Element {
         const fmt = detectDataFormat({ text, filename: file.name, instrument: instrumentLoaded ? instrument : undefined });
         const tag = `[${fmt.source}/${fmt.confidence}]`;
         if (fmt.dataType === "pdf") {
-          const parsed = parsePdfData(text, { id: `${structure.id}-pdf`, filename: file.name });
+          // PDFgui .fgr fit exports carry the CALCULATED curve in the G(r)
+          // column — rebuild the observed one instead of mis-reading it.
+          const parsed = looksLikeFgr(text, file.name)
+            ? fgrToPattern(parseFgr(text), { id: `${structure.id}-pdf`, filename: file.name })
+            : parsePdfData(text, { id: `${structure.id}-pdf`, filename: file.name });
           if (parsed.points.length < 3) throw new Error("fewer than 3 usable G(r) rows");
           setScNuclearDataset(null);
           setPdfDataset(parsed);
           setStep(0);
           const provenance =
             parsed.sourceKind === "sq" ? " (S(Q) → G(r) transformed at load)" :
-            parsed.sourceKind === "fq" ? " (F(Q) → G(r) transformed at load)" : "";
+            parsed.sourceKind === "fq" ? " (F(Q) → G(r) transformed at load)" :
+            parsed.sourceKind === "fgr" ? " (PDFgui fit export: Gobs = Gcalc + Gdiff)" : "";
           setMessage(
             `Loaded PDF “${file.name}” · ${parsed.points.length} pts · ${parsed.scatteringType} ${tag}` +
             `${parsed.qmax !== undefined ? ` · Qmax ${parsed.qmax}` : ""}${provenance}. Real-space G(r) fit ready. ${fmt.note}`,

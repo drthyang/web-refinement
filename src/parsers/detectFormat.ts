@@ -22,6 +22,7 @@ import type { PowderXUnit, Radiation } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { gsasHistogramUnit } from "@/parsers/gsasHistogram";
 import { looksLikePdf } from "@/parsers/pdfData";
+import { looksLikeFgr } from "@/parsers/fgrData";
 
 export type DataType = "powder" | "single-crystal" | "pdf";
 export type DetectionSource = "override" | "header" | "instrument" | "filename" | "heuristic";
@@ -143,18 +144,23 @@ export function detectDataFormat(input: DetectInput): DetectedFormat {
   // --- Data type ---------------------------------------------------------
   // A reduced PDF (`.gr`/`.sq`/`.fq`, or a PDFgetX3/Mantid header) is a
   // real-space G(r) — routed to its own workbench, never a powder pattern.
+  // A PDFgui fit export (`.fgr`) also routes there; the .fgr reader (not the
+  // generic one) then owns its column semantics.
+  const isFgr = looksLikeFgr(text, input.filename);
   const dataType: DataType =
     override?.dataType ??
-    (looksLikePdf(text, input.filename) ? "pdf" : looksLikeReflectionList(text) ? "single-crystal" : "powder");
+    (isFgr || looksLikePdf(text, input.filename) ? "pdf" : looksLikeReflectionList(text) ? "single-crystal" : "powder");
 
   if (dataType === "pdf") {
     return {
       dataType,
       xUnit: "dSpacing", // r in Å; not used for a PDF (the parser owns the grid)
       radiation: radiationFor("dSpacing", instrument),
-      source: override?.dataType ? "override" : /\.(gr|sgr|sq|fq)$/i.test(input.filename) ? "filename" : "header",
+      source: override?.dataType ? "override" : /\.(gr|sgr|sq|fq|fgr)$/i.test(input.filename) ? "filename" : "header",
       confidence: "high",
-      note: "Reduced pair distribution function G(r) — fitted in real space (PDF workbench).",
+      note: isFgr
+        ? "PDFgui fit export (.fgr) — G(r) column is the fit; observed = Gcalc + Gdiff (PDF workbench)."
+        : "Reduced pair distribution function G(r) — fitted in real space (PDF workbench).",
     };
   }
 

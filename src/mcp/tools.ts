@@ -21,6 +21,7 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import { parseMagneticCif } from "@/parsers/cif";
 import { parsePowderData } from "@/parsers/powderData";
 import { parsePdfData } from "@/parsers/pdfData";
+import { looksLikeFgr, parseFgr, fgrToPattern, type FgrSignal } from "@/parsers/fgrData";
 import { detectDataFormat } from "@/parsers/detectFormat";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 import { buildPowderSpec, type MustrainModel } from "@/app/powderSpec";
@@ -816,15 +817,43 @@ export function interpret_structure(args: {
 // JSON → JSON wrapper per capability over the tested core.
 // ---------------------------------------------------------------------------
 
-/** Parse a reduced PDF file (.gr/.sq/.fq — PDFgetX3 or Mantid dialect). */
-export function parse_pdf_data(args: { text: string; filename?: string }): {
+/** Parse a reduced PDF file (.gr/.sq/.fq — PDFgetX3 or Mantid dialect) or a
+ *  PDFgui fit export (.fgr; `signal` picks observed vs residual). */
+export function parse_pdf_data(args: { text: string; filename?: string; signal?: FgrSignal }): {
   detected: { dataType: string; source: string; confidence: string; note?: string };
   pattern: PdfPattern;
   summary: {
     points: number; rMin: number; rMax: number; rStep?: number;
     scatteringType: string; qmax?: number; qdamp?: number; composition?: string;
+    dscale?: number; fitrmin?: number; fitrmax?: number;
   };
 } {
+  // PDFgui .fgr fit exports first: the generic reader's column heuristics
+  // would land on the CALCULATED curve, so they get their own path.
+  if (looksLikeFgr(args.text, args.filename ?? "")) {
+    const fgr = parseFgr(args.text);
+    const signal = args.signal ?? "observed";
+    const pattern = fgrToPattern(fgr, { id: "pdf", signal, ...(args.filename ? { filename: args.filename } : {}) });
+    if (pattern.points.length < 3) throw new Error("fewer than 3 usable G(r) rows");
+    const note = signal === "difference"
+      ? "PDFgui fit export: pattern carries the fit RESIDUAL Gdiff (the mPDF signal), not a total G(r)"
+      : "PDFgui fit export: observed rebuilt as Gcalc + Gdiff";
+    return {
+      detected: { dataType: "pdf", source: "header", confidence: "high", note },
+      pattern,
+      summary: {
+        points: pattern.points.length, rMin: pattern.points[0]!.r, rMax: pattern.points[pattern.points.length - 1]!.r,
+        ...(pattern.rstep !== undefined ? { rStep: pattern.rstep } : {}),
+        scatteringType: pattern.scatteringType,
+        ...(pattern.qmax !== undefined ? { qmax: pattern.qmax } : {}),
+        ...(pattern.qdamp !== undefined ? { qdamp: pattern.qdamp } : {}),
+        ...(fgr.dscale !== undefined ? { dscale: fgr.dscale } : {}),
+        ...(fgr.fitrmin !== undefined ? { fitrmin: fgr.fitrmin } : {}),
+        ...(fgr.fitrmax !== undefined ? { fitrmax: fgr.fitrmax } : {}),
+      },
+    };
+  }
+  if (args.signal !== undefined) throw new Error("`signal` applies only to PDFgui .fgr fit exports");
   const fmt = detectDataFormat({ text: args.text, filename: args.filename ?? "data.gr" });
   if (fmt.dataType !== "pdf") throw new Error(`detected ${fmt.dataType} data, not a reduced PDF — use the powder/single-crystal path`);
   const pattern = parsePdfData(args.text, { id: "pdf", ...(args.filename ? { filename: args.filename } : {}) });
