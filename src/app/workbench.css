@@ -12,6 +12,39 @@
   --fz-body: clamp(12.5px, 0.3vw + 10px, 15.5px);
   --fz-large: clamp(14px, 0.42vw + 11px, 18px);
   --fz-title: clamp(15px, 0.55vw + 12px, 22px);
+
+  /*
+   * Spacing scale. ONE gutter value for every gap in the app — vertical and
+   * horizontal, every grid, every page. They used to be three near-identical
+   * ramps (1vw/0.9vw/1.4vw), which put 19.2px between stacked cards and 17.3px
+   * between side-by-side ones on a 1920px screen: close enough to look like a
+   * mistake rather than a decision, and it was.
+   *
+   * The page gutter is deliberately one step wider so the content breathes at
+   * the window edge; being a multiple of the same value keeps it in rhythm.
+   * --wb-inset is the padding INSIDE a card, one step tighter than the gutter
+   * between cards, so a card's contents never look looser than its neighbours.
+   */
+  --wb-gap: clamp(12px, 0.9vw, 18px);
+  --wb-pad: calc(var(--wb-gap) * 1.5);
+  --wb-inset: clamp(11px, 0.8vw, 16px);
+
+  /*
+   * Floor for the main working row. It does not set the height — the row FILLS
+   * the window (see .wb-work2 / .wb-work3 / .wb-sc below), which is the only
+   * way to fill a 16:9 screen without knowing how tall the chrome above it
+   * happens to be today: the beta banner wraps to two or three lines depending
+   * on width, and the summary row grows with phase badges. The previous
+   * clamp(500px, 66vh, 900px) guessed instead, and was wrong at both ends of
+   * the range it served — the 900px cap wasted ~290px on a 1440p screen while
+   * the 500px floor pushed a 1366x768 laptop into scrolling its primary view.
+   * This floor only bites when the window is genuinely too short, and then
+   * scrolling is the right answer.
+   */
+  --wb-plot-min-h: 380px;
+  /* Secondary plot (the magnetic page's pattern check, which shares its column
+   * with the 3D model, so it cannot simply fill). */
+  --wb-plot-h-sm: clamp(300px, calc((100vh - 380px) * 0.6), 600px);
 }
 
 /* "Refining…" shimmer: a bright band sweeps across the button text while a
@@ -43,26 +76,37 @@
   width: 100%;
   max-width: 2100px;
   margin: 0 auto;
-  padding: clamp(12px, 1.4vw, 30px);
+  padding: var(--wb-pad);
   display: flex;
   flex-direction: column;
-  gap: clamp(12px, 1vw, 22px);
+  gap: var(--wb-gap);
+  /* As a flex item of the app shell, its automatic minimum is its content's
+     height — which would stop the working row inside it from ever shrinking,
+     so a short window scrolls instead of compressing. */
+  min-height: 0;
+  /* The scroll container for the page: the shell itself never scrolls, so the
+     header and footer stay put and a long page (the magnetic workflow) moves
+     under them. */
+  overflow-y: auto;
 }
 
 /* Auto-reflowing tile row (summary cards, quality tiles): never crowds. */
 .wb-autofit {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-  gap: clamp(12px, 0.9vw, 18px);
+  gap: var(--wb-gap);
 }
 
 /* Working area: quality rail (1/6) | main refinement (2/3) | parameters (1/6). */
 .wb-work3 {
   display: grid;
   grid-template-columns: minmax(210px, 1fr) minmax(0, 4fr) minmax(320px, 1fr);
-  gap: clamp(12px, 1vw, 20px);
-  /* Stretch all columns to a common height (the plot card sets it). */
+  gap: var(--wb-gap);
+  /* Stretch all columns to a common height, and take the page's leftover
+     vertical space so that height is "whatever the window has". */
   align-items: stretch;
+  flex: 1 1 auto;
+  min-height: var(--wb-plot-min-h);
 }
 
 /* Powder page: plot / validation / 3D (left, 2/3) | parameters (right, 1/3).
@@ -72,18 +116,37 @@
 .wb-work2 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(12px, 0.9vw, 18px);
+  gap: var(--wb-gap);
   align-items: stretch;
+  flex: 1 1 auto;
+  min-height: var(--wb-plot-min-h);
 }
 .wb-work2 > :first-child {
   grid-column: span 2;
 }
+
+/* A grid item's default `min-height: auto` is its content's minimum, which
+   would let one tall card (the parameter panel's rows, the plot's own chrome)
+   push the working row past the fold on a short window. The cards in these two
+   rows scroll internally, so let them shrink. */
+.wb-work2 > *,
+.wb-work3 > * {
+  min-height: 0;
+}
 @media (max-width: 820px) {
   .wb-work2 {
     grid-template-columns: 1fr;
+    /* Stacked, the cards share one column, so filling the window would halve
+       each of them. Give them their natural height and let the page scroll —
+       the usual phone/tablet reading model. */
+    flex: 0 1 auto;
+    min-height: 0;
   }
   .wb-work2 > :first-child {
     grid-column: auto;
+  }
+  .wb-work2 > * {
+    min-height: var(--wb-plot-min-h);
   }
 }
 
@@ -91,8 +154,12 @@
 .wb-sc {
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(340px, 1fr);
-  gap: clamp(12px, 1vw, 20px);
+  gap: var(--wb-gap);
   align-items: stretch;
+  /* Deliberately NOT `flex: 1` like the powder/PDF working rows: this page's
+     cards are stacks of tables and plots that size to their content and have
+     no internal scroll region, so stretching them to the window would clip
+     rather than fill. The column scrolls instead. */
 }
 @media (max-width: 1120px) {
   .wb-sc {
@@ -104,7 +171,7 @@
 .wb-sc-plots {
   display: grid;
   grid-template-columns: minmax(220px, 360px) minmax(280px, 1fr);
-  gap: clamp(12px, 1vw, 20px);
+  gap: var(--wb-gap);
   align-items: start;
 }
 @media (max-width: 900px) {
@@ -117,7 +184,7 @@
 .wb-mag2 {
   display: grid;
   grid-template-columns: minmax(400px, 6fr) minmax(380px, 5fr);
-  gap: clamp(12px, 1vw, 20px);
+  gap: var(--wb-gap);
   align-items: start;
 }
 
@@ -125,10 +192,10 @@
    the pattern check visible while candidate groups are clicked on the right. */
 .wb-mag2-left {
   position: sticky;
-  top: 12px;
+  top: var(--wb-gap);
   align-self: start;
   display: grid;
-  gap: clamp(12px, 1vw, 20px);
+  gap: var(--wb-gap);
   min-width: 0;
 }
 
@@ -157,6 +224,12 @@
 @media (max-width: 1120px) {
   .wb-work3 {
     grid-template-columns: 1fr;
+    /* Stacked: natural height, page scrolls (see .wb-work2 at 820px). */
+    flex: 0 1 auto;
+    min-height: 0;
+  }
+  .wb-work3 > * {
+    min-height: var(--wb-plot-min-h);
   }
 }
 

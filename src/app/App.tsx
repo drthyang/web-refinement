@@ -530,7 +530,13 @@ export function App(): JSX.Element {
   const hasContent = session.powderSource !== EMPTY_SOURCE || scDataset !== null || pdfDataset !== null;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+    // The shell is exactly the window: header, disclaimer and footer are fixed
+    // chrome and the content column between them takes the rest. That is what
+    // lets a working row fill a 16:9 screen without anyone computing how tall
+    // the chrome happens to be — and a page whose content genuinely exceeds the
+    // window (the magnetic workflow, single crystal) scrolls inside the column
+    // instead of pushing the footer off-screen.
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <WorkbenchHeader
         steps={hasContent ? (pdfDataset ? pdfSteps(pdfDataset, session.extraPhases.length) : scDataset ? SC_STEPS : STEPS) : IDLE_STEPS}
         active={step}
@@ -545,7 +551,14 @@ export function App(): JSX.Element {
       />
       {hasContent && (
         <div style={disclaimerBar}>
-          Public beta — validate results intended for publication against established tools. Export your refinement to GSAS-II or FullProf (Export ▸ bundle) to cross-check.
+          <b>Public beta</b> — validated against published reference fits for the cases in its docs, not for
+          yours. Reproduce anything you intend to publish in{" "}
+          {crossCheckTargets(pdfDataset ? "pdf" : scDataset ? "sc" : "rietveld")}; agreement is the evidence.
+          Unmodelled effects:{" "}
+          <a href={LIMITATIONS_URL} target="_blank" rel="noreferrer" style={disclaimerLink}>
+            limitations
+          </a>
+          .
         </div>
       )}
       {/* The powder engine stays mounted in single-crystal mode (hidden) so all
@@ -598,6 +611,28 @@ export function App(): JSX.Element {
   );
 }
 
-const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk };
+/**
+ * The package a user should reproduce THIS technique's result in. Naming the
+ * right one beats a generic "established tools": a PDF user told to check
+ * against GSAS-II learns nothing, and the reference implementations differ per
+ * technique (real space vs reciprocal space vs single crystal).
+ */
+function crossCheckTargets(technique: "rietveld" | "pdf" | "sc"): string {
+  switch (technique) {
+    case "pdf":
+      // The real-space references, including the magnetic term the PDF page can
+      // add — diffpy.mpdf is the only implementation of it worth checking against.
+      return "PDFgui / diffpy-CMI (PDFfit2), or diffpy.mpdf for a magnetic PDF";
+    case "sc":
+      return "SHELXL, JANA2020, or FullProf";
+    default:
+      return "GSAS-II or FullProf (Export ▸ bundle writes both decks)";
+  }
+}
+
+const LIMITATIONS_URL = "https://github.com/drthyang/web-refinement/blob/main/docs/LIMITATIONS.md";
+
+const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
+const disclaimerLink: React.CSSProperties = { color: theme.warnInk, textDecoration: "underline" };
 const copyrightBar: React.CSSProperties = { display: "flex", justifyContent: "center", alignItems: "center", gap: 8, padding: "10px 24px", fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised };
 const footerLink: React.CSSProperties = { color: theme.secondary, textDecoration: "none" };

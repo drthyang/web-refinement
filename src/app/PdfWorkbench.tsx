@@ -70,7 +70,7 @@ import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
 import { downloadText } from "@/app/download";
 import { structureToCif, magneticStructureToMcif } from "@/core/export/cif";
 import { pdfReport } from "@/core/export/pdfReport";
-import { card as themeCard, color, mono, secondaryButton, uppercaseLabel, fz, toolbarBtn, resetRangeBtn } from "@/app/theme";
+import { card as themeCard, color, mono, secondaryButton, uppercaseLabel, fz, toolbarBtn, resetRangeBtn, space } from "@/app/theme";
 
 const DATA_ACCEPT = ".gr,.sgr,.sq,.fq,.dat,.txt,text/plain";
 const noop = (): void => {};
@@ -1222,10 +1222,16 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       {/* Step 0 — setup + real-space refinement. Both step panels stay MOUNTED
           (display:none) rather than being swapped: KSearchPanel owns the ion
           selection, k, framework and subgroup picks, and unmounting loses them. */}
-      <div style={{ display: step === 1 ? "none" : undefined }}>
+      {/* The step wrapper carries the page's own vertical gutter: it sits
+          between `.wb-main` and its children, so without a gap of its own the
+          rows inside it would butt together while every other page's rows are
+          spaced. */}
+      {/* `auto 1fr` hands the leftover height to the working row, the way the
+          powder page's rows get it directly from `.wb-main`. */}
+      <div style={{ display: step === 1 ? "none" : "grid", gap: space.gap, gridTemplateRows: "auto 1fr", flex: 1, minHeight: 0 }}>
       <SummaryCards cards={summaryCards} />
       <div className="wb-work2">
-        <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 66vh, 900px)" }}>
+        <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", height: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
             <span style={uppercaseLabel}>
               {viewTab === "fit"
@@ -1733,8 +1739,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           The k-search half is intentionally not fed: it scores candidate k
           against unindexed BRAGG peak d-spacings, and a G(r) has none. The k
           is typed in (or carried over from a companion powder refinement). */}
-      <div style={{ display: step === 1 ? "grid" : "none", gap: 14 }}>
-        <div style={{ ...themeCard, padding: "14px 16px" }}>
+      <div style={{ display: step === 1 ? "grid" : "none", gap: space.gap }}>
+        <div style={{ ...themeCard, padding: space.inset }}>
           <div style={{ ...uppercaseLabel, marginBottom: 4 }}>Magnetic PDF (mPDF) — {structure.name || "structure"}</div>
           <p style={{ fontSize: 13, color: color.secondary, margin: 0, lineHeight: 1.5 }}>
             Commensurate single-k workflow (shared with powder and single crystal): magnetic ions → propagation vector k → symmetry framework → magnetic space group → refine moments.

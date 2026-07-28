@@ -4,7 +4,7 @@
  */
 
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { card, color, mono, radius, uppercaseLabel, fz } from "@/app/theme";
+import { card, color, mono, radius, uppercaseLabel, fz, space } from "@/app/theme";
 import { InfoBadge } from "@/app/ui/InfoBadge";
 
 export interface SummaryCardData {
@@ -50,7 +50,7 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
   const showChipRow = showChip || badges.length > 0;
   const chipStyle = data.chipTone === "warn" ? warnChip : okChip;
   return (
-    <div style={{ ...card, padding: "15px 18px", display: "flex", flexDirection: "column", gap: 7 }}>
+    <div style={{ ...card, padding: space.inset, display: "flex", flexDirection: "column", gap: 7 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={uppercaseLabel}>{data.label}</span>
         {data.help && <InfoBadge text={data.help} />}

@@ -9,7 +9,7 @@
 
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { ParameterKind, RefinementParameter, RefinementResult } from "@/core/refinement/types";
-import { card, color, mono, primaryButton, secondaryButton, uppercaseLabel } from "@/app/theme";
+import { card, color, mono, primaryButton, secondaryButton, space, uppercaseLabel } from "@/app/theme";
 import { InfoBadge } from "@/app/ui/InfoBadge";
 
 const CATEGORY: Record<ParameterKind, string> = {
@@ -160,7 +160,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
 
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", overflow: "hidden", height: "100%" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: `10px ${space.inset}` }}>
         <span style={uppercaseLabel}>{title ?? "Powder parameters"}</span>
         <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 11, color: color.faint }}>{freeCount} of {params.length} free</span>
         <button
@@ -336,15 +336,15 @@ function ResultBanner({ result }: { result: RefinementResult }): JSX.Element {
   );
 }
 
-const colHeader: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 104px 62px 62px", padding: "6px 14px", borderBottom: `1px solid ${color.border}`, ...uppercaseLabel };
-const groupHeader: CSSProperties = { display: "flex", alignItems: "center", gap: 8, background: color.groupBg, borderTop: `1px solid ${color.subtle}`, padding: "8px 14px", cursor: "pointer" };
-const paramRow: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 104px 62px 62px", alignItems: "center", padding: "4px 14px 4px 26px", borderTop: `1px solid ${color.subtle2}` };
-const groupControlRow: CSSProperties = { display: "flex", alignItems: "center", gap: 8, rowGap: 5, flexWrap: "wrap", padding: "7px 14px 7px 26px", borderTop: `1px solid ${color.subtle2}`, fontSize: 12, color: color.secondary };
+const colHeader: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 104px 62px 62px", padding: `6px ${space.inset}`, borderBottom: `1px solid ${color.border}`, ...uppercaseLabel };
+const groupHeader: CSSProperties = { display: "flex", alignItems: "center", gap: 8, background: color.groupBg, borderTop: `1px solid ${color.subtle}`, padding: `8px ${space.inset}`, cursor: "pointer" };
+const paramRow: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 104px 62px 62px", alignItems: "center", padding: `4px ${space.inset} 4px calc(${space.inset} + 12px)`, borderTop: `1px solid ${color.subtle2}` };
+const groupControlRow: CSSProperties = { display: "flex", alignItems: "center", gap: 8, rowGap: 5, flexWrap: "wrap", padding: `7px ${space.inset} 7px calc(${space.inset} + 12px)`, borderTop: `1px solid ${color.subtle2}`, fontSize: 12, color: color.secondary };
 const valueInput: CSSProperties = { width: 88, border: `1px solid ${color.input}`, borderRadius: 7, fontSize: 12, fontFamily: mono, padding: "2px 6px", background: "#fff" };
 const pill: CSSProperties = { fontSize: 11, padding: "1px 8px", borderRadius: 999, textAlign: "center", justifySelf: "start" };
-const actionBar: CSSProperties = { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 14px", borderBottom: `1px solid ${color.border}`, background: color.muted2 };
-const frameworkBar: CSSProperties = { display: "flex", alignItems: "center", gap: 10, rowGap: 6, flexWrap: "wrap", padding: "8px 14px", borderBottom: `1px solid ${color.border}`, fontSize: 12, color: color.secondary };
-const footer: CSSProperties = { borderTop: `1px solid ${color.border}`, padding: "12px 14px", background: color.muted2, display: "flex", flexDirection: "column", gap: 8 };
+const actionBar: CSSProperties = { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: `10px ${space.inset}`, borderBottom: `1px solid ${color.border}`, background: color.muted2 };
+const frameworkBar: CSSProperties = { display: "flex", alignItems: "center", gap: 10, rowGap: 6, flexWrap: "wrap", padding: `8px ${space.inset}`, borderBottom: `1px solid ${color.border}`, fontSize: 12, color: color.secondary };
+const footer: CSSProperties = { borderTop: `1px solid ${color.border}`, padding: `12px ${space.inset}`, background: color.muted2, display: "flex", flexDirection: "column", gap: 8 };
 const banner: CSSProperties = { borderRadius: 8, padding: "6px 10px", fontSize: 12 };
 const hcell: CSSProperties = { padding: "1px 10px 1px 0", textAlign: "left", color: color.faint };
 const disabledStyle: CSSProperties = { opacity: 0.55, cursor: "not-allowed" };

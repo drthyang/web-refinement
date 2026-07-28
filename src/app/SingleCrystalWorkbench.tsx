@@ -41,7 +41,7 @@ import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { expandStructureToSupercell, buildModulatedMomentModel, mergeToMagneticSupercell, type ModulatedIon } from "@/core/magnetic/magneticSupercell";
 import type { MomentDegeneracy } from "@/core/magnetic/canonicalize";
 import { downloadText } from "@/app/download";
-import { card as themeCard, color, mono, fz, uppercaseLabel, secondaryButton } from "@/app/theme";
+import { card as themeCard, color, mono, fz, uppercaseLabel, secondaryButton, space } from "@/app/theme";
 
 // Lazy so three.js stays out of the main bundle until the 3D view is opened.
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
@@ -469,7 +469,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           step toggles visibility so each page's state survives switching. */}
       <div className="wb-sc" style={{ display: step === 1 ? "none" : undefined }}>
         {/* Quality rail: F² agreement + merge stats + F_obs/F_calc beside the 3D model. */}
-        <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <span style={uppercaseLabel}>Refinement quality — single crystal (F²)</span>
             <div style={{ display: "flex", gap: 20 }}>
@@ -583,7 +583,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
             supercell, ties one modulated amplitude per magnetic sublattice, and
             refines with ONE shared scale (nuclear + magnetic = one measurement).
             Non-destructive: the shared structure/3D view stay in the base cell. */}
-        <div style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <span style={uppercaseLabel}>Magnetic single-k · supercell refinement</span>
             <label style={{ ...secondaryButton, padding: "6px 12px", cursor: "pointer" }} title="Load a companion magnetic reflection file (.int/.hkl): satellites indexed in the nuclear cell as the fundamental h k l of hkl ± k">
@@ -712,8 +712,8 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       {/* Step 1 — magnetic symmetry analysis. The workflow itself is structure-
           driven and identical to powder; only the moment fit (magneticFit) runs
           against F² reflections instead of a powder pattern. */}
-      <div style={{ display: step === 1 ? "grid" : "none", gap: 14 }}>
-        <div style={{ ...themeCard, padding: "14px 16px" }}>
+      <div style={{ display: step === 1 ? "grid" : "none", gap: space.gap }}>
+        <div style={{ ...themeCard, padding: space.inset }}>
           <div style={{ ...uppercaseLabel, marginBottom: 4 }}>Magnetic symmetry analysis — single crystal ({structure.name || "structure"})</div>
           <p style={{ fontSize: 13, color: color.secondary, margin: 0, lineHeight: 1.5 }}>
             Commensurate single-k workflow (shared with powder): magnetic ions → propagation vector k → symmetry framework → magnetic space group → refine moments.

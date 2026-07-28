@@ -70,7 +70,7 @@ import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { InfoBadge } from "@/app/ui/InfoBadge";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
-import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono, fz, toolbarBtn, resetRangeBtn } from "@/app/theme";
+import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono as themeMono, fz, toolbarBtn, resetRangeBtn, space } from "@/app/theme";
 import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
 import { applyParameters } from "@/core/workflow/apply";
 import { excludedPointMask } from "@/core/refinement/factors";
@@ -1150,7 +1150,7 @@ export function PowderWorkbench({
           <>
             <SummaryCards cards={summaryCards} />
             <div className="wb-work2">
-              <div style={{ ...themeCard, padding: "16px 18px", display: "flex", flexDirection: "column", height: "clamp(500px, 66vh, 900px)" }}>
+              <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", height: "100%" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
                   <span style={themeLabel}>
                     {plotMode === "structure" ? "Crystal structure — unit cell" : plotMode === "validation" ? "Validation plots" : plotMode === "posterior" ? "Bayesian posterior — free parameters" : "Powder pattern"}
@@ -1566,7 +1566,10 @@ const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${them
  *  the visual focus; the load cards above handle the user's own files. */
 function EmptyWorkbench({ onLoadDemo }: { onLoadDemo?: (kind: "rietveld" | "pdf") => void }): JSX.Element {
   return (
-    <div style={{ ...themeCard, padding: "clamp(36px, 9vh, 96px) 24px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 12 }}>
+    // Fills the space a working row would occupy and centres its content in it,
+    // so the first screen looks composed at any window height instead of a
+    // short card marooned above a field of empty background.
+    <div style={{ ...themeCard, flex: 1, minHeight: 0, padding: `clamp(28px, 6vh, 72px) ${space.inset}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: 12 }}>
       <div style={{ fontSize: fz.title, fontWeight: 650, color: theme.ink, letterSpacing: "-0.01em" }}>Start with a demo</div>
       <p style={{ margin: 0, maxWidth: 460, fontSize: fz.small, lineHeight: 1.55, color: theme.secondary }}>
         Each opens a converged refinement — or load your own CIF and data above; the
