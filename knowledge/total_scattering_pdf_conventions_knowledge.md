@@ -125,8 +125,14 @@ Practical rules:
   not a result.
 - Seeding forward makes the series PATH-DEPENDENT: each box starts from the
   previous box's answer, so one box that lands in a local minimum hands it to
-  every box after it. Randomized restarts per box (baseline = the seed, best χ²
-  wins) are the check; a drift that survives restarts is a drift.
+  every box after it. Two checks, in increasing strength: randomized restarts
+  per box (baseline = the seed, best χ² wins), and scanning BOTH directions
+  from the same starting model. Two directions that land on the same track have
+  reached the same minimum from opposite seeds — that is the drift being in the
+  data. Where they separate by more than their combined esd, the value at that
+  box is set by where the fit started, not by G(r); read the low-r end of a
+  high→low pass and the high-r end of a low→high pass with that in mind, since
+  those are the boxes furthest from their pass's starting point.
 - Cost is not flat in r: pair enumeration reaches the box's UPPER edge, so a
   5 Å box at r = 45 Å still enumerates every pair out to ~51 Å.
 ```

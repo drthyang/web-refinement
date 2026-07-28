@@ -356,7 +356,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       range: z.object({ min: z.number(), max: z.number() }).optional().describe("r span to scan (A); defaults to the whole pattern"),
       width: z.number().positive().describe("Box width (A) — fixed for every box"),
       step: z.number().positive().describe("Center-to-center advance (A); width/2 gives half-overlapping boxes"),
-      direction: z.enum(["up", "down"]).optional().describe("Scan order: 'up' = small r to large r (default), 'down' = reverse"),
+      direction: z.enum(["up", "down"]).optional().describe("Scan order: 'up' = small r to large r (default), 'down' = reverse. Call the tool once each way with the SAME parameters to test path dependence: where the two tracks agree the drift is in the data, where they separate by more than their combined esd the value is set by where the fit started."),
       seedFromPrevious: z.boolean().optional().describe("Seed each box from the previous box's refined values (default true)"),
       restarts: z.number().int().min(0).max(20).optional().describe("Randomly perturbed restarts per box beyond the seeded start; the lowest-chi2 one wins and seeds the next box. Use when a track may have inherited one box's local minimum — seeding forward makes the series path-dependent. Costs (restarts + 1)x the scan. Default 0."),
       maxIterations: z.number().int().min(1).max(200).optional(),

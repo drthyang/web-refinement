@@ -630,8 +630,17 @@ app + a validation gate**, no broken intermediate state.
 > the wrong window's Jacobian. Boxes seed from their predecessor, which makes
 > the series path-dependent — hence the per-box `restarts` option (randomized
 > perturbed starts around the seed, lowest χ² wins, per-box RNG seed so the
-> perturbation pattern cannot imprint its own r-dependence). Surfaced as a
-> **Boxcar** plot tab holding the whole feature — the plan (width, step,
+> perturbation pattern cannot imprint its own r-dependence). The second, and
+> stronger, check on path dependence is the **both-directions** mode: the same
+> boxes scanned low→high AND high→low from the SAME starting model, the two
+> tracks overlaid on one pair of axes, and their separation reported in units
+> of the combined esd — where they agree the drift is in the data, where they
+> part the fit is following its seed. A pass records its fits in scan order, so
+> `boxcarStepIndex` maps a "down" pass back onto the ascending plan (getting
+> that backwards would plot an interrupted down pass at the wrong r). Boxes are
+> published as they complete, so the plot fills in during the scan rather than
+> appearing whole at the end. Surfaced as a **Boxcar** plot tab holding the
+> whole feature — the plan (width, step,
 > direction, restarts) sits with the run button and the plot it produces, since
 > those settings shape this view's result and nothing else, leaving the
 > refinement panel one job and one primary action — plus value ± esd vs box

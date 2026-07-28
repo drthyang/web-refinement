@@ -76,6 +76,26 @@ export function boxcarHasGaps(opts: BoxcarPlanOptions): boolean {
   return opts.step > opts.width + EPS;
 }
 
+/**
+ * Which step of a pass fitted the box at ascending index `windowIndex`, or -1
+ * when that box was never reached.
+ *
+ * A pass records its fits in SCAN order, so a "down" pass's step 0 is the
+ * LAST (highest-r) box. Comparing two directions box-for-box — the whole point
+ * of scanning both — means undoing that here rather than in the reader, and it
+ * is also what makes an interrupted pass line up correctly: a cancelled "down"
+ * pass is missing the LOW-r boxes, not the high-r ones.
+ */
+export function boxcarStepIndex(
+  direction: BoxcarDirection,
+  windowIndex: number,
+  totalWindows: number,
+  stepCount: number,
+): number {
+  const i = direction === "up" ? windowIndex : totalWindows - 1 - windowIndex;
+  return i >= 0 && i < stepCount ? i : -1;
+}
+
 /** The end of the scanned span — where the last box's right edge lands. The UI
  *  reports it when the plan stops short of the fit window's end. */
 export function boxcarScannedMax(opts: BoxcarPlanOptions): number | null {

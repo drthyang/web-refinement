@@ -154,8 +154,11 @@ r, refine inside each position (each box seeded from the previous one), and read
 every parameter against the box center: a track that drifts means the local
 structure differs from the average one, a flat track means one model describes
 every length scale. It reports each box's Rw and esd alongside the value, so a
-drift can be told from a badly-fitted box, and offers randomized restarts per
-box to prove a drift is not one box's local minimum inherited by the rest. In
+drift can be told from a badly-fitted box, and offers two independent checks
+that a drift is real rather than inherited — randomized restarts per box, and a
+**both-directions** mode that scans low→high *and* high→low r from the same
+starting model, overlays the two tracks, and states how far apart they land in
+units of their combined esd. The plot fills in box by box as the scan runs. In
 the app it is a tab of its own — the plan, the run, the plot, the per-box table
 with "Adopt", and CSV export in one place; for agents it is `refine_pdf_boxcar`.
 

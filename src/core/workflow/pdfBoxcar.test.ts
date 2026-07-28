@@ -11,6 +11,7 @@ import {
   boxcarHasGaps,
   boxcarPlanIssue,
   boxcarScannedMax,
+  boxcarStepIndex,
   boxcarWindows,
 } from "@/core/workflow/pdfBoxcar";
 
@@ -250,6 +251,52 @@ describe("boxcar refinement through the sequential controller", () => {
     // Deterministic RNG per box → a rerun reproduces the series exactly.
     const again = await withRestarts();
     expect(again.evolution).toEqual(restarted.evolution);
+  });
+
+  it("maps a down pass's scan order back onto the ascending plan", () => {
+    // A "down" pass fits the LAST box first, so its step k is window n-1-k.
+    expect(boxcarStepIndex("up", 0, 5, 5)).toBe(0);
+    expect(boxcarStepIndex("down", 0, 5, 5)).toBe(4);
+    expect(boxcarStepIndex("down", 4, 5, 5)).toBe(0);
+    // An interrupted pass covers a PREFIX of its own order: the up pass loses
+    // the high-r boxes, the down pass loses the low-r ones. Getting this
+    // backwards would silently plot a partial down scan at the wrong r.
+    expect(boxcarStepIndex("up", 4, 5, 2)).toBe(-1);
+    expect(boxcarStepIndex("up", 1, 5, 2)).toBe(1);
+    expect(boxcarStepIndex("down", 0, 5, 2)).toBe(-1);
+    expect(boxcarStepIndex("down", 4, 5, 2)).toBe(0);
+  });
+
+  it("scans both directions over the same boxes and lands on the same values", async () => {
+    // The two-direction comparison: each pass starts from the SAME model and
+    // walks the identical boxes the opposite way. On data whose structure does
+    // not depend on length scale, the tracks must coincide — that agreement is
+    // exactly the evidence the feature reports, so it is pinned here.
+    const up = boxcarDatasets(structure, pattern, spec.bindings, windows);
+    const reversed = [...windows].reverse();
+    const down = boxcarDatasets(structure, pattern, spec.bindings, reversed);
+
+    const opts = { refineOptions: { maxIterations: 30 } };
+    const resUp = await refineSequentialAsync(spec.params, up, opts);
+    const resDown = await refineSequentialAsync(spec.params, down, opts);
+
+    // The down pass really did walk the other way: its first fit is the last box.
+    expect(resDown.steps[0]!.label).toBe(`${windows[windows.length - 1]!.center.toFixed(2)} Å`);
+    expect(resUp.steps[0]!.label).toBe(`${windows[0]!.center.toFixed(2)} Å`);
+
+    const cellId = spec.params.find((p) => p.kind === "cellLength")!.id;
+    const upTrack = resUp.evolution.find((e) => e.parameterId === cellId)!;
+    const downTrack = resDown.evolution.find((e) => e.parameterId === cellId)!;
+    for (let wi = 0; wi < windows.length; wi++) {
+      const iu = boxcarStepIndex("up", wi, windows.length, resUp.steps.length);
+      const id = boxcarStepIndex("down", wi, windows.length, resDown.steps.length);
+      const a = upTrack.values[iu]!;
+      const b = downTrack.values[id]!;
+      // Same box, same data, opposite seeding: a well-determined box converges
+      // to its own minimum either way, so the gap is far below the esd.
+      const esd = Math.hypot(upTrack.esd[iu] ?? 0, downTrack.esd[id] ?? 0);
+      expect(Math.abs(a - b)).toBeLessThan(Math.max(esd, 1e-6));
+    }
   });
 
   it("propagates a runner failure after delivering the boxes already fitted (cancel semantics)", async () => {

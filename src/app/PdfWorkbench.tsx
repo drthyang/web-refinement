@@ -57,9 +57,12 @@ import { applyParameters } from "@/core/workflow/apply";
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
-import { BoxcarPanel, type BoxcarPlan, type BoxcarRun } from "@/app/ui/BoxcarPanel";
-import { boxcarPlanIssue, boxcarScannedMax, boxcarWindows } from "@/core/workflow/pdfBoxcar";
-import type { SequentialStep } from "@/core/refinement/sequential";
+import { BoxcarPanel, stepIndexFor, type BoxcarPlan, type BoxcarRun, type BoxcarSeries } from "@/app/ui/BoxcarPanel";
+import { boxcarPlanIssue, boxcarScannedMax, boxcarWindows, type BoxcarDirection } from "@/core/workflow/pdfBoxcar";
+
+/** One finished (or interrupted) pass, accumulated while a run is in flight. */
+type BoxcarSeriesState = BoxcarSeries;
+import type { SequentialResult, SequentialStep } from "@/core/refinement/sequential";
 import type { SampleResult } from "@/core/refinement/bayes/sampler";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
@@ -580,9 +583,12 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // Cancel button explicitly promises not to do.
   const boxcarSteps = useRef<SequentialStep[]>([]);
 
+  // The plan is enumerated ASCENDING once; a "down" (or the second "both") pass
+  // walks the same boxes reversed. Keeping one canonical list is what lets the
+  // panel align two passes box-for-box.
   const boxcarPlan = useMemo(
-    () => ({ range: { min: fitRange.min, max: fitRange.max }, width: boxWidth, step: boxStep, direction: boxDirection }),
-    [fitRange, boxWidth, boxStep, boxDirection],
+    () => ({ range: { min: fitRange.min, max: fitRange.max }, width: boxWidth, step: boxStep }),
+    [fitRange, boxWidth, boxStep],
   );
   const boxcarWindowList = useMemo(() => boxcarWindows(boxcarPlan), [boxcarPlan]);
   const boxcarIssue = useMemo(() => boxcarPlanIssue(boxcarPlan), [boxcarPlan]);
@@ -618,40 +624,89 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     // may change before the scan ends, and the tracks belong to the parameter
     // set that produced them.
     const freeIds = params.filter((p) => !p.fixed && !p.expression).map((p) => p.id);
-    const plan = { windows, width: boxWidth, direction: boxDirection, restarts, freeIds };
+    // "both" is two passes over the SAME boxes, each starting from the SAME
+    // model — that is what makes their separation a property of the fit rather
+    // than of two different starting points.
+    const directions: BoxcarDirection[] = boxDirection === "both" ? ["up", "down"] : [boxDirection];
+    const plan = { windows, width: boxWidth, restarts, freeIds };
+    const totalBoxes = windows.length * directions.length;
+    const done: BoxcarSeriesState[] = [];
+    /** The evolution table for a pass's completed boxes — rebuilt per box while
+     *  the scan streams, which is cheap next to one windowed refinement. */
+    const evolutionOf = (steps: readonly SequentialStep[]): SequentialResult["evolution"] =>
+      params.map((p) => ({
+        parameterId: p.id,
+        values: steps.map((s) => s.result.parameters[p.id]),
+        esd: steps.map((s) => s.result.esd[p.id]),
+      }));
+    /**
+     * Publish what exists so far: every finished pass plus the boxes the
+     * in-flight pass has delivered. Called after each box, so the plot fills in
+     * as the scan walks rather than appearing whole at the end — a long scan is
+     * then readable (and abandonable) while it runs. `partial` is what the run
+     * carries once it stops early; while `boxcarBusy` is set the panel reads it
+     * as "still scanning" instead.
+     */
+    const publish = (inFlight: BoxcarDirection | null, partial: boolean): void => {
+      const streaming = inFlight !== null && boxcarSteps.current.length > 0
+        ? [{ direction: inFlight, result: { steps: [...boxcarSteps.current], evolution: evolutionOf(boxcarSteps.current) } }]
+        : [];
+      const series = [...done, ...streaming];
+      if (series.length === 0) return;
+      setBoxcarRun({ ...plan, series, ...(partial ? { partial: true } : {}) });
+    };
+
     setBoxcarBusy(true);
     boxcarCancelled.current = false;
     boxcarSteps.current = [];
-    setBoxcarProgress({ done: 0, total: windows.length });
+    // Clear the previous run: leaving it on screen while a new scan streams in
+    // would show two different scans' numbers in one plot.
+    setBoxcarRun(null);
+    setBoxcarProgress({ done: 0, total: totalBoxes });
     try {
-      const res = await client.refinePdfBoxcar(
-        {
-          structure: fitStructure,
-          pattern,
-          parameters: [...params],
-          bindings: [...spec.bindings],
-          restraints: spec.restraints,
-          options: { maxIterations: 20 },
-          ...(spinFit ? {} : multiPhase ? { extraPhases: [...extraPhases] } : {}),
-        },
-        windows,
-        {
-          ...(spinFit ? { magnetic: spinFit.magnetic } : {}),
-          ...(restarts > 0 ? { restarts } : {}),
-          onStep: (step, index, total) => {
-            boxcarSteps.current.push(step);
-            setBoxcarProgress({ done: index + 1, total });
+      for (const direction of directions) {
+        boxcarSteps.current = [];
+        const ordered = direction === "up" ? windows : [...windows].reverse();
+        const completedBefore = done.reduce((n, d) => n + d.result.steps.length, 0);
+        const res = await client.refinePdfBoxcar(
+          {
+            structure: fitStructure,
+            pattern,
+            parameters: [...params],
+            bindings: [...spec.bindings],
+            restraints: spec.restraints,
+            options: { maxIterations: 20 },
+            ...(spinFit ? {} : multiPhase ? { extraPhases: [...extraPhases] } : {}),
           },
-        },
-      );
-      if (specRef.current !== specAtCall) {
-        console.info("[status] boxcar result discarded — the parameter spec changed while it ran");
-        return;
+          ordered,
+          {
+            ...(spinFit ? { magnetic: spinFit.magnetic } : {}),
+            ...(restarts > 0 ? { restarts } : {}),
+            onStep: (step, index) => {
+              boxcarSteps.current.push(step);
+              setBoxcarProgress({ done: completedBefore + index + 1, total: totalBoxes });
+              // A result arriving after a spec swap belongs to the old problem;
+              // publishing it would plot the previous structure's numbers under
+              // the new one's parameter ids.
+              if (specRef.current === specAtCall) publish(direction, true);
+            },
+          },
+        );
+        if (specRef.current !== specAtCall) {
+          console.info("[status] boxcar result discarded — the parameter spec changed while it ran");
+          return;
+        }
+        done.push({ direction, result: res });
+        // Replace the streamed prefix with the pass's own result before the
+        // next pass starts streaming its boxes.
+        boxcarSteps.current = [];
+        publish(null, true);
       }
-      setBoxcarRun({ ...plan, result: res });
-      const bad = res.steps.filter((s) => !s.carried).length;
+      publish(null, false);
+      const bad = done.reduce((n, d) => n + d.result.steps.filter((s) => !s.carried).length, 0);
       console.info(
-        `[status] boxcar: ${res.steps.length} boxes of ${boxWidth} Å across ${fitRange.min.toFixed(2)}–${(boxcarScanned ?? fitRange.max).toFixed(2)} Å` +
+        `[status] boxcar: ${windows.length} boxes of ${boxWidth} Å across ${fitRange.min.toFixed(2)}–${(boxcarScanned ?? fitRange.max).toFixed(2)} Å` +
+        `${directions.length > 1 ? " · both directions" : ` · ${boxDirection === "down" ? "high → low r" : "low → high r"}`}` +
         `${restarts > 0 ? ` · best of ${restarts + 1} starts per box` : ""}` +
         `${bad > 0 ? ` · ${bad} box(es) diverged and were not carried forward` : ""}`,
       );
@@ -659,26 +714,15 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       const msg = e instanceof Error ? e.message : String(e);
       const stopped = boxcarCancelled.current || msg.includes(CANCELLED);
       // A cancelled (or failed) scan still fitted boxes, and Cancel promises to
-      // keep them. Show that prefix as a partial run rather than discarding it.
-      const done = boxcarSteps.current;
-      if (specRef.current === specAtCall && done.length > 0) {
-        setBoxcarRun({
-          ...plan,
-          windows: windows.slice(0, done.length),
-          partial: true,
-          result: {
-            steps: [...done],
-            evolution: params.map((p) => ({
-              parameterId: p.id,
-              values: done.map((s) => s.result.parameters[p.id]),
-              esd: done.map((s) => s.result.esd[p.id]),
-            })),
-          },
-        });
-      }
-      const kept = done.length > 0 ? ` — keeping the ${done.length} box${done.length === 1 ? "" : "es"} already fitted` : "";
-      if (stopped) console.info(`[status] boxcar scan cancelled${kept}`);
-      else console.error(`[status] boxcar scan failed: ${msg}${kept}`);
+      // keep them: fold the interrupted pass's completed boxes in beside any
+      // pass that finished, and mark the whole run partial.
+      const interrupted = boxcarSteps.current;
+      const inFlight = directions[done.length] ?? null;
+      if (specRef.current === specAtCall) publish(inFlight, true);
+      const kept = done.reduce((n, d) => n + d.result.steps.length, 0) + interrupted.length;
+      const keptNote = kept > 0 ? ` — keeping the ${kept} box${kept === 1 ? "" : "es"} already fitted` : "";
+      if (stopped) console.info(`[status] boxcar scan cancelled${keptNote}`);
+      else console.error(`[status] boxcar scan failed: ${msg}${keptNote}`);
     } finally {
       setBoxcarProgress(null);
       setBoxcarBusy(false);
@@ -702,33 +746,50 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
    * label the wrong window's uncertainty as the fit's. The box's own numbers
    * stay visible in the boxcar table, where their window is named.
    */
-  function adoptBoxcarStep(index: number): void {
-    const step = boxcarRun?.result.steps[index];
-    const w = boxcarRun?.windows[index];
-    if (!step || !w) return;
+  function adoptBoxcarStep(seriesIndex: number, windowIndex: number): void {
+    const run = boxcarRun;
+    const series = run?.series[seriesIndex];
+    const w = run?.windows[windowIndex];
+    if (!run || !series || !w) return;
+    const si = stepIndexFor(series, windowIndex, run.windows.length);
+    const step = si >= 0 ? series.result.steps[si] : undefined;
+    if (!step) return;
     setParams((ps) => ps.map((p) => ({ ...p, value: step.result.parameters[p.id] ?? p.value })));
     setResult(null);
     setLive(null);
     console.info(
-      `[status] adopted the ${w.center.toFixed(2)} Å box's values (${w.min.toFixed(2)}–${w.max.toFixed(2)} Å, Rw ${(100 * (step.result.agreement.rWeighted ?? 0)).toFixed(2)}%) — ` +
+      `[status] adopted the ${w.center.toFixed(2)} Å box's values from the ${series.direction === "up" ? "low → high r" : "high → low r"} pass ` +
+      `(${w.min.toFixed(2)}–${w.max.toFixed(2)} Å, Rw ${(100 * (step.result.agreement.rWeighted ?? 0)).toFixed(2)}%) — ` +
       "the fit window is unchanged; refine to get esds for the full window",
     );
   }
 
+  /** One row per box; a compared run repeats the value columns per direction,
+   *  so both passes travel together in the same file. */
   function exportBoxcarCsv(): void {
     const run = boxcarRun;
     if (!run) return;
-    const tracks = run.result.evolution.filter((e) => run.freeIds.includes(e.parameterId));
     const labelOf = (id: string): string => params.find((p) => p.id === id)?.label ?? id;
-    const header = ["rCenter", "rMin", "rMax", "Rw", "status", ...tracks.flatMap((t) => [labelOf(t.parameterId), `${labelOf(t.parameterId)}_esd`])];
-    const rows = run.windows.map((w, i) => {
-      const step = run.result.steps[i];
-      const cells: (string | number)[] = [
-        w.center.toFixed(4), w.min.toFixed(4), w.max.toFixed(4),
-        step?.result.agreement.rWeighted ?? "", step?.result.status ?? "",
-      ];
-      for (const t of tracks) {
-        cells.push(t.values[i] ?? "", t.esd[i] ?? "");
+    const ids = run.freeIds.filter((id) => run.series[0]?.result.evolution.some((e) => e.parameterId === id));
+    const suffix = (d: BoxcarDirection): string => (run.series.length > 1 ? (d === "up" ? "_up" : "_down") : "");
+    const header = [
+      "rCenter", "rMin", "rMax",
+      ...run.series.flatMap((s) => [
+        `Rw${suffix(s.direction)}`,
+        `status${suffix(s.direction)}`,
+        ...ids.flatMap((id) => [`${labelOf(id)}${suffix(s.direction)}`, `${labelOf(id)}_esd${suffix(s.direction)}`]),
+      ]),
+    ];
+    const rows = run.windows.map((w, wi) => {
+      const cells: (string | number)[] = [w.center.toFixed(4), w.min.toFixed(4), w.max.toFixed(4)];
+      for (const s of run.series) {
+        const si = stepIndexFor(s, wi, run.windows.length);
+        const step = si >= 0 ? s.result.steps[si] : undefined;
+        cells.push(step?.result.agreement.rWeighted ?? "", step?.result.status ?? "");
+        for (const id of ids) {
+          const evo = s.result.evolution.find((e) => e.parameterId === id);
+          cells.push(si >= 0 ? evo?.values[si] ?? "" : "", si >= 0 ? evo?.esd[si] ?? "" : "");
+        }
       }
       return cells.join(",");
     });
