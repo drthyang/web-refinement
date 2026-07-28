@@ -44,10 +44,18 @@ export async function maybeRunAsEvaluator(): Promise<boolean> {
   if (!wt || wt.isMainThread || !wt.parentPort) return false;
   const data = wt.workerData as { [EVALUATOR_FLAG]?: boolean; spec?: EvaluatorSpec } | null;
   if (!data || !data[EVALUATOR_FLAG] || !data.spec) return false;
-  const problem = buildProblemForSpec(data.spec);
-  wt.parentPort.on("message", (msg: { id: number; sets: Record<string, number>[] }) => {
+  // Rebuildable, not fixed: a `spec` message re-derives the replica in place so
+  // one pool can serve a series of related problems (the boxcar's per-window
+  // fit ranges) instead of respawning a worker per problem.
+  let problem = buildProblemForSpec(data.spec);
+  wt.parentPort.on("message", (msg: { id: number; sets?: Record<string, number>[]; spec?: EvaluatorSpec }) => {
     try {
-      const results = msg.sets.map((values) => problem.calculate(values));
+      if (msg.spec) {
+        problem = buildProblemForSpec(msg.spec);
+        wt.parentPort!.postMessage({ id: msg.id, ok: true, results: [] });
+        return;
+      }
+      const results = (msg.sets ?? []).map((values) => problem.calculate(values));
       wt.parentPort!.postMessage({ id: msg.id, ok: true, results });
     } catch (e) {
       wt.parentPort!.postMessage({ id: msg.id, ok: false, error: e instanceof Error ? e.message : String(e) });
@@ -74,6 +82,14 @@ function runnableEntry(): string | null {
 
 export interface NodeEvaluatorPool extends BatchEvaluator {
   readonly size: number;
+  /**
+   * Rebuild every replica from a new spec. The problem — including its fit
+   * range — is baked into a replica, so a caller that changes the range
+   * between solves (the boxcar's per-window fit) must re-init rather than
+   * reuse; the alternative, one pool per problem, respawns worker threads that
+   * each re-execute the whole bundle.
+   */
+  init(spec: EvaluatorSpec): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -115,17 +131,23 @@ export async function createNodeEvaluatorPool(spec: EvaluatorSpec, maxWorkers = 
     return null;
   }
 
-  const send = (worker: NodeWorkerLike, sets: Record<string, number>[]): Promise<Float64Array[]> =>
+  const post = (worker: NodeWorkerLike, payload: { sets: Record<string, number>[] } | { spec: EvaluatorSpec }): Promise<Float64Array[]> =>
     new Promise((resolve, reject) => {
       const id = nextId++;
       pending.set(id, {
         resolve: (r) => (r.ok && r.results ? resolve(r.results) : reject(new Error(r.error ?? "evaluator failed"))),
       });
-      worker.postMessage({ id, sets });
+      worker.postMessage({ id, ...payload });
     });
+
+  const send = (worker: NodeWorkerLike, sets: Record<string, number>[]): Promise<Float64Array[]> =>
+    post(worker, { sets });
 
   return {
     size,
+    async init(next: EvaluatorSpec): Promise<void> {
+      await Promise.all(workers.map((w) => post(w, { spec: next })));
+    },
     async evaluate(sets: readonly Record<string, number>[]): Promise<Float64Array[]> {
       const chunkSize = Math.ceil(sets.length / workers.length);
       const jobs: Promise<Float64Array[]>[] = [];

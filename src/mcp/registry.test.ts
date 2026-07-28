@@ -249,6 +249,14 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
     args: { structure, pattern: pdfPattern, parameters: pdfBuilt.parameters, bindings: pdfBuilt.bindings, maxIterations: 2 },
     keys: ["observationCount", "parallel", "residual", "result", "warnings"],
   },
+  refine_pdf_boxcar: {
+    // Three 2 Å boxes across the 0.5–6.45 Å fixture, 2 iterations each.
+    args: {
+      structure, pattern: pdfPattern, parameters: pdfBuilt.parameters, bindings: pdfBuilt.bindings,
+      width: 2, step: 2, maxIterations: 2,
+    },
+    keys: ["boxes", "evolution", "warnings", "windows"],
+  },
   sample_posterior: {
     // A deliberately tiny chain: the contract pins the output SHAPE, not
     // convergence (a 5-step chain reports not-converged with a resume token —

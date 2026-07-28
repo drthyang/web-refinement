@@ -616,6 +616,28 @@ app + a validation gate**, no broken intermediate state.
 > **Posterior view** (ensemble over the worker pool; marginals, credible
 > intervals, esdRatio, R̂/ESS, resume-token Continue).
 >
+> **Update (2026-07-28): boxcar (sliding-window) refinement shipped** — the
+> r-resolved read of a structure, and the first UI consumer of the previously
+> dormant sequential-refinement engine. `core/workflow/pdfBoxcar.ts` owns only
+> the window plan (fixed width, fixed step, direction, and the deliberate
+> refusal to fit a narrowed trailing box — a shrunken box's parameters are not
+> comparable with the rest of the series); the fitting is
+> `refinement/sequential.refineSequentialAsync`, a new async twin of
+> `refineSequential` sharing its seeding/carry helpers, whose runner seam lets
+> `ComputeClient.refinePdfBoxcar` fan each box's Jacobian over the evaluator
+> pool. The pool is **re-initialized per box**: `fitRange` is baked into the
+> replica problem, so reusing one pool across windows would silently evaluate
+> the wrong window's Jacobian. Boxes seed from their predecessor, which makes
+> the series path-dependent — hence the per-box `restarts` option (randomized
+> perturbed starts around the seed, lowest χ² wins, per-box RNG seed so the
+> perturbation pattern cannot imprint its own r-dependence). Surfaced as a
+> toggle + width/step/direction/restarts inputs in the PDF parameter panel's
+> framework strip, a **Boxcar** plot tab (value ± esd vs box center over an Rw
+> context strip, per-box table with "Adopt", CSV export), and the
+> `refine_pdf_boxcar` agent tool (37 tools total). With a spin model applied
+> the boxes solve the mPDF problem, so a magnetic page boxcars the same
+> residual it refines.
+>
 > **UI status (2026-07-17):** the PDF page is design-unified with the powder
 > page (same plot-card layout, toolbar, segmented Refinement | 3D Model view,
 > fit-window chip, Prefit/Refine actions, `wb-work2` grid) and ships as one of

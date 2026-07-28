@@ -101,7 +101,37 @@ Practical rules:
   comparable against a package that keeps Q-dependent normalization in r-space.
 ```
 
-## 5. References
+## 5. Boxcar (sliding-window) refinement — how to read one
+
+```text
+- What it is: refit the SAME model inside a fixed-width r-window slid across
+  G(r), then plot each parameter against the box CENTER. A drifting track means
+  the structure the PDF sees changes with length scale (local ≠ average); a flat
+  track means one model describes every length scale. PDFgui calls this a
+  boxcar refinement; the classic result is a low-r box that needs a
+  lower-symmetry or differently-distorted model than the high-r boxes.
+- Fixed width is the point. A trailing box narrowed to fit the range end would
+  hold fewer points and a different information content, so its parameters are
+  not comparable with the rest — MATERIA refuses to fit one and reports the
+  uncovered tail instead.
+- Box width vs what you free: the box must hold enough peaks to determine the
+  free set. A 5 Å box on a 10 Å cell may contain only the first coordination
+  shell — the cell is then determined by one or two peak positions, and the esd
+  says so. Free the cell + ADPs; hold Qdamp/Qbroad (instrument constants, not
+  functions of r) and spdiameter (a whole-particle envelope) fixed.
+- Esds grow as the box shrinks — fewer points, same parameters. They are
+  relative (uniform weights, correlated G(r) errors), so compare esd to the
+  DRIFT, not to an absolute threshold: a drift smaller than its error bars is
+  not a result.
+- Seeding forward makes the series PATH-DEPENDENT: each box starts from the
+  previous box's answer, so one box that lands in a local minimum hands it to
+  every box after it. Randomized restarts per box (baseline = the seed, best χ²
+  wins) are the check; a drift that survives restarts is a drift.
+- Cost is not flat in r: pair enumeration reaches the box's UPPER edge, so a
+  5 Å box at r = 45 Å still enumerates every pair out to ~51 Å.
+```
+
+## 6. References
 
 - Keen, *J. Appl. Cryst.* **34**, 172 (2001) — the definitive convention map.
 - Egami & Billinge, *Underneath the Bragg Peaks*, 2nd ed. (2012) — G^PDF(r).

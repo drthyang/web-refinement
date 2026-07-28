@@ -148,6 +148,17 @@ against a **local PDFfit2 1.6.0** with committed CI golden fixtures — Ni and M
 X-ray G(r) to corr ≈ 0.9998 and refined cell recovery < 1 mÅ — plus a PDFgui
 `G_calc` golden.
 
+A **boxcar scan** answers the question a single whole-range fit averages away —
+*does the structure change with length scale?* Fix a box width, slide it across
+r, refine inside each position (each box seeded from the previous one), and read
+every parameter against the box center: a track that drifts means the local
+structure differs from the average one, a flat track means one model describes
+every length scale. It reports each box's Rw and esd alongside the value, so a
+drift can be told from a badly-fitted box, and offers randomized restarts per
+box to prove a drift is not one box's local minimum inherited by the rest. In
+the app it is a toggle in the PDF parameter panel plus its own plot tab (with
+CSV export and a per-box "Adopt"); for agents it is `refine_pdf_boxcar`.
+
 The PDF track also carries a **symmetry-mode distortion workflow**
 (AMPLIMODES/ISODISTORT-style): refine symmetry-adapted mode **amplitudes**
 instead of raw coordinates — enumerated from the structure's own space group or
@@ -177,10 +188,10 @@ Approach after Fancher et al. (2016, *Sci. Rep.* **6**, 31625); reporting per
 McCluskey et al. (2023, *J. Appl. Cryst.* **56**, 12) — see
 [docs/REFERENCES.md](docs/REFERENCES.md).
 
-The MCP tool surface has grown to **33 contract-tested tools** spanning the
+The MCP tool surface has grown to **37 contract-tested tools** spanning the
 powder, single-crystal, and PDF tracks (the PDF tools: `parse_pdf_data`,
-`build_pdf_model`, `refine_pdf`, `compute_partial_pdf`, `calibrate_qdamp`,
-`sample_posterior`, plus
+`build_pdf_model`, `refine_pdf`, `refine_pdf_boxcar`, `compute_partial_pdf`,
+`calibrate_qdamp`, `sample_posterior`, plus
 `build_distortion_modes` / `build_symmetry_modes` for mode-amplitude fits).
 
 ## Commands
