@@ -7,13 +7,19 @@
  * panel is built around ONE parameter track at a time (picked from a chip row),
  * drawn with its per-box esd bars, plus the Rw-vs-r context strip that says
  * whether each box was fitted well enough for its value to mean anything.
+ *
+ * The plan (box width, step, direction, restarts) lives HERE rather than in the
+ * parameter panel: these settings shape this view's result and nothing else, so
+ * they sit with the run button and the plot they produce, and the refinement
+ * panel keeps one job and one primary action.
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { SequentialResult } from "@/core/refinement/sequential";
-import type { BoxcarWindow } from "@/core/workflow/pdfBoxcar";
+import type { BoxcarDirection, BoxcarWindow } from "@/core/workflow/pdfBoxcar";
 import { color, fz, mono, primaryButton, secondaryButton } from "@/app/theme";
 import { InfoBadge } from "@/app/ui/InfoBadge";
+import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
 import { linearScale } from "@/visualization/scale";
 
 /** A completed (or in-progress) boxcar scan: the plan and the series it made. */
@@ -34,6 +40,28 @@ export interface BoxcarRun {
   readonly partial?: boolean;
 }
 
+/** The scan the controls describe (owned by the workbench, edited here). */
+export interface BoxcarPlan {
+  readonly width: number;
+  readonly step: number;
+  readonly direction: BoxcarDirection;
+  /** Re-search each box from perturbed starts instead of the seed alone. */
+  readonly randomStart: boolean;
+  readonly restarts: number;
+}
+
+/** What the current plan resolves to against the page's fit window. */
+export interface BoxcarPlanInfo {
+  /** Boxes the settings fit inside the window. */
+  readonly count: number;
+  /** Why the plan cannot run, as user-facing prose (null when it can). */
+  readonly issue: string | null;
+  /** The r window being scanned (the page's fit range). */
+  readonly range: { readonly min: number; readonly max: number };
+  /** Where the last box's right edge lands, or null for an unusable plan. */
+  readonly scannedMax: number | null;
+}
+
 export interface BoxcarPanelProps {
   readonly run: BoxcarRun | null;
   readonly busy: boolean;
@@ -43,8 +71,9 @@ export interface BoxcarPanelProps {
   readonly onCancel: () => void;
   /** Why the panel cannot start a scan right now (disables Run, shown as prose). */
   readonly blockedReason: string | null;
-  /** Plan preview for the idle state: boxes the current settings would fit. */
-  readonly plannedCount: number;
+  readonly plan: BoxcarPlan;
+  readonly planInfo: BoxcarPlanInfo;
+  readonly onPlanChange: (patch: Partial<BoxcarPlan>) => void;
   /** Parameter labels by id (falls back to the id). */
   readonly labels: ReadonlyMap<string, string>;
   /** Download the series as CSV. */
@@ -80,7 +109,7 @@ function useElementSize<T extends HTMLElement>(): [React.RefObject<T>, { width: 
 }
 
 export function BoxcarPanel({
-  run, busy, progress, onRun, onCancel, blockedReason, plannedCount, labels, onExportCsv, onAdoptStep,
+  run, busy, progress, onRun, onCancel, blockedReason, plan, planInfo, onPlanChange, labels, onExportCsv, onAdoptStep,
 }: BoxcarPanelProps): JSX.Element {
   // Tracks worth showing: parameters that were free (fixed rows are flat lines
   // by construction) and actually carry a value in at least one box.
@@ -109,7 +138,7 @@ export function BoxcarPanel({
           onClick={onRun}
           title={
             blockedReason ??
-            `Slide the box across the fit window and refine the free parameters inside each position (${plannedCount} boxes), each box seeded from the previous one.`
+            `Slide the box across the fit window and refine the free parameters inside each position (${planInfo.count} boxes), each box seeded from the previous one.`
           }
         >
           {busy ? <span className="wb-shimmer-text">Scanning…</span> : "Run boxcar scan"}
@@ -145,6 +174,68 @@ export function BoxcarPanel({
             </span>
           }
         />
+      </div>
+
+      {/* The plan. Editing it never disturbs a run already on screen — the run
+          carries its own settings — so a user can compare a finished scan
+          against the next one's plan before spending the time. */}
+      <div style={planBar}>
+        <label style={fieldLabel} title="Width of the fitting box in Å. Every box has exactly this width, so the values are comparable across the scan. Too narrow and the box holds too few G(r) points to determine the free parameters.">
+          box
+          <NumberField value={plan.width} min={0.1} disabled={busy} onCommit={(width) => onPlanChange({ width })} />
+          Å
+        </label>
+        <label style={fieldLabel} title="How far the box advances between fits, in Å. Half the box width gives overlapping boxes — a smoother track at twice the cost.">
+          step
+          <NumberField value={plan.step} min={0.05} disabled={busy} onCommit={(step) => onPlanChange({ step })} />
+          Å
+        </label>
+        <SegmentedToggle
+          options={[
+            { id: "up", label: "low → high r", title: "Start at the smallest r and walk outward — each box seeded from the one before, so the local structure is carried into the average one" },
+            { id: "down", label: "high → low r", title: "Start at the largest r and walk inward — seeded from the average structure, the usual way to test whether the local structure departs from it" },
+          ] as const}
+          value={plan.direction}
+          onChange={(direction) => { if (!busy) onPlanChange({ direction }); }}
+        />
+        <label
+          style={{ ...fieldLabel, cursor: busy ? "default" : "pointer" }}
+          title="Random restarts per box: on top of the seed carried from the previous box, refine this many randomly perturbed starts and keep the lowest-χ² one. Use it when a track looks like it inherited a bad box — seeding forward makes the series path-dependent, and a box that fell into a local minimum hands it to every box after it. Costs (restarts + 1)× the scan time."
+        >
+          <input
+            type="checkbox"
+            checked={plan.randomStart}
+            disabled={busy}
+            onChange={(e) => onPlanChange({ randomStart: e.target.checked })}
+            style={{ accentColor: color.primary }}
+          />
+          random restarts
+          {plan.randomStart && (
+            <NumberField
+              value={plan.restarts}
+              min={1}
+              max={20}
+              integer
+              width={44}
+              disabled={busy}
+              onCommit={(restarts) => onPlanChange({ restarts })}
+            />
+          )}
+          {plan.randomStart ? "per box" : ""}
+        </label>
+        <span style={{ fontFamily: mono, fontSize: fz.micro, color: planInfo.issue ? color.warnInk : color.secondary }}>
+          {planInfo.issue
+            ? planInfo.issue
+            : `${planInfo.count} box${planInfo.count === 1 ? "" : "es"} · ` +
+              `${planInfo.range.min.toFixed(2)}–${(planInfo.scannedMax ?? planInfo.range.max).toFixed(2)} Å` +
+              (planInfo.scannedMax !== null && planInfo.scannedMax < planInfo.range.max - 1e-6
+                ? ` (last ${(planInfo.range.max - planInfo.scannedMax).toFixed(2)} Å of the fit window has no room for a full box)`
+                : "") +
+              // step > width samples the span rather than covering it — say so,
+              // or the r span above reads as continuous coverage.
+              (plan.step > plan.width ? ` · ${(plan.step - plan.width).toFixed(2)} Å gaps between boxes` : "") +
+              (plan.randomStart ? ` · ${planInfo.count * (plan.restarts + 1)} fits total` : "")}
+        </span>
       </div>
 
       {blockedReason && !busy ? (
@@ -206,10 +297,11 @@ export function BoxcarPanel({
         </>
       ) : (
         <div style={{ color: color.secondary, fontSize: fz.small, lineHeight: 1.55 }}>
-          Set the box width and step in the <b>Boxcar</b> strip of the parameter panel, free the parameters you want tracked,
-          then run the scan. The current settings fit <b>{plannedCount}</b> box{plannedCount === 1 ? "" : "es"} inside the fit
-          window. Typical use: keep the cell and an ADP free, hold the instrument terms (Qdamp/Qbroad) fixed at their calibrated
-          values — they are properties of the diffractometer, not of r, and letting them float per box turns real drift into scatter.
+          Set the box above, free the parameters you want tracked in the refinement panel, then run the scan — the current
+          settings fit <b>{planInfo.count}</b> box{planInfo.count === 1 ? "" : "es"} inside the fit window
+          ({planInfo.range.min.toFixed(2)}–{planInfo.range.max.toFixed(2)} Å, set with the plot handles on the Refinement tab).
+          Typical use: keep the cell and an ADP free, and hold the instrument terms (Qdamp/Qbroad) fixed at their calibrated
+          values — they are properties of the diffractometer, not of r, so letting them float per box turns real drift into scatter.
         </div>
       )}
     </div>
@@ -433,6 +525,82 @@ function fmtTick(v: number): string {
   return String(+v.toFixed(4));
 }
 
+/**
+ * Numeric field that keeps what the user is typing until they commit it (blur
+ * or Enter) — the `ParamRow` convention. A plain controlled number input snaps
+ * an emptied field back to 0 mid-edit, which here would also flip the plan to
+ * "width must be positive" while someone is simply retyping a number.
+ */
+function NumberField({ value, min, max, integer = false, width = 56, disabled, onCommit }: {
+  value: number;
+  min: number;
+  max?: number;
+  integer?: boolean;
+  width?: number;
+  disabled: boolean;
+  onCommit: (v: number) => void;
+}): JSX.Element {
+  const [buf, setBuf] = useState<string | null>(null);
+  const commit = (raw?: string): void => {
+    const source = raw !== undefined ? raw : buf;
+    setBuf(null);
+    // An empty or unparsable entry reverts to the last good value rather than
+    // silently committing the minimum — `Number("")` is 0, which would clamp
+    // to the bound and quietly rewrite what the user was editing.
+    if (source === null || source.trim() === "") return;
+    const v = Number(source);
+    if (!Number.isFinite(v)) return;
+    onCommit(Math.min(max ?? Infinity, Math.max(min, integer ? Math.round(v) : v)));
+  };
+  return (
+    <input
+      type="number"
+      min={min}
+      {...(max !== undefined ? { max } : {})}
+      step={integer ? 1 : 0.5}
+      value={buf ?? String(value)}
+      disabled={disabled}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setBuf(e.target.value)}
+      onBlur={() => commit()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          commit((e.target as HTMLInputElement).value);
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      style={{ ...numberInput, width }}
+    />
+  );
+}
+
+const planBar: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  rowGap: 6,
+  flexWrap: "wrap",
+  padding: "7px 10px",
+  borderRadius: 8,
+  border: `1px solid ${color.border}`,
+  background: color.muted2,
+};
+const fieldLabel: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+  fontFamily: mono,
+  fontSize: fz.micro,
+  color: color.secondary,
+};
+const numberInput: CSSProperties = {
+  border: `1px solid ${color.input}`,
+  borderRadius: 7,
+  fontSize: 12,
+  fontFamily: mono,
+  padding: "2px 6px",
+  background: "#fff",
+};
 const cell: CSSProperties = { padding: "3px 8px", fontWeight: 500 };
 const chip: CSSProperties = {
   border: `1px solid ${color.control}`,

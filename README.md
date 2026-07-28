@@ -156,8 +156,8 @@ structure differs from the average one, a flat track means one model describes
 every length scale. It reports each box's Rw and esd alongside the value, so a
 drift can be told from a badly-fitted box, and offers randomized restarts per
 box to prove a drift is not one box's local minimum inherited by the rest. In
-the app it is a toggle in the PDF parameter panel plus its own plot tab (with
-CSV export and a per-box "Adopt"); for agents it is `refine_pdf_boxcar`.
+the app it is a tab of its own — the plan, the run, the plot, the per-box table
+with "Adopt", and CSV export in one place; for agents it is `refine_pdf_boxcar`.
 
 The PDF track also carries a **symmetry-mode distortion workflow**
 (AMPLIMODES/ISODISTORT-style): refine symmetry-adapted mode **amplitudes**

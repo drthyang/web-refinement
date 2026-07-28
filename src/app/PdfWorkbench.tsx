@@ -57,8 +57,8 @@ import { applyParameters } from "@/core/workflow/apply";
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
-import { BoxcarPanel, type BoxcarRun } from "@/app/ui/BoxcarPanel";
-import { boxcarPlanIssue, boxcarScannedMax, boxcarWindows, type BoxcarDirection } from "@/core/workflow/pdfBoxcar";
+import { BoxcarPanel, type BoxcarPlan, type BoxcarRun } from "@/app/ui/BoxcarPanel";
+import { boxcarPlanIssue, boxcarScannedMax, boxcarWindows } from "@/core/workflow/pdfBoxcar";
 import type { SequentialStep } from "@/core/refinement/sequential";
 import type { SampleResult } from "@/core/refinement/bayes/sampler";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
@@ -553,17 +553,22 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // ---- Boxcar (sliding r-window) scan --------------------------------------
   // A fixed-width box slid across the fit window, refined at each position and
   // seeded from the previous one: the r-resolved view of the SAME model, which
-  // is how a local structure that differs from the average one shows up.
-  const [boxcarOn, setBoxcarOn] = useState(false);
-  const [boxWidth, setBoxWidth] = useState(5);
-  const [boxStep, setBoxStep] = useState(1);
-  const [boxDirection, setBoxDirection] = useState<BoxcarDirection>("up");
-  // Randomized restarts per box (0 = seed only). Seeding every box from the
-  // previous one makes the series path-dependent: one box that falls into a
-  // local minimum hands it to every box after it. Restarts re-search each box
+  // is how a local structure that differs from the average one shows up. The
+  // plan is edited in the Boxcar tab (it shapes that view and nothing else);
+  // only the state lives here, because `runBoxcar` and the fit window do.
+  // `randomStart` guards `restarts`: seeding every box from the previous one
+  // makes the series path-dependent, so one box that falls into a local
+  // minimum hands it to every box after it — restarts re-search each box
   // around its seed and keep the best, at (restarts + 1)× the cost.
-  const [boxRandomStart, setBoxRandomStart] = useState(false);
-  const [boxRestarts, setBoxRestarts] = useState(4);
+  const [boxcarPlanState, setBoxcarPlanState] = useState<BoxcarPlan>({
+    width: 5,
+    step: 1,
+    direction: "up",
+    randomStart: false,
+    restarts: 4,
+  });
+  const { width: boxWidth, step: boxStep, direction: boxDirection, randomStart: boxRandomStart, restarts: boxRestarts } =
+    boxcarPlanState;
   const [boxcarRun, setBoxcarRun] = useState<BoxcarRun | null>(null);
   const [boxcarBusy, setBoxcarBusy] = useState(false);
   const [boxcarProgress, setBoxcarProgress] = useState<{ done: number; total: number } | null>(null);
@@ -1452,7 +1457,14 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
               onRun={() => void runBoxcar()}
               onCancel={cancelBoxcar}
               blockedReason={busy ? "A refinement is running — wait for it to finish." : boxcarBlocked}
-              plannedCount={boxcarWindowList.length}
+              plan={boxcarPlanState}
+              planInfo={{
+                count: boxcarWindowList.length,
+                issue: boxcarIssue,
+                range: { min: fitRange.min, max: fitRange.max },
+                scannedMax: boxcarScanned,
+              }}
+              onPlanChange={(patch) => setBoxcarPlanState((p) => ({ ...p, ...patch }))}
               labels={new Map(params.map((p) => [p.id, p.label]))}
               onExportCsv={exportBoxcarCsv}
               onAdoptStep={adoptBoxcarStep}
@@ -1603,44 +1615,15 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           }}
           // The atomic ↔ irreps switch reshapes the whole parameter set (the
           // Positions group swaps per-coordinate rows for whole-cell mode
-          // amplitudes), so it lives at panel level, not inside one group. The
-          // boxcar strip sits alongside it for the same reason: it changes how
-          // the WHOLE free set is refined (many windowed fits, not one), so it
-          // belongs beside the parameterization switch rather than in a group.
+          // amplitudes), so it lives at panel level, not inside one group.
+          // (The boxcar plan deliberately does NOT live here: it shapes the
+          // Boxcar view's result and nothing else, so it sits in that tab with
+          // the run button and the plot it produces.)
           frameworkControls={
-            <>
-              {/* Two independent framework switches share the strip, so each
-                  gets its own full-width row — side by side, their uppercase
-                  captions read as one run-on label. */}
-              <div style={frameworkRow}>
-              <BoxcarControls
-                on={boxcarOn}
-                onToggle={(v) => {
-                  if (busy || boxcarBusy) return;
-                  setBoxcarOn(v);
-                  // Turning it on shows the tab that explains it; turning it off
-                  // leaves the user wherever they are (the run is still there).
-                  if (v) setViewTab("boxcar");
-                }}
-                width={boxWidth}
-                step={boxStep}
-                direction={boxDirection}
-                onWidth={setBoxWidth}
-                onStep={setBoxStep}
-                onDirection={setBoxDirection}
-                randomStart={boxRandomStart}
-                restarts={boxRestarts}
-                onRandomStart={setBoxRandomStart}
-                onRestarts={setBoxRestarts}
-                disabled={busy || boxcarBusy}
-                count={boxcarWindowList.length}
-                issue={boxcarIssue}
-                range={fitRange}
-                scannedMax={boxcarScanned}
-              />
-              </div>
-              {!multiPhase && symModes && (symModes.modes.length > 0 || modes) && (
-                  <div style={frameworkRow}>
+            multiPhase || !symModes || (symModes.modes.length === 0 && !modes)
+              ? undefined
+              : (
+                  <>
                     <span style={uppercaseLabel}>Parameterization</span>
                     <SegmentedToggle
                       options={[
@@ -1676,9 +1659,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                           : ""}
                       </span>
                     )}
-                  </div>
-              )}
-            </>
+                  </>
+                )
           }
         />
       </div>
@@ -1714,190 +1696,3 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     </>
   );
 }
-
-/**
- * The boxcar strip in the parameter panel: one checkbox that stays quiet until
- * it is switched on, then the plan — box width, step, direction — plus a live
- * readout of what the plan actually covers. Nothing here starts a scan; the run
- * button lives in the Boxcar tab next to the results it produces, so the panel
- * keeps exactly one primary action (Refine).
- */
-function BoxcarControls({
-  on, onToggle, width, step, direction, onWidth, onStep, onDirection, disabled, count, issue, range, scannedMax,
-  randomStart, restarts, onRandomStart, onRestarts,
-}: {
-  on: boolean;
-  onToggle: (v: boolean) => void;
-  width: number;
-  step: number;
-  direction: BoxcarDirection;
-  onWidth: (v: number) => void;
-  onStep: (v: number) => void;
-  onDirection: (v: BoxcarDirection) => void;
-  disabled: boolean;
-  count: number;
-  issue: string | null;
-  range: { min: number; max: number };
-  scannedMax: number | null;
-  randomStart: boolean;
-  restarts: number;
-  onRandomStart: (v: boolean) => void;
-  onRestarts: (v: number) => void;
-}): JSX.Element {
-  return (
-    <>
-      <label
-        style={{ display: "flex", alignItems: "center", gap: 6, cursor: disabled ? "default" : "pointer" }}
-        title="Boxcar scan: refine the free parameters inside a fixed-width r-window slid across the fit window, one fit per box, and plot each parameter against the box center. Drift with r means the local structure differs from the average one."
-      >
-        <input
-          type="checkbox"
-          checked={on}
-          disabled={disabled}
-          onChange={(e) => onToggle(e.target.checked)}
-          style={{ accentColor: color.primary }}
-        />
-        <span style={uppercaseLabel}>Boxcar scan</span>
-      </label>
-      {on ? (
-        <>
-          <label style={boxcarFieldLabel} title="Width of the fitting box in Å. Every box has exactly this width, so the values are comparable across the scan. Too narrow and the box holds too few G(r) points to determine the free parameters.">
-            box
-            <NumberField value={width} min={0.1} disabled={disabled} onCommit={onWidth} />
-            Å
-          </label>
-          <label style={boxcarFieldLabel} title="How far the box advances between fits, in Å. Half the box width gives overlapping boxes — a smoother track at twice the cost.">
-            step
-            <NumberField value={step} min={0.05} disabled={disabled} onCommit={onStep} />
-            Å
-          </label>
-          <SegmentedToggle
-            options={[
-              { id: "up", label: "low → high r", title: "Start at the smallest r and walk outward — each box seeded from the one before, so the local structure is carried into the average one" },
-              { id: "down", label: "high → low r", title: "Start at the largest r and walk inward — seeded from the average structure, the usual way to test whether the local structure departs from it" },
-            ] as const}
-            value={direction}
-            onChange={(id) => { if (!disabled) onDirection(id); }}
-          />
-          <label
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: disabled ? "default" : "pointer", fontFamily: mono, fontSize: fz.micro, color: color.secondary }}
-            title="Random restarts per box: on top of the seed carried from the previous box, refine this many randomly perturbed starts and keep the lowest-χ² one. Use it when a track looks like it inherited a bad box — seeding forward makes the series path-dependent, and a box that fell into a local minimum hands it to every box after it. Costs (restarts + 1)× the scan time."
-          >
-            <input
-              type="checkbox"
-              checked={randomStart}
-              disabled={disabled}
-              onChange={(e) => onRandomStart(e.target.checked)}
-              style={{ accentColor: color.primary }}
-            />
-            random restarts
-            {randomStart && (
-              <NumberField
-                value={restarts}
-                min={1}
-                max={20}
-                integer
-                width={44}
-                disabled={disabled}
-                onCommit={onRestarts}
-              />
-            )}
-            {randomStart && "per box"}
-          </label>
-          <span style={{ fontFamily: mono, fontSize: fz.micro, color: issue ? color.warnInk : color.secondary }}>
-            {issue
-              ? issue
-              : `${count} box${count === 1 ? "" : "es"} · ${range.min.toFixed(2)}–${(scannedMax ?? range.max).toFixed(2)} Å` +
-                (scannedMax !== null && scannedMax < range.max - 1e-6
-                  ? ` (last ${(range.max - scannedMax).toFixed(2)} Å of the window not covered — no room for a full box)`
-                  : "") +
-                // step > width samples the span rather than covering it — say
-                // so, or the r span above reads as continuous coverage.
-                (step > width ? ` · ${(step - width).toFixed(2)} Å gaps between boxes` : "") +
-                (randomStart ? ` · ${count * (restarts + 1)} fits total` : "")}
-          </span>
-          <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
-            → run it in the Boxcar tab
-          </span>
-        </>
-      ) : null}
-    </>
-  );
-}
-
-/**
- * Numeric field that keeps what the user is typing until they commit it (blur
- * or Enter) — the `ParamRow` convention. A plain controlled number input snaps
- * an emptied field back to 0 mid-edit, which here would also flip the plan to
- * "width must be positive" while someone is simply retyping a number.
- */
-function NumberField({ value, min, max, integer = false, width = 56, disabled, onCommit }: {
-  value: number;
-  min: number;
-  max?: number;
-  integer?: boolean;
-  width?: number;
-  disabled: boolean;
-  onCommit: (v: number) => void;
-}): JSX.Element {
-  const [buf, setBuf] = useState<string | null>(null);
-  const commit = (raw?: string): void => {
-    const source = raw !== undefined ? raw : buf;
-    setBuf(null);
-    // An empty or unparsable entry reverts to the last good value rather than
-    // silently committing the minimum — `Number("")` is 0, which would clamp
-    // to the bound and quietly rewrite what the user was editing.
-    if (source === null || source.trim() === "") return;
-    const v = Number(source);
-    if (!Number.isFinite(v)) return;
-    const clamped = Math.min(max ?? Infinity, Math.max(min, integer ? Math.round(v) : v));
-    onCommit(clamped);
-  };
-  return (
-    <input
-      type="number"
-      min={min}
-      {...(max !== undefined ? { max } : {})}
-      step={integer ? 1 : 0.5}
-      value={buf ?? String(value)}
-      disabled={disabled}
-      onClick={(e) => e.stopPropagation()}
-      onChange={(e) => setBuf(e.target.value)}
-      onBlur={() => commit()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          commit((e.target as HTMLInputElement).value);
-          (e.target as HTMLInputElement).blur();
-        }
-      }}
-      style={{ ...boxcarInput, width }}
-    />
-  );
-}
-
-/** One full-width cluster inside ParameterPanel's framework strip. */
-const frameworkRow: React.CSSProperties = {
-  flex: "1 1 100%",
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  rowGap: 6,
-  flexWrap: "wrap",
-};
-const boxcarFieldLabel: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 4,
-  fontFamily: mono,
-  fontSize: fz.micro,
-  color: color.secondary,
-};
-const boxcarInput: React.CSSProperties = {
-  width: 56,
-  border: `1px solid ${color.input}`,
-  borderRadius: 7,
-  fontSize: 12,
-  fontFamily: mono,
-  padding: "2px 6px",
-  background: "#fff",
-};
