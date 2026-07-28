@@ -59,6 +59,14 @@ import { buildPowderProblem } from "@/core/workflow/powder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { buildDistortionModes, buildSymmetryModes } from "@/core/crystal/distortionModes";
 import { refine, refineParallel } from "@/core/refinement/engine";
+import { refineSequentialAsync } from "@/core/refinement/sequential";
+import { refineMultiStart } from "@/core/refinement/multiStart";
+import {
+  boxcarPlanIssue,
+  boxcarScannedMax,
+  boxcarWindows,
+  type BoxcarDirection,
+} from "@/core/workflow/pdfBoxcar";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import { parseFullProfInt, looksLikeFullProfInt, writeFullProfInt } from "@/parsers/fullprofInt";
 import { parseHkl } from "@/parsers/hkl";
@@ -975,6 +983,170 @@ export async function refine_pdf(args: {
     warnings: [...(conflict ? [conflict] : []), ...(noAdp ? [noAdp] : [])],
     parallel,
   };
+}
+
+/**
+ * Boxcar (sliding-window) PDF refinement: refit the model inside a fixed-width
+ * r-window slid across the data, each box seeded from the previous one, and
+ * report how every parameter drifts with the box center — the r-resolved read
+ * of a structure whose local and average descriptions may differ.
+ */
+export async function refine_pdf_boxcar(args: {
+  structure: StructureModel;
+  pattern: PdfPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  restraints?: LinearRestraint[];
+  range?: { min: number; max: number };
+  width: number;
+  step: number;
+  direction?: BoxcarDirection;
+  seedFromPrevious?: boolean;
+  restarts?: number;
+  maxIterations?: number;
+}): Promise<{
+  windows: { center: number; min: number; max: number }[];
+  boxes: {
+    center: number;
+    min: number;
+    max: number;
+    status: RefinementResult["status"];
+    rWeighted: number | null;
+    carried: boolean;
+  }[];
+  evolution: { parameterId: string; label: string; values: (number | null)[]; esd: (number | null)[] }[];
+  warnings: string[];
+}> {
+  const rFirst = args.pattern.points[0]?.r ?? 0;
+  const rLast = args.pattern.points[args.pattern.points.length - 1]?.r ?? 0;
+  // Clamp the requested span to where data actually exists. A box outside the
+  // grid has ZERO observations: `buildPdfProblem` gives it an empty window, so
+  // the fit trivially "converges" at Rw 0 with no esds — a box that reports a
+  // perfect fit for a parameter no datum constrained. The UI cannot reach this
+  // (its range comes from the plot), but a tool caller names the span directly.
+  const clamped = {
+    min: Math.max(args.range?.min ?? rFirst, rFirst),
+    max: Math.min(args.range?.max ?? rLast, rLast),
+  };
+  const clipped =
+    args.range !== undefined && (args.range.min < rFirst - 1e-9 || args.range.max > rLast + 1e-9);
+  const plan = {
+    range: clamped,
+    width: args.width,
+    step: args.step,
+    ...(args.direction ? { direction: args.direction } : {}),
+  };
+  const issue = boxcarPlanIssue(plan);
+  if (issue !== null) {
+    throw new Error(
+      `boxcar plan: ${issue}` +
+      (clipped ? ` (the requested range was clipped to the data, ${fmtR(rFirst)}-${fmtR(rLast)} A)` : ""),
+    );
+  }
+  const windows = boxcarWindows(plan);
+
+  const options = { maxIterations: args.maxIterations ?? 20 };
+  const restarts = Math.max(0, Math.floor(args.restarts ?? 0));
+  const baseSpec: EvaluatorSpec = {
+    kind: "pdf",
+    structure: args.structure,
+    pattern: args.pattern,
+    parameters: args.parameters,
+    bindings: args.bindings,
+    ...(args.restraints && args.restraints.length ? { restraints: args.restraints } : {}),
+  };
+  // ONE pool for the whole series, re-initialized per box: `fitRange` is baked
+  // into a replica's problem, so a pool held across windows without re-init
+  // would evaluate the wrong window's Jacobian — silently, since the shape
+  // still matches. Re-init rebuilds the replicas in place; spawning a pool per
+  // box would instead re-execute the bundle in every worker, every box.
+  const first = windows[0]!;
+  const pool = await createNodeEvaluatorPool({ ...baseSpec, fitRange: { min: first.min, max: first.max } });
+  let series;
+  try {
+    series = await refineSequentialAsync(
+      args.parameters,
+      windows.map((w, i) => ({
+        id: `box_${i}`,
+        label: `${w.center.toFixed(2)} A`,
+        buildProblem: (parameters) =>
+          buildProblemForSpec({ ...baseSpec, parameters: [...parameters], fitRange: { min: w.min, max: w.max } }),
+      })),
+      {
+        refineOptions: options,
+        ...(args.seedFromPrevious !== undefined ? { seedFromPrevious: args.seedFromPrevious } : {}),
+      },
+      async (problem, refineOptions, _dataset, index) => {
+        const w = windows[index]!;
+        const fitRange = { min: w.min, max: w.max };
+        await pool?.init({ ...baseSpec, fitRange });
+        // One start, solved on the pool when there is one. `problem.parameters`
+        // is the box's SEEDED set, so the restart baseline is exactly the
+        // seed-only answer — restarts can improve a box, never move it for free.
+        const solve = async (params: readonly RefinementParameter[]): Promise<RefinementResult> => {
+          const p = buildProblemForSpec({ ...baseSpec, parameters: [...params], fitRange });
+          return pool ? refineParallel(p, refineOptions, pool) : refine(p, refineOptions);
+        };
+        if (restarts === 0) return solve(problem.parameters);
+        // A per-box seed: one shared seed would draw the identical perturbation
+        // pattern in every box, imprinting its own r-dependence on the series.
+        const ms = await refineMultiStart(
+          problem.parameters,
+          async (start) => {
+            const result = await solve(start);
+            return { parameters: start.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value })), final: result };
+          },
+          { restarts, seed: 0xb0 + Math.round(w.center * 1000) },
+        );
+        return ms.final;
+      },
+    );
+  } finally {
+    await pool?.dispose();
+  }
+
+  const labelOf = new Map(args.parameters.map((p) => [p.id, p.label]));
+  const num = (v: number | undefined): number | null => (v !== undefined && Number.isFinite(v) ? v : null);
+  const conflict = correlatedMotionConflict(args.parameters);
+  const noAdp = zeroAdpWarning([args.structure]);
+  const diverged = series.steps.filter((s) => !s.carried).length;
+  const scannedMax = boxcarScannedMax(plan);
+  return {
+    windows: windows.map((w) => ({ center: w.center, min: w.min, max: w.max })),
+    boxes: series.steps.map((s, i) => ({
+      center: windows[i]!.center,
+      min: windows[i]!.min,
+      max: windows[i]!.max,
+      status: s.result.status,
+      rWeighted: num(s.result.agreement.rWeighted),
+      carried: s.carried,
+    })),
+    evolution: series.evolution.map((e) => ({
+      parameterId: e.parameterId,
+      label: labelOf.get(e.parameterId) ?? e.parameterId,
+      values: e.values.map(num),
+      esd: e.esd.map(num),
+    })),
+    warnings: [
+      ...(conflict ? [conflict] : []),
+      ...(noAdp ? [noAdp] : []),
+      ...(clipped
+        ? [`The requested range was clipped to where data exists (${fmtR(rFirst)}-${fmtR(rLast)} A); boxes outside the r grid would hold no observations and report a meaningless perfect fit.`]
+        : []),
+      ...(args.step > args.width
+        ? [`step (${args.step} A) exceeds width (${args.width} A), so the boxes sample the range rather than covering it — ${fmtR(args.step - args.width)} A between consecutive boxes is never fitted.`]
+        : []),
+      ...(diverged > 0 ? [`${diverged} box(es) diverged; their values were not carried into the next box.`] : []),
+      ...(scannedMax !== null && scannedMax < clamped.max - 1e-6
+        ? [`Boxes cover ${fmtR(clamped.min)}-${fmtR(scannedMax)} A; the last ${fmtR(clamped.max - scannedMax)} A of the range has no room for a full-width box.`]
+        : []),
+    ],
+  };
+}
+
+/** Compact r for boxcar messages (no trailing zeros). */
+function fmtR(x: number): string {
+  return String(+x.toFixed(3));
 }
 
 /**

@@ -24,15 +24,23 @@ import type {
   RefineSingleCrystalRequest,
   WorkerMessage,
 } from "@/workers/protocol";
+import type { MagneticModel } from "@/core/magnetic/types";
 import { leBailCellPrefit, type LeBailPrefitResult } from "@/core/workflow/leBailPrefit";
 import type { RefinementResult, RefinementOptions, AgreementFactors, RefinementParameter } from "@/core/refinement/types";
-import { refine, refineParallel, type BatchEvaluator } from "@/core/refinement/engine";
+import { refine, refineParallel, type BatchEvaluator, type RefinementProblem } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem, applyMagneticMoments } from "@/core/workflow/magnetic";
 import { runPowderRefinement, runPdfRefinement, runMpdfRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
 import { refineStagedAsync } from "@/core/refinement/staged";
 import { stagesFromKindGroups } from "@/core/workflow/structureRefinement";
 import { refineMultiStart, type MultiStartOptions, type MultiStartResult } from "@/core/refinement/multiStart";
+import {
+  refineSequentialAsync,
+  type SequentialDataset,
+  type SequentialOptions,
+  type SequentialResult,
+} from "@/core/refinement/sequential";
+import type { BoxcarWindow } from "@/core/workflow/pdfBoxcar";
 import {
   samplePosterior,
   samplePosteriorParallel,
@@ -452,7 +460,7 @@ export class ComputeClient {
   }
 
   /** The pdf EvaluatorSpec for a refine request (single- or multi-phase). */
-  private pdfSpec(req: Omit<RefinePdfRequest, "requestId" | "type">): EvaluatorSpec {
+  private pdfSpec(req: Omit<RefinePdfRequest, "requestId" | "type">): Extract<EvaluatorSpec, { kind: "pdf" }> {
     return {
       kind: "pdf",
       structure: req.structure,
@@ -501,6 +509,114 @@ export class ComputeClient {
         return { parameters: applyResultToParams(start, result), final: result };
       };
       return await refineMultiStart(spec.parameters, runOnce, multiStart);
+    } finally {
+      pool.dispose();
+      if (this.activePool === pool) this.activePool = null;
+    }
+  }
+
+  /**
+   * Boxcar (sliding-window) PDF refinement: the sequential controller over the
+   * SAME pattern with per-box fit ranges, each box seeded from the previous
+   * one's refined values (see core/workflow/pdfBoxcar.ts for the window plan).
+   * With a magnetic model the boxes solve the mPDF co-refinement problem, so a
+   * spin-model page runs its boxcar against the identical residual it refines.
+   *
+   * One evaluator pool serves every box (as the multi-start does), but unlike
+   * the multi-start it must RE-INIT the replicas per box: the fit range is part
+   * of the problem (window, observation count), not of the value record. The
+   * partial series survives cancellation — completed boxes have already been
+   * delivered through `onStep` when the pool's rejection propagates.
+   *
+   * `restarts` adds a randomized multi-start INSIDE each box: the seeded values
+   * stay as the baseline candidate and `restarts` perturbed starts are refined
+   * alongside it, the lowest-χ² one winning and seeding the next box. That is
+   * the answer to a boxcar's characteristic failure — seeding every box from
+   * the last one makes the series path-dependent, so a track can inherit one
+   * box's local minimum all the way out. Costs (restarts + 1)× the scan.
+   */
+  async refinePdfBoxcar(
+    req: Omit<RefinePdfRequest, "requestId" | "type" | "fitRange">,
+    windows: readonly BoxcarWindow[],
+    boxcar: {
+      /** Present → the boxes refine nuclear + magnetic G(r) (the mPDF problem). */
+      readonly magnetic?: MagneticModel;
+      readonly seedFromPrevious?: boolean;
+      readonly rejectDiverged?: boolean;
+      /** Perturbed random restarts per box (0 = seed only). */
+      readonly restarts?: number;
+      readonly onStep?: SequentialOptions["onStep"];
+    } = {},
+  ): Promise<SequentialResult> {
+    const base: Extract<EvaluatorSpec, { kind: "pdf" | "mpdf" }> = boxcar.magnetic
+      ? this.mpdfSpec({
+          structure: req.structure,
+          magnetic: boxcar.magnetic,
+          pattern: req.pattern,
+          parameters: req.parameters,
+          bindings: req.bindings,
+          ...(req.restraints ? { restraints: req.restraints } : {}),
+        })
+      : this.pdfSpec(req);
+    const datasets: SequentialDataset[] = windows.map((w, i) => ({
+      id: `box_${i}`,
+      label: `${w.center.toFixed(2)} Å`,
+      buildProblem: (params) =>
+        buildProblemForSpec({ ...base, parameters: [...params], fitRange: { min: w.min, max: w.max } }),
+    }));
+    const seqOptions: SequentialOptions = {
+      refineOptions: req.options ?? {},
+      ...(boxcar.seedFromPrevious !== undefined ? { seedFromPrevious: boxcar.seedFromPrevious } : {}),
+      ...(boxcar.rejectDiverged !== undefined ? { rejectDiverged: boxcar.rejectDiverged } : {}),
+      ...(boxcar.onStep ? { onStep: boxcar.onStep } : {}),
+    };
+
+    const restarts = Math.max(0, Math.floor(boxcar.restarts ?? 0));
+    /** The winning result for one box, from a solver that refines one start.
+     *  `problem.parameters` is the box's SEEDED set, so the multi-start's
+     *  baseline candidate is exactly what the seed-only path would have fitted
+     *  — restarts can only improve a box, never move it for no reason. */
+    const solveBox = async (
+      problem: RefinementProblem,
+      window: BoxcarWindow,
+      solve: (params: readonly RefinementParameter[]) => Promise<RefinementResult>,
+    ): Promise<RefinementResult> => {
+      if (restarts === 0) return solve(problem.parameters);
+      const ms = await refineMultiStart(
+        problem.parameters,
+        async (start) => {
+          const result = await solve(start);
+          return { parameters: applyResultToParams(start, result), final: result };
+        },
+        // Each box gets its OWN deterministic seed: identical seeds would draw
+        // the identical perturbation pattern in every box, turning the search
+        // into a systematic offset that could imprint its own r-dependence.
+        { restarts, seed: 0xb0 + Math.round(window.center * 1000) },
+      );
+      return ms.final;
+    };
+
+    if (this.poolSize() < 2) {
+      return refineSequentialAsync(req.parameters, datasets, seqOptions, async (problem, options, _dataset, index) =>
+        solveBox(problem, windows[index]!, async (params) =>
+          refine(buildProblemForSpec({ ...base, parameters: [...params], fitRange: { min: windows[index]!.min, max: windows[index]!.max } }), options),
+        ),
+      );
+    }
+    const pool = new EvaluatorPool(this.poolSize());
+    this.activePool = pool;
+    try {
+      return await refineSequentialAsync(req.parameters, datasets, seqOptions, async (problem, options, _dataset, index) => {
+        const w = windows[index]!;
+        await pool.init({ ...base, fitRange: { min: w.min, max: w.max } });
+        return solveBox(problem, w, async (params) =>
+          refineParallel(
+            buildProblemForSpec({ ...base, parameters: [...params], fitRange: { min: w.min, max: w.max } }),
+            options,
+            pool,
+          ),
+        );
+      });
     } finally {
       pool.dispose();
       if (this.activePool === pool) this.activePool = null;
