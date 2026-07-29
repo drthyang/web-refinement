@@ -251,17 +251,28 @@ export function BoxcarPanel({
         ) : null}
         <span style={{ flex: 1 }} />
         <InfoBadge
-          width={320}
+          width={340}
           align="right"
           text={
             <span>
               A <b>boxcar</b> scan refines the same model inside a fixed-width r-window
-              slid across G(r). A parameter that drifts with the box center means the
-              structure the PDF sees changes with length scale — the local structure at
-              low r differing from the average (Bragg) one at high r. Flat tracks mean
-              one model describes every length scale. Read the value only where the box
-              fitted well (the Rw strip) and where the esd is small compared with the
-              drift: narrow boxes hold few points, so esds grow as the box shrinks.
+              slid across G(r), and plots each parameter at its box <b>center</b>. A track
+              that drifts means the structure the PDF sees changes with length scale — the
+              local structure at low r differing from the average (Bragg) one at high r;
+              a flat track means one model describes every length scale.
+              <br />
+              <br />
+              Read a value only where its box fitted well (the Rw strip) and where the
+              drift is large compared with the esds. Those esds come from uniform weights
+              over G(r), so compare them with each other rather than as absolute
+              uncertainties — and they grow as the box shrinks, because a narrow box holds
+              fewer points.
+              <br />
+              <br />
+              Each box is seeded from the previous one, which makes the series
+              path-dependent: <b>random restarts</b> re-search each box around its seed,
+              and scanning <b>both</b> directions checks the same thing from the other
+              end. <b>Adopt</b> loads one box's values into the parameter panel.
             </span>
           }
         />
@@ -413,33 +424,27 @@ export function BoxcarPanel({
             </div>
           </div>
 
-          <p style={{ margin: 0, fontSize: 12, color: color.secondary, lineHeight: 1.5 }}>
+          {/* What produced these numbers, in one line. Everything a reader has
+              to be TOLD rather than reminded of — what a boxcar shows, how to
+              read the esds, what Adopt does — lives in the "?" above, so this
+              stays a caption and not an essay. */}
+          <p style={{ margin: 0, fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
             {busy ? (
-              <b style={{ color: color.primary }}>Scanning — the plot fills in as each box is fitted. </b>
+              <b style={{ color: color.primary }}>scanning · </b>
             ) : run.partial ? (
-              <b style={{ color: color.noteInk }}>Partial scan (stopped early) — </b>
+              <b style={{ color: color.noteInk }}>stopped early · </b>
             ) : null}
-            {run.windows.length} boxes of {run.width} Å, scanned{" "}
-            {run.series.length > 1
-              ? "both ways from the same starting model"
-              : DIRECTION_LABEL[run.series[0]?.direction ?? "up"]}
-            ; each box was seeded from the previous one
-            {run.restarts > 0
-              ? `, then re-searched from ${run.restarts} randomly perturbed start${run.restarts === 1 ? "" : "s"} with the lowest-χ² one kept.`
-              : run.series.length > 1
-                ? "."
-                : ", so the track is a continuous path, not independent fits — scan both directions, or turn on random restarts, to check that a drift is not an inherited local minimum."}{" "}
-            Values are plotted at the box CENTER with their esds; esds come from uniform weights over G(r), so compare them with
-            each other rather than reading them as absolute uncertainties. “Adopt” loads that box's values into the parameter panel.
+            {run.windows.length} boxes · {run.width} Å ·{" "}
+            {run.series.length > 1 ? "both directions" : DIRECTION_LABEL[run.series[0]?.direction ?? "up"]}
+            {run.restarts > 0 ? ` · best of ${run.restarts + 1} starts per box` : " · seeded, no restarts"}
           </p>
         </>
       ) : (
         <div style={{ color: color.secondary, fontSize: fz.small, lineHeight: 1.55 }}>
-          Set the box above, free the parameters you want tracked in the refinement panel, then run the scan — the current
-          settings fit <b>{planInfo.count}</b> box{planInfo.count === 1 ? "" : "es"} inside the fit window
-          ({planInfo.range.min.toFixed(2)}–{planInfo.range.max.toFixed(2)} Å, set with the plot handles on the Refinement tab).
-          Typical use: keep the cell and an ADP free, and hold the instrument terms (Qdamp/Qbroad) fixed at their calibrated
-          values — they are properties of the diffractometer, not of r, so letting them float per box turns real drift into scatter.
+          Set the box above, free the parameters you want tracked in the refinement panel, then run the scan.
+          Keep the cell and an ADP free, and hold Qdamp/Qbroad at their calibrated values — they are properties
+          of the diffractometer, not of r, so letting them float per box turns real drift into scatter.
+          The scanned span is the fit window, set with the plot handles on the Refinement tab.
         </div>
       )}
     </div>
