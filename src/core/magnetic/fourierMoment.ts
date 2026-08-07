@@ -70,19 +70,35 @@ export interface FourierStructureFactor {
 }
 
 /**
+ * Number of arms in the star of `k` that contribute to one sublattice's moment:
+ * 2 for a generic k (the ±k pair, which is what keeps m real), but **1** when
+ * −k ≡ k modulo a reciprocal-lattice vector (2k ∈ ℤ³ — k = 0 and every k = ½
+ * type). There the two arms coincide, reality forces S itself to be real, and
+ * counting both would report twice the physical moment.
+ */
+export function armMultiplicity(k: Vec3): 1 | 2 {
+  const selfConjugate = k.every((v) => Math.abs(2 * v - Math.round(2 * v)) < 1e-9);
+  return selfConjugate ? 1 : 2;
+}
+
+/**
  * Real-space moment of a magnetic atom in the cell with integer lattice
  * coordinates `n`, reconstructed from its Fourier coefficient S = (sReal, sImag):
- *   m(n) = 2·(sReal·cos φ + sImag·sin φ),   φ = 2π k·n.
- * The factor 2 folds in the −k partner arm that keeps the moment real.
+ *   m(n) = Σ_arms S e^{−2πi k·n} = A·(sReal·cos φ + sImag·sin φ),   φ = 2π k·n,
+ * where A = `armMultiplicity(k)` folds in the −k partner arm **only when that
+ * arm is distinct**. Getting this wrong is a factor-2 error in every quoted
+ * moment at k = ½ (see docs/INCOMMENSURATE_PLAN.md §2): a self-conjugate k has
+ * one arm, so m(n) = S·cos φ with S real.
  */
 export function momentInCell(sReal: Vec3, sImag: Vec3, k: Vec3, n: Vec3): Vec3 {
   const phi = TWO_PI * (k[0] * n[0] + k[1] * n[1] + k[2] * n[2]);
   const c = Math.cos(phi);
   const s = Math.sin(phi);
+  const a = armMultiplicity(k);
   return [
-    2 * (sReal[0] * c + sImag[0] * s),
-    2 * (sReal[1] * c + sImag[1] * s),
-    2 * (sReal[2] * c + sImag[2] * s),
+    a * (sReal[0] * c + sImag[0] * s),
+    a * (sReal[1] * c + sImag[1] * s),
+    a * (sReal[2] * c + sImag[2] * s),
   ];
 }
 
