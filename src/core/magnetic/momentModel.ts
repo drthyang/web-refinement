@@ -10,10 +10,17 @@
  * Moments start **fixed** (the user frees them), mirroring the atomic-refinement
  * convention (see App / powderSpec: structural rows shown-but-fixed on load).
  *
- * Note (moment magnitude): components are in the crystal-axis convention (µ_B);
- * the absolute magnitude in the propagation-vector formalism carries a
- * convention-dependent factor that should be cross-checked against GSAS-II before
- * quoting a refined moment. Directions and relative sizes are well defined here.
+ * Note (moment magnitude): components are in the crystal-axis convention (µ_B),
+ * and `components` is the FULL physical moment — verified by the supercell
+ * consistency gate (supercellConsistency.test.ts: the parent-cell k-formalism
+ * and the explicit supercell agree per-reflection up to the pure N²
+ * normalization). Two historical factor-of-2 traps at self-conjugate k
+ * (2k ∈ ℤ³) are fixed and pinned by tests: the satellite enumerator counted
+ * every ±k node twice (satellites.test.ts), and the Fourier-side momentInCell
+ * folded in a −k arm that does not exist there (fourierMoment.test.ts).
+ * Remaining caveat: k ≠ 0 magnitudes have no EXTERNAL golden yet — the GSAS-II
+ * per-reflection cross-check (mn3ga350KGolden) is a k = 0 structure; the
+ * FullProf external golden is gate 8 of docs/INCOMMENSURATE_PLAN.md.
  *
  * Every mode is normalized to unit **Cartesian** length before parameters are
  * built, so one unit of amplitude is 1 µ_B along that mode whatever the cell
