@@ -18,6 +18,7 @@
 import type { AtomSite, StructureModel, SymmetryOperation, UnitCell } from "@/core/crystal/types";
 import type { Mat3, Vec3 } from "@/core/math/types";
 import { momentBindingKey, type MagneticModel } from "@/core/magnetic/types";
+import { kDenominators } from "@/core/magnetic/commensurate";
 import { fractionalToCartesian } from "@/core/crystal/unitCell";
 import { applyOperation } from "@/core/crystal/symmetry";
 import { determinant } from "@/core/math/mat3";
@@ -117,14 +118,22 @@ export function displayMoment(atom: Pick<CellAtom, "mag" | "cellIndex">, m: Vec3
 /**
  * Magnetic supercell size for a commensurate k: Nᵢ = smallest integer making
  * Nᵢ·kᵢ an integer (the denominator of kᵢ). k = 0 → (1,1,1); k = (0,0,½) → (1,1,2).
+ *
+ * Commensurability is decided by the shared resolver in
+ * `magnetic/commensurate.ts`, so this display path and the `.int` supercell
+ * transform can never disagree about a given k.
+ *
+ * KNOWN LIMITATION (display policy, deliberately preserved here): an
+ * INCOMMENSURATE k has no finite supercell, and this returns (1,1,1) for it —
+ * the viewer then draws one cell of a structure that never repeats, with the
+ * moments still cosine-modulated inside it. That is a silent approximation, and
+ * replacing it with an explicitly labelled finite "aperiodic window" is Phase F
+ * of docs/INCOMMENSURATE_PLAN.md. Callers that must not approximate should call
+ * `kDenominators` directly and handle its `null`.
  */
 export function magneticSupercell(k: Vec3): [number, number, number] {
-  const denom = (v: number): number => {
-    if (Math.abs(v) < 1e-6) return 1;
-    for (let n = 1; n <= 12; n++) if (Math.abs(v * n - Math.round(v * n)) < 1e-4) return n;
-    return 1;
-  };
-  return [denom(k[0]!), denom(k[1]!), denom(k[2]!)];
+  const resolved = kDenominators(k);
+  return resolved ? [...resolved.denominators] as [number, number, number] : [1, 1, 1];
 }
 
 /** Fractional coord within this of 0 → also drawn at +1 (fill faces/edges/corners). */

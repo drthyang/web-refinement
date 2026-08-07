@@ -5,6 +5,7 @@ import type { RefinementParameter } from "@/core/refinement/types";
 import { refine } from "@/core/refinement/engine";
 import { MAGNETIC_PREFACTOR } from "@/core/magnetic/structureFactor";
 import {
+  armMultiplicity,
   momentInCell,
   fourierMagneticStructureFactor,
   buildFourierSatelliteProblem,
@@ -20,10 +21,25 @@ describe("momentInCell — real-space moment from a Fourier coefficient", () => 
     const sReal: Vec3 = [2, 0, 0];
     const sImag: Vec3 = [0, 0, 0];
     const k: Vec3 = [0, 0, 0.5];
-    // m = 2·sReal·cos(π·n_z): (4,0,0) at n_z=0, (−4,0,0) at n_z=1.
-    expect(momentInCell(sReal, sImag, k, [0, 0, 0])).toEqual([4, 0, 0]);
-    expect(momentInCell(sReal, sImag, k, [0, 0, 1])[0]).toBeCloseTo(-4, 10);
+    // k = ½ is SELF-CONJUGATE: −k ≡ k, so the star has ONE arm and
+    // m = sReal·cos(π·n_z) — (2,0,0) at n_z=0, (−2,0,0) at n_z=1, with NO
+    // factor 2. The moment magnitude equals |S| here, and this is exactly the
+    // amplitude the commensurate real-moment path refines.
+    expect(momentInCell(sReal, sImag, k, [0, 0, 0])).toEqual([2, 0, 0]);
+    expect(momentInCell(sReal, sImag, k, [0, 0, 1])[0]).toBeCloseTo(-2, 10);
     expect(momentInCell(sReal, sImag, k, [0, 0, 1])[1]).toBeCloseTo(0, 10);
+  });
+
+  it("k = 0 is self-conjugate too: the moment is S, not 2S", () => {
+    // A ferromagnet described in the Fourier formalism must report |m| = |S|.
+    expect(momentInCell([3, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0])).toEqual([3, 0, 0]);
+    expect(armMultiplicity([0, 0, 0])).toBe(1);
+    expect(armMultiplicity([0.5, 0, 0])).toBe(1);
+    expect(armMultiplicity([0.5, 0.5, 0.5])).toBe(1);
+    // Generic k keeps both arms.
+    expect(armMultiplicity([0, 0, 0.25])).toBe(2);
+    expect(armMultiplicity([0, 0, 1 / 3])).toBe(2);
+    expect(armMultiplicity([0, 0, 0.137])).toBe(2);
   });
 
   it("gives a constant-magnitude circular helix for S^Re ⊥ S^Im, |S^Re| = |S^Im|", () => {

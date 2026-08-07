@@ -29,6 +29,7 @@ import type { AtomSite, StructureModel } from "@/core/crystal/types";
 import type { RefinementParameter, ParameterBinding } from "@/core/refinement/types";
 import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import { parseSymmetryOperation, equivalentPositions } from "@/core/crystal/symmetry";
+import { componentDenominator, kDenominators } from "@/core/magnetic/commensurate";
 import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
 import type { Vec3 } from "@/core/math/types";
 
@@ -40,31 +41,23 @@ export interface MagneticSupercell {
   readonly kInteger: readonly [number, number, number];
 }
 
-/** Smallest denominator d ∈ [1, maxDenominator] with d·x within tol of an integer. */
-function denominatorOf(x: number, maxDenominator: number, tol: number): number {
-  if (Math.abs(x - Math.round(x)) < tol) return 1; // already integer (incl. 0)
-  for (let d = 2; d <= maxDenominator; d++) {
-    if (Math.abs(d * x - Math.round(d * x)) < tol) return d;
-  }
-  return 0; // not commensurate within the search
-}
-
 /**
  * Resolve the magnetic supercell of a commensurate, axis-diagonal propagation
  * vector. Throws when a component is not commensurate within `maxDenominator`.
+ *
+ * The commensurability decision itself lives in `magnetic/commensurate.ts` — one
+ * resolver shared with every other supercell consumer, so the 3D view, mCIF
+ * export, and this transform can never disagree about whether a given k has a
+ * finite cell. Throwing (rather than approximating) is this path's own policy:
+ * a supercell `.int` transform has no meaningful incommensurate answer.
  */
 export function magneticSupercell(k: Vec3, maxDenominator = 12, tol = 1e-4): MagneticSupercell {
-  const mult: number[] = [];
-  const kInt: number[] = [];
-  for (let i = 0; i < 3; i++) {
-    const n = denominatorOf(k[i]!, maxDenominator, tol);
-    if (n === 0) {
-      throw new Error(`magneticSupercell: k component ${k[i]} is not commensurate with a denominator ≤ ${maxDenominator}`);
-    }
-    mult.push(n);
-    kInt.push(Math.round(n * k[i]!));
+  const resolved = kDenominators(k, maxDenominator, tol);
+  if (!resolved) {
+    const bad = k.find((c) => componentDenominator(c, maxDenominator, tol) === 0);
+    throw new Error(`magneticSupercell: k component ${bad} is not commensurate with a denominator ≤ ${maxDenominator}`);
   }
-  return { multiplicity: mult as [number, number, number], kInteger: kInt as [number, number, number] };
+  return { multiplicity: resolved.denominators, kInteger: resolved.kInteger };
 }
 
 /** Transform one nuclear-cell reflection into the supercell (optionally + K). */
