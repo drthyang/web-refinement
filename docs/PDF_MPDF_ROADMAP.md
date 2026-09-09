@@ -789,6 +789,9 @@ In the spirit of `LIMITATIONS.md` — the deliberate, still-standing constraints
 
 ## 9. References
 
+Canonical, DOI-linked entries are in [`REFERENCES.md`](./REFERENCES.md) (section
+"Real-space total scattering — PDF & mPDF"). Quick list:
+
 Farrow et al., *J. Phys.: Condens. Matter* **19** (2007) 335219 (PDFfit2/PDFgui) ·
 Proffen & Billinge, *J. Appl. Cryst.* **32** (1999) 572 (PDFFIT) ·
 Juhás et al., *J. Appl. Cryst.* **46** (2013) 560 (PDFgetX3) ·

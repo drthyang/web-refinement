@@ -273,12 +273,27 @@ spherical A* values; a published face-indexed dataset; a multi-scan R_int drop).
 
 ## 4. References
 
-- G. M. Sheldrick, *Acta Cryst.* A64 (2008) 112; C71 (2015) 3 — SHELX F²
-  refinement, HKLF/FCF formats, EXTI, WGHT.
-- R. H. Blessing, *Acta Cryst.* A51 (1995) 33 — data reduction, R_int, empirical
-  absorption (SORTAV).
-- L. J. Farrugia, *J. Appl. Cryst.* 32 (1999) 837; 45 (2012) 849 — WinGX.
-- P. Coppens, in *Crystallographic Computing* (1970) — analytical (Gaussian-grid)
-  absorption; W. R. Busing & H. A. Levy, *Acta Cryst.* 10 (1957) 180.
+- G. M. Sheldrick, *Acta Cryst.* **A64** (2008) 112–122,
+  doi:[10.1107/S0108767307043930](https://doi.org/10.1107/S0108767307043930);
+  *Acta Cryst.* **C71** (2015) 3–8,
+  doi:[10.1107/S2053229614024218](https://doi.org/10.1107/S2053229614024218) —
+  SHELX F² refinement, HKLF/FCF formats, EXTI, WGHT.
+- R. H. Blessing, *Acta Cryst.* **A51** (1995) 33–38,
+  doi:[10.1107/S0108767394005726](https://doi.org/10.1107/S0108767394005726) —
+  data reduction, R_int, empirical absorption (SORTAV).
+- L. J. Farrugia, *J. Appl. Cryst.* **32** (1999) 837–838,
+  doi:[10.1107/S0021889899006020](https://doi.org/10.1107/S0021889899006020);
+  *J. Appl. Cryst.* **45** (2012) 849–854,
+  doi:[10.1107/S0021889812029111](https://doi.org/10.1107/S0021889812029111) —
+  WinGX.
+- P. Coppens, L. Leiserowitz & D. Rabinovich, *Acta Cryst.* **18** (1965)
+  1035–1038, doi:[10.1107/S0365110X65002487](https://doi.org/10.1107/S0365110X65002487)
+  — analytical (Gaussian-grid) absorption (the primary source; also the chapter
+  in *Crystallographic Computing*, Munksgaard, 1970); W. R. Busing & H. A. Levy,
+  *Acta Cryst.* **10** (1957) 180–182,
+  doi:[10.1107/S0365110X57000584](https://doi.org/10.1107/S0365110X57000584).
+- S. Parsons, H. D. Flack & T. Wagner, *Acta Cryst.* **B69** (2013) 249–259,
+  doi:[10.1107/S2052519213010014](https://doi.org/10.1107/S2052519213010014) —
+  absolute-structure determination (intensity quotients).
 - *International Tables for Crystallography* Vol. C — mass-absorption
   coefficients, spherical/cylindrical A* tables, Laue classes.

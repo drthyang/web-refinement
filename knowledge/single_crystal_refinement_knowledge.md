@@ -424,12 +424,12 @@ The engine should behave like a careful single-crystal crystallographer:
 ## 20. Reference sources for implementation context
 
 ```text
-- SHELX (SHELXL) documentation and Acta Cryst. C71 (2015) 3–8, Sheldrick: https://shelx.uni-goettingen.de/
+- SHELX (SHELXL) documentation and Acta Cryst. C71 (2015) 3–8, Sheldrick (doi:10.1107/S2053229614024218): https://shelx.uni-goettingen.de/
 - Crystal Structure Refinement (P. Müller et al., IUCr/OUP) — SHELXL practice, twinning, disorder
 - International Tables for Crystallography, Vol. A (space groups) and Vol. C (corrections)
 - IUCr checkCIF validation service and alert definitions: https://checkcif.iucr.org/
 - Giacovazzo, Fundamentals of Crystallography (structure factors, extinction, absorption)
-- Flack & Bernardinelli on absolute structure; Parsons, Flack & Wagner, Acta Cryst. B69 (2013) 249
+- Flack & Bernardinelli on absolute structure; Parsons, Flack & Wagner, Acta Cryst. B69 (2013) 249 (doi:10.1107/S2052519213010014)
 - NIST X-ray form factor / attenuation tables: https://www.nist.gov/pml/x-ray-form-factor-attenuation-and-scattering-tables
 - NIST neutron scattering lengths and cross sections: https://www.ncnr.nist.gov/resources/n-lengths/
 ```

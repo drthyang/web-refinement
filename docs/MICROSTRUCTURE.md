@@ -85,8 +85,10 @@ variance, the isotropic-limit identity Γ = 4√(2ln2)·ε·tanθ, and genuine
 anisotropy (a Σh²k² strain broadens (hk0) but leaves (h00) untouched)
 ([`anisoStrain.test.ts`](../src/core/diffraction/anisoStrain.test.ts)).
 
-References: P. W. Stephens, *J. Appl. Cryst.* 32 (1999) 281; N. C. Popa, *J.
-Appl. Cryst.* 31 (1998) 176.
+References: P. W. Stephens, *J. Appl. Cryst.* **32** (1999) 281–289,
+doi:[10.1107/S0021889898006001](https://doi.org/10.1107/S0021889898006001);
+N. C. Popa, *J. Appl. Cryst.* **31** (1998) 176–180,
+doi:[10.1107/S0021889897009795](https://doi.org/10.1107/S0021889897009795).
 
 ---
 
@@ -107,7 +109,8 @@ Validated: cos²ψ limits (1 along the axis, 0 perpendicular), the isotropic
 reduction, and needle/platelet broadening asymmetry
 ([`anisoSize.test.ts`](../src/core/diffraction/anisoSize.test.ts)).
 
-References: J. I. Langford & D. Louër, *Rep. Prog. Phys.* 59 (1996) 131;
+References: J. I. Langford & D. Louër, *Rep. Prog. Phys.* **59** (1996) 131–234,
+doi:[10.1088/0034-4885/59/2/002](https://doi.org/10.1088/0034-4885/59/2/002);
 FullProf/GSAS-II uniaxial size models.
 
 ---

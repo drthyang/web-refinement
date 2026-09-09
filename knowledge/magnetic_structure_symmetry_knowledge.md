@@ -331,8 +331,8 @@ The engine should behave like a careful magnetic crystallographer:
 
 ```text
 - Rodríguez-Carvajal, FullProf and magnetic refinement notes: https://www.ill.eu/sites/fullprof/
-- Bertaut, representation analysis of magnetic structures (Acta Cryst. A24 (1968) 217)
-- Wills, SARAh / representational analysis (Physica B 276–278 (2000) 680)
+- Bertaut, representation analysis of magnetic structures (Acta Cryst. A24 (1968) 217; doi:10.1107/S0567739468000306)
+- Wills, SARAh / representational analysis (Physica B 276–278 (2000) 680; doi:10.1016/S0921-4526(99)01722-6)
 - Bilbao Crystallographic Server — MAGNDATA, k-SUBGROUPSMAG, MAXMAGN, Get_mirreps:
   https://www.cryst.ehu.es/
 - ISOTROPY / ISODISTORT (Stokes, Campbell) for irreps and magnetic modes: https://iso.byu.edu/

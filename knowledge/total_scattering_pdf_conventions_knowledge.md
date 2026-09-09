@@ -139,8 +139,16 @@ Practical rules:
 
 ## 6. References
 
-- Keen, *J. Appl. Cryst.* **34**, 172 (2001) — the definitive convention map.
+Canonical, DOI-linked entries live in [`../docs/REFERENCES.md`](../docs/REFERENCES.md)
+(section "Real-space total scattering — PDF & mPDF").
+
+- Keen, *J. Appl. Cryst.* **34**, 172–177 (2001) — the definitive convention map.
+  doi:[10.1107/S0021889800019993](https://doi.org/10.1107/S0021889800019993).
 - Egami & Billinge, *Underneath the Bragg Peaks*, 2nd ed. (2012) — G^PDF(r).
+  ISBN 978-0-08-097133-9.
 - Farrow et al., *J. Phys.: Condens. Matter* **19**, 335219 (2007) — PDFfit2.
-- Juhás et al., *J. Appl. Cryst.* **46**, 560 (2013) — PDFgetX3 outputs.
-- Toby & Billinge, *Acta Cryst.* **A60**, 315 (2004) — correlated G(r) errors.
+  doi:[10.1088/0953-8984/19/33/335219](https://doi.org/10.1088/0953-8984/19/33/335219).
+- Juhás et al., *J. Appl. Cryst.* **46**, 560–566 (2013) — PDFgetX3 outputs.
+  doi:[10.1107/S0021889813005190](https://doi.org/10.1107/S0021889813005190).
+- Toby & Billinge, *Acta Cryst.* **A60**, 315–317 (2004) — correlated G(r) errors.
+  doi:[10.1107/S0108767304011754](https://doi.org/10.1107/S0108767304011754).
