@@ -348,7 +348,10 @@ agent tool it exposes.**
   AWO₄ high-entropy tungstate from real POWGEN neutron data
   ([`realAwo4Magnetic.test.ts`](../src/core/workflow/realAwo4Magnetic.test.ts)).
 - **Needed:** scoring by magnetic *intensity* (Le Bail), not just position;
-  incommensurate / multi-k handling; a commensurate/incommensurate flag.
+  multi-k handling; refining k itself for an incommensurate structure. ✅ The
+  commensurate / incommensurate / self-conjugate classification exists
+  ([`propagation.ts`](../src/core/magnetic/propagation.ts): arms, supercell,
+  two-arm factor) and an irrational k flows through the whole M4 path.
 - **Validation gate:** ✅ recovers k for a known AFM at a zone boundary (synthetic
   *and* real AWO₄ 6 K neutron data); Γ returns no match for genuinely magnetic
   peaks. Intensity-scored gate still open.
@@ -410,14 +413,44 @@ agent tool it exposes.**
   recovery, [`fourierMoment.test.ts`](../src/core/magnetic/fourierMoment.test.ts)).
   This closes the gap where the old real-moment path could only do *collinear*
   commensurate structures.
-- **Needed:** wire the Fourier model into the powder/single-crystal workflow +
-  worker paths (replacing the collinear-only real-moment satellite intensity in
-  [`magneticPowder.ts`](../src/core/workflow/magneticPowder.ts)) and connect it to
-  the M3 irrep/basis output so amplitudes come from symmetry, not by hand;
-  magnetic-supercell bookkeeping and multi-arm (star of k) domains; use F1's
-  global search to resolve sign/phase ambiguity; candidate ranking with
+- **Wired (2026-09-09) — incommensurate / two-arm single-k refinement, end to
+  end.** A propagation vector whose ±k arms are distinct (¼-, ⅓-type, or
+  irrational) now refines **complex Fourier coefficients** through the SAME
+  moment-mode machinery, powder and single-crystal alike: every symmetry-
+  allowed mode carries a cosine amplitude and a sine (quadrature) amplitude
+  ([`allowedFourierModes`](../src/core/magnetic/allowedMoments.ts) — the
+  complex-linear stabilizer null space, which also produces symmetry-FORCED
+  helices, e.g. the 120° K-point structure in P3), `MagneticMoment.sinComponents`
+  + `ParameterBinding.momentPart` carry them, one quadrature amplitude is held
+  fixed as the global modulation-phase gauge (`phaseGauge`), and the structure
+  factor sums S = ½(M^cos + i·M^sin) with S* on the −k arm. Real-space picture
+  (viewer, mCIF, mPDF spin field): m(n) = M^cos·cos(2πk·n) + M^sin·sin(2πk·n).
+  The gate is a **convention-free brute-force supercell oracle**
+  ([`fourierModulation.test.ts`](../src/core/magnetic/fourierModulation.test.ts)):
+  the k-formalism must reproduce the plain real-space sum over the magnetic
+  supercell at every satellite, both arms, both time-reversal assignments — it
+  pins the ½, every lattice-phase sign, and the −k conjugation at once. It
+  also caught **three latent defects of the k ≠ 0 path**: (1) the satellite
+  coefficient was the full real-space amplitude, not ½ of it, so every
+  two-arm satellite was 4× too strong and refined moments came out half-size
+  against a shared scale; (2) for a self-conjugate k (½-type) the enumerator
+  listed each satellite twice (G + k and G′ − k coincide), 2× intensity;
+  (3) the viewer/mCIF/mPDF real-space field used the conjugate lattice-phase
+  convention cos(2πk·(n + L)) instead of cos(2πk·(n − L)) — invisible at
+  k = 0/½, wrong for ¼-type and incommensurate k with screw/glide images.
+  Satellites now carry exact Laue-family multiplicities (k off the
+  Laue-invariant lines expands the parent orbit). A helix is recovered through
+  the powder workflow and a fractional-index satellite row in a single-crystal
+  dataset gets no nuclear term
+  ([`fourierPowder.test.ts`](../src/core/workflow/fourierPowder.test.ts)).
+- **Needed:** connect the Fourier modes to the M3 irrep/basis output so
+  amplitudes come from the irrep (conjugate-pair irreps at complex k-phases);
+  refine k itself; harmonics (3k, 5k — squared-up modulations) and the (3+1)D
+  superspace bookkeeping; multi-arm (star of k) domain populations; F1's
+  global search for sign/phase ambiguity; candidate ranking with
   correlation-aware diagnostics (the engine already produces them; the ranker
-  ignores them).
+  ignores them). Still approximate: a satellite family's |F_M|² is evaluated
+  at one representative (no cone/domain average).
 - **Validation gate:** ✅ recover a known basis-mode amplitude for k ≠ 0
   (`fourierMoment.test.ts`). Still open: ranked candidates put the true magnetic
   structure first on a golden case.

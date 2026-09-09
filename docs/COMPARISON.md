@@ -61,7 +61,7 @@ means it could not be confirmed from primary documentation.
 | Pawley | Yes | unclear | unclear |
 | Representation analysis | via Bilbao/ISODISTORT | Yes (built-in) | **Yes (BasIreps)** |
 | Commensurate k | Yes | Yes | Yes |
-| Incommensurate k (helical/conical/SDW) | No | Yes | **Yes** |
+| Incommensurate k (helical/conical/SDW) | Single-k Fourier cos/sin amplitudes (no harmonics / superspace) | Yes | **Yes** |
 | Magnetic form factors / mCIF | Yes / Yes | Yes / Yes | Yes / Yes |
 
 ### Practical
@@ -104,12 +104,12 @@ in-app flows.
 | Uncertainty | LM esds + correlations; **Bayesian posterior sampling** (affine-invariant ensemble MCMC on the same problem seam — prototype, PDF-first; split-R̂/ESS/credible intervals; posterior-vs-esd ratio ≈ 1 validated on the Ni golden) | — (none of the three ships posterior sampling; their uncertainties are the least-squares covariance) |
 | Multi-phase / multi-dataset | Yes (powder 2-phase; PDF multi-phase + multi-dataset co-refinement; sequential Rietveld + PDF) | larger joint-histogram breadth |
 | Intensity extraction | **Le Bail** | + Pawley |
-| Magnetism | mCIF in/out, single-crystal + powder moment refinement, k = 0 **and** k ≠ 0 commensurate, k-search, subgroup candidates + comparison | representation analysis (built-in), incommensurate/helical |
+| Magnetism | mCIF in/out, single-crystal + powder moment refinement, k = 0 **and** k ≠ 0 (commensurate **and** incommensurate single-k: cosine + sine Fourier amplitudes, brute-force-supercell gated), k-search, subgroup candidates + comparison | representation analysis (built-in), harmonics / superspace, multi-k |
 | Validation | GSAS-II golden values + real-data benchmarks; PDFfit2/PDFgui and diffpy.mpdf goldens | decades of community validation |
 | Platform / API | **Static web app, no install**; **33 MCP agent tools** | desktop; Python scripting ecosystems |
 
-**Honest gaps** (the road to maturity): incommensurate / multi-k and
-helical/conical magnetism; built-in representation analysis for the magnetic
+**Honest gaps** (the road to maturity): multi-k, modulation harmonics and
+(3+1)D superspace magnetism; built-in representation analysis for the magnetic
 workflow; spherical-harmonic texture; powder extinction and anomalous
 dispersion; twinning and absolute structure (single crystal); rigid bodies and
 a restraints library; Pawley extraction. These are laid out in

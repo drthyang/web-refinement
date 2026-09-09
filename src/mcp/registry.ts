@@ -218,7 +218,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "build_magnetic_model",
     title: "Build symmetry-allowed magnetic model",
-    description: "Build the magnetic model + moment-mode parameters for chosen ion sites under a magnetic subgroup: amplitudes over the symmetry-ALLOWED directions only, co-located (occupancy-disorder) ions tied to one moment, split orbits as independent sublattices. The refinement cannot leave the allowed space by construction. Feed the outputs to refine_magnetic_powder.",
+    description: "Build the magnetic model + moment-mode parameters for chosen ion sites under a magnetic subgroup: amplitudes over the symmetry-ALLOWED directions only, co-located (occupancy-disorder) ions tied to one moment, split orbits as independent sublattices. The refinement cannot leave the allowed space by construction. For a k with two distinct arms (−k ≢ k: ¼-, ⅓-type or incommensurate) every mode carries a cosine AND a sine (quadrature) amplitude — complex Fourier coefficients, the representation helices/cycloids need (`fourier: true`); `phaseGaugeParameterId` names the one sine amplitude that must stay FIXED (the global modulation phase is unobservable). Read `propagation` for the k classification. Feed the outputs to refine_magnetic_powder.",
     inputSchema: {
       structure: anyObj,
       ionLabels: z.array(z.string()).min(1).describe("Magnetic site labels, e.g. [\"Mn1\"]"),

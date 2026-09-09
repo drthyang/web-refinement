@@ -26,6 +26,40 @@ import { determinant } from "@/core/math/mat3";
 import { anisotropicDebyeWaller, debyeWaller } from "@/core/diffraction/structureFactor";
 import { rotateUAniso } from "@/core/crystal/adp";
 import { IDENTITY3 } from "@/core/math/mat3";
+import { fourierArmFactor } from "@/core/magnetic/propagation";
+
+/** Rotate crystal-axis moment components as an axial vector: axial·R·m. */
+function rotateAxial(r: readonly (readonly number[])[], axial: number, comps: Vec3): [number, number, number] {
+  return [
+    axial * (r[0]![0]! * comps[0] + r[0]![1]! * comps[1] + r[0]![2]! * comps[2]),
+    axial * (r[1]![0]! * comps[0] + r[1]![1]! * comps[1] + r[1]![2]! * comps[2]),
+    axial * (r[2]![0]! * comps[0] + r[2]![1]! * comps[1] + r[2]![2]! * comps[2]),
+  ];
+}
+
+/**
+ * Which arm of the star {+k, −k} a (generally fractional) index belongs to:
+ * +1 when h − k is a reciprocal-lattice vector (a +k satellite H + k), −1 when
+ * h + k is (a −k satellite H − k), 0 when neither (a nuclear index, a higher
+ * harmonic, or a foreign k). A self-conjugate k satisfies both; it returns +1
+ * there (the coefficient is real anyway).
+ */
+export function satelliteArm(h: number, k: number, l: number, kVec: Vec3, tol = 1e-6): 1 | -1 | 0 {
+  const isLattice = (a: number, b: number, c: number): boolean =>
+    Math.abs(a - Math.round(a)) < tol && Math.abs(b - Math.round(b)) < tol && Math.abs(c - Math.round(c)) < tol;
+  if (isLattice(h - kVec[0], k - kVec[1], l - kVec[2])) return 1;
+  if (isLattice(h + kVec[0], k + kVec[1], l + kVec[2])) return -1;
+  return 0;
+}
+
+/** The sine (quadrature) amplitude that actually enters the structure factor:
+ *  absent, zero, or unobservable (self-conjugate k) all collapse to null. */
+function observableSin(moment: { readonly sinComponents?: Vec3 }, arm: 0.5 | 1): Vec3 | null {
+  if (arm === 1) return null;
+  const s = moment.sinComponents;
+  if (!s || (s[0] === 0 && s[1] === 0 && s[2] === 0)) return null;
+  return s;
+}
 
 /** The nuclear operation carrying `from` onto `to` (mod 1), else identity —
  *  used to anchor a split-orbit representative's anisotropic tensor. */
@@ -86,8 +120,15 @@ export interface MagneticStructureFactor {
  */
 export interface ExpandedMagneticAtom {
   readonly position: Vec3;
-  /** Op-rotated, axial-signed moment in the Cartesian frame (μ_B). */
+  /** Op-rotated, axial-signed cosine amplitude in the Cartesian frame (μ_B),
+   *  already multiplied by the two-arm factor (½ when −k ≢ k, else 1) so it is
+   *  the real part of the Fourier coefficient the satellite sees. */
   readonly momentCart: Vec3;
+  /** Op-rotated, axial-signed sine (quadrature) amplitude × arm factor — the
+   *  imaginary part of the coefficient. Present only for a two-arm k with a
+   *  nonzero quadrature amplitude; a kernel that ignores it is wrong for
+   *  helical/elliptical modulations and must refuse such a model. */
+  readonly sinMomentCart?: Vec3;
   readonly occupancy: number;
   readonly formFactorId: string;
   readonly adp: DisplacementParameters;
@@ -97,11 +138,13 @@ export interface ExpandedMagneticAtom {
 export function expandMagneticAtoms(structure: StructureModel, magnetic: MagneticModel): ExpandedMagneticAtom[] {
   const ops = magnetic.operations ?? structure.spaceGroup.operations;
   const dedup = magnetic.operations !== undefined;
+  const arm = fourierArmFactor(magnetic.propagation[0] ?? [0, 0, 0]);
   const out: ExpandedMagneticAtom[] = [];
   for (const moment of magnetic.moments) {
     const site = structure.sites.find((st) => st.label === moment.siteLabel);
     if (!site) continue;
     const ffId = formFactorId(structure, moment.siteLabel, moment.formFactorId);
+    const sinComps = observableSin(moment, arm);
     const seen: Vec3[] | null = dedup ? [] : null;
     const basePos = momentAnchorPosition(structure.spaceGroup.operations, ops, site.position, moment.orbitIndex, moment.position);
     // Anisotropic ADP anchored at the orbit representative, rotated per image —
@@ -126,17 +169,22 @@ export function expandMagneticAtoms(structure: StructureModel, magnetic: Magneti
       }
       const r = op.rotation;
       const axial = determinant(r) * (op.timeReversal ?? 1);
-      const comps = moment.components;
-      const rotatedComps: [number, number, number] = [
-        axial * (r[0][0] * comps[0] + r[0][1] * comps[1] + r[0][2] * comps[2]),
-        axial * (r[1][0] * comps[0] + r[1][1] * comps[1] + r[1][2] * comps[2]),
-        axial * (r[2][0] * comps[0] + r[2][1] * comps[1] + r[2][2] * comps[2]),
-      ];
-      const momentCart = moment.frame === "cartesian" ? rotatedComps : crystalComponentsToCartesian(structure.cell, rotatedComps);
+      const rotatedComps = rotateAxial(r, axial, moment.components);
+      const cosCart = moment.frame === "cartesian" ? rotatedComps : crystalComponentsToCartesian(structure.cell, rotatedComps);
+      const momentCart: Vec3 = arm === 1 ? cosCart : [cosCart[0] * arm, cosCart[1] * arm, cosCart[2] * arm];
+      let sinMomentCart: Vec3 | undefined;
+      if (sinComps) {
+        const rotatedSin = rotateAxial(r, axial, sinComps);
+        const sc = moment.frame === "cartesian" ? rotatedSin : crystalComponentsToCartesian(structure.cell, rotatedSin);
+        sinMomentCart = [sc[0] * arm, sc[1] * arm, sc[2] * arm];
+      }
       const adp: DisplacementParameters = adpAtRep.kind === "anisotropic"
         ? { kind: "anisotropic", uAniso: rotateUAniso(adpAtRep.uAniso, r) }
         : adpAtRep;
-      out.push({ position: p, momentCart, occupancy: site.occupancy, formFactorId: ffId, adp });
+      out.push({
+        position: p, momentCart, occupancy: site.occupancy, formFactorId: ffId, adp,
+        ...(sinMomentCart ? { sinMomentCart } : {}),
+      });
     }
   }
   return out;
@@ -171,11 +219,38 @@ export function magneticStructureFactor(
   const ops = magnetic.operations ?? structure.spaceGroup.operations;
   const dedup = magnetic.operations !== undefined;
 
+  // Two-arm propagation vectors (−k ≢ k): the coefficient of the +k satellite
+  // is S = ½·(M^cos + i·M^sin) — the ½ is the two-arm factor, and the sine
+  // amplitude is what makes helices/cycloids/elliptical modulations
+  // representable at all. Self-conjugate k (k = 0, ½-type): S = M^cos, real,
+  // and the sine amplitude is unobservable (sin(2π k·n) ≡ 0). See
+  // core/magnetic/propagation.ts. The lattice phase e^{2πi k·n_g} that relates
+  // the coefficients of orbit images (S_j' = θ·det R·R·S_j·e^{2πi k·n_g}) is
+  // carried by the UNWRAPPED image position below: e^{2πi (H+k)·(r + n_g)}.
+  const kVec = magnetic.propagation[0] ?? [0, 0, 0];
+  const arm = fourierArmFactor(kVec);
+  // Which arm is this index? The −k satellite (H − k) scatters with the
+  // CONJUGATE coefficient S* = ½(M^cos − i·M^sin): the lattice phases of the
+  // orbit images conjugate on their own through the index (e^{2πi(H−k)·n_g}),
+  // but the representative's own sine part must be negated explicitly. An
+  // index that is neither H + k nor H − k (a nuclear node of a k ≠ 0 model, a
+  // higher harmonic) carries NO magnetic intensity from a single-k modulation:
+  // the formula would return a meaningless partial sum there, which is exactly
+  // what used to leak magnetic intensity onto the nuclear rows of a mixed
+  // single-crystal dataset. The index tolerance is loose (1e-3) because
+  // satellite indices in reflection files are written with few decimals.
+  const isK0 = kVec[0] === 0 && kVec[1] === 0 && kVec[2] === 0;
+  const armSign = isK0 ? 1 : satelliteArm(h, k, l, kVec, 1e-3);
+  if (armSign === 0) return { vector: [ZERO, ZERO, ZERO], squared: 0 };
+  const conjugate = arm === 0.5 && armSign === -1;
+
   for (const moment of magnetic.moments) {
     const site = structure.sites.find((st) => st.label === moment.siteLabel);
     if (!site) continue;
     const ffId = formFactorId(structure, moment.siteLabel, moment.formFactorId);
     const fMag = table.has(ffId) ? table.j0(ffId, s) : 1;
+    const sinRaw = observableSin(moment, arm);
+    const sinComps: Vec3 | null = sinRaw && conjugate ? [-sinRaw[0], -sinRaw[1], -sinRaw[2]] : sinRaw;
     // Thermal damping: the same Debye-Waller factor as the nuclear structure
     // factor — the magnetic scatterer is the same vibrating atom (GSAS-II and
     // FullProf damp |F_M| identically). Omitting it inflates the calculated
@@ -223,12 +298,7 @@ export function magneticStructureFactor(
       // the two operations do not commute for a general Q.
       const r = op.rotation;
       const axial = determinant(r) * (op.timeReversal ?? 1);
-      const comps = moment.components;
-      const rotatedComps: [number, number, number] = [
-        axial * (r[0][0] * comps[0] + r[0][1] * comps[1] + r[0][2] * comps[2]),
-        axial * (r[1][0] * comps[0] + r[1][1] * comps[1] + r[1][2] * comps[2]),
-        axial * (r[2][0] * comps[0] + r[2][1] * comps[1] + r[2][2] * comps[2]),
-      ];
+      const rotatedComps = rotateAxial(r, axial, moment.components);
       const mCart =
         moment.frame === "cartesian"
           ? rotatedComps
@@ -238,10 +308,30 @@ export function magneticStructureFactor(
       const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
       const ph = expι(phase);
       const dw = isoDw ?? anisotropicDebyeWaller(structure.cell, rotateUAniso(anisoU!, r), h, k, l);
-      const w = MAGNETIC_PREFACTOR * site.occupancy * fMag * dw;
-      fx = add(fx, cscale(ph, w * mPerp[0]));
-      fy = add(fy, cscale(ph, w * mPerp[1]));
-      fz = add(fz, cscale(ph, w * mPerp[2]));
+      const w = MAGNETIC_PREFACTOR * site.occupancy * fMag * dw * arm;
+      if (!sinComps) {
+        // Real coefficient (k = 0, self-conjugate k, or no quadrature part):
+        // the historical path, kept operation-for-operation so every k = 0
+        // golden stays bit-identical.
+        fx = add(fx, cscale(ph, w * mPerp[0]));
+        fy = add(fy, cscale(ph, w * mPerp[1]));
+        fz = add(fz, cscale(ph, w * mPerp[2]));
+        continue;
+      }
+      // Complex coefficient: (M⊥^cos + i·M⊥^sin)·e^{iφ}, the sine part rotated
+      // by the same axial transform and projected by the same q̂ (both linear).
+      const rotatedSin = rotateAxial(r, axial, sinComps);
+      const sCart = moment.frame === "cartesian" ? rotatedSin : crystalComponentsToCartesian(structure.cell, rotatedSin);
+      const sPerp = perpendicularMoment(sCart, q);
+      const acc = [fx, fy, fz];
+      for (let a = 0; a < 3; a++) {
+        const c = w * mPerp[a]!;
+        const sv = w * sPerp[a]!;
+        acc[a] = add(acc[a]!, { re: c * ph.re - sv * ph.im, im: c * ph.im + sv * ph.re });
+      }
+      fx = acc[0]!;
+      fy = acc[1]!;
+      fz = acc[2]!;
     }
   }
 

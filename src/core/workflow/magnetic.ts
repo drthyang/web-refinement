@@ -18,7 +18,12 @@ import { resolveTies } from "@/core/refinement/constraints";
 import { nuclearStructureFactorSquared } from "@/core/diffraction/structureFactor";
 import { magneticStructureFactor } from "@/core/magnetic/structureFactor";
 
-/** Apply momentX/Y/Z parameter values onto a magnetic model's moments. */
+/**
+ * Apply moment-mode / momentX/Y/Z parameter values onto a magnetic model's
+ * moments. A `momentMode` binding with `momentPart: "sin"` drives the site's
+ * sine (quadrature) amplitude — the imaginary part of its Fourier coefficient
+ * for a two-arm propagation vector — instead of the cosine amplitude.
+ */
 export function applyMagneticMoments(
   magnetic: MagneticModel,
   bindings: readonly ParameterBinding[],
@@ -27,6 +32,7 @@ export function applyMagneticMoments(
   const moments: MagneticMoment[] = magnetic.moments.map((m) => ({
     ...m,
     components: [...m.components] as Vec3,
+    ...(m.sinComponents ? { sinComponents: [...m.sinComponents] as Vec3 } : {}),
   }));
   // Keyed by the binding key (site label + split-orbit suffix): a magnetic
   // subgroup that splits a site's crystallographic orbit yields several moment
@@ -34,13 +40,22 @@ export function applyMagneticMoments(
   const byKey = new Map(moments.map((m) => [momentBindingKey(m), m]));
 
   // Symmetry-mode bindings define the moment fully, so zero any driven site
-  // first, then accumulate the bound modes.
-  const driven = new Set(
-    bindings.filter((b) => b.kind === "momentMode" && b.targetKey).map((b) => b.targetKey!),
-  );
-  for (const key of driven) {
+  // first, then accumulate the bound modes. The cosine and sine parts are
+  // zeroed independently: a model with only cosine bindings keeps a stored
+  // sine amplitude untouched (and vice versa).
+  const drivenCos = new Set<string>();
+  const drivenSin = new Set<string>();
+  for (const b of bindings) {
+    if (b.kind !== "momentMode" || !b.targetKey) continue;
+    (b.momentPart === "sin" ? drivenSin : drivenCos).add(b.targetKey);
+  }
+  for (const key of drivenCos) {
     const m = byKey.get(key);
     if (m) (m.components as [number, number, number]) = [0, 0, 0];
+  }
+  for (const key of drivenSin) {
+    const m = byKey.get(key);
+    if (m) (m as { sinComponents?: Vec3 }).sinComponents = [0, 0, 0];
   }
 
   for (const binding of bindings) {
@@ -49,7 +64,10 @@ export function applyMagneticMoments(
     const moment = byKey.get(binding.targetKey);
     if (!moment) continue;
     if (binding.kind === "momentMode" && binding.momentBasis) {
-      const c = moment.components as [number, number, number];
+      const target = binding.momentPart === "sin"
+        ? ((moment as { sinComponents?: Vec3 }).sinComponents ??= [0, 0, 0])
+        : moment.components;
+      const c = target as [number, number, number];
       c[0] += v * binding.momentBasis[0]!;
       c[1] += v * binding.momentBasis[1]!;
       c[2] += v * binding.momentBasis[2]!;
@@ -59,6 +77,12 @@ export function applyMagneticMoments(
     }
   }
   return { ...magnetic, moments };
+}
+
+/** True when (h, k, l) is not an integer triple — a magnetic satellite H + k
+ *  (indexed in the nuclear cell) rather than a nuclear Bragg reflection. */
+export function isSatelliteIndex(h: number, k: number, l: number, tol = 1e-6): boolean {
+  return [h, k, l].some((x) => Math.abs(x - Math.round(x)) > tol);
 }
 
 function scalesFrom(
@@ -97,7 +121,13 @@ function computeRows(
   const appliedMag = applyMagneticMoments(magnetic, bindings, values);
   const { nuclear, magnetic: magScale } = scalesFrom(bindings, values);
   return dataset.reflections.map((r) => {
-    const iN = nuclear * nuclearStructureFactorSquared(structure, dataset.radiation, r.h, r.k, r.l);
+    // A satellite H + k carries a non-integer index: it has NO nuclear term
+    // (the nuclear lattice scatters only at integer H), so the nuclear
+    // structure factor must not be evaluated there — at a fractional index it
+    // returns a meaningless partial sum, not zero.
+    const iN = isSatelliteIndex(r.h, r.k, r.l)
+      ? 0
+      : nuclear * nuclearStructureFactorSquared(structure, dataset.radiation, r.h, r.k, r.l);
     const iM = magScale * magneticStructureFactor(structure, appliedMag, r.h, r.k, r.l).squared;
     return {
       h: r.h,

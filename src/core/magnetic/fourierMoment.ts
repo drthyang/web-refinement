@@ -98,6 +98,9 @@ export function fourierMagneticStructureFactor(
   sites: readonly FourierSite[],
   index: Vec3,
   table: MagneticFormFactorTable = magneticTable,
+  /** +1: `index` is a +k satellite (coefficient S); −1: a −k satellite, which
+   *  scatters with the conjugate S* — the sine parts are negated. */
+  arm: 1 | -1 = 1,
 ): FourierStructureFactor {
   const [h, k, l] = index;
   const d = dSpacing(cell, h, k, l);
@@ -115,7 +118,8 @@ export function fourierMagneticStructureFactor(
     const w = MAGNETIC_PREFACTOR * occ * fMag;
 
     const sRealCart = crystalComponentsToCartesian(cell, site.sReal);
-    const sImagCart = crystalComponentsToCartesian(cell, site.sImag);
+    const sImagRaw = crystalComponentsToCartesian(cell, site.sImag);
+    const sImagCart: Vec3 = arm === 1 ? sImagRaw : [-sImagRaw[0], -sImagRaw[1], -sImagRaw[2]];
 
     const phase = TWO_PI * (h * site.position[0] + k * site.position[1] + l * site.position[2]);
     const cph = Math.cos(phase);

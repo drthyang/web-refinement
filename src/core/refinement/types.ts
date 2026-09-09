@@ -159,6 +159,14 @@ export interface ParameterBinding {
    * (mirrors `positionShift`/`uAniso`). Coupled components move together.
    */
   readonly momentBasis?: readonly [number, number, number];
+  /**
+   * Which modulation amplitude a `momentMode` binding drives when the
+   * propagation vector has two distinct arms (±k): "cos" (default) adds
+   * value·momentBasis to the site's cosine amplitude (`components`), "sin" to
+   * its sine/quadrature amplitude (`sinComponents`). A symmetry-forced helical
+   * mode binds one parameter to both parts through two bindings.
+   */
+  readonly momentPart?: "cos" | "sin";
 }
 
 /** A soft linear restraint appended as pseudo-observation to least squares. */

@@ -105,10 +105,21 @@ accidental gap — each is tracked as a roadmap item.
   polarization factor (1−P)cos²2θ + P with the instrument's polarization fraction
   P (P = 0.5 unpolarized, ~0.9–0.95 monochromated synchrotron); TOF ∝ d⁴. The
   per-detector-bank constant prefactors are absorbed into the refined scale.
-- **Magnetic model.** Commensurate **single-k moment refinement**, k = 0 *and*
-  k ≠ 0: moments refine as the symmetry-allowed modes of the chosen magnetic
-  subgroup, magnetic satellites are placed at G ± k, and the magnetic intensity
-  shares the nuclear histogram scale (GSAS-II convention). Works for CW and TOF
+- **Magnetic model.** **Single-k moment refinement**, k = 0, commensurate *and*
+  incommensurate k ≠ 0: moments refine as the symmetry-allowed modes of the
+  chosen magnetic subgroup, magnetic satellites are placed at G ± k, and the
+  magnetic intensity shares the nuclear histogram scale (GSAS-II convention).
+  A k with two distinct arms (−k ≢ k: ¼-, ⅓-type, irrational) refines complex
+  Fourier coefficients — a cosine and a sine (quadrature) amplitude per mode,
+  the representation sinusoidal, helical, cycloidal and elliptical
+  modulations need — with one sine amplitude held fixed as the unobservable
+  global modulation phase; the real-space convention is
+  m(n) = M^cos·cos(2πk·n) + M^sin·sin(2πk·n) and the satellite coefficient is
+  ½(M^cos + i·M^sin). This is gated by a convention-free brute-force supercell
+  oracle, not only by self-consistency. Not modelled: harmonics (3k, 5k —
+  squared-up structures), (3+1)D superspace symmetry, multi-k, and refining k
+  itself; mCIF export of an incommensurate model writes the parent cell with
+  the Fourier amplitudes (the sine part as comments), not a superspace mCIF. Works for CW and TOF
   data, validated **self-consistently** (a known simple AFM at k = (0,0,½) is
   recovered end-to-end) and, at k = 0, against GSAS-II moment magnitudes. Symmetry
   tools: a low-Q **single-k search** (ranks candidate k from magnetic-peak
@@ -125,8 +136,9 @@ accidental gap — each is tracked as a roadmap item.
   against GSAS-II on the Mn₃Ga 350 K data. Candidates carry standard
   **BNS/OG labels** (bundled ISO-MAG table; types I/III, standard settings).
   **Not done:** the **star of k** (multi-arm domains / multi-k) and full
-  **representation (irrep) analysis**; satellite multiplicity is approximated by the parent nuclear
-  multiplicity. (Roadmap M2–M4.)
+  **representation (irrep) analysis**; satellite multiplicities are exact Laue-family sizes
+  (equal-population domains of the star), but each family's |F_M|² is evaluated at ONE
+  representative index — no cone/domain average over the family. (Roadmap M2–M4.)
 - **Real-space PDF.** `G(r)` fitting uses **uniform weights** — reduced-PDF
   point errors are strongly correlated (Toby & Billinge 2004), so Rw is a
   relative indicator, not an absolute one; PDF Rw runs much higher than Bragg

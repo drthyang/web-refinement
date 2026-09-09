@@ -2,13 +2,20 @@
  * Pure geometry for expanding a structure's asymmetric unit into the atoms of a
  * unit cell (or magnetic supercell), with each atom's **moment-placing
  * operation**: rotation, time-reversal sign θ, and returning lattice
- * translation L. The moment arrow on a symmetry-equivalent atom is (see
- * `displayMoment`)
- *   m′ = θ · det(R) · cos(2π k·(L + n)) · R·m,
- * matching the θ-signed axial transform + k-phase used by the magnetic
- * structure factor. When magnetic (Shubnikov) operations are supplied, they —
- * not the nuclear group — define θ and the arrow; atoms of the nuclear orbit
- * not reachable by a magnetic operation carry no moment (other k-arm/domain).
+ * translation L. The moment arrow on a symmetry-equivalent atom in the cell
+ * with integer index n is (see `displayMoment`)
+ *   m′ = θ · det(R) · R·[ M^cos·cos(2π k·(n − L)) + M^sin·sin(2π k·(n − L)) ],
+ * the real-space field whose Fourier coefficients are exactly the ones the
+ * magnetic structure factor sums: an image placed by {R|τ} lands in cell L
+ * (image = wrapped position + L), so its coefficient is
+ * S′ = θ·det(R)·R·S·e^{2πi k·L} — the phase the structure factor carries
+ * through the unwrapped image position — and m′(n) = 2·Re[S′·e^{−2πi k·n}]
+ * gives the (n − L) argument above. (The sign of L matters once k·L is not a
+ * multiple of ½: k = ¼-type and incommensurate k with screw/glide/centring
+ * images. Gate: `fourierModulation.test.ts`, brute-force supercell oracle.)
+ * When magnetic (Shubnikov) operations are supplied, they — not the nuclear
+ * group — define θ and the arrow; atoms of the nuclear orbit not reachable by
+ * a magnetic operation carry no moment (other k-arm/domain).
  *
  * This lives in `core` (no three.js / React) so both the 3D viewer and the
  * mCIF exporter share ONE expansion — the exported magnetic supercell is then
@@ -50,8 +57,10 @@ export interface MomentEntry {
   readonly position?: Vec3;
   /** Which G_M-orbit of the site this entry is (1-based); absent ⇒ orbit 1. */
   readonly orbitIndex?: number;
-  /** Crystal-axis moment components (µ_B). */
+  /** Crystal-axis moment (cosine modulation amplitude) components (µ_B). */
   readonly components: Vec3;
+  /** Sine (quadrature) modulation amplitude for a two-arm k (µ_B); absent ⇒ 0. */
+  readonly sinComponents?: Vec3;
 }
 
 /** The moment entries for a magnetic model (split orbits included). */
@@ -62,6 +71,7 @@ export function momentEntriesFrom(magnetic: MagneticModel): MomentEntry[] {
     ...(m.position ? { position: m.position } : {}),
     ...(m.orbitIndex !== undefined ? { orbitIndex: m.orbitIndex } : {}),
     components: [...m.components] as Vec3,
+    ...(m.sinComponents ? { sinComponents: [...m.sinComponents] as Vec3 } : {}),
   }));
 }
 
@@ -94,23 +104,44 @@ export interface CellAtom {
 }
 
 /**
- * Crystal-axis moment arrow for an expanded atom: the site moment `m`
- * transformed by the atom's placing operation (axial, θ-signed) and modulated
- * by the commensurate k-phase of its cell + returning translation. Returns
- * null when the atom carries no moment under the magnetic group.
+ * Crystal-axis moment arrow for an expanded atom: the site's cosine amplitude
+ * `m` (and sine amplitude `mSin`, two-arm k only) transformed by the atom's
+ * placing operation (axial, θ-signed) and modulated by the k-phase of its
+ * cell index n and returning translation L, φ = 2π k·(n − L) — see the module
+ * doc for why it is n − L. Returns null when the atom carries no moment under
+ * the magnetic group. k absent ⇒ no modulation (a k = 0 arrangement).
  */
-export function displayMoment(atom: Pick<CellAtom, "mag" | "cellIndex">, m: Vec3, k?: Vec3): Vec3 | null {
+export function displayMoment(
+  atom: Pick<CellAtom, "mag" | "cellIndex">,
+  m: Vec3,
+  k?: Vec3,
+  mSin?: Vec3,
+): Vec3 | null {
   if (!atom.mag) return null;
   const { rot: R, theta, latt } = atom.mag;
   const n = atom.cellIndex;
-  const kmod = k
-    ? Math.cos(2 * Math.PI * (k[0]! * (latt[0]! + n[0]!) + k[1]! * (latt[1]! + n[1]!) + k[2]! * (latt[2]! + n[2]!)))
-    : 1;
-  const w = theta * determinant(R) * kmod;
+  const phi = k
+    ? 2 * Math.PI * (k[0]! * (n[0]! - latt[0]!) + k[1]! * (n[1]! - latt[1]!) + k[2]! * (n[2]! - latt[2]!))
+    : 0;
+  const axial = theta * determinant(R);
+  const ws = k && mSin ? axial * Math.sin(phi) : 0;
+  if (ws === 0) {
+    // Cosine-only modulation (every k = 0 / self-conjugate model): the
+    // historical arithmetic order, so existing expansions stay bit-identical.
+    const w = axial * (k ? Math.cos(phi) : 1);
+    return [
+      w * (R[0]![0]! * m[0]! + R[0]![1]! * m[1]! + R[0]![2]! * m[2]!),
+      w * (R[1]![0]! * m[0]! + R[1]![1]! * m[1]! + R[1]![2]! * m[2]!),
+      w * (R[2]![0]! * m[0]! + R[2]![1]! * m[1]! + R[2]![2]! * m[2]!),
+    ];
+  }
+  // Modulated crystal-axis amplitude before the rotation (both parts share R).
+  const wc = axial * Math.cos(phi);
+  const v: Vec3 = [wc * m[0]! + ws * mSin![0]!, wc * m[1]! + ws * mSin![1]!, wc * m[2]! + ws * mSin![2]!];
   return [
-    w * (R[0]![0]! * m[0]! + R[0]![1]! * m[1]! + R[0]![2]! * m[2]!),
-    w * (R[1]![0]! * m[0]! + R[1]![1]! * m[1]! + R[1]![2]! * m[2]!),
-    w * (R[2]![0]! * m[0]! + R[2]![1]! * m[1]! + R[2]![2]! * m[2]!),
+    R[0]![0]! * v[0]! + R[0]![1]! * v[1]! + R[0]![2]! * v[2]!,
+    R[1]![0]! * v[0]! + R[1]![1]! * v[1]! + R[1]![2]! * v[2]!,
+    R[2]![0]! * v[0]! + R[2]![1]! * v[1]! + R[2]![2]! * v[2]!,
   ];
 }
 
@@ -628,10 +659,13 @@ function expandMagneticBox(
       // Which moment entry (if any) places an arrow on this orbit member.
       let placing: MomentPlacing | undefined;
       let components: Vec3 | undefined;
+      let sinComponents: Vec3 | undefined;
       for (const anchor of anchors) {
         placing = placingFor(magOps, anchor.pos, frac, anchor.key);
         if (placing) {
-          components = entries.find((e) => e.key === anchor.key)?.components;
+          const entry = entries.find((e) => e.key === anchor.key);
+          components = entry?.components;
+          sinComponents = entry?.sinComponents;
           break;
         }
       }
@@ -643,7 +677,7 @@ function expandMagneticBox(
             const label = multiCopy ? `${site.label}_${copyIndex}` : site.label;
             const moment =
               placing && components
-                ? displayMoment({ mag: placing, cellIndex: [i, j, l] }, components, k) ?? undefined
+                ? displayMoment({ mag: placing, cellIndex: [i, j, l] }, components, k, sinComponents) ?? undefined
                 : undefined;
             const ffId = placing ? ffById.get(placing.momentKey) : undefined;
             atoms.push({

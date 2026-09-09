@@ -216,7 +216,26 @@ Corollary: several symmetry-distinct models can produce the **same** powder magn
 - refine k, the Fourier amplitudes, and inter-site phases; constrain by irrep/superspace symmetry
 ```
 
-`src/core/magnetic/fourierMoment.ts` holds the Fourier-moment representation; extend for harmonics and superspace bookkeeping.
+Implemented conventions (single k, first harmonic only):
+
+```text
+- classify k first: src/core/magnetic/propagation.ts — "zero" | "commensurate" | "incommensurate",
+  selfConjugate (−k ≡ k: every component of 2k integer), twoArms, armFactor (½ or 1), supercell
+- self-conjugate k (0, ½-type): real coefficients, S = M, sine amplitude unobservable (sin 2πk·n ≡ 0),
+  each satellite G + k counted ONCE (G + k and G′ − k coincide)
+- two arms: real space m_j(n) = Mcos·cos(2πk·n) + Msin·sin(2πk·n); coefficient S = ½(Mcos + i·Msin)
+  at H + k, S* at H − k; orbit image placed by {R|τ} in cell L: S′ = θ·det(R)·R·S·e^{2πi k·L},
+  i.e. real space cos/sin(2πk·(n − L)) — the SIGN of L is observable once k·L ∉ ½ℤ
+- parameters: per symmetry-allowed complex mode a cosine amplitude and a sine (quadrature)
+  amplitude (allowedFourierModes; helices are FORCED where the stabilizer phase is complex, e.g.
+  the 120° K-point structure); the first quadrature amplitude is the global phase gauge — fixed
+- a powder cannot distinguish a helix from a collinear modulation with the same |S| distribution
+  (the cross terms cancel over a Laue family); the sign of the quadrature part (chirality) and the
+  global sign (time reversal) are invisible to unpolarized data
+- gate: k-formalism ≡ brute-force real-space sum over the magnetic supercell, both arms, both θ
+  (src/core/magnetic/fourierModulation.test.ts); helix recovery through the powder workflow
+- still missing: harmonics (3k, 5k), (3+1)D superspace symmetry, refining k, multi-k
+```
 
 ## 13. Limits of magnetic refinement — what neutrons cannot tell you
 

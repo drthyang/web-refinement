@@ -68,6 +68,9 @@ comparison recorded here.
 | Le Bail extraction (pattern reconstruction) | integration | ✅ `core/workflow/leBail.test.ts` |
 | Magnetic powder (separable components + refine) | integration | ✅ `core/workflow/magneticPowder.test.ts` |
 | k≠0 Fourier structure factor (SDW/helix) + amplitude recovery | unit + self-consistent | ✅ `core/magnetic/fourierMoment.test.ts` |
+| Two-arm (incommensurate-type) modulation: k-formalism ≡ brute-force real-space supercell sum — k = ¼ (both θ), ⅓ (P3₁ screw), 3/10, self-conjugate ½; ½ two-arm factor; −k conjugation; gauge invariance; symmetry-forced K-point helix | **convention-free oracle** | ✅ `core/magnetic/fourierModulation.test.ts` |
+| Satellite Laue-family multiplicities (self-conjugate k listed once; off-axis star expanded) vs brute-force position count | unit | ✅ `core/magnetic/fourierModulation.test.ts` |
+| Helix (cos ∥ a, sin ∥ b) recovered through the powder workflow; single-crystal satellite rows carry no nuclear term | integration | ✅ `core/workflow/fourierPowder.test.ts` |
 | Grouped (equal-value) constraints | unit | ✅ `core/refinement/engine.test.ts` |
 | Real 200 K/350 K CIF + reflection lists | golden (GSAS d-spacings) | ✅ `parsers/realData.test.ts` |
 | Plot scaling math | unit | ✅ `visualization/scale.test.ts` |

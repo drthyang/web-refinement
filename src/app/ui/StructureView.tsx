@@ -440,17 +440,20 @@ export function StructureView({
     // the commensurate k-phase (cell index + returning translation) — then
     // crystal-axis components → Cartesian for the arrow. Length ∝ |moment|.
     if (moments && moments.length > 0) {
-      const byKey = new Map(moments.map((e) => [e.key, e.components]));
+      const byKey = new Map(moments.map((e) => [e.key, e]));
       let maxMom = 0;
       for (const e of moments) {
+        // Arrow scale from the modulation envelope √(|Mcos|² + |Msin|²): a
+        // helix's arrows are all that long, a sinusoid's peak at it.
         const c = crystalComponentsToCartesian(structure.cell, e.components);
-        maxMom = Math.max(maxMom, Math.hypot(c[0]!, c[1]!, c[2]!));
+        const s = e.sinComponents ? crystalComponentsToCartesian(structure.cell, e.sinComponents) : [0, 0, 0];
+        maxMom = Math.max(maxMom, Math.hypot(c[0]!, c[1]!, c[2]!, s[0]!, s[1]!, s[2]!));
       }
       const arrowUnit = maxMom > 1e-6 ? (span * 0.42) / maxMom : 0;
       for (const at of atoms) {
-        const m = arrowUnit > 0 && at.mag ? byKey.get(at.mag.momentKey) : undefined;
-        if (!m) continue;
-        const mc = displayMoment(at, m, propagation);
+        const entry = arrowUnit > 0 && at.mag ? byKey.get(at.mag.momentKey) : undefined;
+        if (!entry) continue;
+        const mc = displayMoment(at, entry.components, propagation, entry.sinComponents);
         if (!mc) continue;
         const cart = crystalComponentsToCartesian(structure.cell, mc);
         const len = Math.hypot(cart[0]!, cart[1]!, cart[2]!);

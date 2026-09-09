@@ -54,6 +54,7 @@ import { searchPropagationVector, type KSearchOptions } from "@/core/magnetic/kS
 import { magneticSubgroupLattice, latticeRepresentatives } from "@/core/magnetic/subgroupLattice";
 import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
+import { describePropagation } from "@/core/magnetic/propagation";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { rankNextParameterGroups } from "@/core/workflow/nextParameters";
 import { buildPowderProblem } from "@/core/workflow/powder";
@@ -526,7 +527,19 @@ export function build_magnetic_model(args: {
   k?: Vec3;
   moment?: number;
   tieSameSite?: boolean;
-}): { magnetic: MagneticModel; parameters: RefinementParameter[]; bindings: ParameterBinding[]; activeSites: string[] } {
+}): {
+  magnetic: MagneticModel;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  activeSites: string[];
+  /** k classification: "zero" | "commensurate" | "incommensurate", arms, supercell. */
+  propagation: { kind: string; selfConjugate: boolean; twoArms: boolean; supercell: [number, number, number] | null; description: string };
+  /** True when k has two distinct arms and the parameters are cosine + sine
+   *  (quadrature) amplitudes — complex Fourier coefficients. */
+  fourier: boolean;
+  /** The quadrature parameter that must stay FIXED (global modulation phase). */
+  phaseGaugeParameterId?: string;
+} {
   const build = buildMagneticModel(
     args.structure,
     args.k ?? [0, 0, 0],
@@ -537,7 +550,22 @@ export function build_magnetic_model(args: {
       ...(args.tieSameSite !== undefined ? { tieSameSite: args.tieSameSite } : {}),
     },
   );
-  return { magnetic: build.magnetic, parameters: build.params, bindings: build.bindings, activeSites: build.activeSites };
+  const cls = build.propagation;
+  return {
+    magnetic: build.magnetic,
+    parameters: build.params,
+    bindings: build.bindings,
+    activeSites: build.activeSites,
+    propagation: {
+      kind: cls.kind,
+      selfConjugate: cls.selfConjugate,
+      twoArms: cls.twoArms,
+      supercell: cls.supercell ? [cls.supercell[0], cls.supercell[1], cls.supercell[2]] : null,
+      description: describePropagation(cls),
+    },
+    fourier: build.fourier,
+    ...(build.phaseGauge ? { phaseGaugeParameterId: build.phaseGauge.parameterId } : {}),
+  };
 }
 
 /**

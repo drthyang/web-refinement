@@ -198,7 +198,7 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   search_propagation_vector: { args: { structure, peakD: [6.7, 3.35] }, keys: ["candidates"] },
   list_magnetic_subgroups: { args: { structure, maxIndex: 4 }, keys: ["candidates"] },
   allowed_moments: { args: { structure }, keys: ["sites"] },
-  build_magnetic_model: { args: { structure, ionLabels: ["Po1"] }, keys: ["activeSites", "bindings", "magnetic", "parameters"] },
+  build_magnetic_model: { args: { structure, ionLabels: ["Po1"] }, keys: ["activeSites", "bindings", "fourier", "magnetic", "parameters", "propagation"] },
   rank_next_parameters: {
     args: { structure, pattern, parameters: built.parameters.map((q) => ({ ...q, fixed: q.kind === "scale" ? false : true })), bindings: built.bindings, profile: built.profile },
     keys: ["chiSquared", "groups", "wrNow"],

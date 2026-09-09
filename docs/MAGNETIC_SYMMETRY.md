@@ -277,9 +277,12 @@ anti-translation work, M4); the generation script can bundle them by widening
    BZ-boundary k ≠ 0, and an order-parameter-direction picker so
    multidimensional irreps can drive the stabilizer bridge (3) —
    which then covers epikernels automatically.
-6. Type-IV groups: anti-translation enumeration for the magnetic supercell,
-   table rows (widen `MAGTYPES`), and Fourier-coefficient stabilizers for
-   complex k-phases / conjugate-pair irreps.
+6. Type-IV groups: anti-translation enumeration for the magnetic supercell
+   and table rows (widen `MAGTYPES`). ✅ Fourier-coefficient stabilizers for
+   complex k-phases — the complex-linear null space of
+   e^{2πi k·L}·θ·det(R)·R·S = S, which yields symmetry-forced helices
+   ([`allowedFourierModes`](../src/core/magnetic/allowedMoments.ts)); remaining:
+   conjugate-pair irreps feeding those modes from Route B.
 
 ## References
 

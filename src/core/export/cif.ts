@@ -29,6 +29,7 @@ import { inverse, transpose } from "@/core/math/mat3";
 import { normalize } from "@/core/math/vec3";
 import type { Mat3, Vec3 } from "@/core/math/types";
 import { expandMagneticSupercell, momentAnchorPosition } from "@/core/crystal/cellExpansion";
+import { classifyPropagation, describePropagation } from "@/core/magnetic/propagation";
 
 const EIGHT_PI2 = 8 * Math.PI * Math.PI;
 
@@ -276,7 +277,7 @@ function momentLoop(structure: StructureModel, magnetic: MagneticModel): string 
     const c = momentCrystalComponents(structure.cell, m);
     return [m.siteLabel, c[0].toFixed(4), c[1].toFixed(4), c[2].toFixed(4)];
   });
-  return loop(
+  const main = loop(
     [
       "_atom_site_moment.label",
       "_atom_site_moment.crystalaxis_x",
@@ -285,6 +286,26 @@ function momentLoop(structure: StructureModel, magnetic: MagneticModel): string 
     ],
     rows,
   );
+  // Two-arm k (no finite supercell written, or an incommensurate k): the
+  // moment loop above holds the COSINE amplitude of the modulation
+  // m(n) = Mcos·cos(2πk·n) + Msin·sin(2πk·n); the sine amplitudes have no
+  // standard tag outside the (3+1)D magnetic-superspace dictionary, so they
+  // are recorded as comments a reader can act on rather than silently lost.
+  const sinRows = magnetic.moments
+    .filter((m) => m.sinComponents && m.sinComponents.some((c) => Math.abs(c) > 1e-9))
+    .map((m) => {
+      const s = m.frame === "cartesian"
+        ? cartesianToCrystalComponents(structure.cell, m.sinComponents!)
+        : m.sinComponents!;
+      return `#   ${m.siteLabel}  ${s[0].toFixed(4)}  ${s[1].toFixed(4)}  ${s[2].toFixed(4)}`;
+    });
+  if (sinRows.length === 0) return main;
+  return [
+    main,
+    "# Fourier sine (quadrature) amplitudes, crystal axes (µ_B), of the two-arm",
+    "# modulation m(n) = Mcos·cos(2πk·n) + Msin·sin(2πk·n); Mcos is the loop above.",
+    ...sinRows,
+  ].join("\n");
 }
 
 /** Magnetic (BNS) symmetry-operation loop, when the space group carries them. */
@@ -465,9 +486,14 @@ export function magneticStructureToMcif(
   if (sup) return mcifSupercell(structure, magnetic, sup, k, block, opts);
 
   const aug = withOrbitSites(structure, magnetic);
+  const cls = classifyPropagation(k);
   const parts = [
     HEADER,
-    `# propagation vector k = (${k[0]}, ${k[1]}, ${k[2]})`,
+    `# propagation vector k = (${k[0]}, ${k[1]}, ${k[2]}) — ${describePropagation(cls)}`,
+    ...(cls.kind === "incommensurate"
+      ? ["# Incommensurate k: no finite magnetic supercell exists, so the parent cell is written with",
+         "# the Fourier modulation amplitudes; a (3+1)D magnetic-superspace description is not emitted."]
+      : []),
     `data_${block}`,
     `_pd_phase_name  '${structure.name}'`,
     cellBlock(structure.cell, esd),

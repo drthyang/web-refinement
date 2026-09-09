@@ -84,13 +84,13 @@ function buildFigure(
   const entries = momentEntriesFrom(magnetic);
   const supercell = magneticSupercell(k);
   const atoms = buildCellAtoms(structure, supercell, magnetic.operations, entries);
-  const momByKey = new Map(entries.map((e) => [e.key, e.components]));
+  const momByKey = new Map(entries.map((e) => [e.key, e]));
   const subKeys = entries.map((e) => e.key);
   const elements = [...new Set(structure.sites.map((s) => s.element))];
 
   const pts: Projected[] = atoms.map((atom) => {
-    const comps = atom.mag ? momByKey.get(atom.mag.momentKey) : undefined;
-    const mc = comps ? displayMoment(atom, comps, k) : null;
+    const entry = atom.mag ? momByKey.get(atom.mag.momentKey) : undefined;
+    const mc = entry ? displayMoment(atom, entry.components, k, entry.sinComponents) : null;
     return {
       atom,
       x: atom.xyz[0]!,

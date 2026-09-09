@@ -127,7 +127,10 @@ refinement rather than just running it. See
 
 The magnetic workflow runs end to end: **auto-detect magnetic peaks → k-vector
 search → little-group magnetic subgroups → editable moment preview → moment
-refinement** (k = 0 *and* k ≠ 0, CW and TOF, on one shared scale). Occupancy-
+refinement** (k = 0, commensurate *and* incommensurate k ≠ 0 — sinusoidal,
+helical and cycloidal modulations through cosine + sine Fourier amplitudes,
+gated by a brute-force real-space supercell oracle — CW and TOF, on one shared
+scale). Occupancy-
 disorder sites refine with tied position/ADP, a Σ(occupancy) restraint (optionally
 = 1), and an optional shared moment. Fit quality is judged with **F_obs vs F_calc
 and normal-probability plots**, not just wR. Candidate magnetic groups carry

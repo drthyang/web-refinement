@@ -32,7 +32,12 @@ describe("magneticSatellites", () => {
     // d(±k) = 2a = 8 Å; the parent G = (000) is never in a reflection list, so
     // only the explicit seeding can produce these arms.
     expect(sats.some((s) => Math.abs(s.h - 0.5) < 1e-12 && s.k === 0 && s.l === 0 && Math.abs(s.d - 8) < 1e-9)).toBe(true);
-    expect(sats.some((s) => Math.abs(s.h + 0.5) < 1e-12 && s.k === 0 && s.l === 0)).toBe(true);
+    // The −k arm is the Friedel mate of +k: one Laue family, listed ONCE with
+    // multiplicity 2 (listing both arms separately double-counted every
+    // satellite of a self-conjugate k — here k = (½,0,0) ≡ −k).
+    const pure = sats.filter((s) => Math.abs(Math.abs(s.h) - 0.5) < 1e-12 && s.k === 0 && s.l === 0);
+    expect(pure).toHaveLength(1);
+    expect(pure[0]!.multiplicity).toBe(2);
     // Every satellite is offset by ±k from an integer G, and windowed by its own d.
     for (const s of sats) {
       expect(Math.abs(Math.abs(s.h % 1) - 0.5)).toBeLessThan(1e-9);

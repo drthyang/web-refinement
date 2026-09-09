@@ -18,6 +18,7 @@ import type { PowderPattern } from "@/core/diffraction/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { searchPropagationVector, satelliteMatchDeltas, kLabel, type KCandidate } from "@/core/magnetic/kSearch";
+import { classifyPropagation, describePropagation } from "@/core/magnetic/propagation";
 import type { AnnotatedExtraPeak } from "@/core/magnetic/extraPeaks";
 import { littleGroup } from "@/core/magnetic/magneticGroups";
 import { operationKey } from "@/core/crystal/symmetry";
@@ -306,6 +307,9 @@ export function KSearchPanel({
   // k is confirmed explicitly ("Set k") so the symmetry analysis below does not
   // churn on every keystroke; the inputs hold a draft until then.
   const [k, setAppliedK] = useState<Vec3>([0, 0, 0]);
+  // Arms / commensurability of the applied k: decides whether the moment
+  // parameters are real amplitudes or cosine + sine (quadrature) pairs.
+  const kClass = useMemo(() => classifyPropagation(k), [k]);
   const draftK: Vec3 = [parseKComponent(kText[0]), parseKComponent(kText[1]), parseKComponent(kText[2])];
   const draftPending = draftK.some((v, i) => Math.abs(v - k[i]!) > 1e-12);
 
@@ -872,14 +876,19 @@ export function KSearchPanel({
           title="Propagation vector k"
           info={
             <>
-              One commensurate k describes the ordering (single-k model), so setting a new k replaces
-              the current one. Components accept exact fractions — 1/2, 1/3, −1/3 — or decimals;
-              exact fractions matter, since 0.333 misses the little-group tolerance where 1/3 is
-              meant. Type and press Enter (or Set k), pick a search result below, or leave k = (0, 0, 0)
-              for an ordering with the nuclear cell.
+              One k describes the ordering (single-k model), so setting a new k replaces the current
+              one. Components accept exact fractions — 1/2, 1/3, −1/3 — or decimals (an irrational
+              value is an incommensurate k: no finite magnetic cell, refined through Fourier cos/sin
+              amplitudes); exact fractions matter, since 0.333 misses the little-group tolerance where
+              1/3 is meant. Type and press Enter (or Set k), pick a search result below, or leave
+              k = (0, 0, 0) for an ordering with the nuclear cell.
             </>
           }
-          right={<span style={kChip} title="The active propagation vector — steps 3–5 use it">k = {kLabel(k)}</span>}
+          right={
+            <span style={kChip} title={`The active propagation vector — steps 3–5 use it. ${describePropagation(kClass)}`}>
+              k = {kLabel(k)}{kClass.kind === "incommensurate" ? " · incommensurate" : kClass.twoArms ? " · two arms ±k" : ""}
+            </span>
+          }
         />
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <span style={{ fontFamily: themeMono, fontSize: 13, color: theme.secondary }}>k = (</span>
