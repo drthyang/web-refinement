@@ -324,7 +324,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "build_pdf_model",
     title: "Build PDF parameter set",
-    description: "Build the SYMMETRY-ALLOWED PDF parameter set for a structure (plus optional extra phases) against an observed G(r): the PDF scale (seeded to the least-squares optimum), the Qdamp/Qbroad instrument envelope (seeded from the header, fixed), correlated-motion δ1/δ2 and sratio/rcut, the particle-diameter envelope, and the symmetry-reduced cell/positions/ADPs/occupancies. Feed `parameters`/`bindings`/`restraints` to refine_pdf.",
+    description: "Build the SYMMETRY-ALLOWED PDF parameter set for a structure (plus optional extra phases) against an observed G(r): the PDF scale (seeded to the least-squares optimum), the Qdamp/Qbroad instrument envelope (seeded from the header, fixed), correlated-motion δ1/δ2 and sratio/rcut, the particle-diameter envelope, and the symmetry-reduced cell/positions/ADPs/occupancies. Feed `parameters`/`bindings`/`restraints` to refine_pdf. CHECK `warnings`: it names any site with no displacement parameter (B_iso = 0, e.g. a CIF with no U_iso/B_iso column) — that gives delta-sharp G(r) peaks and a collapsed scale, so the fit converges on a meaningless model. Set a B_iso before refining.",
     inputSchema: {
       structure: anyObj.describe("StructureModel from parse_structure"),
       pattern: anyObj.describe("PdfPattern from parse_pdf_data"),
@@ -335,7 +335,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "refine_pdf",
     title: "Refine against G(r) (real space)",
-    description: "Run the deterministic least-squares PDF refinement of the FREED parameters against an observed G(r) — real-space Rietveld with uniform weights (G(r) errors are correlated; Rw is a relative indicator). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → positions); single- or multi-phase; restrict with `fitRange` (low r below r_poly is reduction artifact). Returns refined values, esds, agreement, diagnostics, the r-space residual, and any correlated-motion model conflict in `warnings`.",
+    description: "Run the deterministic least-squares PDF refinement of the FREED parameters against an observed G(r) — real-space Rietveld with uniform weights (G(r) errors are correlated; Rw is a relative indicator). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → positions); single- or multi-phase; restrict with `fitRange` (low r below r_poly is reduction artifact). Returns refined values, esds, agreement, diagnostics, the r-space residual, and — in `warnings` — any correlated-motion model conflict or missing-ADP defect that makes the reported convergence meaningless.",
     inputSchema: {
       structure: anyObj, pattern: anyObj,
       parameters: anyArr.describe("RefinementParameter[] (set fixed:true/false to choose what refines)"),
@@ -347,6 +347,65 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       maxIterations: z.number().int().min(1).max(200).optional(),
     },
     handler: tools.refine_pdf,
+  },
+  {
+    name: "refine_pdf_boxcar",
+    title: "Boxcar scan over r (PDF)",
+    description: "Run a BOXCAR (sliding-window) PDF refinement: refit the freed parameters inside a fixed-width r-window slid across the data, each box seeded from the previous one, and report how every parameter drifts with the box center. This is the r-resolved read of a structure — a value that changes with the box center means the LOCAL structure (low r) differs from the AVERAGE one (high r), which a single whole-range fit averages away. Every box has exactly `width`; a trailing span too short for a full box is not fitted (reported in `warnings`). Each box is seeded from the previous one, which makes the series PATH-DEPENDENT — set `restarts` to re-search each box from randomly perturbed starts and keep the best, so a drift is not one box's local minimum inherited by the rest. Read a value only where its box fitted well (`boxes[].rWeighted`, `boxes[].status`) and where the esd is small compared with the drift — narrow boxes hold few points, so esds grow as the box shrinks. Hold Qdamp/Qbroad fixed: they are instrument constants, not functions of r.",
+    inputSchema: {
+      structure: anyObj, pattern: anyObj,
+      parameters: anyArr.describe("RefinementParameter[] (set fixed:true/false to choose what is tracked)"),
+      bindings: anyArr,
+      restraints: anyArr.optional(),
+      range: z.object({ min: z.number(), max: z.number() }).optional().describe("r span to scan (A); defaults to the whole pattern"),
+      width: z.number().positive().describe("Box width (A) — fixed for every box"),
+      step: z.number().positive().describe("Center-to-center advance (A); width/2 gives half-overlapping boxes"),
+      direction: z.enum(["up", "down"]).optional().describe("Scan order: 'up' = small r to large r (default), 'down' = reverse. Call the tool once each way with the SAME parameters to test path dependence: where the two tracks agree the drift is in the data, where they separate by more than their combined esd the value is set by where the fit started."),
+      seedFromPrevious: z.boolean().optional().describe("Seed each box from the previous box's refined values (default true)"),
+      restarts: z.number().int().min(0).max(20).optional().describe("Randomly perturbed restarts per box beyond the seeded start; the lowest-chi2 one wins and seeds the next box. Use when a track may have inherited one box's local minimum — seeding forward makes the series path-dependent. Costs (restarts + 1)x the scan. Default 0."),
+      maxIterations: z.number().int().min(1).max(200).optional(),
+    },
+    handler: tools.refine_pdf_boxcar,
+  },
+  {
+    name: "build_mpdf_model",
+    title: "Build magnetic-PDF parameter set",
+    description: "Build the magnetic-PDF (mPDF) parameter set: the nuclear PDF rows (scale seeded from the nuclear curve) plus the four mPDF rows — ordered scale, paramagnetic scale, magnetic peak σ, and the short-range-order correlation length ξ — and the symmetry-allowed moment modes from build_magnetic_model. The mPDF rows start FIXED because `mpdfOrdScale` is degenerate with the moment magnitude; free the moments OR the ordered scale, not both. Feed `parameters`/`bindings`/`magnetic` to refine_mpdf. CHECK `warnings`: non-neutron data, an empty spin field, and any site with no displacement parameter (B_iso = 0) all make the result meaningless.",
+    inputSchema: {
+      structure: anyObj.describe("StructureModel from parse_structure"),
+      pattern: anyObj.describe("PdfPattern from parse_pdf_data — must be neutron for a magnetic term"),
+      magnetic: anyObj.describe("MagneticModel from build_magnetic_model"),
+      parameters: anyArr.describe("Moment-mode RefinementParameter[] from build_magnetic_model"),
+      bindings: anyArr.describe("Moment-mode ParameterBinding[] from build_magnetic_model"),
+    },
+    handler: tools.build_mpdf_model,
+  },
+  {
+    name: "refine_mpdf",
+    title: "Refine magnetic PDF (real space)",
+    description: "Co-refine the nuclear G(r) and the magnetic d_mag(r) against one observed NEUTRON PDF — the real-space counterpart of refine_magnetic_powder (Frandsen & Billinge 2015 unnormalized mPDF, added into the same residual). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → moments → positions); restrict with `fitRange`. Returns refined values, esds, agreement, diagnostics, the refined magnetic model, and separated nuclear/magnetic component curves. X-ray patterns get no magnetic term (reported in `warnings`).",
+    inputSchema: {
+      structure: anyObj, magnetic: anyObj.describe("MagneticModel from build_magnetic_model / build_mpdf_model"),
+      pattern: anyObj,
+      parameters: anyArr.describe("RefinementParameter[] from build_mpdf_model (set fixed:true/false to choose what refines)"),
+      bindings: anyArr,
+      restraints: anyArr.optional(),
+      staged: z.boolean().optional(),
+      fitRange: z.object({ min: z.number().optional(), max: z.number().optional() }).optional(),
+      maxIterations: z.number().int().min(1).max(200).optional(),
+    },
+    handler: tools.refine_mpdf,
+  },
+  {
+    name: "compute_mpdf_components",
+    title: "Separate nuclear vs magnetic G(r)",
+    description: "Split the calculated G(r) into its nuclear and magnetic parts at the CURRENT parameter values, without refining. Use it to check whether a candidate spin model produces enough magnetic signal to fit. `magneticFraction` is the RATIO peak|magnetic| / peak|nuclear| — 0.01 is 1%, and below about that the moments are effectively unconstrained by the data (a strongly magnetic neutron PDF runs 0.1–1). Always read it with `nuclearPeak`/`magneticPeak`: the ratio is reported as 0 when the nuclear peak is zero, which means a degenerate nuclear model, not weak magnetism.",
+    inputSchema: {
+      structure: anyObj, magnetic: anyObj, pattern: anyObj,
+      parameters: anyArr, bindings: anyArr,
+      fitRange: z.object({ min: z.number().optional(), max: z.number().optional() }).optional(),
+    },
+    handler: tools.compute_mpdf_components,
   },
   {
     name: "sample_posterior",

@@ -65,6 +65,25 @@ export const fz = {
   title: "var(--fz-title)",
 } as const;
 
+/**
+ * Spacing tokens (defined in workbench.css so they can scale with the
+ * viewport). `gap` is the ONE gutter between cards — vertical and horizontal,
+ * every page — and `inset` is the padding inside a card. Using the same inset
+ * everywhere is what makes two cards across a gutter look like one grid:
+ * mixing 16px and 18px insets, as the pages used to, reads as a wobble even
+ * when nobody can name it.
+ */
+export const space = {
+  gap: "var(--wb-gap)",
+  page: "var(--wb-pad)",
+  inset: "var(--wb-inset)",
+  /** Height of a page's main plot card — viewport-derived so the working area
+   *  fills the window on any 16:9 screen (see workbench.css for the budget). */
+  plotHeight: "var(--wb-plot-h)",
+  /** Height of a secondary plot that shares its column with another card. */
+  plotHeightSm: "var(--wb-plot-h-sm)",
+} as const;
+
 export const radius = { card: 12, button: 8, small: 7, chip: 6, pill: 999 } as const;
 
 export const shadow = {

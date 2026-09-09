@@ -59,11 +59,21 @@ const STEPS: readonly Step[] = [
 // Single crystal shares the same two-step flow: F² refinement, then the (shared,
 // structure-driven) magnetic symmetry analysis fitting moments against F² data.
 const SC_STEPS: readonly Step[] = STEPS;
-// PDF is nuclear-only for now; mPDF (roadmap P4) enables the magnetic chip —
-// shown dimmed so the workflow shape stays visible.
-const PDF_STEPS: readonly Step[] = [
+// PDF's second chip is the magnetic PDF (mPDF) page. It needs NEUTRON data:
+// X-rays have no dipole coupling to spins, so d_mag(r) is identically zero and
+// the moment parameters would be unconstrained (the bundled GaTa₄Se₈ demo is
+// X-ray — hence a live-but-dimmed chip rather than an unconditional one).
+// It is also single-phase only: `buildMpdfSpec` wraps the single-phase nuclear
+// builder. The chip must carry BOTH guards, or it would open a page whose
+// Apply/Continue silently do nothing (PdfWorkbench's own `magneticCapable`
+// check is the stricter one, and would refuse the model without saying why).
+const pdfSteps = (pdf: PdfPattern, extraPhases: number): readonly Step[] => [
   STEPS[0]!,
-  { label: "Magnetic", disabled: true, hint: "Magnetic PDF (mPDF) is the next milestone — arrives with roadmap P4" },
+  extraPhases > 0
+    ? { label: "Magnetic", disabled: true, hint: "Magnetic PDF is single-phase — remove the additional phases to analyse the spin structure" }
+    : pdf.scatteringType === "neutron"
+      ? { label: "Magnetic", hint: "Magnetic PDF (mPDF): spin model + moment refinement against the magnetic G(r)" }
+      : { label: "Magnetic", disabled: true, hint: "Magnetic PDF needs neutron total-scattering data — an X-ray G(r) carries no magnetic signal" },
 ];
 // Before any data loads, the steps preview the workflow but aren't clickable.
 const IDLE_STEPS: readonly Step[] = STEPS.map((s) => ({
@@ -526,9 +536,15 @@ export function App(): JSX.Element {
   const hasContent = session.powderSource !== EMPTY_SOURCE || scDataset !== null || pdfDataset !== null;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+    // The shell is exactly the window: header, disclaimer and footer are fixed
+    // chrome and the content column between them takes the rest. That is what
+    // lets a working row fill a 16:9 screen without anyone computing how tall
+    // the chrome happens to be — and a page whose content genuinely exceeds the
+    // window (the magnetic workflow, single crystal) scrolls inside the column
+    // instead of pushing the footer off-screen.
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <WorkbenchHeader
-        steps={hasContent ? (pdfDataset ? PDF_STEPS : scDataset ? SC_STEPS : STEPS) : IDLE_STEPS}
+        steps={hasContent ? (pdfDataset ? pdfSteps(pdfDataset, session.extraPhases.length) : scDataset ? SC_STEPS : STEPS) : IDLE_STEPS}
         active={step}
         onStep={setStep}
         version={`v${APP_VERSION}`}
@@ -541,7 +557,14 @@ export function App(): JSX.Element {
       />
       {hasContent && (
         <div style={disclaimerBar}>
-          Public beta — validate results intended for publication against established tools. Export your refinement to GSAS-II or FullProf (Export ▸ bundle) to cross-check.
+          <b>Public beta</b> — validated against published reference fits for the cases in its docs, not for
+          yours. Reproduce anything you intend to publish in{" "}
+          {crossCheckTargets(pdfDataset ? "pdf" : scDataset ? "sc" : "rietveld")}; agreement is the evidence.
+          Unmodelled effects:{" "}
+          <a href={LIMITATIONS_URL} target="_blank" rel="noreferrer" style={disclaimerLink}>
+            limitations
+          </a>
+          .
         </div>
       )}
       {/* The powder engine stays mounted in single-crystal mode (hidden) so all
@@ -573,7 +596,7 @@ export function App(): JSX.Element {
         // PDF mode (auto-switched on loading a reduced .gr). Keyed on the dataset
         // id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <PdfWorkbench key={pdfDataset.id} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} />
+          <PdfWorkbench key={pdfDataset.id} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} />
         </main>
       )}
       {scDataset && (
@@ -594,6 +617,28 @@ export function App(): JSX.Element {
   );
 }
 
-const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk };
+/**
+ * The package a user should reproduce THIS technique's result in. Naming the
+ * right one beats a generic "established tools": a PDF user told to check
+ * against GSAS-II learns nothing, and the reference implementations differ per
+ * technique (real space vs reciprocal space vs single crystal).
+ */
+function crossCheckTargets(technique: "rietveld" | "pdf" | "sc"): string {
+  switch (technique) {
+    case "pdf":
+      // The real-space references, including the magnetic term the PDF page can
+      // add — diffpy.mpdf is the only implementation of it worth checking against.
+      return "PDFgui / diffpy-CMI (PDFfit2), or diffpy.mpdf for a magnetic PDF";
+    case "sc":
+      return "SHELXL, JANA2020, or FullProf";
+    default:
+      return "GSAS-II or FullProf (Export ▸ bundle writes both decks)";
+  }
+}
+
+const LIMITATIONS_URL = "https://github.com/drthyang/web-refinement/blob/main/docs/LIMITATIONS.md";
+
+const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
+const disclaimerLink: React.CSSProperties = { color: theme.warnInk, textDecoration: "underline" };
 const copyrightBar: React.CSSProperties = { display: "flex", justifyContent: "center", alignItems: "center", gap: 8, padding: "10px 24px", fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised };
 const footerLink: React.CSSProperties = { color: theme.secondary, textDecoration: "none" };

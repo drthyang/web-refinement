@@ -25,7 +25,7 @@ import { looksLikeFgr, parseFgr, fgrToPattern, type FgrSignal } from "@/parsers/
 import { detectDataFormat } from "@/parsers/detectFormat";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 import { buildPowderSpec, type MustrainModel } from "@/app/powderSpec";
-import { runPowderRefinement, runPdfRefinement } from "@/workers/runPowder";
+import { runPowderRefinement, runPdfRefinement, runMpdfRefinement } from "@/workers/runPowder";
 import { powderCurves } from "@/core/workflow/powder";
 import {
   buildPdfSpec,
@@ -37,9 +37,11 @@ import {
   pdfPhaseCurves,
   optimalPdfScale,
   correlatedMotionConflict,
+  zeroAdpWarning,
   PDF_STAGE_KINDS,
 } from "@/core/workflow/pdf";
 import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
+import { buildMpdfSpec, mpdfComponents, MPDF_STAGE_KINDS } from "@/core/workflow/mpdf";
 import { computeAgreementFactors, excludedPointMask, weightsFromSigma } from "@/core/refinement/factors";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
 import { generateReflections } from "@/core/diffraction/reflections";
@@ -58,6 +60,14 @@ import { buildPowderProblem } from "@/core/workflow/powder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { buildDistortionModes, buildSymmetryModes } from "@/core/crystal/distortionModes";
 import { refine, refineParallel } from "@/core/refinement/engine";
+import { refineSequentialAsync } from "@/core/refinement/sequential";
+import { refineMultiStart } from "@/core/refinement/multiStart";
+import {
+  boxcarPlanIssue,
+  boxcarScannedMax,
+  boxcarWindows,
+  type BoxcarDirection,
+} from "@/core/workflow/pdfBoxcar";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import { parseFullProfInt, looksLikeFullProfInt, writeFullProfInt } from "@/parsers/fullprofInt";
 import { parseHkl } from "@/parsers/hkl";
@@ -879,12 +889,16 @@ export function parse_pdf_data(args: { text: string; filename?: string; signal?:
  * phases) + observed G(r): PDF scale (seeded to the least-squares optimum) and
  * envelope terms plus the symmetry-reduced structural set. Only
  * symmetry-allowed parameters are created.
+ *
+ * `warnings` carries model defects that would make the fit meaningless without
+ * failing — currently sites with no displacement parameter at all, which give
+ * delta-sharp G(r) peaks and a collapsed scale (see zeroAdpWarning).
  */
 export function build_pdf_model(args: {
   structure: StructureModel;
   pattern: PdfPattern;
   extraPhases?: StructureModel[];
-}): { parameters: RefinementParameter[]; bindings: ParameterBinding[]; restraints: LinearRestraint[]; freeCount: number } {
+}): { parameters: RefinementParameter[]; bindings: ParameterBinding[]; restraints: LinearRestraint[]; freeCount: number; warnings: string[] } {
   const multi = args.extraPhases && args.extraPhases.length > 0;
   const spec = multi
     ? buildMultiPhasePdfSpec([args.structure, ...args.extraPhases!], args.pattern)
@@ -897,11 +911,13 @@ export function build_pdf_model(args: {
     : pdfCurves(args.structure, args.pattern, spec.params, spec.bindings);
   const kappa = optimalPdfScale(start.yObs, start.yCalc) / (phases ? phases.length : 1);
   const parameters = spec.params.map((p) => (p.kind === "pdfScale" ? { ...p, value: kappa, initialValue: kappa } : p));
+  const noAdp = zeroAdpWarning([args.structure, ...(args.extraPhases ?? [])]);
   return {
     parameters,
     bindings: spec.bindings,
     restraints: spec.restraints,
     freeCount: parameters.filter((p) => !p.fixed && !p.expression).length,
+    warnings: noAdp ? [noAdp] : [],
   };
 }
 
@@ -983,14 +999,409 @@ export async function refine_pdf(args: {
     (args.fitRange?.min === undefined || r >= args.fitRange.min) &&
     (args.fitRange?.max === undefined || r <= args.fitRange.max);
   const observationCount = curves.x.filter(inRange).length;
+  // Model defects that do not stop the fit but invalidate its verdict: the
+  // correlated-motion clash, and a missing ADP (which "converges" on a
+  // delta-sharp model with a collapsed scale — warn at the point where the
+  // status is reported, not only at build time).
   const conflict = correlatedMotionConflict(args.parameters);
+  const noAdp = zeroAdpWarning([args.structure, ...(args.extraPhases ?? [])]);
   return {
     result,
     observationCount,
     residual: { r: [...curves.x], gObs: [...curves.yObs], gCalc: [...curves.yCalc] },
-    warnings: conflict ? [conflict] : [],
+    warnings: [...(conflict ? [conflict] : []), ...(noAdp ? [noAdp] : [])],
     parallel,
   };
+}
+
+/**
+ * Boxcar (sliding-window) PDF refinement: refit the model inside a fixed-width
+ * r-window slid across the data, each box seeded from the previous one, and
+ * report how every parameter drifts with the box center — the r-resolved read
+ * of a structure whose local and average descriptions may differ.
+ */
+export async function refine_pdf_boxcar(args: {
+  structure: StructureModel;
+  pattern: PdfPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  restraints?: LinearRestraint[];
+  range?: { min: number; max: number };
+  width: number;
+  step: number;
+  direction?: BoxcarDirection;
+  seedFromPrevious?: boolean;
+  restarts?: number;
+  maxIterations?: number;
+}): Promise<{
+  windows: { center: number; min: number; max: number }[];
+  boxes: {
+    center: number;
+    min: number;
+    max: number;
+    status: RefinementResult["status"];
+    rWeighted: number | null;
+    carried: boolean;
+  }[];
+  evolution: { parameterId: string; label: string; values: (number | null)[]; esd: (number | null)[] }[];
+  warnings: string[];
+}> {
+  const rFirst = args.pattern.points[0]?.r ?? 0;
+  const rLast = args.pattern.points[args.pattern.points.length - 1]?.r ?? 0;
+  // Clamp the requested span to where data actually exists. A box outside the
+  // grid has ZERO observations: `buildPdfProblem` gives it an empty window, so
+  // the fit trivially "converges" at Rw 0 with no esds — a box that reports a
+  // perfect fit for a parameter no datum constrained. The UI cannot reach this
+  // (its range comes from the plot), but a tool caller names the span directly.
+  const clamped = {
+    min: Math.max(args.range?.min ?? rFirst, rFirst),
+    max: Math.min(args.range?.max ?? rLast, rLast),
+  };
+  const clipped =
+    args.range !== undefined && (args.range.min < rFirst - 1e-9 || args.range.max > rLast + 1e-9);
+  const plan = {
+    range: clamped,
+    width: args.width,
+    step: args.step,
+    ...(args.direction ? { direction: args.direction } : {}),
+  };
+  const issue = boxcarPlanIssue(plan);
+  if (issue !== null) {
+    throw new Error(
+      `boxcar plan: ${issue}` +
+      (clipped ? ` (the requested range was clipped to the data, ${fmtR(rFirst)}-${fmtR(rLast)} A)` : ""),
+    );
+  }
+  const windows = boxcarWindows(plan);
+
+  const options = { maxIterations: args.maxIterations ?? 20 };
+  const restarts = Math.max(0, Math.floor(args.restarts ?? 0));
+  const baseSpec: EvaluatorSpec = {
+    kind: "pdf",
+    structure: args.structure,
+    pattern: args.pattern,
+    parameters: args.parameters,
+    bindings: args.bindings,
+    ...(args.restraints && args.restraints.length ? { restraints: args.restraints } : {}),
+  };
+  // ONE pool for the whole series, re-initialized per box: `fitRange` is baked
+  // into a replica's problem, so a pool held across windows without re-init
+  // would evaluate the wrong window's Jacobian — silently, since the shape
+  // still matches. Re-init rebuilds the replicas in place; spawning a pool per
+  // box would instead re-execute the bundle in every worker, every box.
+  const first = windows[0]!;
+  const pool = await createNodeEvaluatorPool({ ...baseSpec, fitRange: { min: first.min, max: first.max } });
+  let series;
+  try {
+    series = await refineSequentialAsync(
+      args.parameters,
+      windows.map((w, i) => ({
+        id: `box_${i}`,
+        label: `${w.center.toFixed(2)} A`,
+        buildProblem: (parameters) =>
+          buildProblemForSpec({ ...baseSpec, parameters: [...parameters], fitRange: { min: w.min, max: w.max } }),
+      })),
+      {
+        refineOptions: options,
+        ...(args.seedFromPrevious !== undefined ? { seedFromPrevious: args.seedFromPrevious } : {}),
+      },
+      async (problem, refineOptions, _dataset, index) => {
+        const w = windows[index]!;
+        const fitRange = { min: w.min, max: w.max };
+        await pool?.init({ ...baseSpec, fitRange });
+        // One start, solved on the pool when there is one. `problem.parameters`
+        // is the box's SEEDED set, so the restart baseline is exactly the
+        // seed-only answer — restarts can improve a box, never move it for free.
+        const solve = async (params: readonly RefinementParameter[]): Promise<RefinementResult> => {
+          const p = buildProblemForSpec({ ...baseSpec, parameters: [...params], fitRange });
+          return pool ? refineParallel(p, refineOptions, pool) : refine(p, refineOptions);
+        };
+        if (restarts === 0) return solve(problem.parameters);
+        // A per-box seed: one shared seed would draw the identical perturbation
+        // pattern in every box, imprinting its own r-dependence on the series.
+        const ms = await refineMultiStart(
+          problem.parameters,
+          async (start) => {
+            const result = await solve(start);
+            return { parameters: start.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value })), final: result };
+          },
+          { restarts, seed: 0xb0 + Math.round(w.center * 1000) },
+        );
+        return ms.final;
+      },
+    );
+  } finally {
+    await pool?.dispose();
+  }
+
+  const labelOf = new Map(args.parameters.map((p) => [p.id, p.label]));
+  const num = (v: number | undefined): number | null => (v !== undefined && Number.isFinite(v) ? v : null);
+  const conflict = correlatedMotionConflict(args.parameters);
+  const noAdp = zeroAdpWarning([args.structure]);
+  const diverged = series.steps.filter((s) => !s.carried).length;
+  const scannedMax = boxcarScannedMax(plan);
+  return {
+    windows: windows.map((w) => ({ center: w.center, min: w.min, max: w.max })),
+    boxes: series.steps.map((s, i) => ({
+      center: windows[i]!.center,
+      min: windows[i]!.min,
+      max: windows[i]!.max,
+      status: s.result.status,
+      rWeighted: num(s.result.agreement.rWeighted),
+      carried: s.carried,
+    })),
+    evolution: series.evolution.map((e) => ({
+      parameterId: e.parameterId,
+      label: labelOf.get(e.parameterId) ?? e.parameterId,
+      values: e.values.map(num),
+      esd: e.esd.map(num),
+    })),
+    warnings: [
+      ...(conflict ? [conflict] : []),
+      ...(noAdp ? [noAdp] : []),
+      ...(clipped
+        ? [`The requested range was clipped to where data exists (${fmtR(rFirst)}-${fmtR(rLast)} A); boxes outside the r grid would hold no observations and report a meaningless perfect fit.`]
+        : []),
+      ...(args.step > args.width
+        ? [`step (${args.step} A) exceeds width (${args.width} A), so the boxes sample the range rather than covering it — ${fmtR(args.step - args.width)} A between consecutive boxes is never fitted.`]
+        : []),
+      ...(diverged > 0 ? [`${diverged} box(es) diverged; their values were not carried into the next box.`] : []),
+      ...(scannedMax !== null && scannedMax < clamped.max - 1e-6
+        ? [`Boxes cover ${fmtR(clamped.min)}-${fmtR(scannedMax)} A; the last ${fmtR(clamped.max - scannedMax)} A of the range has no room for a full-width box.`]
+        : []),
+    ],
+  };
+}
+
+/** Compact r for boxcar messages (no trailing zeros). */
+function fmtR(x: number): string {
+  return String(+x.toFixed(3));
+}
+
+/**
+ * Build the magnetic-PDF parameter set: the nuclear PDF rows (scale seeded to
+ * the least-squares optimum of the NUCLEAR curve, as build_pdf_model does), the
+ * four mPDF rows, and the caller's symmetry-allowed moment modes.
+ *
+ * The mPDF rows start FIXED on purpose: `mpdfOrdScale` is degenerate with the
+ * moment magnitude (both scale d_mag linearly), so freeing both fits a flat
+ * valley. Free the moments OR the ordered scale, not both.
+ */
+export function build_mpdf_model(args: {
+  structure: StructureModel;
+  pattern: PdfPattern;
+  magnetic: MagneticModel;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+}): {
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  restraints: LinearRestraint[];
+  magnetic: MagneticModel;
+  freeCount: number;
+  warnings: string[];
+} {
+  const spec = buildMpdfSpec(args.structure, args.pattern, {
+    magnetic: args.magnetic,
+    params: args.parameters,
+    bindings: args.bindings,
+  });
+  // Seed the nuclear scale. `pdfScale` multiplies ONLY the nuclear term — the
+  // magnetic term rides alongside with its own scales — so the conditional
+  // least-squares optimum is κ = Σ(obs − mag)·nuc / Σnuc², not build_pdf_model's
+  // Σobs·nuc / Σnuc². Seeding off the raw observed would inflate κ to absorb the
+  // magnetic signal, which matters: a neutron PDF over a strong moment can carry
+  // a magnetic peak comparable to the nuclear one.
+  //
+  // "Conditional" is the honest word: `mag` is evaluated at the moments the
+  // caller guessed, so an over-estimated starting moment under-seeds κ. It is a
+  // SEED — the co-refinement solves κ and the moments together — and a joint
+  // 2-parameter linear solve is deliberately not done here, because the second
+  // amplitude (ordScale) is exactly degenerate with the moment magnitude.
+  // `mpdfComponents` returns the unit-scale nuclear curve and the magnetic curve
+  // from one evaluation, both band-limited exactly as the fitted model is.
+  const start = mpdfComponents(args.structure, spec.magnetic, args.pattern, spec.params, spec.bindings);
+  const kappa = optimalPdfScale(start.yObs.map((o, i) => o - (start.yMagnetic[i] ?? 0)), start.yNuclear);
+  const parameters = spec.params.map((p) => (p.kind === "pdfScale" ? { ...p, value: kappa, initialValue: kappa } : p));
+  const warnings: string[] = [];
+  if (args.pattern.scatteringType !== "neutron") {
+    warnings.push(`Pattern scatteringType is "${args.pattern.scatteringType}": X-rays carry no magnetic dipole term, so d_mag(r) is identically zero and the moment parameters are unconstrained.`);
+  }
+  if (args.magnetic.moments.length === 0) {
+    warnings.push("The magnetic model has no moments — the magnetic component is identically zero.");
+  }
+  const empty = emptySpinFieldWarning(args.pattern, spec.magnetic, start.yMagnetic);
+  if (empty) warnings.push(empty);
+  // A missing nuclear ADP is worse here than in build_pdf_model: the nuclear
+  // term goes delta-sharp exactly as it does there, and the moments are then
+  // refined against whatever mismatch the collapsing nuclear scale leaves
+  // behind — so the magnetic answer is corrupted too, not just the nuclear one.
+  const noAdp = zeroAdpWarning([args.structure]);
+  if (noAdp) warnings.push(noAdp);
+  // The caller's rows are concatenated onto a freshly built nuclear spec, so
+  // re-feeding this tool its OWN output (instead of build_magnetic_model's)
+  // would duplicate every id and silently produce an ill-posed problem.
+  const seen = new Set<string>();
+  const duplicated = [...new Set(spec.params.filter((p) => (seen.has(p.id) ? true : (seen.add(p.id), false))).map((p) => p.id))];
+  if (duplicated.length > 0) {
+    warnings.push(`Duplicate parameter ids (${duplicated.join(", ")}): \`parameters\`/\`bindings\` must be build_magnetic_model's MOMENT rows, not another build_mpdf_model result.`);
+  }
+  return {
+    parameters,
+    bindings: spec.bindings,
+    restraints: spec.restraints,
+    magnetic: spec.magnetic,
+    freeCount: parameters.filter((p) => !p.fixed && !p.expression).length,
+    warnings,
+  };
+}
+
+/**
+ * Co-refine the nuclear G(r) and the magnetic d_mag(r) against one observed
+ * neutron PDF (real-space Rietveld with a magnetic term, Frandsen &
+ * Billinge 2015). Returns the result, the refined magnetic model, and the
+ * separated nuclear/magnetic component curves.
+ */
+export async function refine_mpdf(args: {
+  structure: StructureModel;
+  magnetic: MagneticModel;
+  pattern: PdfPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  restraints?: LinearRestraint[];
+  staged?: boolean;
+  fitRange?: { min?: number; max?: number };
+  maxIterations?: number;
+}): Promise<{
+  result: RefinementResult;
+  magnetic: MagneticModel;
+  observationCount: number;
+  components: { r: number[]; gObs: number[]; gNuclear: number[]; gMagnetic: number[]; gCalc: number[] };
+  warnings: string[];
+  parallel: { workers: number } | null;
+}> {
+  const options = { maxIterations: args.maxIterations ?? 30 };
+
+  // Parallel fast path (flat fits): the Jacobian fans out over the node
+  // worker-thread pool when the runtime supports it; bit-identical to serial.
+  let parallel: { workers: number } | null = null;
+  let result: RefinementResult | null = null;
+  if (!args.staged) {
+    const spec: EvaluatorSpec = {
+      kind: "mpdf",
+      structure: args.structure,
+      magnetic: args.magnetic,
+      pattern: args.pattern,
+      parameters: args.parameters,
+      bindings: args.bindings,
+      ...(args.restraints && args.restraints.length ? { restraints: args.restraints } : {}),
+      ...(args.fitRange ? { fitRange: args.fitRange } : {}),
+    };
+    const pool = await createNodeEvaluatorPool(spec);
+    if (pool) {
+      try {
+        result = await refineParallel(buildProblemForSpec(spec), options, pool);
+        parallel = { workers: pool.size };
+      } finally {
+        await pool.dispose();
+      }
+    }
+  }
+  if (!result) {
+    result = runMpdfRefinement({
+      type: "refineMpdf",
+      requestId: 0,
+      structure: args.structure,
+      magnetic: args.magnetic,
+      pattern: args.pattern,
+      parameters: args.parameters,
+      bindings: args.bindings,
+      ...(args.restraints && args.restraints.length ? { restraints: args.restraints } : {}),
+      ...(args.staged ? { staged: MPDF_STAGE_KINDS } : {}),
+      ...(args.fitRange ? { fitRange: args.fitRange } : {}),
+      options,
+    });
+  }
+
+  const refined = args.parameters.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value }));
+  // The protocol never carries the refined magnetic model back; every caller
+  // reconstructs it from the converged values (the magnetic powder convention).
+  const refinedMagnetic = applyMagneticMoments(args.magnetic, args.bindings, Object.fromEntries(refined.map((p) => [p.id, p.value])));
+  const c = mpdfComponents(args.structure, refinedMagnetic, args.pattern, refined, args.bindings, args.fitRange);
+  const inRange = (r: number): boolean =>
+    (args.fitRange?.min === undefined || r >= args.fitRange.min) &&
+    (args.fitRange?.max === undefined || r <= args.fitRange.max);
+  const conflict = correlatedMotionConflict(args.parameters);
+  const warnings = conflict ? [conflict] : [];
+  if (args.pattern.scatteringType !== "neutron") {
+    warnings.push(`Pattern scatteringType is "${args.pattern.scatteringType}": no magnetic term was added (X-rays have no dipole coupling to spins).`);
+  }
+  if (args.magnetic.moments.length === 0) {
+    warnings.push("The magnetic model has no moments — this was a nuclear-only refinement.");
+  }
+  const empty = emptySpinFieldWarning(args.pattern, refinedMagnetic, c.yMagnetic);
+  if (empty) warnings.push(empty);
+  return {
+    result,
+    magnetic: refinedMagnetic,
+    observationCount: c.x.filter(inRange).length,
+    components: { r: [...c.x], gObs: [...c.yObs], gNuclear: [...c.yNuclear], gMagnetic: [...c.yMagnetic], gCalc: [...c.yCalc] },
+    warnings,
+    parallel,
+  };
+}
+
+/**
+ * Separate the observed G(r) into its nuclear and magnetic calculated parts at
+ * the CURRENT parameter values — no refinement. The way to check whether a
+ * candidate spin model produces a magnetic signal large enough to fit before
+ * spending a refinement on it.
+ */
+export function compute_mpdf_components(args: {
+  structure: StructureModel;
+  magnetic: MagneticModel;
+  pattern: PdfPattern;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  fitRange?: { min?: number; max?: number };
+}): {
+  components: { r: number[]; gObs: number[]; gNuclear: number[]; gMagnetic: number[]; gCalc: number[]; diff: number[] };
+  /** Peak |magnetic| as a RATIO of peak |nuclear| (0.01 = 1 %). Below ~0.01 the
+   *  moments are effectively unconstrained by this data. Read it together with
+   *  the two peaks below: a zero nuclear peak makes the ratio undefined (it is
+   *  reported as 0), which is a degenerate nuclear model, NOT weak magnetism. */
+  magneticFraction: number;
+  /** Peak |nuclear| G(r) in the window — 0 means a degenerate nuclear model. */
+  nuclearPeak: number;
+  /** Peak |magnetic| G(r) in the window — 0 means no magnetic term at all. */
+  magneticPeak: number;
+} {
+  const c = mpdfComponents(args.structure, args.magnetic, args.pattern, args.parameters, args.bindings, args.fitRange);
+  const nuclearPeak = peakAbs(c.yNuclear);
+  const magneticPeak = peakAbs(c.yMagnetic);
+  return {
+    components: { r: [...c.x], gObs: [...c.yObs], gNuclear: [...c.yNuclear], gMagnetic: [...c.yMagnetic], gCalc: [...c.yCalc], diff: [...c.diff] },
+    magneticFraction: nuclearPeak > 0 ? magneticPeak / nuclearPeak : 0,
+    nuclearPeak,
+    magneticPeak,
+  };
+}
+
+/** Largest |y| over a curve — the peak-height helper the mPDF tools share. */
+function peakAbs(ys: readonly number[]): number {
+  return ys.reduce((m, y) => Math.max(m, Math.abs(y)), 0);
+}
+
+/**
+ * The magnetic term is dropped entirely when no site in the expanded box carries
+ * a moment — which happens silently when the magnetic model's `siteLabel`s do
+ * not match the structure's site labels. The refinement then "succeeds" with an
+ * identically-zero moment Jacobian, so this has to be said out loud.
+ */
+function emptySpinFieldWarning(pattern: PdfPattern, magnetic: MagneticModel, gMagnetic: readonly number[]): string | null {
+  if (pattern.scatteringType !== "neutron" || magnetic.moments.length === 0) return null;
+  if (peakAbs(gMagnetic) > 0) return null;
+  return `The magnetic model declares ${magnetic.moments.length} moment(s) but the calculated magnetic G(r) is identically zero — no site in the structure carries a moment under it. Check that the model's siteLabel values match the structure's site labels; the moment parameters are unconstrained as it stands.`;
 }
 
 /**

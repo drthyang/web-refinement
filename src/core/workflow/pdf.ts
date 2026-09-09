@@ -40,7 +40,7 @@ import {
 import { cartesianAdpTensor, enumeratePairs } from "@/core/pdf/pairEnumerator";
 import { computeGofR, PAIR_REACH_MARGIN, type PdfModelParams } from "@/core/pdf/forwardModel";
 import { computeGofRWithColumns, DUISO_DBISO, type PdfColumnRequest } from "@/core/pdf/gradients";
-import { rotateUAniso } from "@/core/crystal/adp";
+import { rotateUAniso, toIsotropic } from "@/core/crystal/adp";
 import { orthogonalizationMatrix } from "@/core/crystal/unitCell";
 import { mulVec } from "@/core/math/mat3";
 import { computePartialsGofR } from "@/core/pdf/partials";
@@ -903,4 +903,44 @@ export function correlatedMotionConflict(params: readonly RefinementParameter[])
   return freeDelta && freeStep
     ? "δ1/δ2 and sratio/rcut are alternative correlated-motion models — refine one family, fix the other."
     : null;
+}
+
+/**
+ * Below this an ADP is *missing*, not small: a real B_iso is O(0.1–5) Å², and
+ * nothing physical sits at 1e-6.
+ */
+const ZERO_ADP_TOLERANCE = 1e-6;
+
+/**
+ * Sites carrying no displacement parameter at all (B_iso ≈ 0).
+ *
+ * Plenty of CIFs — the Pearson's / structure-report dialects especially — have
+ * no `_atom_site_U_iso_or_equiv` (or `_B_iso_`) column, and every site then
+ * parses with B_iso = 0. In reciprocal space that is merely wrong (no
+ * Debye–Waller falloff); in real space it is fatal. The Gaussian width of every
+ * pair collapses to the r-dependent floor, each G(r) peak becomes a delta-like
+ * spike far taller than the data, and the least-squares PDF scale drops by
+ * orders of magnitude to compensate. The refinement then reports "converged" on
+ * a model that is nothing but sharpened noise.
+ *
+ * Deliberately a warning and not a substituted default: picking an ADP for the
+ * user would hide the defect and invent physics. Returns a user-facing message,
+ * or null when every site has one.
+ */
+export function zeroAdpWarning(structures: readonly StructureModel[]): string | null {
+  const labels: string[] = [];
+  const qualify = structures.length > 1;
+  for (const s of structures) {
+    for (const site of s.sites) {
+      const iso = toIsotropic(site.adp);
+      if (iso.kind === "isotropic" && Math.abs(iso.bIso) < ZERO_ADP_TOLERANCE) {
+        labels.push(qualify ? `${s.name || s.id}/${site.label}` : site.label);
+      }
+    }
+  }
+  if (labels.length === 0) return null;
+  const shown = labels.length > 6
+    ? `${labels.slice(0, 6).join(", ")} (+${labels.length - 6} more)`
+    : labels.join(", ");
+  return `No displacement parameter on ${labels.length === 1 ? "site" : "sites"} ${shown} (B_iso = 0) — typically a CIF with no _atom_site_U_iso_or_equiv / _atom_site_B_iso_or_equiv column. A zero ADP makes every G(r) peak delta-sharp, so the refined PDF scale collapses to compensate and the fit is meaningless no matter what Rw it reports. Set a B_iso per site before refining (0.3–1 Å², i.e. U_iso ≈ 0.004–0.013 Å², is a typical room-temperature starting value).`;
 }

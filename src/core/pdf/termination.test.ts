@@ -97,6 +97,39 @@ describe("bandLimit — ideal low-pass on a uniform grid", () => {
     expect(err).toBeLessThan(2e-3 * scale);
   });
 
+  it("the 'fft' method reproduces the exact sum", () => {
+    // The gate is wrap-around: too small a transform aliases the kernel's
+    // mirrored half onto its forward half, which no physics assertion in this
+    // file would notice. 1e-11 is loose enough for the FFT's own rounding
+    // (~1e-13 relative) and tight enough that aliasing cannot hide under it.
+    const g = Float64Array.from(r, (x) => Math.exp(-((x - 12) ** 2) / 0.02) + 0.1 * Math.sin(4 * x));
+    const exact = bandLimit(g, r[0]!, h, qmax);
+    const fft = bandLimit(g, r[0]!, h, qmax, "fft");
+    const scale = Math.max(...exact.map(Math.abs));
+    let err = 0;
+    for (let i = 0; i < n; i++) err = Math.max(err, Math.abs(fft[i]! - exact[i]!));
+    expect(err).toBeLessThan(1e-11 * scale);
+  });
+
+  it("splitting a small term off and FFT-ing only that matches the single exact call", () => {
+    // The property `workflow/mpdf` relies on: band-limiting is linear, so a big
+    // term done exactly plus a small one done by FFT equals the whole thing.
+    // `small` is ~5 % of `big`, the magnetic fraction of a real neutron G(r).
+    const big = Float64Array.from(r, (x) => Math.exp(-((x - 12) ** 2) / 0.02) * 8 - 0.35 * x);
+    const small = Float64Array.from(r, (x) => 0.05 * Math.sin(2.4 * x) * Math.exp(-x / 20));
+    const whole = Float64Array.from(big, (v, i) => v + small[i]!);
+
+    const oneCall = bandLimit(whole, r[0]!, h, qmax);
+    const split = bandLimit(big, r[0]!, h, qmax);
+    const splitSmall = bandLimit(small, r[0]!, h, qmax, "fft");
+    for (let i = 0; i < n; i++) split[i] = split[i]! + splitSmall[i]!;
+
+    const scale = Math.max(...oneCall.map(Math.abs));
+    let err = 0;
+    for (let i = 0; i < n; i++) err = Math.max(err, Math.abs(split[i]! - oneCall[i]!));
+    expect(err).toBeLessThan(1e-12 * scale);
+  });
+
   it("a sharp peak gains the sinc ripple: first zero at π/Qmax, negative sidelobe", () => {
     const rPeak = 12;
     const g = Float64Array.from(r, (x) => (Math.abs(x - rPeak) < h / 2 ? 1 : 0)); // ~δ at 12 Å

@@ -18,8 +18,10 @@ import {
   optimalPdfScale,
   guidedPdfParams,
   correlatedMotionConflict,
+  zeroAdpWarning,
   PDF_STAGE_KINDS,
 } from "@/core/workflow/pdf";
+import { parseCif } from "@/parsers/cif";
 import { runPdfRefinement } from "@/workers/runPowder";
 
 const IDENTITY_OP = { rotation: IDENTITY3, translation: [0, 0, 0] as const, xyz: "x,y,z" };
@@ -406,6 +408,62 @@ describe("correlated-motion exclusivity guard", () => {
     expect(correlatedMotionConflict(both)).toMatch(/alternative correlated-motion/);
     const stepOnly = spec.params.map((p) => (p.id === "rcut" ? { ...p, fixed: false } : p));
     expect(correlatedMotionConflict(stepOnly)).toBeNull();
+  });
+});
+
+describe("missing-ADP guard", () => {
+  // The Pearson's / structure-report atom-site column set: no U_iso and no
+  // B_iso, so every site parses at B_iso = 0. Fitting a real G(r) against this
+  // converges (Rw ~ 97%) on a delta-sharp model with a scale ~50× too small —
+  // the failure this guard exists to name.
+  const noAdpCif = (adpHeader = "", adpValues: [string, string] = ["", ""]): string => `data_mnte
+_cell_length_a  4.1429
+_cell_length_b  4.1429
+_cell_length_c  6.7031
+_cell_angle_alpha  90
+_cell_angle_beta   90
+_cell_angle_gamma  120
+loop_
+  _space_group_symop_operation_xyz
+  'x,y,z'
+loop_
+  _atom_site_label
+  _atom_site_type_symbol
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+  _atom_site_occupancy${adpHeader}
+  Te Te 0.333333 0.666667 0.25 1${adpValues[0]}
+  Mn Mn 0 0 0 1${adpValues[1]}
+`;
+
+  it("names every ADP-less site and says why the fit will be meaningless", () => {
+    const warning = zeroAdpWarning([parseCif(noAdpCif())]);
+    expect(warning).not.toBeNull();
+    expect(warning).toMatch(/\bTe\b/);
+    expect(warning).toMatch(/\bMn\b/);
+    expect(warning).toMatch(/B_iso = 0/);
+    expect(warning).toMatch(/delta-sharp/);
+    expect(warning).toMatch(/scale collapses/);
+  });
+
+  it("stays silent once the CIF carries a B_iso column", () => {
+    const withB = parseCif(noAdpCif("\n  _atom_site_B_iso_or_equiv", [" 0.47", " 0.47"]));
+    expect(zeroAdpWarning([withB])).toBeNull();
+  });
+
+  it("passes a structure whose ADPs are set, and qualifies site labels across phases", () => {
+    expect(zeroAdpWarning([perturbedStructure()])).toBeNull();
+    const bare = parseCif(noAdpCif());
+    const two = zeroAdpWarning([bare, { ...bare, id: "second", name: "second" }])!;
+    expect(two).toMatch(/second\/Mn/);
+  });
+
+  it("catches an anisotropic site whose tensor is all zeros", () => {
+    const s = p1Structure({ a: 4, b: 4, c: 4, alpha: 90, beta: 90, gamma: 90 }, [
+      { label: "A", element: "Ni", position: [0, 0, 0], occupancy: 1, adp: { kind: "anisotropic", uAniso: [0, 0, 0, 0, 0, 0] } },
+    ]);
+    expect(zeroAdpWarning([s])).toMatch(/\bA\b/);
   });
 });
 

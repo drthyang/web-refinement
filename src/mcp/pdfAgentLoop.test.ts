@@ -98,5 +98,37 @@ describe("agent loop — nuclear PDF study via MCP tools only", () => {
     const cal = call("calibrate_qdamp", { structure: truth.structure, pattern: parsed.pattern, maxIterations: 20 });
     expect(cal.qdamp).toBeGreaterThan(0.02);
     expect(cal.qdamp).toBeLessThan(0.05);
-  }, 120000);
+
+    // 5. Boxcar: the r-resolved read of the SAME model. The truth is one
+    //    length-scale-independent structure, so every box must land on it —
+    //    a flat track is the correct answer here, and the drift a real local
+    //    distortion would show is measured against exactly this baseline.
+    const boxcar = await call("refine_pdf_boxcar", {
+      structure: start.structure, pattern: parsed.pattern,
+      parameters: params, bindings: model.bindings,
+      range: { min: 1.5, max: 9.5 }, width: 4, step: 2, maxIterations: 25,
+    });
+    expect(boxcar.windows.map((w: { min: number; max: number }) => [w.min, w.max])).toEqual([
+      [1.5, 5.5], [3.5, 7.5], [5.5, 9.5],
+    ]);
+    expect(boxcar.boxes.every((b: { status: string }) => b.status === "converged")).toBe(true);
+    const track = boxcar.evolution.find((e: { parameterId: string }) => e.parameterId.startsWith("cell_"))!;
+    for (const v of track.values) expect(Math.abs(v - TRUE_A)).toBeLessThan(5e-3);
+    // Every box carries a real fit: a box outside the data would "converge"
+    // with no observations at all (Rw 0, no esd) — the regression this pins.
+    for (const b of boxcar.boxes) expect(b.rWeighted).toBeGreaterThan(0);
+    for (const e of track.esd) expect(e).toBeGreaterThan(0);
+
+    // A range beyond the r grid is clipped to the data, with the clip reported
+    // — never fitted as empty boxes that report a perfect fit for nothing.
+    const clipped = await call("refine_pdf_boxcar", {
+      structure: start.structure, pattern: parsed.pattern,
+      parameters: params, bindings: model.bindings,
+      range: { min: 1.5, max: 60 }, width: 4, step: 4, maxIterations: 10,
+    });
+    const rLast = parsed.pattern.points[parsed.pattern.points.length - 1]!.r;
+    expect(Math.max(...clipped.windows.map((w: { max: number }) => w.max))).toBeLessThanOrEqual(rLast + 1e-9);
+    expect(clipped.warnings.some((w: string) => w.includes("clipped to where data exists"))).toBe(true);
+    for (const b of clipped.boxes) expect(b.rWeighted).toBeGreaterThan(0);
+  }, 180000);
 });

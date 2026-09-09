@@ -78,6 +78,13 @@ const MOMENT_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "momentMode", "momentX", "momentY", "momentZ",
 ]);
 
+/** Kinds that reach ONLY the mPDF bag — every `mpdfVals` case in `apply.ts`.
+ *  Together with {@link MOMENT_KINDS} these are the kinds that cannot move the
+ *  nuclear model, which is what makes the nuclear G(r) cache below sound. */
+const MPDF_ONLY_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
+  "mpdfOrdScale", "mpdfParaScale", "mpdfPsigma", "corrLength",
+]);
+
 /** The magnetic box + spin list + composition bookkeeping for one evaluation. */
 interface SpinField {
   readonly spins: MpdfSpin[];
@@ -89,12 +96,21 @@ function buildSpinField(structure: StructureModel, magnetic: MagneticModel): Spi
   const box = expandSpinField(structure, magnetic);
   const spins: MpdfSpin[] = [];
   for (const atom of box.atoms) {
+    // Whether an atom carries a moment is decided by SYMMETRY (`displayMoment`
+    // returns null only when the magnetic group puts no arrow on the orbit
+    // member), never by the moment's current magnitude — so the spin list, its
+    // length N, the pair indices, ρ₀ and the spins-per-atom scale are all pure
+    // functions of the geometry. A magnitude filter here would make N jump as a
+    // refined moment crosses zero: the cached pair list (keyed on geometry
+    // alone) would then index a differently-sized spin array, giving a wrong
+    // magnetic curve in one direction and an out-of-bounds read in the other,
+    // and it would break the pooled ≡ serial contract because pool members
+    // prime their caches from different value-sets. A zero moment is a
+    // legitimate spin: it contributes exactly zero to A_ij/B_ij and ⟨m²⟩.
     if (!atom.moment) continue;
     // Crystal-axis (normalized â,b̂,ĉ) → Cartesian μ_B; the normalized axes of
     // an axis-diagonal supercell coincide with the parent's.
-    const m = crystalComponentsToCartesian(box.cell, atom.moment);
-    if (Math.hypot(m[0]!, m[1]!, m[2]!) < 1e-9) continue;
-    spins.push({ position: atom.site.position, moment: m });
+    spins.push({ position: atom.site.position, moment: crystalComponentsToCartesian(box.cell, atom.moment) });
   }
   return { spins, boxVolumeCells: box.n[0] * box.n[1] * box.n[2], cell: box.cell };
 }
@@ -138,6 +154,33 @@ export function buildMpdfProblem(
   const geomIds = [...new Set(bindings.filter((b) => PAIR_GEOMETRY_KINDS.has(b.kind)).map((b) => b.parameterId))];
   let lastNucKey: string | null = null;
   let cachedNucPairs: PdfPair[] = [];
+
+  // Nuclear G(r) cache — the one buildPdfProblem has no use for. A moment-only
+  // Jacobian column leaves the nuclear model untouched, so recomputing
+  // computeGofR for it is pure waste; with a moment-dominated parameter set that
+  // is most of the Jacobian (measured: ~9.6 ms of a ~18 ms evaluation, on 9 of
+  // every 10 columns). Its BAND-LIMITED form caches alongside it — see the
+  // linearity split at the call site, which is what buys the other ~6 ms.
+  //
+  // The key must cover every parameter that can reach `applied.model` or
+  // `applied.pdf`. It is built by EXCLUSION, from parameter ids all of whose
+  // bindings are moment/mPDF kinds: `applyParameters` switches on binding kind,
+  // and those cases only write `momentScale` and the `mpdf` bag ("momentMode"
+  // has no case at all), so they provably cannot move the nuclear model. Keying
+  // on RESOLVED values also makes ties safe — a nuclear parameter tied to a
+  // moment one still shows its own resolved value here. A parameter with no
+  // binding stays in the key, which can only cost a spurious miss.
+  const magneticOnlyIds = new Set<string>();
+  for (const p of parameters) {
+    const own = bindings.filter((b) => b.parameterId === p.id);
+    if (own.length > 0 && own.every((b) => MOMENT_KINDS.has(b.kind) || MPDF_ONLY_KINDS.has(b.kind))) {
+      magneticOnlyIds.add(p.id);
+    }
+  }
+  const nuclearIds = parameters.map((p) => p.id).filter((id) => !magneticOnlyIds.has(id));
+  let lastNucModelKey: string | null = null;
+  let cachedNucModel: Float64Array | null = null;
+  let cachedNucBand: Float64Array | null = null;
 
   // Magnetic caches: the spin-PAIR geometry follows the nuclear geometry key;
   // the spin FIELD additionally moves with the moment parameters. The magnetic
@@ -213,13 +256,37 @@ export function buildMpdfProblem(
       cachedNucPairs = enumeratePairs(applied.model.cell, atoms, rMaxModel + PAIR_REACH_MARGIN);
       lastNucKey = nucKey;
     }
-    const params: PdfModelParams = { scatteringType: pattern.scatteringType, ...(applied.pdf ?? PDF_DEFAULTS) };
-    const gModel = computeGofR(applied.model.cell, atoms, modelGrid, params, cachedNucPairs);
+    let nucModelKey = "";
+    for (const id of nuclearIds) nucModelKey += `|${resolved[id]}`;
+    if (nucModelKey !== lastNucModelKey || !cachedNucModel) {
+      const params: PdfModelParams = { scatteringType: pattern.scatteringType, ...(applied.pdf ?? PDF_DEFAULTS) };
+      cachedNucModel = computeGofR(applied.model.cell, atoms, modelGrid, params, cachedNucPairs);
+      // Band-limiting is LINEAR, so the terminated nuclear curve caches with the
+      // curve itself and the magnetic term can be band-limited separately and
+      // added. That is what makes the FFT safe here (see BandLimitMethod): the
+      // exact sum runs on the big nuclear term, and the transform only ever
+      // sees d_mag, a few per cent of the total — its error shrinks with it,
+      // and the nuclear rounding is now bit-identical between the two points of
+      // a moment finite difference instead of merely close.
+      cachedNucBand = terminate ? bandLimit(cachedNucModel, modelGrid[0]!, qstep, qmax) : null;
+      lastNucModelKey = nucModelKey;
+    }
     const gMag = magneticComponent(resolved, applied);
-    if (gMag) for (let k = 0; k < gModel.length; k++) gModel[k] = gModel[k]! + gMag[k]!;
-    const gWindow = terminate
-      ? bandLimit(gModel, modelGrid[0]!, qstep, qmax).subarray(sliceOffset, sliceOffset + rWindow.length)
-      : gModel;
+    // Copy either way: the sum is accumulated in place, and the cached array
+    // would otherwise pick up d_mag again on every hit.
+    let gWindow: Float64Array;
+    if (terminate) {
+      const band = Float64Array.from(cachedNucBand!);
+      if (gMag) {
+        const magBand = bandLimit(gMag, modelGrid[0]!, qstep, qmax, "fft");
+        for (let k = 0; k < band.length; k++) band[k] = band[k]! + magBand[k]!;
+      }
+      gWindow = band.subarray(sliceOffset, sliceOffset + rWindow.length);
+    } else {
+      const gModel = Float64Array.from(cachedNucModel);
+      if (gMag) for (let k = 0; k < gModel.length; k++) gModel[k] = gModel[k]! + gMag[k]!;
+      gWindow = gModel;
+    }
     const out = new Float64Array(rValues.length + restraints.length);
     out.set(gWindow.subarray(0, rWindow.length), i0);
     for (let i = 0; i < restraints.length; i++) {

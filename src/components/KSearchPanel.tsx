@@ -50,7 +50,7 @@ import { momentEntriesFrom } from "@/app/ui/cellModel";
 import { magneticReportHtml, type MagneticReportGroup } from "@/core/export/magneticReport";
 import { structureToCif, magneticStructureToMcif } from "@/core/export/cif";
 import { downloadText } from "@/app/download";
-import { card as themeCard, color as theme, mono as themeMono, uppercaseLabel as themeLabel } from "@/app/theme";
+import { card as themeCard, color as theme, mono as themeMono, uppercaseLabel as themeLabel, resetRangeBtn, space, toolbarBtn } from "@/app/theme";
 
 // Lazy so three.js stays in its own chunk (only loaded when a group is previewed).
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
@@ -722,7 +722,7 @@ export function KSearchPanel({
           the refinement plot (refined curves, fit range, unit toggle), plus
           the satellite / allowed / residual tick rows. */}
       {patternView && (
-        <section style={{ ...themeCard, padding: "12px 16px 12px", display: "flex", flexDirection: "column" }}>
+        <section style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, flexWrap: "wrap", marginBottom: 8 }}>
             <span style={themeLabel}>Powder pattern</span>
             <InfoBadge
@@ -776,7 +776,7 @@ export function KSearchPanel({
               {patternView.unitToggle}
             </div>
           </div>
-          <div style={{ height: "clamp(320px, 38vh, 460px)", display: "flex", flexDirection: "column" }}>
+          <div style={{ height: space.plotHeightSm, display: "flex", flexDirection: "column" }}>
             <WorkbenchPlot
               curves={patternView.curves}
               xLabel={patternView.xLabel}
@@ -808,7 +808,7 @@ export function KSearchPanel({
         </section>
       )}
 
-      <section style={{ ...themeCard, padding: "14px 16px", display: "flex", flexDirection: "column", ...(patternView ? {} : { height: "clamp(480px, 78vh, 900px)" }) }}>
+      <section style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", ...(patternView ? {} : { height: "100%" }) }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
           <span style={themeLabel}>3D model — {magBuild ? "moment preview" : "refined structure"}</span>
           <InfoBadge
@@ -833,7 +833,7 @@ export function KSearchPanel({
       </div>
 
       {/* Right panel: the workflow controls (steps 1–5). */}
-      <div style={{ ...themeCard, padding: 16, display: "grid", gap: 14, alignContent: "start", minWidth: 0 }}>
+      <div style={{ ...themeCard, padding: space.inset, display: "grid", gap: 14, alignContent: "start", minWidth: 0 }}>
       {/* 1. Which sites carry a moment */}
       <section>
         <StepTitle
@@ -1648,5 +1648,3 @@ const removePeakBtn: React.CSSProperties = {
 };
 
 /** Toolbar button (blue outline) — matches the refinement plot header. */
-const toolbarBtn: React.CSSProperties = { border: `1px solid ${theme.primary}`, background: "#fff", color: theme.primary, borderRadius: 8, padding: "3px 11px", fontSize: 11, fontWeight: 600, fontFamily: themeMono, cursor: "pointer" };
-const resetRangeBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 6, padding: "1px 8px", fontSize: 11, color: theme.ink, cursor: "pointer" };

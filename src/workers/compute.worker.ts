@@ -16,7 +16,7 @@ import type { ComputeRequest, ComputeResponse, EvaluatorSpec } from "@/workers/p
 import { refine, type RefinementProblem } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
-import { runPowderRefinement, runPdfRefinement, buildProblemForSpec } from "@/workers/runPowder";
+import { runPowderRefinement, runPdfRefinement, runMpdfRefinement, buildProblemForSpec } from "@/workers/runPowder";
 import { leBailCellPrefit } from "@/core/workflow/leBailPrefit";
 import { GpuStructureFactor } from "@/workers/gpuStructureFactor";
 import { evaluatePowderBatchOnGpu } from "@/workers/gpuPowderEvaluator";
@@ -61,6 +61,12 @@ async function handle(req: ComputeRequest): Promise<ComputeResponse> {
     }
     if (req.type === "refinePdf") {
       const result = runPdfRefinement(req, (yCalc, rWeighted) =>
+        post({ requestId: req.requestId, progress: { yCalc, rWeighted } }),
+      );
+      return { requestId: req.requestId, ok: true, result };
+    }
+    if (req.type === "refineMpdf") {
+      const result = runMpdfRefinement(req, (yCalc, rWeighted) =>
         post({ requestId: req.requestId, progress: { yCalc, rWeighted } }),
       );
       return { requestId: req.requestId, ok: true, result };

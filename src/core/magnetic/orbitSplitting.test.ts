@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { StructureModel } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
 import { buildSpaceGroup } from "@/core/crystal/spaceGroups";
+import { expandSpinField } from "@/core/crystal/cellExpansion";
 import { applyOperation } from "@/core/crystal/symmetry";
 import { generateMagneticCandidatesForK, littleGroup } from "@/core/magnetic/magneticGroups";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
@@ -102,5 +103,84 @@ describe("orbit splitting under a k ≠ 0 little group", () => {
     expect(build.magnetic.moments[0]!.orbitIndex).toBeUndefined();
     expect(build.magnetic.moments[0]!.position).toBeUndefined();
     expect(build.params.every((p) => /^mom_Fe1_\d+$/.test(p.id))).toBe(true);
+  });
+});
+
+/**
+ * A magnetic model is built ONCE against the structure as it stands, then the
+ * refinement moves the atoms underneath it. The split-orbit anchor must follow
+ * the site: it is an orbit *identity* ("the second G_M-orbit of Fe1"), not a
+ * frozen coordinate. Anchoring on the build-time coordinate made the whole
+ * orbit-2 sublattice vanish the moment a refined position drifted past the
+ * 1e-3 coincidence tolerance — silently, with no error and no warning, and
+ * invisibly to the optimizer (the FD step h ≈ 1e-6·|p| never reaches the
+ * cliff, but an LM trial step sails over it).
+ */
+describe("split-orbit anchors follow refined positions", () => {
+  /** The same structure with Fe1 displaced by `dx` along a (fractional). */
+  const shifted = (dx: number): StructureModel => ({
+    ...structure,
+    sites: [{ ...structure.sites[0]!, position: [0.1 + dx, 0.2, 0.3] }],
+  });
+
+  const built = buildMagneticModel(structure, k, ["Fe1"], typeI.operations, { moment: 2 });
+
+  /** Spins the viewer/mPDF spin field puts in the magnetic box. */
+  const spinCount = (s: StructureModel): number =>
+    expandSpinField(s, built.magnetic).atoms.filter((a) => a.moment).length;
+
+  it("keeps every sublattice's spins across the 1e-3 coincidence tolerance", () => {
+    const n0 = spinCount(structure);
+    expect(n0).toBeGreaterThan(0);
+    // Just under, just over, and far past the old cliff — the spin field is a
+    // function of symmetry, so the count must not move at all.
+    for (const dx of [9e-4, 1.1e-3, 0.02]) {
+      expect(spinCount(shifted(dx)), `dx=${dx}`).toBe(n0);
+    }
+  });
+
+  it("keeps both split orbits' moments (orbit 2 did not silently drop out)", () => {
+    const momentKeys = (s: StructureModel): Set<string> =>
+      new Set(
+        expandSpinField(s, built.magnetic)
+          .atoms.map((a) => a.moment && a.site.label)
+          .filter((l): l is string => Boolean(l))
+          .map((l) => l.replace(/_\d+$/, "")),
+      );
+    expect(momentKeys(shifted(0.02))).toEqual(momentKeys(structure));
+    // Both split orbits still carry a moment: half the spins would survive if
+    // only orbit 1 (anchored at the site position) matched.
+    expect(spinCount(shifted(0.02))).toBe(spinCount(structure));
+  });
+
+  it("leaves the powder |F_M|² with no memory of where the model was built", () => {
+    // The invariant that makes refinement correct: evaluating a model built at
+    // p₀ against the structure at p must equal evaluating a model built at p.
+    // Anything else means the model remembers p₀ — which is precisely what a
+    // frozen split-orbit anchor does.
+    const dx = 0.02;
+    const rebuilt = buildMagneticModel(shifted(dx), k, ["Fe1"], typeI.operations, { moment: 2 });
+    expect(rebuilt.params.map((p) => p.id)).toEqual(built.params.map((p) => p.id));
+
+    // Drive BOTH sublattices: either one alone translates rigidly under this
+    // shift and |F|² cannot see a rigid translation. The two orbits move
+    // oppositely (the orbit-2 anchor is inversion-related), so it is their
+    // interference that carries the signal.
+    const values: Record<string, number> = {};
+    built.params.forEach((p, i) => { values[p.id] = 1.3 + 0.4 * i; });
+    const sq = (b: typeof built): number =>
+      magneticStructureFactor(shifted(dx), applyMagneticMoments(b.magnetic, b.bindings, values), 1, 0, 1 / 3).squared;
+
+    expect(sq(rebuilt)).toBeGreaterThan(1e-6);
+    expect(sq(built)).toBeCloseTo(sq(rebuilt), 12);
+  });
+
+  it("is a no-op at zero shift (goldens stay bit-identical)", () => {
+    const values: Record<string, number> = {};
+    for (const p of built.params) values[p.id] = 0.7;
+    const applied = applyMagneticMoments(built.magnetic, built.bindings, values);
+    expect(magneticStructureFactor(shifted(0), applied, 1, 0, 1 / 3).squared).toBe(
+      magneticStructureFactor(structure, applied, 1, 0, 1 / 3).squared,
+    );
   });
 });
