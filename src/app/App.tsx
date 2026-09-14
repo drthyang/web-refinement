@@ -28,7 +28,7 @@ import { detectDataFormat, type DetectedFormat } from "@/parsers/detectFormat";
 import { parsePdfData } from "@/parsers/pdfData";
 import { looksLikeFgr, parseFgr, fgrToPattern } from "@/parsers/fgrData";
 import { parseInstrumentParameters } from "@/parsers/instrument";
-import { startingPowderParams, loadReflectionDataset } from "@/app/loadData";
+import { startingPowderParams, loadReflectionDataset, describeDrops } from "@/app/loadData";
 import { powderBindings } from "@/examples/synthetic";
 import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
 import { gata4se8PdfExample } from "@/examples/gata4se8Pdf";
@@ -330,7 +330,7 @@ export function App(): JSX.Element {
           setScNuclearDataset(loaded.dataset);
           setMessage(
             `Loaded single-crystal “${file.name}” · ${loaded.kept} reflections [${loaded.format}]` +
-            `${loaded.dropped > 0 ? ` (${loaded.dropped} dropped)` : ""}. Merge report + F² refinement ready.`,
+            `${describeDrops(loaded)}. Merge report + F² refinement ready.`,
           );
           return;
         }
@@ -350,12 +350,12 @@ export function App(): JSX.Element {
     if (!scDataset) { setMessage("Load the nuclear reflections first, then add the magnetic file."); return; }
     file.text().then((text) => {
       try {
-        const loaded = loadReflectionDataset(text, structure, `${structure.id}-mag-hkl`, file.name);
+        const loaded = loadReflectionDataset(text, structure, `${structure.id}-mag-hkl`, file.name, { role: "magnetic" });
         if (loaded.kept < 1) throw new Error("no usable reflections in the magnetic file");
         setScMagneticDataset(loaded.dataset);
         setMessage(
           `Loaded magnetic “${file.name}” · ${loaded.kept} reflections [${loaded.format}]` +
-          `${loaded.dropped > 0 ? ` (${loaded.dropped} dropped)` : ""}. Joint nuclear + magnetic co-refinement ready.`,
+          `${describeDrops(loaded)}. Joint nuclear + magnetic co-refinement ready.`,
         );
       } catch (e) {
         setMessage(`Magnetic data load failed: ${e instanceof Error ? e.message : String(e)}`);

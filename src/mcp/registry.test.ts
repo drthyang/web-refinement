@@ -218,7 +218,7 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   })(),
   parse_single_crystal_data: {
     args: { text: "1 0 0 100 2\n1 1 0 50 2\n1 1 1 30 2\n", name: "sc", id: "nuc" },
-    keys: ["dataset", "dropped", "format", "kVectors", "kept", "problems"],
+    keys: ["dataset", "dropped", "format", "forwardBeamSkipped", "kVectors", "kept", "problems"],
   },
   write_single_crystal_data: {
     args: {

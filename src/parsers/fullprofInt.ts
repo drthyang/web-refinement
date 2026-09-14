@@ -69,6 +69,8 @@ export interface FullProfIntParse {
   readonly title: string;
   /** Rows skipped as unparseable (diagnostic; see `problems` for details). */
   readonly skipped: number;
+  /** Of `skipped`, the `0 0 0` forward-beam rows dropped by `skipForwardBeam`. */
+  readonly forwardBeamSkipped: number;
   /** Line-numbered diagnostics for every skipped/suspect input line. */
   readonly problems: FullProfIntProblem[];
 }
@@ -141,6 +143,14 @@ export interface FullProfIntParseOptions {
    *  instead of skipping — the paired-load path uses this so a malformed file
    *  is rejected loudly rather than silently truncated. Default false. */
   readonly strict?: boolean;
+  /** Skip a `0 0 0` row — the forward beam, not a Bragg reflection — counting
+   *  it in `forwardBeamSkipped` (and `skipped`) and recording it in `problems`,
+   *  never as a strict-mode error (the file is well-formed). Off by default:
+   *  in the FullProf single-k convention a magnetic file is indexed by the
+   *  fundamental of each satellite, so its `0 0 0` row IS the satellite at k
+   *  and must be kept — the nuclear-file loaders opt in. A propagation-vector
+   *  row (`h k l nv`) is skipped only when its k-vector is zero. */
+  readonly skipForwardBeam?: boolean;
 }
 
 /**
@@ -226,6 +236,7 @@ export function parseFullProfInt(text: string, opts: FullProfIntParseOptions = {
 
   const reflections: FullProfIntReflection[] = [];
   let skipped = 0;
+  let forwardBeamSkipped = 0;
   for (let i = cursor; i < lines.length; i++) {
     const line = lines[i]!;
     if (line.trim() === "" || line.trim().startsWith("!")) continue;
@@ -243,6 +254,21 @@ export function parseFullProfInt(text: string, opts: FullProfIntParseOptions = {
       skipped++;
       problem(i + 1, `a 1-based k index (nv ≤ ${kVectors?.length ?? "Nk"}) in field 4`, line.trimEnd());
       continue;
+    }
+    // The forward beam. A plain-format `0 0 0` row — or a k-variant row whose
+    // propagation vector is zero — is not a Bragg reflection: refining it fits
+    // k·|F(000)|² to a meaningless intensity (at unit weight when σ = 0, which
+    // then wrecks the scale), and the σ-outlier filter can never reject a row
+    // that has no σ. Opt-in (see `skipForwardBeam`): in a fundamental-indexed
+    // magnetic file this row is the satellite at k. Recorded, never strict.
+    if (opts.skipForwardBeam && h === 0 && k === 0 && l === 0) {
+      const kv = hasK && kIndex != null ? kVectors?.[kIndex - 1] : undefined;
+      if (!hasK || (kv !== undefined && kv.every((c) => c === 0))) {
+        skipped++;
+        forwardBeamSkipped++;
+        problems.push({ line: i + 1, expected: "a Bragg reflection (0 0 0 is the forward beam — row skipped)", found: line.trimEnd() });
+        continue;
+      }
     }
     if (iObs == null) {
       skipped++;
@@ -267,6 +293,7 @@ export function parseFullProfInt(text: string, opts: FullProfIntParseOptions = {
     format,
     title,
     skipped,
+    forwardBeamSkipped,
     problems,
   };
 }

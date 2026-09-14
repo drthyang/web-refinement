@@ -256,11 +256,12 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "parse_single_crystal_data",
     title: "Parse single-crystal reflections",
-    description: "Parse single-crystal integrated intensities — a FullProf .int (h k l I σ) or a SHELX HKLF4 .hkl — into a SingleCrystalDataset. Parse the nuclear and magnetic files, then merge_magnetic_supercell into one dataset for the magnetic refinement.",
+    description: "Parse single-crystal integrated intensities — a FullProf .int (h k l I σ) or a SHELX HKLF4 .hkl — into a SingleCrystalDataset. Parse the nuclear and magnetic files, then merge_magnetic_supercell into one dataset for the magnetic refinement. A 0 0 0 row (the forward beam, not a Bragg reflection) is skipped by default — pass skipForwardBeam:false for a fundamental-indexed MAGNETIC file, where 0 0 0 is the satellite at k itself.",
     inputSchema: {
       text: z.string().describe("FullProf .int or SHELX .hkl file text"),
       name: z.string().optional(),
       id: z.string().optional().describe("Dataset id (bind a scale to it)"),
+      skipForwardBeam: z.boolean().optional().describe("Skip a 0 0 0 row — the forward beam (default true). Pass false for a fundamental-indexed magnetic file, whose 0 0 0 is the satellite at k."),
     },
     handler: tools.parse_single_crystal_data,
   },

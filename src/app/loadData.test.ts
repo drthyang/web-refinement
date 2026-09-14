@@ -16,6 +16,7 @@ import {
   startingSxParams,
   isGsasReflectionList,
   loadReflectionDataset,
+  describeDrops,
   structuralParameters,
 } from "@/app/loadData";
 
@@ -144,5 +145,42 @@ describe("structuralParameters", () => {
     expect(bParams.length).toBe(structure.sites.length);
     expect(bParams.every((p) => !p.fixed)).toBe(true);
     expect(bindings.filter((b) => b.kind === "bIso").length).toBe(structure.sites.length);
+  });
+});
+
+describe("loadReflectionDataset — the 0 0 0 forward-beam row", () => {
+  const structure = exampleStructure();
+  const INT = [
+    "Crystal",
+    "(3i4,2f8.2,i4,6f8.0)",
+    "1.0000 0 0",
+    "   0   0   0  120.00    0.00   1 0.00000 0.00000 0.00000 0.00000 0.00000 0.00000",
+    "  -4 -10   1    0.04    0.02   1-0.42101-0.15770-0.49921-0.10071-0.75733 0.98234",
+    "  -3 -11   1    0.18    0.01   1-0.41794-0.01514-0.49563-0.16901-0.76136 0.98550",
+    "",
+  ].join("\n");
+
+  it("drops it from a nuclear file and reports it apart from other drops", () => {
+    const loaded = loadReflectionDataset(INT, structure, "ds", "x_nuc.int");
+    expect(loaded.format).toBe("fullprof");
+    expect(loaded.kept).toBe(2);
+    expect(loaded.dropped).toBe(0);
+    expect(loaded.forwardBeamSkipped).toBe(1);
+    expect(loaded.dataset.reflections.some((r) => r.h === 0 && r.k === 0 && r.l === 0)).toBe(false);
+    expect(describeDrops(loaded)).toBe(" (1 forward-beam 0 0 0 row skipped)");
+  });
+
+  it("keeps it in the companion magnetic file (there it is the satellite at k)", () => {
+    const loaded = loadReflectionDataset(INT, structure, "ds", "x_mag.int", { role: "magnetic" });
+    expect(loaded.kept).toBe(3);
+    expect(loaded.forwardBeamSkipped).toBe(0);
+    expect(describeDrops(loaded)).toBe("");
+  });
+
+  it("ends a free-format SHELX list at the all-zero terminator", () => {
+    const loaded = loadReflectionDataset("1 0 0 100 2\n0 0 0 0 0\n", structure, "ds", "x.hkl");
+    expect(loaded.format).toBe("shelx");
+    expect(loaded.kept).toBe(1);
+    expect(loaded.forwardBeamSkipped).toBe(0);
   });
 });

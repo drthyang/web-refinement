@@ -71,7 +71,7 @@ import {
 } from "@/core/workflow/pdfBoxcar";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import { parseFullProfInt, looksLikeFullProfInt, writeFullProfInt } from "@/parsers/fullprofInt";
-import { parseHkl } from "@/parsers/hkl";
+import { parseHklRows } from "@/parsers/hkl";
 import {
   mergeToMagneticSupercell,
   expandStructureToSupercell,
@@ -645,11 +645,16 @@ export async function refine_magnetic_powder(args: {
  * SHELX HKLF4 `.hkl`) into a SingleCrystalDataset — the entry point for the
  * single-crystal and joint co-refinement paths. Detection is by content; GSAS
  * reflection lists (which need a cell to d-filter) are out of scope here.
+ * A `0 0 0` row is dropped by default (the forward beam); pass
+ * skipForwardBeam:false for a fundamental-indexed magnetic file, whose `0 0 0`
+ * is the satellite at k itself.
  */
-export function parse_single_crystal_data(args: { text: string; name?: string; id?: string }): {
+export function parse_single_crystal_data(args: { text: string; name?: string; id?: string; skipForwardBeam?: boolean }): {
   dataset: SingleCrystalDataset;
   kept: number;
   dropped: number;
+  /** `0 0 0` forward-beam rows dropped (the all-zero SHELX terminator is never counted). */
+  forwardBeamSkipped: number;
   format: "fullprof" | "shelx";
   /** Propagation vectors declared in the file ([] for a plain nuclear file). */
   kVectors: [number, number, number][];
@@ -658,22 +663,29 @@ export function parse_single_crystal_data(args: { text: string; name?: string; i
 } {
   const id = args.id ?? "sc-hkl";
   const name = args.name ?? "single crystal";
+  // A `0 0 0` row is the forward beam in a nuclear file — never a Bragg
+  // reflection, and (with σ = 0) a unit-weight observation that wrecks the
+  // scale — so it is dropped by default. A fundamental-indexed MAGNETIC file's
+  // `0 0 0` is the satellite at k: the caller passes skipForwardBeam:false.
+  const skipForwardBeam = args.skipForwardBeam ?? true;
   if (looksLikeFullProfInt(args.text)) {
-    const parsed = parseFullProfInt(args.text);
+    const parsed = parseFullProfInt(args.text, { skipForwardBeam });
     return {
       dataset: { id, name, radiation: { kind: "neutron", wavelength: parsed.wavelength ?? 1.0 }, reflections: parsed.reflections },
       kept: parsed.reflections.length,
-      dropped: parsed.skipped,
+      dropped: parsed.skipped - parsed.forwardBeamSkipped,
+      forwardBeamSkipped: parsed.forwardBeamSkipped,
       format: "fullprof",
       kVectors: (parsed.kVectors ?? []).map((k) => [...k] as [number, number, number]),
       problems: parsed.problems.map((p) => ({ ...p })),
     };
   }
-  const reflections = parseHkl(args.text);
+  const { reflections, forwardBeamSkipped } = parseHklRows(args.text, { skipForwardBeam });
   return {
     dataset: { id, name, radiation: { kind: "neutron", wavelength: 1.54 }, reflections },
     kept: reflections.length,
     dropped: 0,
+    forwardBeamSkipped,
     format: "shelx",
     kVectors: [],
     problems: [],

@@ -16,7 +16,7 @@ import type { PowderParseOptions } from "@/parsers/powderData";
 import { powderParameters, singleCrystalParameters } from "@/examples/synthetic";
 import { powderCurves } from "@/core/workflow/powder";
 import { singleCrystalComparison } from "@/core/workflow/singleCrystal";
-import { parseHkl } from "@/parsers/hkl";
+import { parseHklRows } from "@/parsers/hkl";
 import { parseReflectionList } from "@/parsers/reflectionList";
 import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
 import { dSpacing } from "@/core/crystal/unitCell";
@@ -105,7 +105,15 @@ export interface LoadedReflections {
   readonly kept: number;
   /** Reflections dropped (belong to another phase, e.g. an impurity). */
   readonly dropped: number;
+  /** `0 0 0` forward-beam rows skipped (nuclear role only; the all-zero SHELX terminator is not counted). */
+  readonly forwardBeamSkipped: number;
   readonly format: "gsas" | "shelx" | "fullprof";
+}
+
+export interface LoadReflectionOptions {
+  /** Which file this is. The nuclear set (default) drops a `0 0 0` forward-beam
+   *  row; the companion magnetic set keeps it — there it is the satellite at k. */
+  readonly role?: "nuclear" | "magnetic";
 }
 
 /** True when the text looks like a GSAS-II reflection list (has Fo**2 / header). */
@@ -126,14 +134,19 @@ export function loadReflectionDataset(
   structure: StructureModel,
   datasetId: string,
   name: string,
+  opts: LoadReflectionOptions = {},
 ): LoadedReflections {
+  // A `0 0 0` row is the forward beam in a nuclear file (dropped) but the
+  // satellite at k itself in a fundamental-indexed magnetic file (kept).
+  const skipForwardBeam = opts.role !== "magnetic";
   if (looksLikeFullProfInt(text)) {
-    const parsed = parseFullProfInt(text);
+    const parsed = parseFullProfInt(text, { skipForwardBeam });
     const wavelength = parsed.wavelength ?? 1.0;
     return {
       dataset: { id: datasetId, name, radiation: { kind: "neutron", wavelength }, reflections: parsed.reflections },
       kept: parsed.reflections.length,
-      dropped: parsed.skipped,
+      dropped: parsed.skipped - parsed.forwardBeamSkipped,
+      forwardBeamSkipped: parsed.forwardBeamSkipped,
       format: "fullprof",
     };
   }
@@ -153,16 +166,31 @@ export function loadReflectionDataset(
       dataset: { id: datasetId, name, radiation: { kind: "neutron-tof" }, reflections },
       kept: reflections.length,
       dropped,
+      forwardBeamSkipped: 0,
       format: "gsas",
     };
   }
-  const reflections = parseHkl(text);
+  const { reflections, forwardBeamSkipped } = parseHklRows(text, { skipForwardBeam });
   return {
     dataset: { id: datasetId, name, radiation: { kind: "neutron" as const, wavelength: 1.54 }, reflections },
     kept: reflections.length,
     dropped: 0,
+    forwardBeamSkipped,
     format: "shelx",
   };
+}
+
+/**
+ * Status-message suffix naming what a reflection load left out, e.g.
+ * " (1 dropped, 1 forward-beam 0 0 0 row skipped)" — "" when nothing was.
+ */
+export function describeDrops(loaded: LoadedReflections): string {
+  const parts: string[] = [];
+  if (loaded.dropped > 0) parts.push(`${loaded.dropped} dropped`);
+  if (loaded.forwardBeamSkipped > 0) {
+    parts.push(`${loaded.forwardBeamSkipped} forward-beam 0 0 0 row${loaded.forwardBeamSkipped === 1 ? "" : "s"} skipped`);
+  }
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 
 /**
