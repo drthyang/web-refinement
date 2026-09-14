@@ -978,6 +978,49 @@ export class ComputeClient {
     return this.runParallel(spec, req.options ?? {}, req.dataset.reflections.length);
   }
 
+  /**
+   * Multi-start single-crystal F² refinement (escape local minima): one
+   * baseline refine plus `multiStart.restarts` perturbed restarts, keeping the
+   * lowest-χ² result — the single-crystal twin of `refinePowderMultiStart`
+   * (same generic core; one evaluator pool shared across every start). An F²
+   * surface traps LM readily: a positional mode driven onto its ±bound, or an
+   * atom settled into a neighbour's basin, converges cleanly to a wrong answer
+   * with a plausible wR2. Pass `multiStart.minKick` so a mode sitting at 0
+   * still gets a physically sized kick (see MultiStartOptions).
+   */
+  async refineSingleCrystalMultiStart(
+    req: Omit<RefineSingleCrystalRequest, "requestId" | "type">,
+    multiStart: MultiStartOptions = {},
+  ): Promise<MultiStartResult> {
+    const spec: Extract<EvaluatorSpec, { kind: "singleCrystal" }> = {
+      kind: "singleCrystal", structure: req.structure, dataset: req.dataset, parameters: req.parameters, bindings: req.bindings,
+    };
+    const options = req.options ?? {};
+
+    if (this.poolSize() < 2) {
+      // No pool: run each start in-thread through the serial engine.
+      const runOnce = (start: readonly RefinementParameter[]): { parameters: RefinementParameter[]; final: RefinementResult } => {
+        const result = refine(buildProblemForSpec({ ...spec, parameters: [...start] }), options);
+        return { parameters: applyResultToParams(start, result), final: result };
+      };
+      return refineMultiStart(spec.parameters, runOnce, multiStart);
+    }
+
+    const pool = new EvaluatorPool(this.poolSize());
+    this.activePool = pool;
+    try {
+      await pool.init(spec);
+      const runOnce = async (start: readonly RefinementParameter[]): Promise<{ parameters: RefinementParameter[]; final: RefinementResult }> => {
+        const result = await refineParallel(buildProblemForSpec({ ...spec, parameters: [...start] }), options, pool);
+        return { parameters: applyResultToParams(start, result), final: result };
+      };
+      return await refineMultiStart(spec.parameters, runOnce, multiStart);
+    } finally {
+      pool.dispose();
+      if (this.activePool === pool) this.activePool = null;
+    }
+  }
+
   refineMagnetic(req: Omit<RefineMagneticRequest, "requestId" | "type">): Promise<RefinementResult> {
     return this.run({ ...req, type: "refineMagnetic", requestId: this.nextId++ });
   }

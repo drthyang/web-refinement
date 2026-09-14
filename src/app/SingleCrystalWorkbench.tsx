@@ -128,6 +128,8 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   }, [structure, params, bindings]);
   const [result, setResult] = useState<RefinementResult | null>(null);
   const [busy, setBusy] = useState(false);
+  // Outcome of the last Prefit / Escape-min run, shown beside the refine actions.
+  const [thoroughNote, setThoroughNote] = useState<string | null>(null);
   const [plotKind, setPlotKind] = useState<"fobs" | "npp">("fobs");
   // Reflection spotlighted by a click in the F_obs/F_calc plot (or null).
   const [selected, setSelected] = useState<Selection | null>(null);
@@ -217,6 +219,76 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       if (magnetic) setMagnetic(applyMagneticMoments(magnetic, momentBindings, res.parameters));
     } catch (e) {
       console.error(`[status] Single-crystal refinement failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Thorough refine — the local-minimum-resistant path the powder and PDF pages
+   * have: one baseline fit plus perturbed restarts, keeping the lowest χ². One
+   * engine, two faces: with no fit yet it is "Prefit" (a broad cold-start
+   * search); once a fit exists it is a lighter "Escape min" nudge out of the
+   * current basin. An F² surface traps LM readily — a positional mode driven
+   * onto its ±bound, or an atom settled into a neighbour's basin, converges
+   * cleanly to a wrong answer with a plausible wR2 — and the esd- and
+   * value-relative kicks both vanish for a mode sitting at 0, so the kicks carry
+   * an absolute floor in the parameter's own units (fractional shift, Å²).
+   * With a magnetic model applied the multi-start is the MAGNETIC one: it
+   * freezes the nuclear scaffold, searches the moment subspace, then runs one
+   * joint LM over everything freed (nuclear minima are not searched there).
+   */
+  async function runThorough(): Promise<void> {
+    const mode: "prefit" | "escape" = result ? "escape" : "prefit";
+    const wide = mode === "prefit";
+    setBusy(true);
+    setThoroughNote(null);
+    try {
+      await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
+      let ms;
+      if (magnetic) {
+        ms = await client.refineMagneticSingleCrystalMultiStart(
+          { structure, magnetic, dataset: activeDataset, parameters: [...params], bindings: [...bindings, ...momentBindings] },
+          wide ? { restarts: 12 } : { restarts: 6, escapeSigma: 3 },
+          { maxIterations: 25 },
+        );
+        setMagnetic(applyMagneticMoments(magnetic, momentBindings, ms.final.parameters));
+      } else {
+        // Kick floors: 0.1 in fractional coordinates (~0.6 Å in a 6 Å cell) for
+        // a positional mode — a seed sweep on a synthetic bound-trapped start
+        // put 0.05 at 2/10 recoveries and 0.1 at 7–9/10 — and a basin-sized
+        // step for the displacement parameters. Prefit casts the wider net
+        // (more restarts, ~4σ kicks), Escape a tighter one.
+        const minKick = (p: RefinementParameter): number | undefined => {
+          switch (p.kind) {
+            case "positionShift": return 0.1;
+            case "bIso": return wide ? 1 : 0.5;
+            case "uAniso": return wide ? 0.01 : 0.005;
+            case "occupancy": return wide ? 0.2 : 0.1;
+            case "extinction": return 0.01;
+            default: return undefined; // scale: the esd-relative kick is right
+          }
+        };
+        ms = await client.refineSingleCrystalMultiStart(
+          { structure, dataset: activeDataset, parameters: [...params], bindings, options: { maxIterations: 25 } },
+          wide ? { restarts: 12, escapeSigma: 4, relFraction: 0.5, minKick } : { restarts: 6, escapeSigma: 2, relFraction: 0.5, minKick },
+        );
+      }
+      setParams((prev) => prev.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value })));
+      setResult(ms.final);
+      const wr = (100 * (ms.final.agreement.rWeighted ?? 0)).toFixed(2);
+      const starts = ms.restartsRun + 1;
+      setThoroughNote(wide
+        ? (ms.improved
+            ? `Prefit found a lower minimum (restart ${ms.bestStartIndex} of ${ms.restartsRun}) — wR2 ${wr}%, best of ${starts} starts. Refine to polish.`
+            : `Prefit: the starting model was already best of ${starts} starts — wR2 ${wr}%. Refine to polish.`)
+        : (ms.improved
+            ? `Escaped a local minimum (restart ${ms.bestStartIndex} of ${ms.restartsRun}) — wR2 ${wr}%, best of ${starts} starts.`
+            : `Already at the best minimum — the baseline beat all ${starts} starts, wR2 ${wr}%.`));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setThoroughNote(`${wide ? "Prefit" : "Escape min"} failed: ${msg}`);
+      console.error(`[status] Single-crystal ${mode} failed: ${msg}`);
     } finally {
       setBusy(false);
     }
@@ -371,6 +443,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   function reset(): void {
     setParams(spec.params.map((p) => ({ ...p, value: p.initialValue })));
     setResult(null);
+    setThoroughNote(null);
   }
 
   function exportCif(): void {
@@ -459,6 +532,11 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       >
         Export CIF
       </button>
+      {thoroughNote && (
+        <span style={{ fontSize: fz.small, color: thoroughNote.includes("failed") ? color.warnInk : color.secondary, alignSelf: "center" }}>
+          {thoroughNote}
+        </span>
+      )}
     </>
   );
 
@@ -571,6 +649,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           esd={result?.esd}
           onChange={onParamChange}
           onRefine={() => runRefine(false)}
+          onThorough={() => void runThorough()}
+          thoroughMode={result ? "escape" : "prefit"}
+          prefitTitle="Prefit from a cold start: a broad set of perturbed restarts of the free parameters (positions kicked by up to ~0.1 in fractional coordinates), keeping the best — lands the structure in a good basin before you refine. (No Le Bail stage: integrated intensities have no profile to pre-fit.)"
           onReset={reset}
           busy={busy}
           result={result}

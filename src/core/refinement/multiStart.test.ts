@@ -121,3 +121,31 @@ describe("refineMultiStart — real LM engine on a tilted double well", () => {
     expect(refinementCost(res.final)).toBeLessThan(0.02);
   });
 });
+
+describe("perturbParameters — minKick floor", () => {
+  const rng = (): number => 0.999; // deterministic: displacement = +0.998·scale
+  const pos = (): RefinementParameter =>
+    ({ id: "x", label: "x", kind: "positionShift", value: 0, initialValue: 0, fixed: false, min: -0.2, max: 0.2 });
+
+  it("a mode at 0 with no esd gets no kick without a floor (the esd- and value-relative kicks both vanish)", () => {
+    expect(perturbParameters([pos()], {}, rng, { escapeSigma: 4, relFraction: 0.05 })[0]!.value).toBe(0);
+  });
+
+  it("the floor kicks it, still capped at half the bound span", () => {
+    const kicked = perturbParameters([pos()], {}, rng, { escapeSigma: 4, relFraction: 0.05, minKick: () => 0.05 })[0]!.value;
+    expect(kicked).toBeCloseTo(0.05 * 0.998, 6);
+    const capped = perturbParameters([pos()], {}, rng, { escapeSigma: 4, relFraction: 0.05, minKick: () => 5 })[0]!.value;
+    expect(capped).toBeCloseTo(0.2 * 0.998, 6);
+  });
+
+  it("never lifts a parameter the floor does not name, and never a fixed one", () => {
+    const scale: RefinementParameter = { id: "s", label: "s", kind: "scale", value: 0, initialValue: 0, fixed: false };
+    const held: RefinementParameter = { ...pos(), id: "h", fixed: true };
+    const out = perturbParameters([scale, held, pos()], {}, rng, {
+      escapeSigma: 4, relFraction: 0.05, minKick: (p) => (p.kind === "positionShift" ? 0.05 : undefined),
+    });
+    expect(out[0]!.value).toBe(0);
+    expect(out[1]!.value).toBe(0);
+    expect(out[2]!.value).toBeCloseTo(0.05 * 0.998, 6);
+  });
+});
