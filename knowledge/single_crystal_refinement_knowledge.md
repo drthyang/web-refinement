@@ -373,7 +373,7 @@ Additions worth building on top of the existing spine:
 ```text
 - wrong Laue class inflates Rint relative to the correct one (merging test)
 - special-position atom cannot refine off its site; occupancy scaled by multiplicity
-- cell parameters obey the crystal system after refinement
+- cell parameters are fixed input from indexing (never refined against F²; no lattice rows in the single-crystal spec)
 - completeness/resolution gates fire when a dataset is truncated
 ```
 

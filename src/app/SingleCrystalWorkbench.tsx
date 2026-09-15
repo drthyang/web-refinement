@@ -526,12 +526,13 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   const summaryCards: SummaryCardData[] = [
     {
       label: "Structure",
+      help: "The unit cell is taken from indexing / data reduction and held fixed. Integrated intensities carry no information on peak positions, so no single-crystal program refines the cell against F² (SHELXL's CELL/ZERR, Jana, FullProf and GSAS-II alike); its esds belong to the diffractometer, not to this fit.",
       loadLabel: "Load CIF…",
       accept: ".cif,.mcif,text/plain",
       onFile: onLoadCif ?? noop,
       chip: "✓ parsed",
       title: `${structure.name || "structure"} · ${structure.spaceGroup.hermannMauguin ?? "—"}`,
-      meta: `a ${cell.a.toFixed(4)} · b ${cell.b.toFixed(4)} · c ${cell.c.toFixed(4)} Å · ${structure.sites.length} sites`,
+      meta: `a ${cell.a.toFixed(4)} · b ${cell.b.toFixed(4)} · c ${cell.c.toFixed(4)} Å · ${structure.sites.length} sites · cell fixed`,
     },
     {
       label: "Data · single crystal",

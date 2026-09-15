@@ -21,7 +21,7 @@ spec does:
 
 | Concern | Shared function | Powder caller | Single-crystal caller |
 | --- | --- | --- | --- |
-| Independent cell parameters | `independentCellParameters` | `buildStructureRefinement` | `buildSingleCrystalSpec` |
+| Independent cell parameters | `independentCellParameters` | `buildStructureRefinement` | — (the cell is fixed input from indexing; integrated intensities carry no positional information, so — as in SHELXL, Jana, FullProf and GSAS-II — it is never a single-crystal parameter) |
 | Symmetry-adapted positions | `allowedPositionShifts` | ″ | ″ |
 | Symmetry-adapted anisotropic ADP | `allowedAnisotropicAdpModes` | ″ | ″ |
 | Parameter → model application | `applyParameters` (`workflow/apply.ts`) | powder problems | single-crystal problem |
@@ -43,10 +43,15 @@ What differs is only the **observable and its corrections**, isolated in
   Waller code as powder.
 - **Angles** in degrees at the UI/report boundary; radians internal.
 - **Parameter-freeing convention:** scale (and extinction) free on the first
-  "Refine"; structural rows (positions, ADP, occupancy) and the cell start
-  **fixed**, freed per row or by the staged sequence in the expert order
-  scale → cell → ADP → positions — the same "safe first click" behavior as
-  `buildPowderSpec`.
+  "Refine"; structural rows (positions, ADP, occupancy) start **fixed**, freed
+  per row or by the staged sequence in the expert order scale → ADP →
+  positions — the same "safe first click" behavior as `buildPowderSpec`.
+- **The cell is not a parameter.** It is shown on the Structure card as fixed
+  input ("cell fixed") and never appears in the parameter panel: SHELXL takes it
+  from `CELL`/`ZERR` and only propagates its esds into geometry, Jana refines
+  cells only under the powder profile options, FullProf's manual requires zero
+  codewords for the cell without a powder profile, and GSAS-II computes cell
+  derivatives only on the powder path.
 
 ---
 
