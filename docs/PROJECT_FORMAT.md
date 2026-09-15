@@ -94,7 +94,7 @@ own. Bindings must reference parameters present in the file; ids must be unique.
 | --- | --- | --- |
 | `dataset` | `SingleCrystalDataset` | Nuclear reflections `{h, k, l, iObs, sigma?}`, radiation as loaded. |
 | `magneticDataset?` | `SingleCrystalDataset` | Companion magnetic set (`_mag` file) for joint co-refinement. |
-| `probe` | xray · neutron · neutron-tof | The user's probe choice (a reflection file cannot carry it). |
+| `probe` | xray · neutron · neutron-tof | The user's probe choice (a reflection file cannot carry it). The page presents it as **source** (X-ray / neutron) × **mode** (CW / TOF); X-ray is always constant-wavelength, so the three values are X-ray CW, neutron CW, neutron TOF. |
 | `refinement` | see above | Nuclear rows **plus** applied moment rows; bindings likewise. |
 | `magnetic?` | `MagneticModel` | Model applied from the symmetry analysis. |
 | `outlierFilter?` | `{on, cutoffSigma}` | SHELX-style OMIT on \|Fo²−Fc²\|/σ. |

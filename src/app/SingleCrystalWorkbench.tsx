@@ -74,7 +74,10 @@ function r1Ink(r1: number): string {
 type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: string };
 
 /** Probe the reflections were measured with. A bare .hkl / reflection list can't
- *  carry this, so the user picks it (seeded from the loaded instrument). */
+ *  carry this, so the user picks it (seeded from the loaded instrument). The UI
+ *  presents it as source × mode — X-ray (always constant-wavelength), neutron
+ *  constant-wavelength, neutron time-of-flight — which collapses to this
+ *  three-way value; the project file stores the same value. */
 type Probe = "xray" | "neutron" | "neutron-tof";
 
 export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, client, step, onStep, instrumentProbe, exportsRef, onLoadData, onLoadMagneticData, onLoadCif, restore }: {
@@ -517,7 +520,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   const ag = comparison.agreement;
   const st = merge.statistics;
   const cell = structure.cell;
-  const probeLabel = probe === "xray" ? "X-ray" : probe === "neutron" ? "Neutron" : "Neutron TOF";
+  const probeLabel = probe === "xray" ? "X-ray · CW" : probe === "neutron" ? "Neutron · CW" : "Neutron · TOF";
   const wl = "wavelength" in effectiveRadiation ? ` · λ ${effectiveRadiation.wavelength} Å` : "";
 
   const summaryCards: SummaryCardData[] = [
@@ -840,36 +843,76 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
 
 /** Segmented X-ray / Neutron / TOF control for the single-crystal Data card.
  *  A bare reflection file carries no probe, so this is the authoritative source. */
+/**
+ * Source × mode picker for the probe. The reflection file cannot report its
+ * own radiation, so the user states it the way an experiment is described:
+ * the SOURCE (X-ray or neutron) and, for neutrons, the MODE — constant
+ * wavelength (a monochromated reactor / synchrotron-style beam) or time of
+ * flight (a spallation source, no single λ). X-ray single-crystal data is
+ * always constant-wavelength, so its mode control is fixed at CW.
+ */
 function ProbeToggle({ probe, onChange }: { probe: Probe; onChange: (p: Probe) => void }): JSX.Element {
-  const opts: { value: Probe; label: string }[] = [
-    { value: "xray", label: "X-ray" },
-    { value: "neutron", label: "Neutron" },
-    { value: "neutron-tof", label: "TOF" },
-  ];
+  const source: "xray" | "neutron" = probe === "xray" ? "xray" : "neutron";
+  const mode: "cw" | "tof" = probe === "neutron-tof" ? "tof" : "cw";
+  const setSource = (s: "xray" | "neutron"): void => onChange(s === "xray" ? "xray" : mode === "tof" ? "neutron-tof" : "neutron");
+  const setMode = (m: "cw" | "tof"): void => {
+    if (source === "xray") return; // fixed: X-ray is always constant-wavelength
+    onChange(m === "tof" ? "neutron-tof" : "neutron");
+  };
+  const modeFixed = source === "xray";
   return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-      <span
-        style={{ fontSize: fz.micro, color: color.faint }}
-        title="The reflection file cannot report its own radiation. Pick the probe used — it selects neutron scattering lengths (b) vs X-ray form factors f(Q) + polarization, changing every F_calc."
-      >
-        probe
-      </span>
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <ProbeSegment
+        label="source"
+        hint="The reflection file cannot report its own radiation. X-ray uses atomic form factors f(Q) plus the polarization factor; neutron uses scattering lengths b — the choice changes every F_calc."
+        options={[{ value: "xray", label: "X-ray" }, { value: "neutron", label: "Neutron" }]}
+        value={source}
+        onChange={setSource}
+      />
+      <ProbeSegment
+        label="mode"
+        hint={modeFixed
+          ? "X-ray single-crystal data is always constant-wavelength (monochromatic)."
+          : "Constant wavelength: a monochromatic beam, λ from the file (default 1 Å). Time of flight: a spallation source — no single wavelength, so the λ-dependent corrections are not applied."}
+        options={[{ value: "cw", label: "CW" }, { value: "tof", label: "TOF" }]}
+        value={mode}
+        onChange={setMode}
+        disabled={modeFixed}
+      />
+    </div>
+  );
+}
+
+/** One labelled segmented group of the probe picker. */
+function ProbeSegment<T extends string>({ label, hint, options, value, onChange, disabled = false }: {
+  label: string;
+  hint: string;
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  disabled?: boolean;
+}): JSX.Element {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, opacity: disabled ? 0.55 : 1 }} title={hint}>
+      <span style={{ fontSize: fz.micro, color: color.faint }}>{label}</span>
       <span style={{ display: "inline-flex", border: `1px solid ${color.control}`, borderRadius: 6, overflow: "hidden" }}>
-        {opts.map((o) => (
+        {options.map((o) => (
           <button
             key={o.value}
             onClick={() => onChange(o.value)}
+            disabled={disabled}
+            aria-pressed={value === o.value}
             style={{
-              border: "none", padding: "2px 9px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer",
-              background: probe === o.value ? color.primary : "transparent",
-              color: probe === o.value ? "#fff" : color.secondary,
+              border: "none", padding: "2px 9px", fontSize: 11.5, fontFamily: "inherit", cursor: disabled ? "default" : "pointer",
+              background: value === o.value ? color.primary : "transparent",
+              color: value === o.value ? "#fff" : color.secondary,
             }}
           >
             {o.label}
           </button>
         ))}
       </span>
-    </div>
+    </span>
   );
 }
 
