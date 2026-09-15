@@ -5,7 +5,7 @@
 
 import type { PowderCurves } from "@/core/workflow/powder";
 import type { ProjectFile } from "@/core/project/types";
-import { serializeProject } from "@/parsers/project";
+import { serializeProject } from "@/core/project/io";
 
 
 export function powderPatternCsv(curves: PowderCurves): string {

@@ -11,6 +11,9 @@
 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
+import type { PdfWorkspace } from "@/core/project/types";
+import { overlaySavedParameters, pdfWorkspaceFrom } from "@/app/projectIo";
+import { useOnChange } from "@/app/useOnChange";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PdfPattern } from "@/core/diffraction/types";
 import type { RefinementResult } from "@/core/refinement/types";
@@ -96,7 +99,7 @@ function rwInk(rw: number): string {
   return color.warnInk;
 }
 
-export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructure = false, client, step = 0, onStep, exportsRef, onLoadData, onLoadCif, onAddPhase, onRemovePhase, presetValues, presetFitRange }: {
+export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructure = false, client, step = 0, onStep, exportsRef, onLoadData, onLoadCif, onAddPhase, onRemovePhase, presetValues, presetFitRange, restore }: {
   structure: StructureModel;
   pattern: PdfPattern;
   /** Active workflow step (0 = refinement, 1 = magnetic PDF analysis). */
@@ -119,8 +122,19 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   presetValues?: Record<string, number>;
   /** Fit window to open with (demo snapshots refine a specific window). */
   presetFitRange?: { min: number; max: number };
+  /** A saved PDF workspace to reopen (project open). The shell remounts this
+   *  page with a fresh key when it opens a project; the workspace seeds the
+   *  initial state and overlays the saved parameter rows onto the spec. */
+  restore?: PdfWorkspace;
 }): JSX.Element {
   const multiPhase = extraPhases.length > 0;
+  // The workspace this page was mounted to reopen, read once. It applies only
+  // while `structure` and `pattern` are the very objects the file carried —
+  // identity, not id — so the shell may drop the prop without the page losing
+  // its restored state, and a later CIF or data load can never re-stamp the
+  // saved rows onto a different model.
+  const mounted = useRef({ restore, structure, pattern }).current;
+  const restoring = mounted.restore && mounted.structure === structure && mounted.pattern === pattern ? mounted.restore : undefined;
   // Position parameterization (single-phase only): "atomic" refines the
   // symmetry-constrained per-coordinate shifts; "irreps" refines symmetry-
   // adapted distortion-mode AMPLITUDES (AMPLIMODES/ISODISTORT paradigm). The
@@ -128,9 +142,12 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // no second CIF needed — amplitudes seed at 0, rigid-translation gauge
   // excluded); loading a high-symmetry PARENT cif upgrades it to the observed
   // decomposition, whose mode 1 is the frozen order parameter (Å).
-  const [positionMode, setPositionMode] = useState<"atomic" | "irreps">("atomic");
-  const [modes, setModes] = useState<{ set: DistortionModeSet; parentName: string; fromActivation?: boolean } | null>(null);
-  useEffect(() => setModes(null), [structure]);
+  const [positionMode, setPositionMode] = useState<"atomic" | "irreps">(restoring?.positionMode ?? "atomic");
+  const [modes, setModes] = useState<{ set: DistortionModeSet; parentName: string; fromActivation?: boolean } | null>(() => {
+    const dm = restoring?.distortionModes;
+    return dm ? { set: dm.set, parentName: dm.parentName, ...(dm.fromActivation ? { fromActivation: true } : {}) } : null;
+  });
+  useOnChange(structure, () => setModes(null));
   // ---- Magnetic PDF (mPDF, roadmap P4) -----------------------------------
   // The spin model handed over from the magnetic page (step 1). Model AND its
   // moment rows travel together: they must enter the `spec` memo as one unit,
@@ -141,8 +158,11 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     magnetic: MagneticModel;
     params: readonly RefinementParameter[];
     bindings: readonly ParameterBinding[];
-  } | null>(null);
-  useEffect(() => setSpinModel(null), [structure]);
+  } | null>(() => {
+    const sm = restoring?.spinModel;
+    return sm ? { magnetic: sm.magnetic, params: [...sm.parameters], bindings: [...sm.bindings] } : null;
+  });
+  useOnChange(structure, () => setSpinModel(null));
   // The magnetic term exists only for neutron data (no X-ray dipole coupling),
   // and `buildMpdfSpec` is single-phase (it wraps `buildPdfSpec`, not the
   // multi-phase builder). Outside those conditions the page stays purely nuclear.
@@ -175,14 +195,15 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   const defaultRange = useMemo((): FitRangeSelection => {
     const rFirst0 = pattern.points[0]?.r ?? 0;
     const rLast0 = pattern.points[pattern.points.length - 1]?.r ?? 1;
-    if (presetFitRange) {
-      return { min: Math.max(presetFitRange.min, rFirst0), max: Math.min(presetFitRange.max, rLast0) };
+    const preset = restoring?.fitRange ?? presetFitRange;
+    if (preset) {
+      return { min: Math.max(preset.min, rFirst0), max: Math.min(preset.max, rLast0) };
     }
     return {
       min: Math.min(Math.max(pattern.rpoly ?? 1.5, rFirst0), rLast0),
       max: Math.min(rLast0, 30),
     };
-  }, [pattern, presetFitRange]);
+  }, [pattern, presetFitRange, restoring]);
   // Parameter spec: PDF scale/envelope + the symmetry-reduced structural set,
   // with the phase scale(s) seeded from the least-squares optimum of the
   // starting model (exact for one linear scale; split evenly across phases).
@@ -208,10 +229,12 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     // values carry over by id in the spec-swap effect.
     const preset = modeSet !== null && modes?.fromActivation ? undefined : presetValues;
     // κ-seeding the phase scale(s) costs a full forward G(r) calculation —
-    // skip it when a preset (demo snapshot) supplies every scale anyway.
-    const presetCoversScale =
-      preset !== undefined &&
-      raw.params.every((p) => p.kind !== "pdfScale" || preset[p.id] !== undefined);
+    // skip it when a preset (demo snapshot) or a reopened project supplies
+    // every scale anyway.
+    const savedIds = restoring ? new Set(restoring.refinement.parameters.map((p) => p.id)) : null;
+    const presetCoversScale = raw.params.every(
+      (p) => p.kind !== "pdfScale" || (preset !== undefined && preset[p.id] !== undefined) || (savedIds !== null && savedIds.has(p.id)),
+    );
     let params = raw.params;
     if (!presetCoversScale) {
       const start = multiPhase
@@ -231,11 +254,15 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     if (preset) {
       params = params.map((p) => (preset[p.id] !== undefined ? { ...p, value: preset[p.id]!, initialValue: preset[p.id]! } : p));
     }
+    // Project open: the saved rows ARE the state being reopened (values,
+    // initial values, free flags, esds) — they win over the κ seed and any
+    // preset. Rows the file does not know keep the spec's defaults.
+    if (restoring) params = overlaySavedParameters(params, restoring.refinement.parameters);
     return { ...raw, params };
-  }, [fitStructure, modeSet, extraPhases, multiPhase, phases, pattern, defaultRange, presetValues, spinFit]);
+  }, [fitStructure, modeSet, extraPhases, multiPhase, phases, pattern, defaultRange, presetValues, spinFit, restoring]);
 
   const [params, setParams] = useState<readonly RefinementParameter[]>(spec.params);
-  const [result, setResult] = useState<RefinementResult | null>(null);
+  const [result, setResult] = useState<RefinementResult | null>(restoring?.refinement.lastResult ?? null);
   const [busy, setBusy] = useState(false);
   // Live calculated curve streamed from the worker during a refinement.
   const [live, setLive] = useState<number[] | null>(null);
@@ -328,7 +355,9 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       });
     }
     setParams(next);
-    setResult(null);
+    // The first spec of a mount may carry a reopened project's result; every
+    // later swap is a real model change and invalidates the result.
+    if (prev !== null) setResult(null);
     setLive(null);
     prevSpecCtx.current = { structure, pattern, multiPhase, anchor: fitStructure, bindings: spec.bindings, spinFit };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- spec is the sole trigger; the rest is read-at-fire context
@@ -563,16 +592,12 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // makes the series path-dependent, so one box that falls into a local
   // minimum hands it to every box after it — restarts re-search each box
   // around its seed and keep the best, at (restarts + 1)× the cost.
-  const [boxcarPlanState, setBoxcarPlanState] = useState<BoxcarPlan>({
-    width: 5,
-    step: 1,
-    direction: "up",
-    randomStart: false,
-    restarts: 4,
-  });
+  const [boxcarPlanState, setBoxcarPlanState] = useState<BoxcarPlan>(
+    restoring?.boxcar?.plan ?? { width: 5, step: 1, direction: "up", randomStart: false, restarts: 4 },
+  );
   const { width: boxWidth, step: boxStep, direction: boxDirection, randomStart: boxRandomStart, restarts: boxRestarts } =
     boxcarPlanState;
-  const [boxcarRun, setBoxcarRun] = useState<BoxcarRun | null>(null);
+  const [boxcarRun, setBoxcarRun] = useState<BoxcarRun | null>(restoring?.boxcar?.lastRun ?? null);
   const [boxcarBusy, setBoxcarBusy] = useState(false);
   const [boxcarProgress, setBoxcarProgress] = useState<{ done: number; total: number } | null>(null);
   // Set while a scan is being cancelled, so the loop's rejection is reported as
@@ -1096,12 +1121,21 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     });
     downloadText(`${pattern.id}_report.md`, text, "text/markdown");
   };
+  // The project snapshot reads the live state through a ref (like the exports
+  // above), so the shell's stable handler always sees the current page.
+  const projectWorkspaceRef = useRef<() => PdfWorkspace>(() => { throw new Error("PdfWorkbench: not mounted"); });
+  projectWorkspaceRef.current = () =>
+    pdfWorkspaceFrom({
+      pattern, params: activeParams, bindings: spec.bindings, result, fitRange, positionMode, modes, spinModel,
+      boxcarPlan: boxcarPlanState, boxcarRun,
+    });
   useEffect(() => {
     if (!exportsRef) return;
     exportsRef.current = {
       csv: () => exportCsvRef.current(),
       cif: () => exportCifRef.current(),
       report: () => exportReportRef.current(),
+      projectWorkspace: () => projectWorkspaceRef.current(),
     };
     return () => { exportsRef.current = null; };
   }, [exportsRef]);

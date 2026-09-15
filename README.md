@@ -230,9 +230,12 @@ nuclear and magnetic structures:
   (crystallite size & microstrain, isotropic / uniaxial / generalized Mustrain),
   and magnetic moments — with fixed/free states, bounds, and constraints.
 - Compare observed vs calculated, track refinement history, and export the
-  refinement — a reproducible project JSON, or a one-click FullProf / GSAS-II
-  cross-check bundle (control file + data + instrument, with your original
-  instrument and data files included verbatim).
+  refinement — a one-click FullProf / GSAS-II cross-check bundle (control file
+  + data + instrument, with your original instrument and data files included
+  verbatim).
+- Save the whole session as a project file (`.materia.json`) and reopen it
+  later to continue — powder, single-crystal, and PDF sessions each in their
+  own validated block, so a file can never be read as the wrong technique.
 
 ## Architecture in one paragraph
 
@@ -255,7 +258,7 @@ correct f64 CPU path (WebAssembly is skipped). Full detail in
 - [docs/SCATTERING_TABLES.md](docs/SCATTERING_TABLES.md) — neutron / X-ray / magnetic form-factor tables
 - [docs/VALIDATION.md](docs/VALIDATION.md) — testing & external comparison strategy
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — scope and known simplifications
-- [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project JSON format
+- [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project file format (save / reopen a session)
 - [docs/REFINEMENT_PROCEDURE.md](docs/REFINEMENT_PROCEDURE.md) — the guided 7-step workflow
 - [docs/COMPARISON.md](docs/COMPARISON.md) — features vs GSAS-II / Jana2020 / FullProf
 - [docs/REFERENCES.md](docs/REFERENCES.md) — bibliography: papers, data sources, and GSAS-II (validation reference)

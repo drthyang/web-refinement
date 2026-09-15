@@ -51,4 +51,11 @@ export type {
 export type {
   ProjectMetadata,
   ProjectFile,
+  Technique,
+  Workspace,
+  PowderWorkspace,
+  SingleCrystalWorkspace,
+  PdfWorkspace,
+  RefinementState,
+  FitWindow,
 } from "@/core/project/types";

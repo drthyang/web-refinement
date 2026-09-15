@@ -110,8 +110,9 @@ Full detail in [DATA_MODEL.md](./DATA_MODEL.md). In brief:
   imports magnetic types, so Phases 1–4 cannot accidentally depend on Phase 5+.
 - **DiffractionDataset** is either a SingleCrystalDataset (h k l I σ) or a
   PowderPattern (x y σ with an x-unit). Both feed one engine.
-- **ProjectFile** is the serializable aggregate of all of the above plus the
-  parameter list and last result.
+- **ProjectFile** is the saved session: the phases plus ONE technique-tagged
+  `workspace` (powder / singleCrystal / pdf) holding that technique's dataset,
+  settings, parameters and last result — validated per technique on load.
 
 All data types are methods-free plain objects so they serialize to JSON and
 cross the worker boundary without custom (de)serialization.
@@ -162,8 +163,12 @@ never by hand-rolling `postMessage` calls in components.
 
 - **Parsers** (`src/parsers`): CIF (cell, symmetry ops, sites), hkl intensity
   tables, powder tables (with x-unit metadata). Pure functions: `string → model`.
-- **Project I/O**: `ProjectFile ↔ JSON`, guarded by `schemaVersion` for
-  migration. See [PROJECT_FORMAT.md](./PROJECT_FORMAT.md).
+- **Project I/O** (`src/core/project`): `ProjectFile ↔ JSON` — a readable
+  serializer, a `schemaVersion` gate with migrations, and structural validation
+  by technique. The app layer (`src/app/projectIo.ts`) maps each engine's live
+  state to its workspace block and back; the shell owns the envelope, the
+  active engine supplies its block (`projectWorkspace` in the engine contract).
+  See [PROJECT_FORMAT.md](./PROJECT_FORMAT.md).
 
 ## Validation strategy
 

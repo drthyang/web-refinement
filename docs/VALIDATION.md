@@ -25,7 +25,7 @@ comparison recorded here.
 
 | Area | Test kind | Status |
 | --- | --- | --- |
-| ProjectFile JSON round-trip | unit | ✅ `core/project/project.test.ts` |
+| ProjectFile round-trip, per-technique validation (foreign-data refusal, id integrity), v1→v2 migration, readable serializer | unit | ✅ `core/project/project.test.ts`, `core/project/serialize.test.ts`, `app/projectIo.test.ts` |
 | CIF parsing (cell, symmetry, sites) | unit + golden | ✅ `parsers/cif.test.ts` |
 | Powder/reflection numeric parsing (esd) | unit | ✅ `parsers/cif.test.ts` |
 | Reciprocal metric tensor / volume | golden (GSAS) | ✅ `core/crystal/unitCell.test.ts` |

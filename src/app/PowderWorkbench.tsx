@@ -17,14 +17,12 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { APP_VERSION, PROJECT_SCHEMA_VERSION } from "@/app/constants";
 import { downloadText, downloadBlob } from "@/app/download";
 import { fullprofBundle, gsas2Bundle, type BundleOptions } from "@/core/export/bundle";
 import { zipStore } from "@/core/export/zip";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { RefinementParameter, RefinementResult, ParameterBinding } from "@/core/refinement/types";
-import type { ProjectFile } from "@/core/project/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import { magneticComponentCurve } from "@/core/workflow/magneticPowder";
@@ -35,7 +33,8 @@ import { extractSizeStrain } from "@/core/diffraction/microstructure";
 import { guidedPowderParams, type SiteTies, type MustrainModel } from "@/app/powderSpec";
 import { multiPhaseCurves } from "@/core/workflow/multiPhase";
 import { DEFAULT_STAGE_KINDS, siteGroups } from "@/core/workflow/structureRefinement";
-import { powderPatternCsv, projectJson } from "@/core/export/exporters";
+import { powderPatternCsv } from "@/core/export/exporters";
+import { powderWorkspaceFrom, type PowderViewState } from "@/app/projectIo";
 import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from "@/core/export/cif";
 import { isMomentParameterKind } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
@@ -113,12 +112,19 @@ export interface PowderWorkbenchProps {
   onLoadInstrument: (file: File) => void;
   /** Load the bundled demo (from the empty-state prompt). */
   onLoadDemo?: (kind: "rietveld" | "pdf") => void;
+  /** Open a saved project (from the empty-state prompt). */
+  onOpenProject?: (file: File) => void;
+  /** Engine-private view state to restore after a project open. The shell
+   *  restores the session itself; this is applied once per `token`, after the
+   *  pattern-change resets have run, so the restored window and unit win. */
+  viewRestore?: PowderViewState & { readonly token: number };
 }
 
 export function PowderWorkbench({
   session, setSession, powderResult, setPowderResult, instrument, instrumentLoaded, ownStructure,
   client, active, step, onStep, setMessage, exportsRef,
   onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, onLoadInstrument, onLoadDemo,
+  onOpenProject, viewRestore,
 }: PowderWorkbenchProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
@@ -345,6 +351,15 @@ export function PowderWorkbench({
   useEffect(() => {
     setManualPeakD([]);
   }, [pattern]);
+  // Project open: declared AFTER the pattern-change resets (fit range, display
+  // unit, manual peaks) so that in the commit where the pattern and the restore
+  // token change together, the restored view state is what remains.
+  useEffect(() => {
+    if (!viewRestore) return;
+    setFitRange(viewRestore.fitRange);
+    setDisplayUnit(viewRestore.displayUnit);
+    setManualPeakD([...viewRestore.manualPeakD]);
+  }, [viewRestore]);
   const addManualPeak = useCallback((d: number): void => {
     if (!Number.isFinite(d) || d <= 0) return;
     setManualPeakD((list) => (list.some((v) => Math.abs(v - d) < 0.005) ? list : [...list, d]));
@@ -806,25 +821,6 @@ export function PowderWorkbench({
     client.cancel();
   }
 
-  function exportProject(): void {
-    const project: ProjectFile = {
-      schemaVersion: PROJECT_SCHEMA_VERSION,
-      metadata: {
-        title: `${structure.name} session`,
-        createdAt: new Date().toISOString(),
-        modifiedAt: new Date().toISOString(),
-        appVersion: APP_VERSION,
-      },
-      structures: [structure],
-      magneticModels: [],
-      datasets: [pattern],
-      parameters: [...powderParams],
-      bindings: [...pBindings],
-      ...(powderResult ? { lastResult: powderResult } : {}),
-    };
-    downloadText(`${structure.id}-project.json`, projectJson(project), "application/json");
-  }
-
   const wRpct = (() => {
     // The page's single wR readout: the true weighted R_wp with the engine's
     // definition and point selection (1/σ² weights, excluded-sentinel plateau,
@@ -990,7 +986,7 @@ export function PowderWorkbench({
     if (active) exportsRef.current = {
       cif: exportCif,
       csv: exportCsv,
-      projectJson: exportProject,
+      projectWorkspace: () => powderWorkspaceFrom(session, powderResult, instrument, instrumentLoaded, { fitRange, displayUnit, manualPeakD }),
       fullprofBundle: () => exportBundle("fullprof"),
       gsas2Bundle: () => exportBundle("gsas2"),
     };
@@ -1123,7 +1119,7 @@ export function PowderWorkbench({
     return (
       <main className="wb-main" style={{ flex: 1, display: active ? undefined : "none" }}>
         <SummaryCards cards={summaryCards} />
-        <EmptyWorkbench {...(onLoadDemo ? { onLoadDemo } : {})} />
+        <EmptyWorkbench {...(onLoadDemo ? { onLoadDemo } : {})} {...(onOpenProject ? { onOpenProject } : {})} />
       </main>
     );
   }
@@ -1564,7 +1560,7 @@ const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${them
 /** Empty-state panel shown in place of the plot/parameters on a clean start.
  *  The two converged demos (one per technique, matching the header chips) are
  *  the visual focus; the load cards above handle the user's own files. */
-function EmptyWorkbench({ onLoadDemo }: { onLoadDemo?: (kind: "rietveld" | "pdf") => void }): JSX.Element {
+function EmptyWorkbench({ onLoadDemo, onOpenProject }: { onLoadDemo?: (kind: "rietveld" | "pdf") => void; onOpenProject?: (file: File) => void }): JSX.Element {
   return (
     // Fills the space a working row would occupy and centres its content in it,
     // so the first screen looks composed at any window height instead of a
@@ -1591,9 +1587,26 @@ function EmptyWorkbench({ onLoadDemo }: { onLoadDemo?: (kind: "rietveld" | "pdf"
           />
         </div>
       )}
+      {onOpenProject && (
+        <label style={openProjectLink} title="Reopen a session saved with Project ▸ Save project">
+          … or open a saved project (.materia.json)
+          <input
+            type="file"
+            accept=".materia.json,.json,application/json"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onOpenProject(f);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      )}
     </div>
   );
 }
+
+const openProjectLink: React.CSSProperties = { marginTop: 14, fontSize: fz.small, color: theme.primary, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 };
 
 function DemoCard({ kicker, title, blurb, onClick }: { kicker: string; title: string; blurb: string; onClick: () => void }): JSX.Element {
   const [hover, setHover] = useState(false);

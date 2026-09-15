@@ -15,56 +15,26 @@
  */
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import type { SequentialResult } from "@/core/refinement/sequential";
-import { boxcarStepIndex, type BoxcarDirection, type BoxcarWindow } from "@/core/workflow/pdfBoxcar";
+import {
+  boxcarStepIndex,
+  type BoxcarDirection,
+  type BoxcarDirectionChoice,
+  type BoxcarPlan,
+  type BoxcarRun,
+  type BoxcarSeries,
+} from "@/core/workflow/pdfBoxcar";
+
+// The run/plan data types live in the core (a project file carries them); the
+// panel's callers always imported them from here.
+export type { BoxcarDirectionChoice, BoxcarPlan, BoxcarRun, BoxcarSeries };
 import { color, fz, mono, primaryButton, secondaryButton } from "@/app/theme";
 import { InfoBadge } from "@/app/ui/InfoBadge";
 import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
 import { linearScale } from "@/visualization/scale";
 
-/** One scan pass: the fits made walking the boxes in one direction. Its
- *  `result.steps` are in SCAN order, which for a "down" pass is the reverse of
- *  the run's (ascending) window list — {@link stepIndexFor} maps between them. */
-export interface BoxcarSeries {
-  readonly direction: BoxcarDirection;
-  readonly result: SequentialResult;
-}
-
-/** A completed (or in-progress) boxcar scan: the plan and the series it made. */
-export interface BoxcarRun {
-  /** The full plan, ALWAYS ascending in r, whichever way the passes walked it. */
-  readonly windows: readonly BoxcarWindow[];
-  /** One entry per direction scanned (two when the run compares both). */
-  readonly series: readonly BoxcarSeries[];
-  /** Box width used (Å) — reported in the caption, since the plan can be edited
-   *  in the panel after a run without invalidating the run itself. */
-  readonly width: number;
-  /** Randomized restarts each box ran beyond its seeded start (0 = seed only). */
-  readonly restarts: number;
-  /** Ids that were free when this run started — the tracks worth plotting.
-   *  Frozen with the run: the panel's free flags may have changed since. */
-  readonly freeIds: readonly string[];
-  /** True when the scan was cancelled (or failed) partway: some boxes (or a
-   *  whole pass) are missing from the plan. */
-  readonly partial?: boolean;
-}
-
 /** {@link boxcarStepIndex} bound to a series (see there for the ordering rule). */
 export function stepIndexFor(series: BoxcarSeries, windowIndex: number, total: number): number {
   return boxcarStepIndex(series.direction, windowIndex, total, series.result.steps.length);
-}
-
-/** Scan order the user asked for: one direction, or both for the comparison. */
-export type BoxcarDirectionChoice = BoxcarDirection | "both";
-
-/** The scan the controls describe (owned by the workbench, edited here). */
-export interface BoxcarPlan {
-  readonly width: number;
-  readonly step: number;
-  readonly direction: BoxcarDirectionChoice;
-  /** Re-search each box from perturbed starts instead of the seed alone. */
-  readonly randomStart: boolean;
-  readonly restarts: number;
 }
 
 /** What the current plan resolves to against the page's fit window. */

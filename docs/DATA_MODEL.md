@@ -129,8 +129,12 @@ structure factor are computed in functions, not stored on the model.
 
 ## Project file (`core/project/types.ts`)
 
-`ProjectFile` aggregates everything: `schemaVersion`, `metadata`, `structures[]`,
-`magneticModels[]`, `datasets[]`, `parameters[]`, `bindings[]`, `lastResult?`.
-Being plain JSON, it round-trips through `JSON.stringify`; that invariant is
-tested in `core/project/project.test.ts`. Format details and migration policy are
-in [PROJECT_FORMAT.md](./PROJECT_FORMAT.md).
+`ProjectFile` is the saved session: `schemaVersion`, `metadata`, the phases
+(`structures[]`, `[0]` primary), and **one `workspace` tagged by technique** —
+`powder` (pattern + instrument + profile + refinement + magnetic…),
+`singleCrystal` (nuclear/magnetic reflection sets + probe + refinement…), or
+`pdf` (G(r) + fit window + position mode + distortion modes + spin model +
+boxcar…). Each block owns its dataset type and its validator branch, so a file
+can never be read as the wrong kind of measurement. Being plain JSON, it
+round-trips losslessly (`core/project/project.test.ts`). Format, loading rules
+and migration policy: [PROJECT_FORMAT.md](./PROJECT_FORMAT.md).

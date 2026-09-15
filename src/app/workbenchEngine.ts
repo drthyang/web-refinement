@@ -1,7 +1,7 @@
 /**
  * The Workbench engine contract: what the app shell (App.tsx — header, data
- * loading, mode routing) shares with the two refinement engines
- * (`PowderWorkbench`, `SingleCrystalWorkbench`).
+ * loading, mode routing) shares with the refinement engines (`PowderWorkbench`,
+ * `SingleCrystalWorkbench`, `PdfWorkbench`).
  *
  * ## The quality-panel boundary (design decision, ratified 2026-07-10)
  *
@@ -18,9 +18,21 @@
  * Only the "GoF ≈ 1 is ideal" idea is common — the formulas differ. Anything
  * combined (e.g. a nuclear+magnetic single-crystal agreement) must be computed
  * in that engine's own convention, never borrowed from the other.
+ *
+ * ## The project boundary
+ *
+ * Saving a project follows the same shape: the shell owns the envelope (the
+ * phases, metadata, the active page) and each engine owns its technique's
+ * `workspace` block — it is the only party that knows its private state
+ * (parameters, result, fit window, spin model…). The engine publishes a
+ * `projectWorkspace` snapshot function next to its exports; the shell calls
+ * the active engine's when the user saves. Restoring runs the other way: the
+ * shell parses the file and hands the engine its workspace as a `restore`
+ * prop on a fresh mount. See core/project/types.ts for the format.
  */
 
 import type { MutableRefObject } from "react";
+import type { Workspace } from "@/core/project/types";
 
 /**
  * Export actions an engine publishes for the shell's header buttons. The
@@ -38,12 +50,16 @@ export interface WorkbenchExports {
   csv?: () => void;
   /** Markdown refinement report (PDF page). */
   report?: () => void;
-  /** Whole-session project JSON (powder). */
-  projectJson?: () => void;
   /** Model + data + build script as a FullProf bundle (.zip). */
   fullprofBundle?: () => void;
   /** Model + data + instprm + build_gpx.py as a GSAS-II bundle (.zip). */
   gsas2Bundle?: () => void;
+  /**
+   * The engine's technique block of the project file — everything needed to
+   * reopen this page as it is now. The shell wraps it with the phases and
+   * metadata (Save project).
+   */
+  projectWorkspace?: () => Workspace;
 }
 
 /** The shell-owned ref an engine publishes its exports into (null when unmounted/inactive). */

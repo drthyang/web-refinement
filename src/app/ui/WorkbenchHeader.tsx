@@ -48,9 +48,16 @@ interface Props {
   readonly activeDemo?: "rietveld" | "pdf" | null;
   readonly onLoadDemo?: (id: "rietveld" | "pdf") => void;
   readonly onExitDemo?: () => void;
+  /** Open a saved project file — offered even on the landing, before any data. */
+  readonly onOpenProject?: (file: File) => void;
+  /** Save the current session as a project file (absent while nothing is loaded). */
+  readonly onSaveProject?: () => void;
 }
 
-export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo }: Props): JSX.Element {
+/** File-picker filter for project files (any .json is accepted; the reader decides). */
+const PROJECT_ACCEPT = ".materia.json,.json,application/json";
+
+export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo, onOpenProject, onSaveProject }: Props): JSX.Element {
   return (
     <header className="wb-header" style={headerBar}>
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
@@ -90,6 +97,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
         />
       </nav>
       <div className="wb-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
+        {onOpenProject && <ProjectMenu onOpenProject={onOpenProject} {...(onSaveProject ? { onSaveProject } : {})} />}
         {demos && demos.length > 0 && onLoadDemo && (
           <DemosMenu demos={demos} activeDemo={activeDemo} onLoadDemo={onLoadDemo} onExitDemo={onExitDemo} />
         )}
@@ -273,6 +281,59 @@ function DemosMenu({ demos, activeDemo, onLoadDemo, onExitDemo }: {
   );
 }
 
+/**
+ * "Project ▾": save the whole session as one `.materia.json`, or open a saved
+ * one. Lives beside Demos/Export because a project is the session-level
+ * counterpart of the per-mode exports (see workbenchEngine.ts).
+ */
+function ProjectMenu({ onOpenProject, onSaveProject }: { onOpenProject: (file: File) => void; onSaveProject?: () => void }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <ActionButton onClick={() => setOpen((o) => !o)} active={open}>Project ▾</ActionButton>
+      {open && (
+        <div style={menu}>
+          {onSaveProject && (
+            <MenuItem onClick={() => { setOpen(false); onSaveProject(); }}>Save project</MenuItem>
+          )}
+          <MenuFileItem accept={PROJECT_ACCEPT} onFile={(f) => { setOpen(false); onOpenProject(f); }}>
+            Open project…
+          </MenuFileItem>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A menu row that opens the file picker (a label wrapping a hidden input). */
+function MenuFileItem({ children, accept, onFile }: { children: React.ReactNode; accept: string; onFile: (file: File) => void }): JSX.Element {
+  const [hover, setHover] = useState(false);
+  return (
+    <label onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ ...menuItem(hover), boxSizing: "border-box" }}>
+      {children}
+      <input
+        type="file"
+        accept={accept}
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onFile(f);
+          e.target.value = "";
+        }}
+      />
+    </label>
+  );
+}
+
 function ActionButton({ children, onClick, active }: { children: React.ReactNode; onClick: () => void; active?: boolean }): JSX.Element {
   const [hover, setHover] = useState(false);
   const lit = hover || active;
@@ -329,28 +390,25 @@ function ExportMenu({ exports }: { exports: readonly ExportAction[] }): JSX.Elem
 function MenuItem({ children, onClick }: { children: React.ReactNode; onClick: () => void }): JSX.Element {
   const [hover, setHover] = useState(false);
   return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: "block",
-        width: "100%",
-        textAlign: "left",
-        whiteSpace: "nowrap",
-        border: "none",
-        background: hover ? color.primaryTintBg : "transparent",
-        color: hover ? color.primary : color.ink,
-        padding: "8px 14px",
-        fontSize: 13,
-        fontWeight: 500,
-        cursor: "pointer",
-      }}
-    >
+    <button onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={menuItem(hover)}>
       {children}
     </button>
   );
 }
+
+const menuItem = (hover: boolean): CSSProperties => ({
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  whiteSpace: "nowrap",
+  border: "none",
+  background: hover ? color.primaryTintBg : "transparent",
+  color: hover ? color.primary : color.ink,
+  padding: "8px 14px",
+  fontSize: 13,
+  fontWeight: 500,
+  cursor: "pointer",
+});
 
 const menu: CSSProperties = {
   position: "absolute",

@@ -14,6 +14,11 @@
 import { useCallback, useRef, useState } from "react";
 import { APP_VERSION } from "@/app/constants";
 import type { RefinementResult } from "@/core/refinement/types";
+import type { StructureModel } from "@/core/crystal/types";
+import { TECHNIQUE_LABEL, type PdfWorkspace, type ProjectFile, type SingleCrystalWorkspace } from "@/core/project/types";
+import { looksLikeProjectFile, parseProject, projectFileName, serializeProject } from "@/core/project/io";
+import { defaultProjectTitle, projectFileFor, sessionFromPowderWorkspace, type PowderViewState } from "@/app/projectIo";
+import { downloadText } from "@/app/download";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { PdfPattern, SingleCrystalDataset } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
@@ -88,6 +93,26 @@ const DEMOS = [
   { id: "pdf", label: "PDF · GaTa₄Se₈ X-ray G(r)" },
 ] as const;
 
+/**
+ * What a just-opened project asks the engines to restore. `token` changes per
+ * open and is part of the keyed engines' mount keys, so their initializers
+ * run against the workspace; each engine reads its block once, at mount.
+ */
+interface ProjectRestore {
+  readonly token: number;
+  readonly powderView?: PowderViewState & { readonly token: number };
+  readonly singleCrystal?: SingleCrystalWorkspace;
+  readonly pdf?: PdfWorkspace;
+}
+const NO_RESTORE: ProjectRestore = { token: 0 };
+
+/** Identity of the project the session came from, so Save keeps its title and creation date. */
+interface ProjectMeta {
+  readonly title: string;
+  readonly createdAt: string;
+  readonly notes?: string;
+}
+
 export function App(): JSX.Element {
   // The workbench opens clean (no data): the shell shows a landing view until the
   // user loads the bundled Mn₃Ga POWGEN demo (the header "Demo" toggle) or their
@@ -125,6 +150,12 @@ export function App(): JSX.Element {
   // example), the Structure card's load button becomes "Add CIF…" and appends a
   // phase instead of replacing — the multi-phase entry point.
   const [ownStructure, setOwnStructure] = useState(false);
+  // Project save/open (see workbenchEngine.ts, "The project boundary").
+  const [projectMeta, setProjectMeta] = useState<ProjectMeta | null>(null);
+  const [restore, setRestore] = useState<ProjectRestore>(NO_RESTORE);
+  // A user-facing problem from the last project open. The app has no status
+  // bar (status goes to the console), but a refused file must be seen.
+  const [notice, setNotice] = useState<string | null>(null);
   // The status bar under the header is gone (results and diagnostics live in
   // the parameter panel / quality rail); status texts go to the console so
   // load/refine errors are still traceable.
@@ -179,6 +210,9 @@ export function App(): JSX.Element {
     setPowderResult(null);
     setDemoActive(false);
     setStep(0);
+    setProjectMeta(null);
+    setRestore((r) => ({ token: r.token }));
+    setNotice(null);
   }
 
   function onClearStructures(): void {
@@ -188,6 +222,9 @@ export function App(): JSX.Element {
 
   /** The two bundled demos — one per technique, both converged snapshots. */
   function onLoadDemo(kind: "rietveld" | "pdf"): void {
+    // A demo is the bundled snapshot, not the user's project.
+    setProjectMeta(null);
+    setRestore((r) => ({ token: r.token }));
     if (kind === "rietveld") {
       const ex = mn3gaPowgenExample();
       setSession(loadedSession(ex.structure, ex.pattern, ex.instrument, ex.extraPhases, ex.refinedParams));
@@ -275,11 +312,115 @@ export function App(): JSX.Element {
     setPowderResult(null);
   }
 
+  // ── Project save / open ─────────────────────────────────────────────────
+  // The shell owns the envelope (phases, metadata, active page); the ACTIVE
+  // engine supplies its technique block through the exports ref. Opening runs
+  // the other way: the file's technique tag decides which mode the app enters,
+  // and the engine gets its block as a `restore` prop on a fresh mount.
+
+  function onSaveProject(): void {
+    const engine = pdfDataset ? pdfExports : scDataset ? scExports : powderExports;
+    const workspace = engine.current?.projectWorkspace?.();
+    if (!workspace) {
+      setNotice("Nothing to save yet — load a structure and a dataset first.");
+      return;
+    }
+    // Single crystal refines one phase; the powder / PDF blocks carry every phase.
+    const structures: StructureModel[] =
+      workspace.technique === "singleCrystal" ? [session.structure] : [session.structure, ...session.extraPhases];
+    const title = projectMeta?.title ?? defaultProjectTitle(session.structure, workspace.technique);
+    const file = projectFileFor({
+      structures,
+      workspace,
+      title,
+      step,
+      ...(projectMeta ? { createdAt: projectMeta.createdAt } : {}),
+      ...(projectMeta?.notes !== undefined ? { notes: projectMeta.notes } : {}),
+    });
+    downloadText(projectFileName(file), serializeProject(file), "application/json");
+    if (!projectMeta) setProjectMeta({ title, createdAt: file.metadata.createdAt });
+    setNotice(null);
+    setMessage(`Saved project “${title}” (${TECHNIQUE_LABEL[workspace.technique]}).`);
+  }
+
+  function onOpenProject(file: File): void {
+    file.text().then((text) => openProjectText(text, file.name));
+  }
+
+  function openProjectText(text: string, sourceName: string): void {
+    let file: ProjectFile;
+    try {
+      file = parseProject(text);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setNotice(`Could not open “${sourceName}” — ${msg}`);
+      setMessage(`Project open failed: ${msg}`);
+      return;
+    }
+    const structures = file.structures;
+    const primary = structures[0]!;
+    const ws = file.workspace;
+    switch (ws.technique) {
+      case "powder": {
+        const r = sessionFromPowderWorkspace(ws, structures);
+        setSession(r.session);
+        setInstrument(r.instrument);
+        setInstrumentLoaded(r.instrumentLoaded);
+        setPowderResult(r.result);
+        setScNuclearDataset(null);
+        setPdfDataset(null);
+        setRestore((prev) => {
+          const token = prev.token + 1;
+          return { token, powderView: { ...r.view, token } };
+        });
+        break;
+      }
+      case "singleCrystal": {
+        // The dormant powder session just carries the structure (as onLoadCif does).
+        setSession(newSession(primary, instrument));
+        setPowderResult(null);
+        setPdfDataset(null);
+        setScDataset(ws.dataset);
+        setScMagneticDataset(ws.magneticDataset ?? null);
+        setRestore((prev) => ({ token: prev.token + 1, singleCrystal: ws }));
+        break;
+      }
+      case "pdf": {
+        // Same dormant powder session, but with the file's extra phases so the
+        // PDF page (which reads them from the session) sums every phase.
+        const extraPhases = structures.slice(1);
+        const base = newSession(primary, instrument);
+        const spec = buildSpecFor(primary, extraPhases, base.pattern, instrument, true, base.backgroundTerms, base.siteTies, "isotropic");
+        setSession({ ...base, extraPhases: [...extraPhases], powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile });
+        setPowderResult(null);
+        setScNuclearDataset(null);
+        setPdfDataset(ws.pattern);
+        setRestore((prev) => ({ token: prev.token + 1, pdf: ws }));
+        break;
+      }
+    }
+    setOwnStructure(true);
+    setDemo(null);
+    // The magnetic page exists for every technique except a PDF that cannot
+    // carry a magnetic term (X-ray, or multi-phase) — stay on the nuclear page there.
+    const wantStep = file.view?.step === 1 ? 1 : 0;
+    const magneticPage = ws.technique !== "pdf" || (ws.pattern.scatteringType === "neutron" && structures.length === 1);
+    setStep(magneticPage ? wantStep : 0);
+    setProjectMeta({ title: file.metadata.title, createdAt: file.metadata.createdAt, ...(file.metadata.notes !== undefined ? { notes: file.metadata.notes } : {}) });
+    setNotice(null);
+    setMessage(`Opened project “${file.metadata.title}” — ${TECHNIQUE_LABEL[ws.technique]}, saved by v${file.metadata.appVersion}.`);
+  }
+
   // Unified, auto-detecting data loader: the resolver classifies the file
   // (powder vs single-crystal) and, for powder, its x-unit, then dispatches.
   function onLoadData(file: File): void {
     file.text().then((text) => {
       try {
+        // A project file dropped on any load button opens as a project.
+        if (looksLikeProjectFile(text)) {
+          openProjectText(text, file.name);
+          return;
+        }
         // Any data load is the user's own content — no longer the pristine demo.
         setDemoActive(false);
         // FullProf's ILL `.dat` templates share the extension but differ in
@@ -525,7 +666,6 @@ export function App(): JSX.Element {
     : [
         { label: session.magnetic && session.magnetic.moments.length > 0 ? "mCIF" : "CIF", onClick: () => powderExports.current?.cif?.() },
         { label: "CSV", onClick: () => powderExports.current?.csv?.() },
-        { label: "Project JSON", onClick: () => powderExports.current?.projectJson?.() },
         { label: "GSAS-II bundle (.zip)", onClick: () => powderExports.current?.gsas2Bundle?.() },
         { label: "FullProf bundle (.zip)", onClick: () => powderExports.current?.fullprofBundle?.() },
       ];
@@ -554,7 +694,15 @@ export function App(): JSX.Element {
         activeDemo={demo}
         onLoadDemo={onLoadDemo}
         onExitDemo={onExitDemo}
+        onOpenProject={onOpenProject}
+        {...(hasContent ? { onSaveProject } : {})}
       />
+      {notice && (
+        <div role="alert" style={noticeBar}>
+          <span style={{ flex: 1 }}>{notice}</span>
+          <button onClick={() => setNotice(null)} style={noticeClose} title="Dismiss">✕</button>
+        </div>
+      )}
       {hasContent && (
         <div style={disclaimerBar}>
           <b>Public beta</b> — validated against published reference fits for the cases in its docs, not for
@@ -591,19 +739,21 @@ export function App(): JSX.Element {
         onClearStructures={onClearStructures}
         onLoadInstrument={onLoadInstrument}
         onLoadDemo={onLoadDemo}
+        onOpenProject={onOpenProject}
+        {...(restore.powderView ? { viewRestore: restore.powderView } : {})}
       />
       {pdfDataset && (
         // PDF mode (auto-switched on loading a reduced .gr). Keyed on the dataset
         // id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <PdfWorkbench key={pdfDataset.id} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} />
+          <PdfWorkbench key={`${pdfDataset.id}#${restore.token}`} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} {...(restore.pdf ? { restore: restore.pdf } : {})} />
         </main>
       )}
       {scDataset && (
         // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
         // the dataset id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <SingleCrystalWorkbench key={scDataset.id} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} />
+          <SingleCrystalWorkbench key={`${scDataset.id}#${restore.token}`} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} {...(restore.singleCrystal ? { restore: restore.singleCrystal } : {})} />
         </main>
       )}
       <footer style={copyrightBar}>
@@ -638,6 +788,8 @@ function crossCheckTargets(technique: "rietveld" | "pdf" | "sc"): string {
 
 const LIMITATIONS_URL = "https://github.com/drthyang/web-refinement/blob/main/docs/LIMITATIONS.md";
 
+const noticeBar: React.CSSProperties = { display: "flex", alignItems: "center", gap: 12, padding: "8px 24px", fontSize: 12.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
+const noticeClose: React.CSSProperties = { border: "none", background: "transparent", color: theme.warnInk, cursor: "pointer", fontSize: 13, padding: "0 4px" };
 const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
 const disclaimerLink: React.CSSProperties = { color: theme.warnInk, textDecoration: "underline" };
 const copyrightBar: React.CSSProperties = { display: "flex", justifyContent: "center", alignItems: "center", gap: 8, padding: "10px 24px", fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised };
