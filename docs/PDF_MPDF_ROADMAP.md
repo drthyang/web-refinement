@@ -80,7 +80,7 @@ fit needs **exactly one new science module** and **zero engine changes**.
 | **Crystal / math** `crystal/`, `math/` | `fractionalToCartesian`, `metricTensor`, `expandStructureAtoms`, `expandMagneticSupercell`, `adp.ts`, `gaussLegendre` | — | rmax-bounded periodic-image **pair enumerator**; sine-FT / FFT bridge |
 | **Magnetic** `magnetic/` | `buildMagneticModel`, `allowedMomentDirections`, `isotropySubgroup`/`buildMomentField`, `applyMagneticMoments`, `canonicalizeMomentValues`, k-search / MSG candidates | export `buildMomentField` | `magnetic/mpdf.ts` spin-pair kernel + ⟨j0⟩ real-space envelope |
 | **UI** `app/`, `visualization/` | `ParameterPanel`, project I/O, CSV export, `StructureView` | `WorkbenchPlot` → signed-y variant (G(r) has negative lobes) | `PdfWorkbench.tsx`, `.gr` data card wiring |
-| **Data / parsers** `parsers/`, `diffraction/types.ts` | `ProjectFile`, `parseCif`/`parseMagneticCif`, `detectFormat` chain | `DiffractionDataset` union; `schemaVersion` bump | `PdfPattern` type; `parsers/pdfData.ts` (`.gr`/`.sq`/`.fq`) |
+| **Data / parsers** `parsers/`, `diffraction/types.ts` | `ProjectFile`, `parseCif`/`parseMagneticCif`, `detectFormat` chain | ✅ a `pdf` technique block in the project file (schema v2 — pattern, fit window, position mode, distortion modes, spin model, boxcar), see [PROJECT_FORMAT.md](./PROJECT_FORMAT.md) | `PdfPattern` type; `parsers/pdfData.ts` (`.gr`/`.sq`/`.fq`) |
 | **MCP / agent** `mcp/` | `TOOL_REGISTRY`/`ToolDefinition` pattern, `createNodeEvaluatorPool`, `buildProblemForSpec` | `pdf`/`mpdf` `EvaluatorSpec` arm | ~9 new tools (§4) |
 | **Workers / GPU** `workers/` | `refineParallel` pool, the GPU kernel class + two-gate validation *pattern* | `EvaluatorSpec` variant | optional WebGPU pair-histogram kernel |
 

@@ -262,8 +262,9 @@ the a(T)/moment(T) curves that are the point of a sequential study.
 
 Each `run` accumulates a `RefinementIteration[]` (iteration number, χ², agreement
 factors). This is the audit trail the UI shows and the basis for undo. History is
-part of `RefinementResult`, which is part of the saved `ProjectFile`, so a reopened
-project shows how it got where it is.
+part of `RefinementResult`, which the saved project file keeps as
+`workspace.refinement.lastResult` ([PROJECT_FORMAT.md](./PROJECT_FORMAT.md)), so a
+reopened project shows how it got where it is.
 
 ## What is intentionally *not* here yet
 

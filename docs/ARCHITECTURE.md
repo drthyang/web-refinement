@@ -80,7 +80,7 @@ src/
     diagnostics/     assessment / next-steps / interpretation (judgment)
     export/          CIF, mCIF, FullProf + GSAS-II bundles, reports
     absorption/      μ, transmission, crystal habit, face indexing
-    project/         project file (de)serialization
+    project/         project file: types, readable serializer, validation, migration
   parsers/           CIF/mCIF, hkl, powder formats, instrument files
   mcp/               agent tool layer: tools.ts (pure handlers),
                      registry.ts (single source of truth), server.ts (stdio)

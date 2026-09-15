@@ -187,12 +187,17 @@ accidental gap — each is tracked as a roadmap item.
   packing follows GSAS-II's reader and is covered by synthetic tests only. A
   `CONST` bank is assumed constant-wavelength (the common case) — a rare
   constant-µs-step TOF `CONST` bank would need an explicit unit override.
-- **Output.** Reproducible project JSON with history; refined **CIF export with
-  esds** and **mCIF export** (k ≠ 0 writes the magnetic supercell); markdown
-  reports; a one-click **FullProf + GSAS-II cross-check bundle** (CW + TOF
-  `.pcr` with the original data/instrument files verbatim). **Not yet:**
-  single-crystal and multi-phase `.pcr` export; geometry tables in the report.
-  (Roadmap M5 remainder.)
+- **Output.** **Save / reopen the whole session** as a `.materia.json` project
+  (data, phases, parameters, settings and last result embedded; powder,
+  single-crystal and PDF sessions each in their own validated block — see
+  [PROJECT_FORMAT.md](./PROJECT_FORMAT.md)); refined **CIF export with esds**
+  and **mCIF export** (k ≠ 0 writes the magnetic supercell); markdown reports; a
+  one-click **FullProf + GSAS-II cross-check bundle** (CW + TOF `.pcr` with the
+  original data/instrument files verbatim). **Not yet:** single-crystal and
+  multi-phase `.pcr` export; geometry tables in the report; project save/open as
+  MCP tools. A project does not store posterior (MCMC) samples or the magnetic
+  page's k-search exploration — the applied magnetic model is saved, the
+  exploration is re-run. (Roadmap M5 remainder.)
 
 ## What "not validated" means here
 

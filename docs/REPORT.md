@@ -40,7 +40,8 @@ in `src/core/**` is pure, framework-free TypeScript.
 | Magnetic | `src/core/magnetic` | Perpendicular-moment projection, magnetic `F_M` |
 | Refinement | `src/core/refinement` | Levenberg–Marquardt engine, R-factors, esds, constraint ties |
 | Workflows | `src/core/workflow` | Single-crystal & powder problem builders + obs/calc comparison |
-| Parsers | `src/parsers` | CIF (esd-aware), hkl, powder, project JSON |
+| Parsers | `src/parsers` | CIF (esd-aware), hkl, powder, instrument files |
+| Project | `src/core/project` | Technique-tagged project file (schema v2): types, readable serializer, per-technique validation, v1→v2 migration |
 | Compute | `src/workers` | Typed worker + client (refinement off the main thread) |
 | Visualization | `src/visualization` | SVG pattern plot, obs-vs-calc scatter |
 | UI | `src/app`, `src/components` | Workbench: structure view, parameter tables, refine, export |

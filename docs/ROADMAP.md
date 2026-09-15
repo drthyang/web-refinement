@@ -460,15 +460,21 @@ agent tool it exposes.**
 ### M5 — Ship the results 🚧
 
 - **Goal:** reproducible, publishable, machine-readable outputs.
-- **Exists:** versioned project JSON round-trip; agreement factors; refinement
-  history; **refined CIF export with esds** and **mCIF export** (k ≠ 0 writes
-  the magnetic supercell) ([`export/cif.ts`](../src/core/export/cif.ts));
-  markdown **report generators**; the one-click **FullProf + GSAS-II
-  cross-check bundle** (CW + TOF `.pcr`, original data/instrument files
-  verbatim). The MCP tool registry (§5) is the headless API substrate.
+- **Exists:** **save / reopen the whole session** as a technique-tagged project
+  file (schema v2 — powder, single-crystal and PDF blocks with the data,
+  phases, parameters, settings and last result embedded; validated per
+  technique on load; v1 migration; [PROJECT_FORMAT.md](./PROJECT_FORMAT.md),
+  shipped 2026-09-15); agreement factors; refinement history; **refined CIF
+  export with esds** and **mCIF export** (k ≠ 0 writes the magnetic supercell)
+  ([`export/cif.ts`](../src/core/export/cif.ts)); markdown **report
+  generators**; the one-click **FullProf + GSAS-II cross-check bundle** (CW +
+  TOF `.pcr`, original data/instrument files verbatim). The MCP tool registry
+  (§5) is the headless API substrate.
 - **Needed:** single-crystal and multi-phase `.pcr` export; a fuller report
   (geometry tables, correlation/failure-mode summary); `export_cif` /
-  `generate_report` as MCP tools.
+  `generate_report` and `save_project` / `load_project` as MCP tools (the
+  project codec in `core/project/io` is headless already); optional project
+  blocks for posterior samples and the magnetic page's exploration state.
 - **Validation gate:** CIF/mCIF round-trip; an external tool (VESTA/GSAS-II)
   reads the exported files.
 

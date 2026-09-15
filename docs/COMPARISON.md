@@ -106,6 +106,7 @@ in-app flows.
 | Intensity extraction | **Le Bail** | + Pawley |
 | Magnetism | mCIF in/out, single-crystal + powder moment refinement, k = 0 **and** k ≠ 0 (commensurate **and** incommensurate single-k: cosine + sine Fourier amplitudes, brute-force-supercell gated), k-search, subgroup candidates + comparison | representation analysis (built-in), harmonics / superspace, multi-k |
 | Validation | GSAS-II golden values + real-data benchmarks; PDFfit2/PDFgui and diffpy.mpdf goldens | decades of community validation |
+| Session files | **Save / reopen the whole session** as one readable `.materia.json` (data, phases, parameters, settings, last result; one validated block per technique, so a file can never load as the wrong measurement) | `.gpx` / `.m50`+`.m40` / `.pcr` project files with decades of tooling around them |
 | Platform / API | **Static web app, no install**; **33 MCP agent tools** | desktop; Python scripting ecosystems |
 
 **Honest gaps** (the road to maturity): multi-k, modulation harmonics and
