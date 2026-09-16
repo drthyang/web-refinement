@@ -88,8 +88,14 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
               WORKBENCH
             </span>
           </div>
-          <span style={betaBadge} title="MATERIA is in public beta — validate results against established tools before publication">beta</span>
-          <span className="wb-version-chip" style={versionChip}>{version}</span>
+          {/* One meta pill, not three: the release state and the version are
+              the same fact about this build, so they share a chip instead of
+              lining up two boxes in two colours beside the wordmark. The
+              version hides itself on a phone (wb-version-chip). */}
+          <span style={betaBadge} title="MATERIA is in public beta — validate results against established tools before publication">
+            beta
+            <span className="wb-version-chip" style={betaVersion}>{version}</span>
+          </span>
           <GpuBadge />
         </div>
       </div>
@@ -164,12 +170,25 @@ function GpuBadge(): JSX.Element {
 }
 
 /**
- * The header nav is four chips in two matching groups — technique
- * (Rietveld | PDF) and refinement target (Nuclear | Magnetic) — so "what am I
- * fitting, and in which space" is one glance. Nothing loaded → all neutral;
- * once data picks the direction, the active chip in each group lights and the
- * inactive one dims.
+ * The header nav is six chips in three groups — sample form (Powder | Crystal),
+ * technique (Rietveld | PDF) and refinement target (Nuclear | Magnetic) — so
+ * "what am I fitting, and in which space" is one glance. The first two only
+ * REPORT what the loaded data is, so they render as quiet segmented controls
+ * ({@link ChipVariant}); only the step group, the one you click, carries the
+ * accent. Nothing loaded → all neutral; once data picks the direction, the
+ * selected chip in each group lifts and the others dim.
  */
+/**
+ * How a chip group carries its weight. The header holds three groups, and they
+ * are not equal: the step chips are the navigation (you click them), while the
+ * sample-form and technique chips only report what the data is. Painting all
+ * three in accent blue put four saturated blocks across the bar — the brand
+ * mark included — and flattened that difference. "nav" keeps the accent fill;
+ * "indicator" is a quiet segmented control (a raised white segment on a warm
+ * track), legible at a glance but never competing with the thing you act on.
+ */
+type ChipVariant = "nav" | "indicator";
+
 interface Chip {
   readonly key: string;
   readonly label: string;
@@ -182,31 +201,54 @@ interface Chip {
   readonly onClick?: () => void;
 }
 
-function ChipGroup({ chips }: { chips: readonly Chip[] }): JSX.Element {
+function ChipGroup({ chips, variant = "nav" }: { chips: readonly Chip[]; variant?: ChipVariant }): JSX.Element {
+  const indicator = variant === "indicator";
   return (
-    <span style={{ display: "inline-flex", border: `1px solid ${color.control}`, borderRadius: radius.pill, overflow: "hidden" }}>
-      {chips.map((c) => <GroupChip key={c.key} chip={c} />)}
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        // The indicator track is inset by 2px so its selected segment reads as
+        // a tile floating on the track rather than a slab filling the pill.
+        gap: indicator ? 2 : 0,
+        padding: indicator ? 2 : 0,
+        border: `1px solid ${indicator ? color.subtle : color.control}`,
+        background: indicator ? color.chipBg : "transparent",
+        borderRadius: radius.pill,
+        overflow: "hidden",
+      }}
+    >
+      {chips.map((c) => <GroupChip key={c.key} chip={c} variant={variant} />)}
     </span>
   );
 }
 
-function GroupChip({ chip }: { chip: Chip }): JSX.Element {
+function GroupChip({ chip, variant = "nav" }: { chip: Chip; variant?: ChipVariant }): JSX.Element {
   const [rawHover, setHover] = useState(false);
   const hover = rawHover && chip.onClick !== undefined && !chip.active;
+  const indicator = variant === "indicator";
   // Lit but not selected: the accent tint of hover, made permanent, plus a dot
   // so the state reads as "in the model" rather than "the cursor is here".
   const lit = !!chip.present && !chip.active;
+  const background = chip.active
+    ? indicator ? color.surface : color.primary
+    : lit || hover ? color.primaryTintBg : "transparent";
+  const ink = chip.active
+    ? indicator ? color.ink : "#fff"
+    : lit || hover ? color.primary : chip.dimmed ? (indicator ? color.faint : color.faintest) : color.secondary;
   const style: CSSProperties = {
     fontFamily: mono,
-    fontSize: 11,
+    fontSize: indicator ? 10.5 : 11,
     fontWeight: 600,
     letterSpacing: "0.07em",
     textTransform: "uppercase",
-    padding: "7px 14px",
+    padding: indicator ? "4px 11px" : "7px 14px",
     whiteSpace: "nowrap",
     border: "none",
-    background: chip.active ? color.primary : lit || hover ? color.primaryTintBg : "transparent",
-    color: chip.active ? "#fff" : lit || hover ? color.primary : chip.dimmed ? color.faintest : color.secondary,
+    borderRadius: indicator ? radius.pill : 0,
+    background,
+    color: ink,
+    ...(indicator && chip.active ? { boxShadow: "0 1px 2px rgba(25,23,20,0.10)" } : {}),
     cursor: chip.onClick && !chip.active ? "pointer" : "default",
     transition: "color 160ms, background 160ms",
   };
@@ -227,14 +269,17 @@ function GroupChip({ chip }: { chip: Chip }): JSX.Element {
     : <span {...shared}>{content}</span>;
 }
 
-/** The "in the model" marker on a lit (present, not active) chip. */
+/** The "in the model" marker on a lit (present, not active) chip: a small
+ *  accent dot with a soft halo, so it reads as a status light on the tint
+ *  rather than a stray bullet glued to the label. */
 const presentDot: CSSProperties = {
   display: "inline-block",
-  width: 5,
-  height: 5,
+  width: 4.5,
+  height: 4.5,
   borderRadius: "50%",
   background: color.primary,
-  marginRight: 6,
+  boxShadow: `0 0 0 2.5px ${color.primaryTintBorder}66`,
+  marginRight: 7,
   verticalAlign: "middle",
 };
 
@@ -247,6 +292,7 @@ function FormChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | null 
   ] as const;
   return (
     <ChipGroup
+      variant="indicator"
       chips={chips.map((c) => ({
         key: c.id,
         label: c.label,
@@ -267,6 +313,7 @@ function TechniqueChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | 
   ] as const;
   return (
     <ChipGroup
+      variant="indicator"
       chips={chips.map((c) => ({
         key: c.id,
         label: c.label,
@@ -484,41 +531,45 @@ const brandMark: CSSProperties = {
 
 /** Engine-mode badge (Rietveld / PDF / single crystal): primary-tinted pill so
  *  the active engine is always one glance away, next to the workflow steps. */
-const versionChip: CSSProperties = {
-  fontFamily: mono,
-  fontSize: 11,
-  color: color.secondary,
-  background: color.chipBg,
-  border: `1px solid ${color.border}`,
-  borderRadius: radius.chip,
-  padding: "2px 8px",
-};
-
-const betaBadge: CSSProperties = {
+/**
+ * The meta pills beside the wordmark (release + build, GPU). They share one
+ * geometry — same height, radius, type scale and optical padding — so they read
+ * as one quiet cluster rather than three unrelated boxes.
+ */
+const metaPill: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+  height: 20,
   fontFamily: mono,
   fontSize: 10,
   fontWeight: 600,
   letterSpacing: "0.09em",
   textTransform: "uppercase",
+  borderRadius: radius.pill,
+  padding: "0 8px",
+  whiteSpace: "nowrap",
+};
+
+const betaBadge: CSSProperties = {
+  ...metaPill,
   color: color.noteInk,
   background: color.noteBg,
   border: `1px solid ${color.noteBorder}`,
-  borderRadius: radius.chip,
-  padding: "2px 7px",
+};
+
+/** The build number inside the beta pill: same chip, lighter voice. */
+const betaVersion: CSSProperties = {
+  fontWeight: 500,
+  letterSpacing: "0.04em",
+  textTransform: "none",
+  opacity: 0.72,
 };
 
 const gpuBadgeBase: CSSProperties = {
-  fontFamily: mono,
-  fontSize: 10,
-  fontWeight: 600,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-  borderRadius: radius.chip,
-  padding: "2px 7px",
-  display: "inline-flex",
-  alignItems: "center",
+  ...metaPill,
   gap: 4,
-  whiteSpace: "nowrap",
+  padding: "0 8px 0 7px",
   cursor: "default",
   transition: "opacity 160ms, color 160ms, background 160ms",
 };
