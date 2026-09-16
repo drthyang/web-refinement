@@ -218,3 +218,13 @@ another language is exactly the maintenance drift this architecture avoids.
   reference. No WebAssembly (dual-implementation drift).
 - Every phase ends with: passing tests, updated docs, a working local app, and
   no broken intermediate state.
+- Layout: **edges line up** (`src/app/workbench.css`, header comment). One
+  content column — the header, notice/disclaimer bars, footer and page all pad
+  with `--wb-edge`, so brand mark, banner text, first card and last menu button
+  share one left and one right line at every width. A card's border sits on
+  that line; a page title outside a card sits flush on it with no padding of
+  its own. Siblings are spaced by `--wb-gap` only (inside a card, `--wb-inset`);
+  no hand-typed pixel gutters at page level. A working row fills the window
+  with its columns stretched to one bottom edge; what does not fit scrolls
+  inside its card (no sticky rails). Verify with `getBoundingClientRect()`
+  before and after a layout change, not by eye.

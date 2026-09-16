@@ -695,7 +695,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
             supercell, ties one modulated amplitude per magnetic sublattice, and
             refines with ONE shared scale (nuclear + magnetic = one measurement).
             Non-destructive: the shared structure/3D view stay in the base cell. */}
-        <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="wb-sc-wide" style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <span style={uppercaseLabel}>Magnetic single-k · supercell refinement</span>
             <label style={{ ...secondaryButton, padding: "6px 12px", cursor: "pointer" }} title="Load a companion magnetic reflection file (.int/.hkl): satellites indexed in the nuclear cell as the fundamental h k l of hkl ± k">
@@ -824,7 +824,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       {/* Step 1 — magnetic symmetry analysis. The workflow itself is structure-
           driven and identical to powder; only the moment fit (magneticFit) runs
           against F² reflections instead of a powder pattern. */}
-      <div style={{ display: step === 1 ? "grid" : "none", gap: space.gap }}>
+      <div className="wb-mag-page" style={{ display: step === 1 ? undefined : "none" }}>
         <div style={{ ...themeCard, padding: space.inset }}>
           <div style={{ ...uppercaseLabel, marginBottom: 4 }}>Magnetic symmetry analysis — single crystal ({structure.name || "structure"})</div>
           <p style={{ fontSize: 13, color: color.secondary, margin: 0, lineHeight: 1.5 }}>

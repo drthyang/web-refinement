@@ -895,9 +895,12 @@ export function KSearchPanel({
 
   return (
     <div className="wb-mag2">
-      {/* Left rail (sticky): in powder mode the refined pattern first — the
-          judging tool while clicking candidate groups on the right — then the
-          3D model (magnetic (super)cell; arrows once a group is selected). */}
+      {/* Left rail: in powder mode the refined pattern first — the judging
+          tool while clicking candidate groups on the right — then the 3D model
+          (magnetic (super)cell; arrows once a group is selected), which fills
+          the rest of the row. The row fills the window and the steps card on
+          the right scrolls inside itself, so this rail stays in view without
+          being sticky (layout rule, workbench.css). */}
       <div className="wb-mag2-left">
       {/* Pattern check: is the k / magnetic-space-group choice consistent
           with where the unexplained intensity actually sits? The same view as
@@ -991,7 +994,7 @@ export function KSearchPanel({
         </section>
       )}
 
-      <section style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", ...(patternView ? {} : { height: "100%" }) }}>
+      <section className="wb-mag2-model" style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
           <span style={themeLabel}>3D model — {magBuild ? "moment preview" : "refined structure"}</span>
           <InfoBadge
@@ -1009,14 +1012,16 @@ export function KSearchPanel({
             {...(magBuild ? { magneticOperations: magBuild.magnetic.operations ?? [] } : {})}
             {...(momentEntries ? { moments: momentEntries } : {})}
             {...(standardCell ? { standardCell } : {})}
+            minCanvasHeight={240}
             exports={[viewerCifExport]}
           />
         </Suspense>
       </section>
       </div>
 
-      {/* Right panel: the workflow controls (steps 1–5). */}
-      <div style={{ ...themeCard, padding: space.inset, display: "grid", gap: 14, alignContent: "start", minWidth: 0 }}>
+      {/* Right panel: the workflow controls (steps 1–5). Stretched to the row's
+          height; its content scrolls inside the card, not the page. */}
+      <div className="wb-mag2-steps" style={{ ...themeCard, padding: space.inset, display: "grid", gap: 14, alignContent: "start", minWidth: 0 }}>
       {/* 1. Which sites carry a moment */}
       <section>
         <StepTitle

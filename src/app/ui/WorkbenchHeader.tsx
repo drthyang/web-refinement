@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { color, mono, radius, shadow } from "@/app/theme";
+import { color, mono, radius, shadow, space } from "@/app/theme";
 import type { DemoId } from "@/app/demos";
 
 /** Display face for the MATERIA wordmark — geometric, loaded in index.html. */
@@ -428,7 +428,7 @@ const headerBar: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 22,
-  padding: "15px 28px",
+  padding: `15px ${space.edge}`,
   borderBottom: `1px solid ${color.border}`,
   background: color.raised,
   boxShadow: shadow.header,

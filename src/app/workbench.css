@@ -3,6 +3,20 @@
  * most of the look; this file owns the few things inline styles cannot do —
  * viewport-responsive type tokens (clamp) and media-query grid reflow — so the
  * UI fills wide windows yet stays comfortable and readable on small ones.
+ *
+ * ALIGNMENT RULE (every page, every band): edges line up.
+ *   1. One content column. The header, the notice/disclaimer bars, the footer
+ *      and the page all pad with --wb-edge, so the brand mark, the banner text,
+ *      the first card's border and the last menu button share one left and one
+ *      right line at every window width.
+ *   2. A card's border sits on that line; anything that lives outside a card
+ *      (a page title row) sits flush on it too — no padding of its own.
+ *   3. Siblings are separated by --wb-gap and nothing else; inside a card the
+ *      inset is --wb-inset. No hand-typed 12 / 14 / 24 / 28px at page level.
+ *   4. A working row fills the window; its columns stretch to one common
+ *      bottom edge; whatever does not fit scrolls INSIDE its card rather than
+ *      pushing the row's edges apart or sticking at an edge of its own.
+ * Check it with getBoundingClientRect(), not by eye: the rule is a number.
  */
 
 :root {
@@ -28,6 +42,17 @@
   --wb-gap: clamp(12px, 0.9vw, 18px);
   --wb-pad: calc(var(--wb-gap) * 1.5);
   --wb-inset: clamp(11px, 0.8vw, 16px);
+
+  /*
+   * ONE content column (rule 1 above). The page is capped at --wb-max and
+   * centred; --wb-edge is the inline padding that puts a full-width band's
+   * content on exactly the page's edges: the page gutter while the window is
+   * narrower than the cap, then half the surplus plus the gutter. Percentage
+   * padding resolves against the containing block's width — the window, for
+   * every band and for .wb-main alike — so the same expression aligns them all.
+   */
+  --wb-max: 2100px;
+  --wb-edge: max(var(--wb-pad), calc((100% - var(--wb-max)) / 2 + var(--wb-pad)));
 
   /*
    * Floor for the main working row. It does not set the height — the row FILLS
@@ -71,12 +96,11 @@
   }
 }
 
-/* Main content column: fills the window on wide screens, comfortable gutters. */
+/* Main content column: fills the window on wide screens, comfortable gutters,
+ * and the same inline edge as every band above and below it. */
 .wb-main {
   width: 100%;
-  max-width: 2100px;
-  margin: 0 auto;
-  padding: var(--wb-pad);
+  padding: var(--wb-pad) var(--wb-edge);
   display: flex;
   flex-direction: column;
   gap: var(--wb-gap);
@@ -85,8 +109,9 @@
      so a short window scrolls instead of compressing. */
   min-height: 0;
   /* The scroll container for the page: the shell itself never scrolls, so the
-     header and footer stay put and a long page (the magnetic workflow) moves
-     under them. */
+     header and footer stay put. The working rows fill this column and scroll
+     inside their cards, so this scrolls only when the window is genuinely too
+     short for a row's floor, or when a narrow layout stacks its columns. */
   overflow-y: auto;
 }
 
@@ -161,6 +186,12 @@
      no internal scroll region, so stretching them to the window would clip
      rather than fill. The column scrolls instead. */
 }
+/* A card below the two columns (the supercell magnetic panel) spans both, so
+ * the row ends on the page's right edge instead of leaving the right column
+ * ragged (alignment rule). */
+.wb-sc-wide {
+  grid-column: 1 / -1;
+}
 @media (max-width: 1120px) {
   .wb-sc {
     grid-template-columns: 1fr;
@@ -180,32 +211,74 @@
   }
 }
 
-/* Magnetic page: pattern check + 3D model (left rail) | workflow controls (right). */
+/* Magnetic page (powder and single crystal): a title row or intro card, then
+ * the magnetic row. `auto 1fr` hands the row the leftover height, the way the
+ * powder page's rows get it directly from .wb-main. */
+.wb-mag-page {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: var(--wb-gap);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Magnetic page: pattern check + 3D model (left rail) | workflow controls (right).
+ * The same model as the powder/PDF working rows (rule 4): the row fills the
+ * window, both columns stretch to one bottom edge, and the long side (steps
+ * 1–5) scrolls INSIDE its card. The pattern check and 3D model therefore stay
+ * in view while candidate groups are clicked — what the earlier sticky rail
+ * was for, without its misalignments (it stuck at --wb-gap while the page's
+ * edge is --wb-pad, and its bottom ran past the right card's into the gutter). */
 .wb-mag2 {
   display: grid;
   grid-template-columns: minmax(400px, 6fr) minmax(380px, 5fr);
   gap: var(--wb-gap);
-  align-items: start;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: var(--wb-plot-min-h);
+}
+.wb-mag2 > * {
+  min-height: 0;
 }
 
-/* The left rail sticks as one unit while the workflow steps scroll, keeping
-   the pattern check visible while candidate groups are clicked on the right. */
+/* Left rail: the pattern card takes its plot height; the 3D model fills the rest. */
 .wb-mag2-left {
-  position: sticky;
-  top: var(--wb-gap);
-  align-self: start;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--wb-gap);
   min-width: 0;
+  min-height: 0;
+}
+.wb-mag2-model {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
-/* Narrow: stack, pattern check first (cards auto-size; nothing sticks). */
+/* Workflow steps: the card is the scroll region, not the page. */
+.wb-mag2-steps {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Narrow: stack, pattern check first; cards auto-size and the page scrolls.
+ * The page wrapper must then take its content's height — a fixed `1fr` row
+ * would squeeze the stacked grid and its auto rows would overlap. */
 @media (max-width: 1120px) {
+  .wb-mag-page {
+    grid-template-rows: auto auto;
+    flex: 0 0 auto;
+    min-height: auto;
+  }
   .wb-mag2 {
     grid-template-columns: 1fr;
+    min-height: 0;
   }
-  .wb-mag2-left {
-    position: static;
+  .wb-mag2-model {
+    flex: none;
+    min-height: var(--wb-plot-min-h);
+  }
+  .wb-mag2-steps {
+    overflow: visible;
   }
 }
 
@@ -238,7 +311,7 @@
  * overrides what must respond to the viewport, hence the !important. */
 @media (max-width: 700px) {
   .wb-header {
-    padding: 10px 14px !important;
+    padding: 10px var(--wb-edge) !important;
     gap: 10px !important;
   }
   .wb-header-title {

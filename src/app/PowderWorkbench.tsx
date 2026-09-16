@@ -1454,9 +1454,13 @@ export function PowderWorkbench({
           </>
         );
       case 1:
+        // Title row + working row (.wb-mag-page, workbench.css): the row gets
+        // the leftover height so it fills the window and its two columns end
+        // on one line; a narrow window stacks and scrolls the page instead.
         return (
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "2px 4px 0" }}>
+          <div className="wb-mag-page">
+            {/* Outside any card, so flush on the column edge: no padding of its own. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h2 style={{ ...h2, margin: 0, fontSize: 15 }}>Magnetic symmetry analysis</h2>
               <span style={{ fontSize: 12.5, color: theme.secondary, fontFamily: themeMono }}>
                 {structure.name || "structure"}

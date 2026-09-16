@@ -44,7 +44,7 @@ import { PowderWorkbench } from "@/app/PowderWorkbench";
 import { SingleCrystalWorkbench } from "@/app/SingleCrystalWorkbench";
 import { PdfWorkbench } from "@/app/PdfWorkbench";
 import { WorkbenchHeader, type Step, type ExportAction } from "@/app/ui/WorkbenchHeader";
-import { color as theme } from "@/app/theme";
+import { color as theme, space } from "@/app/theme";
 import {
   type Session,
   newSession,
@@ -832,9 +832,9 @@ function crossCheckTargets(technique: "rietveld" | "pdf" | "sc"): string {
 
 const LIMITATIONS_URL = "https://github.com/drthyang/web-refinement/blob/main/docs/LIMITATIONS.md";
 
-const noticeBar: React.CSSProperties = { display: "flex", alignItems: "center", gap: 12, padding: "8px 24px", fontSize: 12.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
+const noticeBar: React.CSSProperties = { display: "flex", alignItems: "center", gap: 12, padding: `8px ${space.edge}`, fontSize: 12.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
 const noticeClose: React.CSSProperties = { border: "none", background: "transparent", color: theme.warnInk, cursor: "pointer", fontSize: 13, padding: "0 4px" };
-const disclaimerBar: React.CSSProperties = { padding: "7px 24px", fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
+const disclaimerBar: React.CSSProperties = { padding: `7px ${space.edge}`, fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
 const disclaimerLink: React.CSSProperties = { color: theme.warnInk, textDecoration: "underline" };
-const copyrightBar: React.CSSProperties = { display: "flex", justifyContent: "center", alignItems: "center", gap: 8, padding: "10px 24px", fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised };
+const copyrightBar: React.CSSProperties = { display: "flex", justifyContent: "center", alignItems: "center", gap: 8, padding: `10px ${space.edge}`, fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised };
 const footerLink: React.CSSProperties = { color: theme.secondary, textDecoration: "none" };
