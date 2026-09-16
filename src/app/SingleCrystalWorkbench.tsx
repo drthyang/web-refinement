@@ -10,7 +10,7 @@
  * whenever single-crystal data is loaded.
  */
 
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, useCallback } from "react";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { SingleCrystalWorkspace } from "@/core/project/types";
 import { modulatedInputsFrom, restoreMomentBindings, restoreSingleCrystalParameters, singleCrystalWorkspaceFrom } from "@/app/projectIo";
@@ -44,6 +44,8 @@ import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { expandStructureToSupercell, buildModulatedMomentModel, mergeToMagneticSupercell, type ModulatedIon } from "@/core/magnetic/magneticSupercell";
 import type { MomentDegeneracy } from "@/core/magnetic/canonicalize";
 import { downloadText } from "@/app/download";
+import { reportHtml } from "@/core/export/report";
+import { singleCrystalReportInput, reportFileName, type MagneticExploration } from "@/app/reportInputs";
 import { card as themeCard, color, mono, fz, uppercaseLabel, secondaryButton, space } from "@/app/theme";
 
 // Lazy so three.js stays out of the main bundle until the 3D view is opened.
@@ -500,11 +502,41 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
     }
   }
 
+  // The magnetic page's current candidate, for the report (published by KSearchPanel).
+  const exploredMagnetic = useRef<MagneticExploration | null>(null);
+  const publishExploration = useCallback((m: MagneticExploration | null): void => {
+    exploredMagnetic.current = m;
+  }, []);
+
+  // Self-contained HTML report (Export ▾ → Report): data and merge statistics,
+  // the F_obs/F_calc figure, SHELX agreement, the refined structure with esds,
+  // the magnetic model (applied or under exploration), every parameter.
+  function exportReport(): void {
+    const html = reportHtml(singleCrystalReportInput({
+      structure: refinedStructure,
+      params,
+      bindings: [...bindings, ...momentBindings],
+      result,
+      dataset: activeDataset,
+      totalReflections: probedDataset.reflections.length,
+      excluded,
+      filterOn,
+      cutoffSigma,
+      agreement: comparison.agreement,
+      merge: merge.statistics,
+      points: obsCalc.map((r) => ({ obs: r.iObs, calc: r.iCalc, ...(r.kind === "magnetic" ? { magnetic: true } : {}) })),
+      magnetic,
+      explored: exploredMagnetic.current,
+    }));
+    downloadText(reportFileName(structure), html, "text/html");
+  }
+
   // Publish the current exporter so the app header can drive it; clear on unmount
   // (switch back to powder) so the header never calls a stale single-crystal export.
   useEffect(() => {
     if (!exportsRef) return;
     exportsRef.current = {
+      report: exportReport,
       cif: exportCif,
       scInt: exportInt,
       projectWorkspace: () => singleCrystalWorkspaceFrom({
@@ -836,6 +868,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           structure={structure}
           magneticFit={magneticFit}
           onContinue={(m, mp, mb) => { applyMagneticModel(m, mp, mb); onStep?.(0); }}
+          onReportModel={publishExploration}
         />
       </div>
     </>

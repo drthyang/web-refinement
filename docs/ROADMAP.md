@@ -479,12 +479,18 @@ agent tool it exposes.**
   technique on load; v1 migration; [PROJECT_FORMAT.md](./PROJECT_FORMAT.md),
   shipped 2026-09-15); agreement factors; refinement history; **refined CIF
   export with esds** and **mCIF export** (k ≠ 0 writes the magnetic supercell)
-  ([`export/cif.ts`](../src/core/export/cif.ts)); markdown **report
-  generators**; the one-click **FullProf + GSAS-II cross-check bundle** (CW +
-  TOF `.pcr`, original data/instrument files verbatim). The MCP tool registry
-  (§5) is the headless API substrate.
-- **Needed:** single-crystal and multi-phase `.pcr` export; a fuller report
-  (geometry tables, correlation/failure-mode summary); `export_cif` /
+  ([`export/cif.ts`](../src/core/export/cif.ts)); the **HTML refinement
+  report** for every technique (Export ▾ → Report, shipped 2026-09-16:
+  headline agreement factors, the fit figure with Bragg ticks or the
+  F_obs/F_calc plot, the refined atomic structure(s) with esds, the magnetic
+  structure with k / magnetic space group / moments / projected figure, every
+  parameter grouped, engine diagnostics and conventions —
+  [`export/report.ts`](../src/core/export/report.ts)); the one-click
+  **FullProf + GSAS-II cross-check bundle** (CW + TOF `.pcr`, original
+  data/instrument files verbatim). The MCP tool registry (§5) is the headless
+  API substrate.
+- **Needed:** single-crystal and multi-phase `.pcr` export; bond-length /
+  angle geometry tables in the report; `export_cif` /
   `generate_report` and `save_project` / `load_project` as MCP tools (the
   project codec in `core/project/io` is headless already); optional project
   blocks for posterior samples and the magnetic page's exploration state.

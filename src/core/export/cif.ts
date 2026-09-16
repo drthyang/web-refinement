@@ -63,7 +63,7 @@ export interface CifExportOptions {
 }
 
 /** Per-field standard uncertainties recovered from the refined parameters. */
-interface EsdMap {
+export interface EsdMap {
   readonly cell: Partial<Record<keyof UnitCell, number>>;
   readonly bIso: Map<string, number>;
   readonly occ: Map<string, number>;
@@ -79,7 +79,7 @@ interface EsdMap {
  * approximation). Anisotropic-U component esds are not propagated (emitted
  * without su).
  */
-function buildEsdMap(params: readonly RefinementParameter[], bindings: readonly ParameterBinding[]): EsdMap {
+export function buildEsdMap(params: readonly RefinementParameter[], bindings: readonly ParameterBinding[]): EsdMap {
   const byId = new Map(params.map((p) => [p.id, p]));
   const cell: Partial<Record<keyof UnitCell, number>> = {};
   const bIso = new Map<string, number>();
@@ -128,7 +128,7 @@ export function formatWithEsd(value: number, esd: number | undefined, decimals: 
 const sanitizeBlock = (name: string): string => name.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "structure";
 
 /** Cell volume V = abc·√(1 − Σcos² + 2∏cos) (Å³). */
-function cellVolume(cell: UnitCell): number {
+export function cellVolume(cell: UnitCell): number {
   const rad = (a: number): number => Math.cos((a * Math.PI) / 180);
   const ca = rad(cell.alpha);
   const cb = rad(cell.beta);

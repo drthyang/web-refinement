@@ -36,6 +36,8 @@ import { DEFAULT_STAGE_KINDS, siteGroups } from "@/core/workflow/structureRefine
 import { powderPatternCsv } from "@/core/export/exporters";
 import { powderWorkspaceFrom, type PowderViewState } from "@/app/projectIo";
 import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from "@/core/export/cif";
+import { reportHtml } from "@/core/export/report";
+import { powderReportInput, reportFileName, type MagneticExploration } from "@/app/reportInputs";
 import { isMomentParameterKind } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
 import { CANCELLED } from "@/workers/computeClient";
@@ -1058,10 +1060,46 @@ export function PowderWorkbench({
     downloadBlob(`${base}_${target}.zip`, zipStore(entries), "application/zip");
   }
 
+  // The magnetic page's current candidate, for the report — published by
+  // KSearchPanel; null when nothing is selected there or the page is closed.
+  const exploredMagnetic = useRef<MagneticExploration | null>(null);
+  const publishExploration = useCallback((m: MagneticExploration | null): void => {
+    exploredMagnetic.current = m;
+  }, []);
+
+  // Self-contained HTML report of the whole study (Export ▾ → Report): data
+  // and model, the fit as plotted (display unit, ticks, window), agreement,
+  // the refined phases with esds, the magnetic structure (applied model, or
+  // the candidate under exploration, labelled), every parameter, diagnostics.
+  function exportReport(): void {
+    const inWindow = curves.x.filter((x) => x >= effectiveFitRange.min && x <= effectiveFitRange.max).length;
+    const html = reportHtml(powderReportInput({
+      session,
+      refinedPhases,
+      params: powderParams,
+      bindings: pBindings,
+      result: powderResult,
+      instrument,
+      instrumentLoaded,
+      wR: weightedR(curves),
+      rExp: rExp ?? null,
+      gof: refinedGof,
+      curves: displayCurves,
+      xLabel: displayXLabel,
+      ticks: phaseTicks.map((t) => ({ label: t.label, color: t.color, x: t.ticks.map((tk) => tk.x) })),
+      fitRange: fitRangeActive ? displayFitRange : null,
+      pointsInWindow: inWindow,
+      tofViewOnly,
+      explored: exploredMagnetic.current,
+    }));
+    downloadText(reportFileName(structure), html, "text/html");
+  }
+
   // Publish this engine's header exports while it is the active mode; cleared on
   // unmount (the shell's other ref serves single-crystal mode).
   useEffect(() => {
     if (active) exportsRef.current = {
+      report: exportReport,
       cif: exportCif,
       csv: exportCsv,
       projectWorkspace: () => powderWorkspaceFrom(session, powderResult, instrument, instrumentLoaded, { fitRange, displayUnit, manualPeakD }),
@@ -1495,6 +1533,7 @@ export function PowderWorkbench({
               preselect={session.magnetic ?? null}
               onApply={applyMagneticPreview}
               onContinue={continueRefinementWithMagnetic}
+              onReportModel={publishExploration}
             />
           </div>
         );

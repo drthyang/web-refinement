@@ -21,10 +21,11 @@ import { searchPropagationVector, satelliteMatchDeltas, kLabel, type KCandidate 
 import { classifyPropagation, describePropagation } from "@/core/magnetic/propagation";
 import type { AnnotatedExtraPeak } from "@/core/magnetic/extraPeaks";
 import { littleGroup } from "@/core/magnetic/magneticGroups";
-import { operationKey } from "@/core/crystal/symmetry";
+import { magneticOperationSignature as magOpsSignature } from "@/core/magnetic/operationSignature";
 import {
   magneticSubgroupLattice,
   latticeRepresentatives,
+  latticeCandidateLabel as latticeLabel,
   type LatticeCandidate,
 } from "@/core/magnetic/subgroupLattice";
 import { decomposeMagneticRepresentation, projectIrrepModes } from "@/core/magnetic/irreps";
@@ -50,7 +51,8 @@ import {
 import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { InfoBadge } from "@/app/ui/InfoBadge";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
-import { magneticReportHtml, type MagneticReportGroup } from "@/core/export/magneticReport";
+import type { ReportGroup } from "@/core/export/report";
+import type { MagneticExploration } from "@/app/reportInputs";
 import { structureToCif, magneticStructureToMcif } from "@/core/export/cif";
 import { downloadText } from "@/app/download";
 import { card as themeCard, color as theme, mono as themeMono, uppercaseLabel as themeLabel, resetRangeBtn, space, toolbarBtn } from "@/app/theme";
@@ -81,11 +83,6 @@ const FRAMEWORKS: readonly { id: "msg" | "irrep"; label: string }[] = [
   { id: "irrep", label: "Representation analysis" },
 ];
 
-/** Compare magnetic groups by operation set (spatial coset + θ). */
-function magOpsSignature(ops: readonly SymmetryOperation[]): string {
-  return [...new Set(ops.map((o) => `${operationKey(o)}|${o.timeReversal ?? 1}`))].sort().join(" ");
-}
-
 /** A residual peak as this panel consumes it: detected (annotated) or manually
  *  added by clicking the pattern — manual picks bypass the inclusion criteria
  *  (explicit user intent) and are removable from the table. */
@@ -98,29 +95,6 @@ export interface ResidualPeak extends AnnotatedExtraPeak {
  *  render loop when the prop is absent, e.g. single-crystal mode). */
 const NO_PEAKS: readonly ResidualPeak[] = [];
 
-/** Display pieces for a lattice candidate: symbol, numbers, setting note. */
-function latticeLabel(c: LatticeCandidate): { symbol: string; numbers: string | null; setting: string | null } {
-  if (c.candidate.standard) {
-    return {
-      symbol: c.candidate.label,
-      numbers: `BNS ${c.candidate.standard.bnsNumber} · OG ${c.candidate.standard.ogNumber}`,
-      setting: null,
-    };
-  }
-  if (c.settingMatch) {
-    return {
-      symbol: formatMagneticSymbol(c.settingMatch.identity.bnsSymbol),
-      numbers: `BNS ${c.settingMatch.identity.bnsNumber} · OG ${c.settingMatch.identity.ogNumber}`,
-      setting: c.settingMatch.transformation,
-    };
-  }
-  // Descriptive fallback: the row already shows the type chip, so strip the
-  // label's own "type …" prefix.
-  const bare = c.candidate.label
-    .replace(/^type III · /, "")
-    .replace(/^type I \(no time reversal\)$/, "no time reversal");
-  return { symbol: bare, numbers: null, setting: null };
-}
 
 const ISOTROPY_FAILURE_TEXT: Record<IsotropyFailure, string> = {
   "no-modes": "The selected irrep(s) carry no moment on the chosen site(s) — this order parameter is magnetically silent here.",
@@ -217,7 +191,7 @@ export function KSearchPanel({
   onApply,
   onContinue,
   baselineAgreement = null,
-  preselect = null,
+  preselect = null, onReportModel,
 }: {
   structure: StructureModel;
   /** The BASE (as-loaded) primary structure for the powder moments fit — the
@@ -277,6 +251,13 @@ export function KSearchPanel({
    * section opened), and the amplitudes are seeded from its moments.
    */
   preselect?: MagneticModel | null;
+  /**
+   * Publishes what the page currently shows — the selected candidate with its
+   * moments at the current amplitudes, its label, and the moments-only fit's
+   * agreement — so the header's report (Export ▾ → Report) can include the
+   * model under exploration. Called with null when no candidate is selected.
+   */
+  onReportModel?: (model: MagneticExploration | null) => void;
 }): JSX.Element {
   const ions = useMemo(() => magneticIonCandidates(structure), [structure]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(ions.map((i) => i.siteLabel)));
@@ -695,6 +676,50 @@ export function KSearchPanel({
   const canRefine = !!(magBuild && magBuild.params.length > 0 && (magneticFit || canPowderRefine));
   const agreementLabel = magneticFit?.agreementLabel ?? "wR";
 
+  // What this page shows right now, for the header's report (Export ▾ →
+  // Report): the selected candidate, its label, and the moments-only fit.
+  const reportGroup = useMemo<ReportGroup>(() => {
+    if (framework === "msg" && selIdx != null && reps[selIdx]) {
+      const r = reps[selIdx]!;
+      const lbl = latticeLabel(r);
+      return {
+        symbol: lbl.symbol,
+        ...(lbl.numbers ? { numbers: lbl.numbers } : {}),
+        ...(lbl.setting ? { setting: lbl.setting } : {}),
+        index: r.index,
+      };
+    }
+    if (framework === "irrep" && combo && !("failure" in combo)) {
+      const identity = combo.standard ?? combo.settingMatch?.identity ?? null;
+      return {
+        symbol: identity
+          ? formatMagneticSymbol(identity.bnsSymbol)
+          : `isotropy subgroup of ${[...chosenIrreps].sort().join(" ⊕ ")}`,
+        ...(identity ? { numbers: `BNS ${identity.bnsNumber} · OG ${identity.ogNumber}` } : {}),
+        ...(combo.settingMatch ? { setting: combo.settingMatch.transformation } : {}),
+      };
+    }
+    return { symbol: "magnetic subgroup" };
+  }, [framework, selIdx, reps, combo, chosenIrreps]);
+  useEffect(() => {
+    if (!onReportModel) return;
+    if (!magBuild) {
+      onReportModel(null);
+      return;
+    }
+    onReportModel({
+      magnetic: applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps),
+      params: magBuild.params.map((p) => ({ ...p, value: amps[p.id] ?? p.value })),
+      bindings: magBuild.bindings,
+      k,
+      group: reportGroup,
+      agreement: refineWR,
+      agreementLabel,
+    });
+  }, [onReportModel, magBuild, amps, k, reportGroup, refineWR, agreementLabel]);
+  // Unmount (or a page switch that remounts the panel) withdraws the candidate.
+  useEffect(() => () => onReportModel?.(null), [onReportModel]);
+
   /**
    * Fit a build's moment amplitudes against the data with the nuclear model
    * held fixed. The injected backend (powder / single crystal / PDF pages all
@@ -805,43 +830,6 @@ export function KSearchPanel({
     } finally {
       setRefining(false);
     }
-  }
-
-  /** Download a self-contained HTML report of the current magnetic model:
-   *  the projected structure figure + parameter/sublattice/cell tables. */
-  function exportReport(): void {
-    if (!magBuild) return;
-    let group: MagneticReportGroup = { symbol: "magnetic subgroup" };
-    if (framework === "msg" && selIdx != null && reps[selIdx]) {
-      const r = reps[selIdx]!;
-      const lbl = latticeLabel(r);
-      group = {
-        symbol: lbl.symbol,
-        ...(lbl.numbers ? { numbers: lbl.numbers } : {}),
-        ...(lbl.setting ? { setting: lbl.setting } : {}),
-        index: r.index,
-      };
-    } else if (framework === "irrep" && combo && !("failure" in combo)) {
-      const identity = combo.standard ?? combo.settingMatch?.identity ?? null;
-      group = {
-        symbol: identity
-          ? formatMagneticSymbol(identity.bnsSymbol)
-          : `isotropy subgroup of ${[...chosenIrreps].sort().join(" ⊕ ")}`,
-        ...(identity ? { numbers: `BNS ${identity.bnsNumber} · OG ${identity.ogNumber}` } : {}),
-        ...(combo.settingMatch ? { setting: combo.settingMatch.transformation } : {}),
-      };
-    }
-    const html = magneticReportHtml({
-      structure,
-      magnetic: magBuild.magnetic,
-      values: amps,
-      params: magBuild.params,
-      bindings: magBuild.bindings,
-      k,
-      group,
-      ...(refineWR != null ? { note: `${agreementLabel} = ${(100 * refineWR).toFixed(1)}% (moments-only fit)` } : {}),
-    });
-    downloadText(`${structure.id}-magnetic-report.html`, html, "text/html");
   }
 
   /** Search candidate k-vectors from the INCLUDED residual peaks, weighted by
@@ -1828,13 +1816,9 @@ export function KSearchPanel({
                     Continue in refinement page →
                   </button>
                 )}
-                <button
-                  style={{ ...btn, marginTop: 0, background: "#fff", color: theme.primary, border: `1px solid ${theme.primary}` }}
-                  onClick={exportReport}
-                  title="Download a self-contained HTML report: projected structure figure with moment arrows + parameter, sublattice, and cell tables"
-                >
-                  Export report
-                </button>
+                <span style={{ fontSize: 12, color: theme.secondary }} title="The HTML report (Export ▾ → Report) includes the candidate shown here, labelled as such, until you Continue.">
+                  report: Export ▾
+                </span>
               </div>
             </div>
           )}

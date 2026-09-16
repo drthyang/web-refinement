@@ -119,13 +119,19 @@ one shared magnitude per site with per-orbit direction angles — was removed:
 same-size moments across sublattices are a physical prior, not a symmetry
 requirement, and the fit should be free to disagree.)
 
-**Report export.** Step 5's "Export report" button downloads a self-contained
-HTML report of the current magnetic model: a projected structure figure
-(down c*, moment arrows per sublattice, ⊙/⊗ for out-of-plane components,
-magnetic supercell for k ≠ 0) plus the moment-parameter, cell, and
-sublattice tables — built by
-[`magneticReportHtml`](../src/core/export/magneticReport.ts) from the same
-expansion that drives the 3D viewer.
+**Report.** The header's Export ▾ → Report writes one self-contained HTML
+report of the whole study ([`core/export/report.ts`](../src/core/export/report.ts));
+its magnetic section carries k, the magnetic space group (BNS/OG numbers,
+setting, index), the projected structure figure (down c*, moment arrows per
+sublattice, ⊙/⊗ for out-of-plane components, magnetic supercell for k ≠ 0),
+the moment parameters with esds, and the sublattice table — from the same
+expansion that drives the 3D viewer. The section always states its
+provenance: the model applied to the refinement (refined jointly, or only
+carried over from this page), or, when nothing is applied, the candidate
+under exploration here, labelled as such with its moments-only fit. The
+group is named the way this page names it (the same subgroup-lattice
+enumeration, so the labels agree). The page's own "Export report" button was
+folded into that menu entry.
 
 **Tested:** k=0 candidate set (P2₁/m → P2₁'/m'), allowed-moment dimensions, the
 simple-AFM recovery ([`magneticSimpleAfm.test.ts`](../src/core/workflow/magneticSimpleAfm.test.ts)).

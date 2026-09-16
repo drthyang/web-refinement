@@ -692,21 +692,25 @@ export function App(): JSX.Element {
   }
 
   // Header export buttons follow the active mode, calling into the engine's
-  // published handlers: single crystal exposes only its own CIF; powder keeps
-  // CIF/mCIF + CSV + project JSON. Labels the shell can know (they depend only
-  // on session state it owns); behavior lives in the engines.
+  // published handlers. The report comes first on every page — one HTML
+  // document summarising the study — then the technique's own files. Labels
+  // the shell can know (they depend only on session state it owns); behavior
+  // lives in the engines.
+  const reportHint = "Self-contained HTML report: data and model, the fit figure and agreement factors, the refined atomic and magnetic structures with esds, every parameter, and the refinement's diagnostics";
   const headerExports: ExportAction[] = pdfDataset
     ? [
+        { label: "Report", hint: reportHint, onClick: () => pdfExports.current?.report?.() },
         { label: "CIF", onClick: () => pdfExports.current?.cif?.() },
         { label: "CSV", onClick: () => pdfExports.current?.csv?.() },
-        { label: "Report", onClick: () => pdfExports.current?.report?.() },
       ]
     : scDataset
     ? [
+        { label: "Report", hint: reportHint, onClick: () => scExports.current?.report?.() },
         { label: "CIF", onClick: () => scExports.current?.cif?.() },
         { label: ".int", onClick: () => scExports.current?.scInt?.() },
       ]
     : [
+        { label: "Report", hint: reportHint, onClick: () => powderExports.current?.report?.() },
         { label: session.magnetic && session.magnetic.moments.length > 0 ? "mCIF" : "CIF", onClick: () => powderExports.current?.cif?.() },
         { label: "CSV", onClick: () => powderExports.current?.csv?.() },
         { label: "GSAS-II bundle (.zip)", onClick: () => powderExports.current?.gsas2Bundle?.() },

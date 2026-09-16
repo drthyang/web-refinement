@@ -48,7 +48,7 @@ export interface WorkbenchExports {
   scInt?: () => void;
   /** Observed/calculated curves as CSV (powder, PDF). */
   csv?: () => void;
-  /** Markdown refinement report (PDF page). */
+  /** Self-contained HTML report of the study (every technique; `core/export/report.ts`). */
   report?: () => void;
   /** Model + data + build script as a FullProf bundle (.zip). */
   fullprofBundle?: () => void;

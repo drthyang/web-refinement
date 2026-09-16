@@ -235,6 +235,11 @@ nuclear and magnetic structures:
   refinement — a one-click FullProf / GSAS-II cross-check bundle (control file
   + data + instrument, with your original instrument and data files included
   verbatim).
+- Write a **report** (Export ▾ → Report) for any technique: one self-contained
+  HTML page with the headline agreement factors, the fit figure, the refined
+  atomic structure with standard uncertainties, the magnetic structure (k,
+  magnetic space group, moments, projected figure) when there is one, every
+  parameter, and the refinement's diagnostics and conventions.
 - Save the whole session as a project file (`.materia.json`) and reopen it
   later to continue — powder, single-crystal, and PDF sessions each in their
   own validated block, so a file can never be read as the wrong technique.

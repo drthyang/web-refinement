@@ -27,6 +27,8 @@ export interface Step {
 export interface ExportAction {
   readonly label: string;
   readonly onClick: () => void;
+  /** Tooltip: what the file contains. */
+  readonly hint?: string;
 }
 
 interface Props {
@@ -380,7 +382,7 @@ function ExportMenu({ exports }: { exports: readonly ExportAction[] }): JSX.Elem
       {open && (
         <div style={menu}>
           {exports.map((e) => (
-            <MenuItem key={e.label} onClick={() => { setOpen(false); e.onClick(); }}>{e.label}</MenuItem>
+            <MenuItem key={e.label} onClick={() => { setOpen(false); e.onClick(); }} {...(e.hint ? { title: e.hint } : {})}>{e.label}</MenuItem>
           ))}
         </div>
       )}
@@ -388,10 +390,10 @@ function ExportMenu({ exports }: { exports: readonly ExportAction[] }): JSX.Elem
   );
 }
 
-function MenuItem({ children, onClick }: { children: React.ReactNode; onClick: () => void }): JSX.Element {
+function MenuItem({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title?: string }): JSX.Element {
   const [hover, setHover] = useState(false);
   return (
-    <button onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={menuItem(hover)}>
+    <button onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={menuItem(hover)} {...(title ? { title } : {})}>
       {children}
     </button>
   );

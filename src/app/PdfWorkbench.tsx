@@ -72,7 +72,8 @@ import { WorkbenchPlot, type FitRangeSelection } from "@/app/ui/WorkbenchPlot";
 import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
 import { downloadText } from "@/app/download";
 import { structureToCif, magneticStructureToMcif } from "@/core/export/cif";
-import { pdfReport } from "@/core/export/pdfReport";
+import { reportHtml } from "@/core/export/report";
+import { pdfReportInput } from "@/app/reportInputs";
 import { card as themeCard, color, mono, secondaryButton, uppercaseLabel, fz, toolbarBtn, resetRangeBtn, space } from "@/app/theme";
 
 const DATA_ACCEPT = ".gr,.sgr,.sq,.fq,.dat,.txt,text/plain";
@@ -1109,17 +1110,26 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   };
   const exportReportRef = useRef<() => void>(noop);
   exportReportRef.current = (): void => {
-    const conflict = motionConflict;
-    const text = pdfReport({
-      phases: phases.map((p) => p.structure),
-      pattern,
-      parameters: params,
+    // Every phase AS REFINED, each through its own bindings (as the CIF export).
+    const values: Record<string, number> = {};
+    for (const p of activeParams) values[p.id] = p.value;
+    const refined = phases.map((phase) =>
+      applyParameters(phase.structure, multiPhase ? pdfPhaseBindingsFor(spec.bindings, phase.id) : spec.bindings, values).model,
+    );
+    const html = reportHtml(pdfReportInput({
+      phases: refined,
+      params: activeParams,
+      bindings: spec.bindings,
       result,
+      pattern,
       rw,
       fitRange,
-      ...(conflict ? { warnings: [conflict] } : {}),
-    });
-    downloadText(`${pattern.id}_report.md`, text, "text/markdown");
+      curves,
+      positionMode,
+      spinModel: spinFit ? refinedMagnetic ?? spinFit.magnetic : null,
+      ...(motionConflict ? { warnings: [motionConflict] } : {}),
+    }));
+    downloadText(`${pattern.id}_report.html`, html, "text/html");
   };
   // The project snapshot reads the live state through a ref (like the exports
   // above), so the shell's stable handler always sees the current page.
