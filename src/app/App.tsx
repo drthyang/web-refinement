@@ -11,7 +11,7 @@
  * the structure the single-crystal engine refines) and the instrument.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { APP_VERSION } from "@/app/constants";
 import type { RefinementResult } from "@/core/refinement/types";
 import type { StructureModel } from "@/core/crystal/types";
@@ -36,6 +36,8 @@ import { parseInstrumentParameters } from "@/parsers/instrument";
 import { startingPowderParams, loadReflectionDataset, describeDrops } from "@/app/loadData";
 import { powderBindings } from "@/examples/synthetic";
 import { mn3gaPowgenExample } from "@/examples/mn3gaPowgen";
+import { awo4MagneticDemoAvailable, loadAwo4MagneticExample } from "@/examples/awo4Magnetic";
+import { DEMOS, type DemoId } from "@/app/demos";
 import { gata4se8PdfExample } from "@/examples/gata4se8Pdf";
 import { ComputeClient } from "@/workers/computeClient";
 import { PowderWorkbench } from "@/app/PowderWorkbench";
@@ -86,12 +88,6 @@ const IDLE_STEPS: readonly Step[] = STEPS.map((s) => ({
   disabled: true,
   hint: "Load a structure + dataset (or pick a demo) to start",
 }));
-// The bundled demos — one converged snapshot per technique (header Demos menu
-// and the landing cards).
-const DEMOS = [
-  { id: "rietveld", label: "Rietveld · Mn₃Ga neutron TOF" },
-  { id: "pdf", label: "PDF · GaTa₄Se₈ X-ray G(r)" },
-] as const;
 
 /**
  * What a just-opened project asks the engines to restore. `token` changes per
@@ -142,7 +138,19 @@ export function App(): JSX.Element {
   const [instrumentLoaded, setInstrumentLoaded] = useState(false);
   // Which bundled demo is the loaded content (null = user's own / nothing) —
   // drives the header Demos menu and is cleared once the user loads their own.
-  const [demo, setDemo] = useState<null | "rietveld" | "pdf">(null);
+  const [demo, setDemo] = useState<DemoId | null>(null);
+  // Demos whose files live in the git-ignored data folder (unpublished data)
+  // are offered only when the dev server can serve them; the public build
+  // never lists them.
+  const [localDemos, setLocalDemos] = useState<ReadonlySet<DemoId>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    awo4MagneticDemoAvailable().then((ok) => {
+      if (!cancelled && ok) setLocalDemos(new Set<DemoId>(["magnetic"]));
+    });
+    return () => { cancelled = true; };
+  }, []);
+  const demos = DEMOS.filter((d) => !d.local || localDemos.has(d.id));
   // Loading own content clears the demo marker (the session is no longer the
   // pristine bundled snapshot); the demo loaders set it directly.
   const setDemoActive = (on: boolean): void => setDemo(on ? demo ?? "rietveld" : null);
@@ -220,11 +228,46 @@ export function App(): JSX.Element {
     setMessage("Cleared the workbench.");
   }
 
-  /** The two bundled demos — one per technique, both converged snapshots. */
-  function onLoadDemo(kind: "rietveld" | "pdf"): void {
+  /** The bundled demos — one per workflow, each a converged snapshot. */
+  function onLoadDemo(kind: DemoId): void {
     // A demo is the bundled snapshot, not the user's project.
     setProjectMeta(null);
     setRestore((r) => ({ token: r.token }));
+    if (kind === "magnetic") {
+      // LOCAL data (dev server + data folder only): 6 K POWGEN histogram with
+      // the solved k = (½,0,0) structure applied. The session carries the
+      // refined nuclear values, the magnetic model and its moment rows, and
+      // the app opens on the magnetic page, which recognizes the applied model
+      // and preselects its group. Fetched, so nothing of it is in the bundle.
+      loadAwo4MagneticExample().then(
+        (ex) => {
+          const base = loadedSession(ex.structure, ex.pattern, ex.instrument, [], ex.refinedParams, ex.backgroundTerms);
+          setSession({
+            ...base,
+            magnetic: ex.magnetic,
+            powderParams: [...base.powderParams, ...ex.momentParams],
+            powderBindings: [...base.powderBindings, ...ex.momentBindings],
+            rawData: ex.rawData,
+            rawInstrument: ex.rawInstrument,
+          });
+          setInstrument(ex.instrument);
+          setInstrumentLoaded(true);
+          setOwnStructure(false);
+          setScNuclearDataset(null);
+          setPdfDataset(null);
+          setPowderResult(null);
+          setStep(1);
+          setDemo("magnetic");
+          setNotice(null);
+          setMessage(`Loaded the local AWO₄ magnetic demo (POWGEN 6 K, k = (½ 0 0), ${ex.group}) — magnetic page.`);
+        },
+        (e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          setNotice(`The AWO₄ demo needs the local data folder (data/AWO4/…) served by the dev server — ${msg}`);
+        },
+      );
+      return;
+    }
     if (kind === "rietveld") {
       const ex = mn3gaPowgenExample();
       setSession(loadedSession(ex.structure, ex.pattern, ex.instrument, ex.extraPhases, ex.refinedParams));
@@ -690,7 +733,7 @@ export function App(): JSX.Element {
         version={`v${APP_VERSION}`}
         exports={hasContent ? headerExports : []}
         technique={hasContent ? (pdfDataset ? "pdf" : scDataset ? "sc" : "rietveld") : null}
-        demos={DEMOS}
+        demos={demos}
         activeDemo={demo}
         onLoadDemo={onLoadDemo}
         onExitDemo={onExitDemo}
@@ -739,6 +782,7 @@ export function App(): JSX.Element {
         onClearStructures={onClearStructures}
         onLoadInstrument={onLoadInstrument}
         onLoadDemo={onLoadDemo}
+        demos={demos}
         onOpenProject={onOpenProject}
         {...(restore.powderView ? { viewRestore: restore.powderView } : {})}
       />

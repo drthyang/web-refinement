@@ -51,6 +51,43 @@ a basis transformation, the 3D view can draw its **standard-setting cell**
 (e.g. the orthohexagonal C-centered cell of Cmcm-family subgroups) over the
 parent cell, from the transformation (P, p) reported by the setting search.
 
+**Ranking against the data (2026-09-16).** *Rank N candidates against the data*
+refines every moment-allowing candidate of the open sections (or all of them)
+the same way *Refine moments* fits the selected one — nuclear model held fixed,
+through the page's fit backend (the evaluator-worker pool on powder, the
+multi-start on single crystal and PDF) — and writes the result into each row:
+wR with its difference from the nuclear-only fit, and the refined moment
+magnitudes. Rows then sort by fit; clicking a ranked row previews it with its
+refined amplitudes. **Ties are expected**, not a bug: a powder cannot tell
+several symmetry-distinct models apart (knowledge §9, direction ambiguity), so
+candidates within 0.01 % of the best wR are marked ≈ and the ★ goes to the
+**maximal subgroup with the fewest moment parameters** among them — the
+top-down prescription, applied automatically. On the AWO₄ 6 K data (a
+local-only demo — unpublished data, served from the git-ignored data folder
+by the dev server, never in the public build) five models tie at wR 7.45 %
+(P2/c′, P-1′, Pc′, P2, P1) and P2/c′ (index 2, 2 dof) is the pick.
+
+**The candidate on the pattern.** The page's pattern preview draws the
+*nuclear* fit plus the selected candidate's magnetic contribution at the
+current amplitudes (the magnetic part also as its own overlay), so a click on
+a candidate shows where its intensity would go before any number is read. The
+powder page supplies the nuclear-only curves and a component callback
+(`MagneticPatternView.magneticComponent`); *Show on refinement pattern* puts
+the model on the session without its parameter rows.
+
+**Opening on a model.** When the session carries a magnetic model — an mCIF
+load, a reopened project, a previous *Continue*, or the local AWO₄ demo —
+the page opens ON it: k set, ions selected, the candidate whose operations
+match selected (its index section opened), and the amplitudes recovered from
+the moments by least squares over the mode basis
+([`amplitudeFit.ts`](../src/core/magnetic/amplitudeFit.ts)).
+
+**k = 0 in the residual.** A k = 0 ordering adds magnetic intensity *onto the
+nuclear peaks*, so every residual peak sits on a nuclear reflection and the
+k ≠ 0 search (which excludes such peaks by default) has nothing to work with.
+Instead of a silent "0/N used", step 2 says so and offers to keep k = 0 or to
+feed those peaks to the search anyway.
+
 For each candidate, the **symmetry-allowed moment directions** on a site are the
 null space of `{ θ_g·det(R_g)·R_g − I }` over the site stabilizer
 ([`allowedMomentDirections`](../src/core/magnetic/allowedMoments.ts)) — these are

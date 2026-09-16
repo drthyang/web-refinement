@@ -674,7 +674,10 @@ export function WorkbenchPlot({
                 label: o.label,
                 shape: "dash" as const,
               })),
-              ...(overlays && overlays.length > 0 ? [] : phaseEntries),
+              // Overlays replace the generic "hkl" key only; explicit Bragg rows
+              // (the magnetic page draws its candidate over the pattern AND
+              // needs its tick rows named) stay in the legend.
+              ...(overlays && overlays.length > 0 && !(phases && phases.length > 0) ? [] : phaseEntries),
             ];
             let x = X0 + 182;
             return entries.map((e, i) => {

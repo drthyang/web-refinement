@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { color, mono, radius, shadow } from "@/app/theme";
+import type { DemoId } from "@/app/demos";
 
 /** Display face for the MATERIA wordmark — geometric, loaded in index.html. */
 const display = '"Space Grotesk", "IBM Plex Sans", system-ui, sans-serif';
@@ -42,11 +43,11 @@ interface Props {
    * crystal appears as a third chip only while active.
    */
   readonly technique?: "rietveld" | "pdf" | "sc" | null;
-  /** The bundled demos (one per technique) for the Demos ▾ menu. */
-  readonly demos?: readonly { readonly id: "rietveld" | "pdf"; readonly label: string }[];
+  /** The bundled demos (one per workflow) for the Demos ▾ menu. */
+  readonly demos?: readonly { readonly id: DemoId; readonly label: string }[];
   /** Which demo is loaded (adds "Exit demo" to the menu and lights the button). */
-  readonly activeDemo?: "rietveld" | "pdf" | null;
-  readonly onLoadDemo?: (id: "rietveld" | "pdf") => void;
+  readonly activeDemo?: DemoId | null;
+  readonly onLoadDemo?: (id: DemoId) => void;
   readonly onExitDemo?: () => void;
   /** Open a saved project file — offered even on the landing, before any data. */
   readonly onOpenProject?: (file: File) => void;
@@ -245,9 +246,9 @@ function TechniqueChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | 
 
 /** "Demos ▾": one bundled, converged example per technique. */
 function DemosMenu({ demos, activeDemo, onLoadDemo, onExitDemo }: {
-  demos: readonly { readonly id: "rietveld" | "pdf"; readonly label: string }[];
-  activeDemo: "rietveld" | "pdf" | null;
-  onLoadDemo: (id: "rietveld" | "pdf") => void;
+  demos: readonly { readonly id: DemoId; readonly label: string }[];
+  activeDemo: DemoId | null;
+  onLoadDemo: (id: DemoId) => void;
   onExitDemo?: (() => void) | undefined;
 }): JSX.Element {
   const [open, setOpen] = useState(false);

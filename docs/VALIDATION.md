@@ -59,6 +59,8 @@ comparison recorded here.
 | k-search recovers k=(½,0,0) from **real** AWO₄ 6 K neutron data | integration (real POWGEN) | ✅ `core/workflow/realAwo4Magnetic.test.ts` |
 | Antiferromagnetic \|F_M\|² ≠ 0 (magnetic-op orbit expansion, k≠0) | golden (Mn₃Ga 6h) | ✅ `core/magnetic/afmStructureFactor.test.ts` |
 | Abelian little-group irreps + Γ_mag decomposition + mode projection | golden (P1/C2/Ci/D2/C4) | ✅ `core/magnetic/irreps.test.ts` |
+| Mode amplitudes recovered from a model's moments (open-on-model, demo seeding) | round trip + the 30 K mCIF | ✅ `core/magnetic/amplitudeFit.test.ts` |
+| Local AWO₄ 6 K magnetic demo — k = (½,0,0), P2/c′ is a maximal lattice candidate, session reopens at the solved wR | data-gated (git-ignored data/) | ✅ `examples/awo4Magnetic.test.ts`; provenance `examples/awo4MagneticSolve.test.ts` (AWO4_SOLVE=1) |
 | Moment-size restraint → physical magnitudes | integration | ✅ `core/workflow/magneticCompare.test.ts` |
 | TOF ↔ d conversion (POWGEN calibration) | golden (GSAS `.lst`) | ✅ `core/diffraction/instrument.test.ts` |
 | Instrument-file parsing | unit | ✅ `core/diffraction/instrument.test.ts` |

@@ -443,14 +443,27 @@ agent tool it exposes.**
   the powder workflow and a fractional-index satellite row in a single-crystal
   dataset gets no nuclear term
   ([`fourierPowder.test.ts`](../src/core/workflow/fourierPowder.test.ts)).
+- **Wired (2026-09-16) — the magnetic page ranks candidates against the
+  data.** Every moment-allowing candidate is refined (nuclear fixed, through
+  the page's worker backend) and the rows carry wR, Δ vs nuclear-only and the
+  moment magnitudes; ties within 0.01 % — the powder direction ambiguity —
+  are marked and the ★ goes to the maximal subgroup with the fewest
+  parameters. The selected candidate is drawn ON the pattern (nuclear + its
+  magnetic term), the page opens on an applied model (k, ions, group and
+  amplitudes recovered from the moments), and a residual made only of peaks
+  on nuclear positions is explained as k = 0 instead of "0 used". The
+  **AWO₄ 6 K demo** (POWGEN bank-3 data, k = (½,0,0), P2/c′) opens on that
+  page with its solved structure — LOCAL ONLY: the data are unpublished and
+  stay in the git-ignored data folder; the dev server serves them and the
+  public build never lists the demo. The numbers come from
+  `awo4MagneticSolve.test.ts`, the app's own pipeline, not by hand.
 - **Needed:** connect the Fourier modes to the M3 irrep/basis output so
   amplitudes come from the irrep (conjugate-pair irreps at complex k-phases);
   refine k itself; harmonics (3k, 5k — squared-up modulations) and the (3+1)D
   superspace bookkeeping; multi-arm (star of k) domain populations; F1's
-  global search for sign/phase ambiguity; candidate ranking with
-  correlation-aware diagnostics (the engine already produces them; the ranker
-  ignores them). Still approximate: a satellite family's |F_M|² is evaluated
-  at one representative (no cone/domain average).
+  global search for sign/phase ambiguity; correlation-aware diagnostics in the
+  ranking (the engine already produces them). Still approximate: a satellite
+  family's |F_M|² is evaluated at one representative (no cone/domain average).
 - **Validation gate:** ✅ recover a known basis-mode amplitude for k ≠ 0
   (`fourierMoment.test.ts`). Still open: ranked candidates put the true magnetic
   structure first on a golden case.

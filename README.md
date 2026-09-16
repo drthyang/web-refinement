@@ -13,10 +13,12 @@ workbench; the same pure core is exposed to agents as tools (see
 
 **▶ Try it in your browser: [drthyang.github.io/web-refinement](https://drthyang.github.io/web-refinement/)** — a
 fully static GitHub Pages app; nothing to install, and your data never leaves
-your machine. Two bundled demos open converged from the start page: a two-phase
-**Mn₃Ga neutron TOF Rietveld** fit (wR 3.9%) and a **GaTa₄Se₈ X-ray PDF** fit
-of the local structure, where the average-structure model is deliberately
-left to disagree with the data at short range.
+your machine. Two bundled demos open converged from the start page: a
+two-phase **Mn₃Ga neutron TOF Rietveld** fit at 600 K (wR 3.9%) and a
+**GaTa₄Se₈ X-ray PDF** fit of the local structure, where the average-structure
+model is deliberately left to disagree with the data at short range. (A third,
+magnetic demo — the AWO₄ k = (½ 0 0) structure — appears only in a local dev
+build with the git-ignored data folder present; its data are unpublished.)
 
 <p align="center">
   <img src="docs/screenshots/desktop.png" alt="Two-phase Mn₃Ga + MnO Rietveld refinement of POWGEN time-of-flight data, converged at wR 3.86%: observed/calculated/difference curves, per-phase Bragg ticks, and the symmetry-allowed parameter table with esds" width="100%" />
