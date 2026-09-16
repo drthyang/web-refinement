@@ -1013,8 +1013,13 @@ export function PowderWorkbench({
     }
   }
 
-  // The header export always writes the primary phase; the moments belong to it.
+  // Header exports write the primary phase (the moments belong to it): the
+  // nuclear CIF in its space group, and — with a magnetic model on the session —
+  // the mCIF in the magnetic space group of the magnetic cell as well.
   function exportCif(): void {
+    exportPhaseCif(refinedStructure, false);
+  }
+  function exportMcif(): void {
     exportPhaseCif(refinedStructure, true);
   }
 
@@ -1101,6 +1106,7 @@ export function PowderWorkbench({
     if (active) exportsRef.current = {
       report: exportReport,
       cif: exportCif,
+      ...(session.magnetic && session.magnetic.moments.length > 0 ? { mcif: exportMcif } : {}),
       csv: exportCsv,
       projectWorkspace: () => powderWorkspaceFrom(session, powderResult, instrument, instrumentLoaded, { fitRange, displayUnit, manualPeakD }),
       fullprofBundle: () => exportBundle("fullprof"),

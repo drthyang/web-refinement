@@ -41,8 +41,12 @@ import type { Workspace } from "@/core/project/types";
  * engine-private state: parameters, results, live curves).
  */
 export interface WorkbenchExports {
-  /** Refined structure as CIF/mCIF, with esds + agreement in the engine's own convention. */
+  /** Refined structure as CIF (its space group + asymmetric unit, esds, agreement). */
   cif?: () => void;
+  /** The magnetic structure as mCIF — in its magnetic space group (the magnetic
+   *  cell for k ≠ 0), with the moment loop. Present only when a model with
+   *  moments is on the session. */
+  mcif?: () => void;
   /** Single-crystal reflection data as FullProf `.int` (nuclear, plus the paired
    *  magnetic set as `_mag.int` when a joint session is loaded). */
   scInt?: () => void;

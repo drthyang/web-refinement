@@ -583,6 +583,8 @@ export interface SupercellAtom {
   readonly moment?: Vec3;
   /** Form-factor id carried from the source moment (for the mCIF). */
   readonly formFactorId?: string;
+  /** Label of the parent asymmetric-unit site this copy descends from. */
+  readonly parentLabel?: string;
 }
 
 export interface MagneticSupercellExpansion {
@@ -682,6 +684,7 @@ function expandMagneticBox(
             const ffId = placing ? ffById.get(placing.momentKey) : undefined;
             atoms.push({
               site: { ...site, label, position },
+              parentLabel: site.label,
               ...(moment ? { moment } : {}),
               ...(ffId ? { formFactorId: ffId } : {}),
             });

@@ -711,7 +711,10 @@ export function App(): JSX.Element {
       ]
     : [
         { label: "Report", hint: reportHint, onClick: () => powderExports.current?.report?.() },
-        { label: session.magnetic && session.magnetic.moments.length > 0 ? "mCIF" : "CIF", onClick: () => powderExports.current?.cif?.() },
+        { label: "CIF", hint: "Refined atomic structure in its space group: cell and asymmetric unit with esds, agreement factors", onClick: () => powderExports.current?.cif?.() },
+        ...(session.magnetic && session.magnetic.moments.length > 0
+          ? [{ label: "mCIF", hint: "Magnetic structure in its magnetic space group — the magnetic cell for k ≠ 0, with centering / anti-translations — plus the moment loop", onClick: () => powderExports.current?.mcif?.() }]
+          : []),
         { label: "CSV", onClick: () => powderExports.current?.csv?.() },
         { label: "GSAS-II bundle (.zip)", onClick: () => powderExports.current?.gsas2Bundle?.() },
         { label: "FullProf bundle (.zip)", onClick: () => powderExports.current?.fullprofBundle?.() },

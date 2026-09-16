@@ -137,7 +137,9 @@ disorder sites refine with tied position/ADP, a Σ(occupancy) restraint (optiona
 = 1), and an optional shared moment. Fit quality is judged with **F_obs vs F_calc
 and normal-probability plots**, not just wR. Candidate magnetic groups carry
 their standard **BNS/OG labels** (bundled ISO-MAG table), and refined structures
-export as CIF/mCIF with esds (k ≠ 0 writes the magnetic supercell). The star of
+export as CIF/mCIF with esds (k ≠ 0 writes the magnetic supercell in its own
+magnetic space group — coset representatives, centering and anti-translations,
+asymmetric unit — never a P1 atom list). The star of
 k / multi-k and full representation analysis are the next milestones; see
 [docs/ROADMAP.md](docs/ROADMAP.md) and
 [docs/LIMITATIONS.md](docs/LIMITATIONS.md).

@@ -478,7 +478,7 @@ agent tool it exposes.**
   phases, parameters, settings and last result embedded; validated per
   technique on load; v1 migration; [PROJECT_FORMAT.md](./PROJECT_FORMAT.md),
   shipped 2026-09-15); agreement factors; refinement history; **refined CIF
-  export with esds** and **mCIF export** (k ≠ 0 writes the magnetic supercell)
+  export with esds** and **mCIF export** (k ≠ 0 writes the magnetic supercell in its own magnetic space group — the Shubnikov group of the expanded cell recovered from the atoms and moments, [`core/magnetic/supercellGroup.ts`](../src/core/magnetic/supercellGroup.ts), shipped 2026-09-16)
   ([`export/cif.ts`](../src/core/export/cif.ts)); the **HTML refinement
   report** for every technique (Export ▾ → Report, shipped 2026-09-16:
   headline agreement factors, the fit figure with Bragg ticks or the

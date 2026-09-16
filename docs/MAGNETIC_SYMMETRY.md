@@ -133,6 +133,29 @@ group is named the way this page names it (the same subgroup-lattice
 enumeration, so the labels agree). The page's own "Export report" button was
 folded into that menu entry.
 
+**mCIF export in the right symmetry.** Export ▾ offers the nuclear CIF (the
+parent space group and asymmetric unit, with esds) and, when a magnetic model
+is on the session, the mCIF. For k = 0 the mCIF is the parent cell in the
+chosen magnetic subgroup. For a commensurate k ≠ 0 it is the magnetic
+supercell — and, since 2026-09-16, in that cell's own magnetic space group
+rather than a P1 list of every atom:
+[`magneticCellGroup`](../src/core/magnetic/supercellGroup.ts) re-expresses
+each parent operation in the supercell basis, combines it with every parent
+lattice translation inside the cell, with and without time reversal, and
+keeps an operation only if it maps every atom onto an atom of its kind
+carrying the transformed moment (the viewer's θ·det(R)·R·m). Parent
+translations that flip every moment come out as anti-translations (a
+black-and-white lattice, BNS type IV) in the `_space_group_symop_magn_centering`
+loop; translations that change the moments any other way (a k = ⅓ sinusoid)
+are simply not symmetries and are left out. The atom loop holds the orbit
+representatives — the supercell's asymmetric unit — so the file re-expands,
+in this app's parser and in VESTA/Bilbao/GSAS-II, to exactly the arrangement
+on screen (tested on the AWO₄ nuclear structure with k = (½ 0 0): 4
+representatives × 2 centerings, 9 sites). The BNS symbol is written when the
+operations match a tabulated type I/III group; a type IV group is not in the
+bundled table, so the file says so in a comment instead of carrying the
+parent-basis label, which names a different group.
+
 **Tested:** k=0 candidate set (P2₁/m → P2₁'/m'), allowed-moment dimensions, the
 simple-AFM recovery ([`magneticSimpleAfm.test.ts`](../src/core/workflow/magneticSimpleAfm.test.ts)).
 

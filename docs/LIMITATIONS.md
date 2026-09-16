@@ -191,7 +191,7 @@ accidental gap — each is tracked as a roadmap item.
   (data, phases, parameters, settings and last result embedded; powder,
   single-crystal and PDF sessions each in their own validated block — see
   [PROJECT_FORMAT.md](./PROJECT_FORMAT.md)); refined **CIF export with esds**
-  and **mCIF export** (k ≠ 0 writes the magnetic supercell); markdown reports; a
+  and **mCIF export** (k ≠ 0 writes the magnetic supercell in its magnetic space group); the HTML refinement report (Export ▾ → Report); a
   one-click **FullProf + GSAS-II cross-check bundle** (CW + TOF `.pcr` with the
   original data/instrument files verbatim). **Not yet:** single-crystal and
   multi-phase `.pcr` export; geometry tables in the report; project save/open as

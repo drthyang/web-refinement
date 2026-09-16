@@ -4,7 +4,7 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { parseCif, parseMagneticCif } from "@/parsers/cif";
 import { structureToCif, magneticStructureToMcif, formatWithEsd } from "@/core/export/cif";
-import { expandMagneticSupercell } from "@/core/crystal/cellExpansion";
+import { expandMagneticSupercell, expandSpinField } from "@/core/crystal/cellExpansion";
 
 const structure: StructureModel = {
   id: "s",
@@ -249,15 +249,24 @@ describe("magneticStructureToMcif — commensurate k builds the magnetic superce
     expect(mcif).toContain('_parent_space_group.name_H-M_alt  "P 1"');
   });
 
-  it("splits the atom across the two layers with opposite moments (AFM), matching the app", () => {
+  it("writes the doubled cell in its magnetic space group: one Mn plus the anti-translation that generates the AFM partner", () => {
     const mcif = magneticStructureToMcif(afm, magK, {});
+    expect(mcif).toContain("_space_group_symop_magn_centering.xyz");
     const back = parseMagneticCif(mcif);
-    // Two Mn in the doubled cell: one at z = 0, one at z = ½.
-    const zs = back.structure.sites.map((s) => s.position[2]).sort();
+    // The asymmetric unit is ONE Mn; the black-and-white lattice's anti-
+    // translation (x, y, z+½)' places the time-reversed partner at z = ½.
+    expect(back.structure.sites).toHaveLength(1);
+    const anti = back.structure.spaceGroup.operations.find((o) => o.timeReversal === -1);
+    expect(anti).toBeDefined();
+    expect(anti!.translation[2]).toBeCloseTo(0.5, 6);
+    // Re-expanding through the operations gives the app's arrangement back:
+    // z = 0 and z = ½ carrying +3 and −3 µ_B (cos(2π·½·L): +1 at L=0, −1 at L=1).
+    const atoms = expandSpinField(back.structure, back.magnetic!).atoms;
+    const zs = atoms.map((a) => a.site.position[2]).sort();
+    expect(zs).toHaveLength(2);
     expect(zs[0]).toBeCloseTo(0, 4);
     expect(zs[1]).toBeCloseTo(0.5, 4);
-    // …carrying +3 and −3 µ_B (cos(2π·½·L): +1 at L=0, −1 at L=1).
-    const mz = back.magnetic!.moments.map((m) => m.components[2]).sort((p, q) => p - q);
+    const mz = atoms.map((a) => a.moment![2]).sort((p, q) => p - q);
     expect(mz[0]).toBeCloseTo(-3, 3);
     expect(mz[1]).toBeCloseTo(3, 3);
   });
