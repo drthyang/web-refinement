@@ -24,13 +24,18 @@ const has = Object.values(AWO4_DEMO_FILES).every((rel) => dataExists(rel));
  * folder (unpublished data), so this skips on CI and fresh clones.
  */
 describe.skipIf(!has)("local AWO₄ magnetic demo (POWGEN 6 K, k = ½ 0 0)", () => {
-  const ex = buildAwo4MagneticExample({
-    data: readData(AWO4_DEMO_FILES.data),
-    instrument: readData(AWO4_DEMO_FILES.instrument),
-    solution: readData(AWO4_DEMO_FILES.solution),
-  });
+  // Built lazily: vitest evaluates a skipped describe's body to collect its
+  // tests, so reading the (absent) files here would throw on CI.
+  let built: ReturnType<typeof buildAwo4MagneticExample> | null = null;
+  const example = (): ReturnType<typeof buildAwo4MagneticExample> =>
+    (built ??= buildAwo4MagneticExample({
+      data: readData(AWO4_DEMO_FILES.data),
+      instrument: readData(AWO4_DEMO_FILES.instrument),
+      solution: readData(AWO4_DEMO_FILES.solution),
+    }));
 
   it("reads the bank-3 histogram and the TOF calibration", () => {
+    const ex = example();
     expect(ex.pattern.points.length).toBe(3670);
     expect(ex.pattern.xUnit).toBe("tof");
     expect(ex.pattern.points.every((p) => Number.isFinite(p.yObs) && (p.sigma ?? 0) > 0)).toBe(true);
@@ -39,6 +44,7 @@ describe.skipIf(!has)("local AWO₄ magnetic demo (POWGEN 6 K, k = ½ 0 0)", () 
   });
 
   it("carries the solved P2/c′ model: a maximal candidate of the k = (½,0,0) lattice, tied cations at 2.57 µ_B", () => {
+    const ex = example();
     expect(ex.k).toEqual([0.5, 0, 0]);
     expect(ex.magnetic.propagation[0]).toEqual([0.5, 0, 0]);
     const reps = latticeRepresentatives(magneticSubgroupLattice(ex.structure.spaceGroup.operations, ex.k));
@@ -54,6 +60,7 @@ describe.skipIf(!has)("local AWO₄ magnetic demo (POWGEN 6 K, k = ½ 0 0)", () 
   });
 
   it("reopens as a powder session with the moment rows merged and the fit near the solved wR", () => {
+    const ex = example();
     const base = loadedSession(ex.structure, ex.pattern, ex.instrument, [], ex.refinedParams, ex.backgroundTerms);
     expect(base.backgroundTerms).toBe(ex.backgroundTerms);
     expect(base.powderProfile.shape).toBe("tof");
