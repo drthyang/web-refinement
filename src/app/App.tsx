@@ -90,6 +90,19 @@ const IDLE_STEPS: readonly Step[] = STEPS.map((s) => ({
 }));
 
 /**
+ * Light the Magnetic chip when the model already carries moments: a refinement
+ * with a magnetic model IS nuclear + magnetic, so the nuclear page should say
+ * so rather than leaving Magnetic looking like an unvisited step. Skipped when
+ * that step is disabled (an X-ray or multi-phase PDF session can hold no spin
+ * model), which would light a chip the user cannot open.
+ */
+function withMagneticPresent(steps: readonly Step[], present: boolean, hint: string): readonly Step[] {
+  const magnetic = steps[1];
+  if (!present || !magnetic || magnetic.disabled) return steps;
+  return [steps[0]!, { ...magnetic, present: true, hint }];
+}
+
+/**
  * What a just-opened project asks the engines to restore. `token` changes per
  * open and is part of the keyed engines' mount keys, so their initializers
  * run against the workspace; each engine reads its block once, at mount.
@@ -725,6 +738,27 @@ export function App(): JSX.Element {
   // hides the workflow steps, exports, and disclaimer.
   const hasContent = session.powderSource !== EMPTY_SOURCE || scDataset !== null || pdfDataset !== null;
 
+  // Does the CURRENT model include magnetic moments? The shell owns the powder
+  // session, so it reads that directly; the single-crystal and PDF engines own
+  // theirs and report it (one flag each — both can be mounted at once, and the
+  // active technique decides which counts).
+  const [scMagnetic, setScMagnetic] = useState(false);
+  const [pdfMagnetic, setPdfMagnetic] = useState(false);
+  const magneticInModel = pdfDataset
+    ? pdfMagnetic
+    : scDataset
+      ? scMagnetic
+      : !!session.magnetic && session.magnetic.moments.length > 0;
+  const headerSteps = hasContent
+    ? withMagneticPresent(
+        pdfDataset ? pdfSteps(pdfDataset, session.extraPhases.length) : scDataset ? SC_STEPS : STEPS,
+        magneticInModel,
+        pdfDataset
+          ? "An mPDF spin model is part of this fit — open the magnetic PDF page"
+          : "Magnetic moments are part of this refinement — open the magnetic analysis",
+      )
+    : IDLE_STEPS;
+
   return (
     // The shell is exactly the window: header, disclaimer and footer are fixed
     // chrome and the content column between them takes the rest. That is what
@@ -734,7 +768,7 @@ export function App(): JSX.Element {
     // instead of pushing the footer off-screen.
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <WorkbenchHeader
-        steps={hasContent ? (pdfDataset ? pdfSteps(pdfDataset, session.extraPhases.length) : scDataset ? SC_STEPS : STEPS) : IDLE_STEPS}
+        steps={headerSteps}
         active={step}
         onStep={setStep}
         version={`v${APP_VERSION}`}
@@ -797,14 +831,14 @@ export function App(): JSX.Element {
         // PDF mode (auto-switched on loading a reduced .gr). Keyed on the dataset
         // id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <PdfWorkbench key={`${pdfDataset.id}#${restore.token}`} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} {...(restore.pdf ? { restore: restore.pdf } : {})} />
+          <PdfWorkbench onMagneticPresent={setPdfMagnetic} key={`${pdfDataset.id}#${restore.token}`} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} {...(restore.pdf ? { restore: restore.pdf } : {})} />
         </main>
       )}
       {scDataset && (
         // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
         // the dataset id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <SingleCrystalWorkbench key={`${scDataset.id}#${restore.token}`} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} {...(restore.singleCrystal ? { restore: restore.singleCrystal } : {})} />
+          <SingleCrystalWorkbench onMagneticPresent={setScMagnetic} key={`${scDataset.id}#${restore.token}`} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} {...(restore.singleCrystal ? { restore: restore.singleCrystal } : {})} />
         </main>
       )}
       <footer style={copyrightBar}>

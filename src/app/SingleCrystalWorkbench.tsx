@@ -82,7 +82,7 @@ type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: strin
  *  three-way value; the project file stores the same value. */
 type Probe = "xray" | "neutron" | "neutron-tof";
 
-export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, client, step, onStep, instrumentProbe, exportsRef, onLoadData, onLoadMagneticData, onLoadCif, restore }: {
+export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, client, step, onStep, onMagneticPresent, instrumentProbe, exportsRef, onLoadData, onLoadMagneticData, onLoadCif, restore }: {
   structure: StructureModel;
   dataset: SingleCrystalDataset;
   /** Companion magnetic reflection file for joint co-refinement (Phase 2). When
@@ -95,6 +95,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   step: number;
   /** Switch the app-level step (e.g. "continue to refinement" after applying a model). */
   onStep?: (i: number) => void;
+  /** Report whether the model currently carries magnetic moments, so the shell's
+   *  header can light the Magnetic chip from the F² page. */
+  onMagneticPresent?: (present: boolean) => void;
   /** Radiation of the loaded instrument, if any — seeds the probe default so a
    *  loaded X-ray instrument selects X-ray scattering without the user asking. */
   instrumentProbe?: "xray" | "neutron";
@@ -501,6 +504,13 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       emit(probedDataset, "");
     }
   }
+
+  // Tell the shell whether the model includes moments (the header's Magnetic
+  // chip lights up from the F² page); withdrawn when this engine unmounts.
+  useEffect(() => {
+    onMagneticPresent?.(!!magnetic && magnetic.moments.length > 0);
+  }, [onMagneticPresent, magnetic]);
+  useEffect(() => () => onMagneticPresent?.(false), [onMagneticPresent]);
 
   // The magnetic page's current candidate, for the report (published by KSearchPanel).
   const exploredMagnetic = useRef<MagneticExploration | null>(null);

@@ -100,12 +100,15 @@ function rwInk(rw: number): string {
   return color.warnInk;
 }
 
-export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructure = false, client, step = 0, onStep, exportsRef, onLoadData, onLoadCif, onAddPhase, onRemovePhase, presetValues, presetFitRange, restore }: {
+export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructure = false, client, step = 0, onStep, onMagneticPresent, exportsRef, onLoadData, onLoadCif, onAddPhase, onRemovePhase, presetValues, presetFitRange, restore }: {
   structure: StructureModel;
   pattern: PdfPattern;
   /** Active workflow step (0 = refinement, 1 = magnetic PDF analysis). */
   step?: number;
   onStep?: (i: number) => void;
+  /** Report whether an mPDF spin model is part of the fit, so the shell's header
+   *  can light the Magnetic chip from the nuclear page. */
+  onMagneticPresent?: (present: boolean) => void;
   /** Additional crystallographic phases (multi-phase G(r) sum). */
   extraPhases?: readonly StructureModel[];
   /** True once the user replaced the bundled structure — the load button then
@@ -505,6 +508,13 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
    * every refine, firing the spec-swap effect that clears `result`, `live` and
    * the posterior. The fit would visibly lose its esds the moment it converged.
    */
+  // Tell the shell whether a spin model is in the fit (the header's Magnetic
+  // chip lights up from the nuclear page); withdrawn when this engine unmounts.
+  useEffect(() => {
+    onMagneticPresent?.(!!spinFit && spinFit.magnetic.moments.length > 0);
+  }, [onMagneticPresent, spinFit]);
+  useEffect(() => () => onMagneticPresent?.(false), [onMagneticPresent]);
+
   const refinedMagnetic = useMemo(() => {
     if (!spinFit) return null;
     const values: Record<string, number> = {};

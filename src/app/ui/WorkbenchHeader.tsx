@@ -17,6 +17,15 @@ export interface Step {
   /** Greyed and non-clickable — e.g. Magnetic on the PDF page until mPDF, or
    *  both chips before any data is loaded. */
   readonly disabled?: boolean;
+  /**
+   * This step's content is part of the CURRENT model even though the user is
+   * on another step — the Magnetic chip once moments are in the refinement.
+   * Lights the chip (accent tint + a dot) without claiming to be the active
+   * page, so the nuclear page shows at a glance that the fit is nuclear +
+   * magnetic. Nuclear is never marked: it is always in the model, so the mark
+   * would carry no information.
+   */
+  readonly present?: boolean;
   /** Tooltip (shown on the chip). */
   readonly hint?: string;
 }
@@ -93,7 +102,8 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
             key: s.label,
             label: s.label,
             active: i === active && !s.disabled,
-            dimmed: !!s.disabled || i !== active,
+            dimmed: !!s.disabled || (i !== active && !s.present),
+            ...(s.present ? { present: true } : {}),
             ...(s.hint !== undefined ? { hint: s.hint } : {}),
             ...(s.disabled ? {} : { onClick: () => onStep(i) }),
           }))}
@@ -165,6 +175,8 @@ interface Chip {
   readonly label: string;
   readonly active: boolean;
   readonly dimmed: boolean;
+  /** In the model but not the open page — lit, not selected (see {@link Step}). */
+  readonly present?: boolean;
   readonly hint?: string;
   /** Present = clickable (the Nuclear/Magnetic chips navigate); absent = indicator only. */
   readonly onClick?: () => void;
@@ -181,6 +193,9 @@ function ChipGroup({ chips }: { chips: readonly Chip[] }): JSX.Element {
 function GroupChip({ chip }: { chip: Chip }): JSX.Element {
   const [rawHover, setHover] = useState(false);
   const hover = rawHover && chip.onClick !== undefined && !chip.active;
+  // Lit but not selected: the accent tint of hover, made permanent, plus a dot
+  // so the state reads as "in the model" rather than "the cursor is here".
+  const lit = !!chip.present && !chip.active;
   const style: CSSProperties = {
     fontFamily: mono,
     fontSize: 11,
@@ -190,8 +205,8 @@ function GroupChip({ chip }: { chip: Chip }): JSX.Element {
     padding: "7px 14px",
     whiteSpace: "nowrap",
     border: "none",
-    background: chip.active ? color.primary : hover ? color.primaryTintBg : "transparent",
-    color: chip.active ? "#fff" : hover ? color.primary : chip.dimmed ? color.faintest : color.secondary,
+    background: chip.active ? color.primary : lit || hover ? color.primaryTintBg : "transparent",
+    color: chip.active ? "#fff" : lit || hover ? color.primary : chip.dimmed ? color.faintest : color.secondary,
     cursor: chip.onClick && !chip.active ? "pointer" : "default",
     transition: "color 160ms, background 160ms",
   };
@@ -201,10 +216,27 @@ function GroupChip({ chip }: { chip: Chip }): JSX.Element {
     onMouseEnter: () => setHover(true),
     onMouseLeave: () => setHover(false),
   };
+  const content = (
+    <>
+      {lit && <span aria-hidden style={presentDot} />}
+      {chip.label}
+    </>
+  );
   return chip.onClick
-    ? <button className="wb-header-step" {...shared} onClick={chip.onClick}>{chip.label}</button>
-    : <span {...shared}>{chip.label}</span>;
+    ? <button className="wb-header-step" {...shared} onClick={chip.onClick}>{content}</button>
+    : <span {...shared}>{content}</span>;
 }
+
+/** The "in the model" marker on a lit (present, not active) chip. */
+const presentDot: CSSProperties = {
+  display: "inline-block",
+  width: 5,
+  height: 5,
+  borderRadius: "50%",
+  background: color.primary,
+  marginRight: 6,
+  verticalAlign: "middle",
+};
 
 /** Sample form: Powder (Bragg profile or total scattering) vs Single crystal (F²). */
 function FormChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | null }): JSX.Element {

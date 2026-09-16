@@ -82,6 +82,16 @@ match selected (its index section opened), and the amplitudes recovered from
 the moments by least squares over the mode basis
 ([`amplitudeFit.ts`](../src/core/magnetic/amplitudeFit.ts)).
 
+**The header says when a fit is nuclear + magnetic.** Once moments are part of
+the model, the header's **Magnetic** chip stays lit (accent tint + a dot) while
+the user works on the nuclear page, with a tooltip saying so — a refinement
+carrying a magnetic model is not a nuclear refinement with an unvisited second
+step. The powder shell reads this from the session; the single-crystal and PDF
+engines report their own model through `onMagneticPresent`. The Nuclear chip is
+never marked: it is always in the model, so the mark would say nothing. A PDF
+session that cannot hold a spin model (X-ray, or multi-phase) keeps the chip
+disabled rather than lighting one the user cannot open.
+
 **k = 0 in the residual.** A k = 0 ordering adds magnetic intensity *onto the
 nuclear peaks*, so every residual peak sits on a nuclear reflection and the
 k ≠ 0 search (which excludes such peaks by default) has nothing to work with.
