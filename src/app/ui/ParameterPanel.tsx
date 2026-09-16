@@ -11,6 +11,7 @@ import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { ParameterKind, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import { card, color, mono, primaryButton, secondaryButton, space, uppercaseLabel } from "@/app/theme";
 import { InfoBadge } from "@/app/ui/InfoBadge";
+import { resolveTies } from "@/core/refinement/constraints";
 
 const CATEGORY: Record<ParameterKind, string> = {
   scale: "Scale",
@@ -83,7 +84,9 @@ const CATEGORY: Record<ParameterKind, string> = {
 const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "Instrument", "Correlated motion", "Particle shape", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic", "mPDF"];
 
 /** difC/difA/difB come from instrument calibration — shown but not togglable. */
-const isLocked = (p: RefinementParameter): boolean => p.kind === "tofCalibration";
+/** Rows the user cannot free: instrument calibration, and parameters derived
+ *  from others by a tie expression (their value follows the tie). */
+const isLocked = (p: RefinementParameter): boolean => p.kind === "tofCalibration" || !!p.expression;
 
 interface Props {
   readonly params: readonly RefinementParameter[];
@@ -153,6 +156,14 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
   const [open, setOpen] = useState<Record<string, boolean>>({});
 
   const freeCount = params.filter((p) => !p.fixed).length;
+  // Current values of the tied rows (e.g. a moment amplitude "= hypot(…)" of
+  // its reference): resolved from the other rows for display.
+  const resolved = useMemo<Record<string, number> | null>(() => {
+    if (!params.some((p) => p.expression)) return null;
+    const values: Record<string, number> = {};
+    for (const p of params) values[p.id] = p.value;
+    try { return resolveTies(params, values); } catch { return null; }
+  }, [params]);
 
   const setGroupFree = (rows: RefinementParameter[], free: boolean): void => {
     for (const p of rows) if (!isLocked(p)) onChange(p.id, { fixed: !free });
@@ -244,7 +255,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
               )}
               {open[g.name] &&
                 g.rows.map((p) => (
-                  <ParamRow key={p.id} param={p} esd={esd?.[p.id] ?? p.esd} onChange={onChange} disabled={disabled} />
+                  <ParamRow key={p.id} param={p} esd={esd?.[p.id] ?? p.esd} onChange={onChange} disabled={disabled} resolvedValue={resolved?.[p.id]} />
                 ))}
             </div>
           );
@@ -259,10 +270,12 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
   );
 }
 
-function ParamRow({ param, esd, onChange, disabled }: { param: RefinementParameter; esd?: number | undefined; onChange: (id: string, patch: Partial<RefinementParameter>) => void; disabled?: boolean | undefined }): JSX.Element {
+function ParamRow({ param, esd, onChange, disabled, resolvedValue }: { param: RefinementParameter; esd?: number | undefined; onChange: (id: string, patch: Partial<RefinementParameter>) => void; disabled?: boolean | undefined; resolvedValue?: number | undefined }): JSX.Element {
   const locked = isLocked(param);
   const [buf, setBuf] = useState<string | null>(null);
-  const shown = buf ?? String(+param.value.toFixed(5));
+  // A tied row shows what its tie evaluates to right now — the stored value is
+  // only a seed until the next refinement writes the resolved value back.
+  const shown = buf ?? String(+(resolvedValue ?? param.value).toFixed(5));
   // Commit the edited value. `raw` (passed on Enter) is read straight from the
   // input, so a keypress applies even if React hasn't flushed the buffered state
   // yet — otherwise Enter could no-op and the profile would look unresponsive.
@@ -287,7 +300,8 @@ function ParamRow({ param, esd, onChange, disabled }: { param: RefinementParamet
         onChange={(e) => setBuf(e.target.value)}
         onBlur={() => commit()}
         onKeyDown={(e) => { if (e.key === "Enter") { commit((e.target as HTMLInputElement).value); (e.target as HTMLInputElement).blur(); } }}
-        style={valueInput}
+        readOnly={!!param.expression}
+        style={{ ...valueInput, ...(param.expression ? { opacity: 0.75 } : {}) }}
       />
       <span style={{ fontFamily: mono, fontSize: 11, color: color.faint }}>{esd !== undefined ? `±${+esd.toPrecision(2)}` : "—"}</span>
       <StatusPill param={param} locked={locked} />
@@ -296,6 +310,7 @@ function ParamRow({ param, esd, onChange, disabled }: { param: RefinementParamet
 }
 
 function StatusPill({ param, locked }: { param: RefinementParameter; locked: boolean }): JSX.Element {
+  if (param.expression) return <span style={{ ...pill, border: `1px solid ${color.subtle}`, background: color.pageBg, color: color.faint }} title={`Derived: ${param.expression}`}>= tied</span>;
   if (locked) return <span style={{ ...pill, border: `1px solid ${color.subtle}`, background: color.pageBg, color: color.faintest }}>calib</span>;
   if (!param.fixed) return <span style={{ ...pill, border: `1px solid ${color.primaryTintBorder}`, background: color.primaryTintBg, color: color.primary }}>● free</span>;
   return <span style={{ ...pill, border: `1px solid ${color.subtle2}`, background: "#f6f2ea", color: color.faint }}>○ fixed</span>;

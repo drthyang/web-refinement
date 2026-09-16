@@ -16,6 +16,7 @@ import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import { isMomentParameterKind, type ParameterBinding, type RefinementParameter } from "@/core/refinement/types";
+import { resolveTies } from "@/core/refinement/constraints";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { searchPropagationVector, satelliteMatchDeltas, kLabel, type KCandidate } from "@/core/magnetic/kSearch";
 import { classifyPropagation, describePropagation } from "@/core/magnetic/propagation";
@@ -472,6 +473,16 @@ export function KSearchPanel({
     [structure, k, selected, tieMoments, tieMagnitudes, tieScope, flippedUnits],
   );
   const magBuild = useMemo(() => (chosenOps ? buildFor(chosenOps) : null), [chosenOps, buildFor]);
+  // The amplitudes with the |M| ties resolved: a derived amplitude
+  // ("= ±hypot(…)") follows its reference wherever the amplitudes are applied
+  // — preview, 3D arrows, handoff, report. Every parameter gets a value
+  // (edited, else its seed) so a tie never reads a missing reference.
+  const resolvedAmps = useMemo(() => {
+    if (!magBuild) return amps;
+    const base: Record<string, number> = {};
+    for (const p of magBuild.params) base[p.id] = amps[p.id] ?? p.value;
+    return resolveTies(magBuild.params, base);
+  }, [magBuild, amps]);
 
   // Whether an |M| tie could apply: ≥2 magnetic sites (the all-sites scope
   // ties across elements), or a split orbit (two sublattices of one site) —
@@ -551,7 +562,7 @@ export function KSearchPanel({
   // The candidate magnetic model with the current amplitudes applied — feeds
   // both the 3D moment arrows and the allowed-reflection tick row.
   const appliedMagnetic = useMemo(
-    () => (magBuild ? applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps) : null),
+    () => (magBuild ? applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps) : null),
     [magBuild, amps],
   );
 
@@ -708,8 +719,8 @@ export function KSearchPanel({
       return;
     }
     onReportModel({
-      magnetic: applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps),
-      params: magBuild.params.map((p) => ({ ...p, value: amps[p.id] ?? p.value })),
+      magnetic: applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps),
+      params: magBuild.params.map((p) => ({ ...p, value: resolvedAmps[p.id] ?? p.value })),
       bindings: magBuild.bindings,
       k,
       group: reportGroup,
@@ -729,9 +740,11 @@ export function KSearchPanel({
    */
   const fitMoments = useCallback(
     async (build: MagneticModelBuild, start?: Record<string, number>): Promise<{ values: Record<string, number>; agreement: number | null }> => {
+      // Free every amplitude except a derived one (a |M| tie's "= ±hypot(…)"):
+      // that value follows its reference inside the problem's tie resolution.
       const moments = build.params.map((p) => {
         const v = start?.[p.id] ?? p.value;
-        return { ...p, value: v, initialValue: v, fixed: false };
+        return { ...p, value: v, initialValue: v, fixed: !!p.expression };
       });
       if (magneticFit) return magneticFit.refine(build.magnetic, moments, build.bindings);
       if (!(pattern && nuclearParams && nuclearBindings && profile)) throw new Error("no data to fit the moments against");
@@ -820,7 +833,7 @@ export function KSearchPanel({
     setRefining(true);
     setRefineWR(null);
     try {
-      const { values, agreement } = await fitMoments(magBuild, amps);
+      const { values, agreement } = await fitMoments(magBuild, resolvedAmps);
       setAmps((a) => {
         const next: Record<string, number> = { ...a };
         for (const p of magBuild.params) next[p.id] = values[p.id] ?? next[p.id]!;
@@ -1701,13 +1714,25 @@ export function KSearchPanel({
                 {magBuild.params.map((p) => (
                   <label key={p.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
                     <span style={{ color: theme.secondary }}>{p.label} (µ_B)</span>
-                    <input
-                      type="number"
-                      step={0.1}
-                      value={amps[p.id] ?? p.value}
-                      onChange={(e) => setAmps((a) => ({ ...a, [p.id]: Number(e.target.value) }))}
-                      style={kInput}
-                    />
+                    {p.expression ? (
+                      // Derived by the |M| tie: shown, not edited — it follows the reference.
+                      <input
+                        type="number"
+                        value={+(resolvedAmps[p.id] ?? p.value).toFixed(3)}
+                        readOnly
+                        disabled
+                        title={`Derived from the tie ${p.expression} — edit the reference amplitudes instead`}
+                        style={{ ...kInput, opacity: 0.7 }}
+                      />
+                    ) : (
+                      <input
+                        type="number"
+                        step={0.1}
+                        value={amps[p.id] ?? p.value}
+                        onChange={(e) => setAmps((a) => ({ ...a, [p.id]: Number(e.target.value) }))}
+                        style={kInput}
+                      />
+                    )}
                   </label>
                 ))}
               </div>
@@ -1746,8 +1771,11 @@ export function KSearchPanel({
                               direction(s). Scope: <b>per element</b> ties Mn1 = Mn2 but leaves Fe free;{" "}
                               <b>all sites</b> ties every selected site regardless of element. Use the{" "}
                               <b>flip</b> toggles to make a tied sublattice antiparallel to the
-                              reference. Sublattices whose allowed modes differ in number or geometry
-                              cannot be tied by a linear constraint and stay independent (noted below).
+                              reference. A sublattice with a single allowed mode is tied to a multi-mode
+                              reference through a derived amplitude equal to ±|M| of the reference (the
+                              reference's modes are re-expressed orthonormally, so its amplitudes are
+                              components of one vector); two multi-mode sublattices of different
+                              geometry cannot be tied and stay independent (noted below).
                             </>
                           }
                         />
@@ -1799,7 +1827,7 @@ export function KSearchPanel({
                 {onApply && (
                   <button
                     style={{ ...btn, marginTop: 0, background: "#fff", color: theme.primary, border: `1px solid ${theme.primary}` }}
-                    onClick={() => onApply(applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps))}
+                    onClick={() => onApply(applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps))}
                   >
                     Show on refinement pattern
                   </button>
@@ -1808,8 +1836,8 @@ export function KSearchPanel({
                   <button
                     style={{ ...btn, marginTop: 0 }}
                     onClick={() => onContinue(
-                      applyMagneticMoments(magBuild.magnetic, magBuild.bindings, amps),
-                      magBuild.params.map((p) => ({ ...p, value: amps[p.id] ?? p.value, initialValue: amps[p.id] ?? p.value })),
+                      applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps),
+                      magBuild.params.map((p) => ({ ...p, value: resolvedAmps[p.id] ?? p.value, initialValue: resolvedAmps[p.id] ?? p.value })),
                       magBuild.bindings,
                     )}
                   >

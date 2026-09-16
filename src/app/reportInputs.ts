@@ -15,6 +15,7 @@ import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import type { MergeStatistics } from "@/core/diffraction/merge";
 import type { PdfPattern, Radiation, SingleCrystalDataset } from "@/core/diffraction/types";
 import { isMomentParameterKind, type ParameterBinding, type RefinementParameter, type RefinementResult } from "@/core/refinement/types";
+import { resolveTies } from "@/core/refinement/constraints";
 import type { PowderProfile } from "@/core/workflow/powder";
 import { formatMagneticSymbol, identifyMagneticGroupAnySetting } from "@/core/magnetic/bnsOg";
 import { magneticOperationSignature } from "@/core/magnetic/operationSignature";
@@ -47,9 +48,17 @@ export function reportFileName(structure: StructureModel): string {
 
 /** Parameters with the last result's esds merged in (the CIF export's `withEsd`). */
 export function withEsds(params: readonly RefinementParameter[], result: RefinementResult | null | undefined): RefinementParameter[] {
+  // A tied row (e.g. "= hypot(…)") reports what its tie evaluates to.
+  let resolved: Record<string, number> | null = null;
+  if (params.some((p) => p.expression)) {
+    const values: Record<string, number> = {};
+    for (const p of params) values[p.id] = p.value;
+    try { resolved = resolveTies(params, values); } catch { resolved = null; }
+  }
   return params.map((p) => {
     const e = result?.esd[p.id];
-    return e !== undefined && Number.isFinite(e) ? { ...p, esd: e } : { ...p };
+    const value = p.expression && resolved ? resolved[p.id] ?? p.value : p.value;
+    return { ...p, value, ...(e !== undefined && Number.isFinite(e) ? { esd: e } : {}) };
   });
 }
 

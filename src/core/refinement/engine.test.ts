@@ -283,9 +283,9 @@ describe("diagnostics: bound-active parameters and shift", () => {
 
 describe("constraints", () => {
   it("parses tie expressions", () => {
-    expect(parseTie("= x")).toEqual({ factor: 1, refId: "x", constant: 0 });
-    expect(parseTie("= 2*occA")).toEqual({ factor: 2, refId: "occA", constant: 0 });
-    expect(parseTie("= -1*occA+1")).toEqual({ factor: -1, refId: "occA", constant: 1 });
+    expect(parseTie("= x")).toEqual({ kind: "linear", factor: 1, refId: "x", constant: 0 });
+    expect(parseTie("= 2*occA")).toEqual({ kind: "linear", factor: 2, refId: "occA", constant: 0 });
+    expect(parseTie("= -1*occA+1")).toEqual({ kind: "linear", factor: -1, refId: "occA", constant: 1 });
   });
 
   it("resolves a tied occupancy (occB = 1 − occA via -1*occA+1)", () => {
@@ -295,6 +295,38 @@ describe("constraints", () => {
     ];
     const resolved = resolveTies(params, { occA: 0.3, occB: 0 });
     expect(resolved.occB).toBeCloseTo(0.7, 10);
+  });
+
+  it("returns the RESOLVED value of a tied parameter, not its stale seed", () => {
+    // y = a·m1 + b·m2 with b tied to |(a, q)| — the magnitude tie an equal-|M|
+    // moment amplitude uses. The fit moves a; b must follow it in the result,
+    // or every consumer (parameter panel, project file, report, the applied
+    // magnetic model) keeps the seed the refinement never used.
+    const m1 = [1, 2, 3, 4, 5];
+    const m2 = [5, 4, 3, 2, 1];
+    const trueA = 3;
+    const trueQ = 4; // ⇒ b = 5
+    const observations = Float64Array.from(m1.map((v, i) => trueA * v + 5 * m2[i]!));
+    const weights = Float64Array.from(m1.map(() => 1));
+    const parameters: RefinementParameter[] = [
+      { id: "a", label: "a", kind: "momentMode", value: 1, initialValue: 1, fixed: false },
+      { id: "q", label: "q", kind: "momentMode", value: trueQ, initialValue: trueQ, fixed: true },
+      { id: "b", label: "b", kind: "momentMode", value: 99, initialValue: 99, fixed: true, expression: "= hypot(a,q)" },
+    ];
+    const problem: RefinementProblem = {
+      parameters,
+      observations,
+      weights,
+      // The problem resolves the tie itself, as every workflow builder does.
+      calculate: (v) => {
+        const r = resolveTies(parameters, v);
+        return Float64Array.from(m1.map((x, i) => r.a! * x + r.b! * m2[i]!));
+      },
+    };
+    const result = refine(problem);
+    expect(result.parameters.a).toBeCloseTo(trueA, 4);
+    expect(result.parameters.b).toBeCloseTo(Math.hypot(result.parameters.a!, trueQ), 10);
+    expect(result.parameters.b).not.toBe(99);
   });
 
   it("ties group members equal to the group leader (Phase 8 grouping)", () => {

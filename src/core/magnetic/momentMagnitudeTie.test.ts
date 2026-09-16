@@ -1,8 +1,14 @@
 import { describe, it, expect } from "vitest";
 import type { StructureModel } from "@/core/crystal/types";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
+import type { Vec3 } from "@/core/math/types";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
+import { resolveTies } from "@/core/refinement/constraints";
+import { exampleStructure } from "@/examples/mn3ga";
+import { magneticSubgroupLattice, latticeRepresentatives } from "@/core/magnetic/subgroupLattice";
+import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
+import { fitAmplitudesToMoments } from "@/core/magnetic/amplitudeFit";
 
 /**
  * Cross-site |M| tie: same moment SIZE on every sublattice of an element,
@@ -73,21 +79,72 @@ describe("buildMagneticModel — equal-|M| tie across sites", () => {
     expect(Math.sign(seed2[0]!)).toBe(-1); // seed carries the flip too
   });
 
-  it("skips sublattices with incompatible mode geometry (different dof)", () => {
+  it("ties single-mode sublattices to a multi-mode reference through a derived |M| amplitude", () => {
     const withGeneric: StructureModel = {
       ...twoMn,
       sites: [
         ...twoMn.sites,
-        // General position → 3 dof; cannot be linearly tied to a 1-dof site.
+        // General position → 3 dof: it becomes the reference; the 1-dof sites
+        // derive their amplitude from its size instead of staying untied.
         { label: "Mn3", element: "Mn", oxidationState: 2, position: [0.11, 0.23, 0.37], occupancy: 1, adp: iso },
       ],
     };
     const b = buildMagneticModel(withGeneric, [0, 0, 0], ["Mn1", "Mn2", "Mn3"], ops222, { moment: 2, tieEqualMagnitude: true });
-    // Mn2 ties to Mn1; Mn3 keeps its own three amplitudes and is reported.
-    expect(b.params.filter((p) => p.id.startsWith("mom_Mn3")).length).toBe(3);
-    expect(b.params.some((p) => p.id === "mom_Mn2_0")).toBe(false);
-    expect(b.magnitudeTies[0]!.members.map((m) => m.key)).toEqual(["Mn2"]);
-    expect(b.magnitudeTies[0]!.skipped.map((s) => s.label)).toEqual(["Mn3"]);
+    expect(b.magnitudeTies[0]!.reference).toBe("Mn3");
+    expect(b.magnitudeTies[0]!.members.map((m) => [m.key, m.via])).toEqual([["Mn1", "magnitude"], ["Mn2", "magnitude"]]);
+    expect(b.magnitudeTies[0]!.skipped).toEqual([]);
+    const ref = b.params.filter((p) => p.id.startsWith("mom_Mn3"));
+    expect(ref).toHaveLength(3);
+    ref.forEach((p) => expect(p.expression).toBeUndefined());
+    const d1 = b.params.find((p) => p.id === "mom_Mn1_0")!;
+    expect(d1.fixed).toBe(true);
+    expect(d1.expression).toBe("= hypot(mom_Mn3_0,mom_Mn3_1,mom_Mn3_2)");
+    expect(d1.label).toContain("|M(Mn3)|");
+    // Any reference amplitudes: every sublattice ends up with the reference's size.
+    const values = resolveTies(b.params, { mom_Mn3_0: 1, mom_Mn3_1: 2, mom_Mn3_2: 2, mom_Mn1_0: 0, mom_Mn2_0: 0 });
+    expect(values.mom_Mn1_0).toBeCloseTo(3, 9);
+    const applied = applyMagneticMoments(b.magnetic, b.bindings, values);
+    for (const lbl of ["Mn1", "Mn2", "Mn3"]) expect(norm(applied.moments.find((m) => m.siteLabel === lbl)!.components)).toBeCloseTo(3, 6);
+    // A flip is the sign of the derived amplitude (antiparallel along the same axis).
+    const f = buildMagneticModel(withGeneric, [0, 0, 0], ["Mn1", "Mn2", "Mn3"], ops222, { moment: 2, tieEqualMagnitude: true, flippedUnits: ["Mn1"] });
+    expect(f.params.find((p) => p.id === "mom_Mn1_0")!.expression).toBe("= -hypot(mom_Mn3_0,mom_Mn3_1,mom_Mn3_2)");
+    const fv = resolveTies(f.params, { mom_Mn3_0: 1, mom_Mn3_1: 2, mom_Mn3_2: 2, mom_Mn1_0: 0, mom_Mn2_0: 0 });
+    expect(fv.mom_Mn1_0).toBeCloseTo(-3, 9);
+  });
+
+  it("Mn₃Ga-type split orbit: the two-mode orbit is the reference, the one-mode orbit follows its |M| in the hexagonal metric", () => {
+    const structure = exampleStructure();
+    const k: Vec3 = [0, 0, 0];
+    const reps = latticeRepresentatives(magneticSubgroupLattice(structure.spaceGroup.operations, k, { maxIndex: 6 }));
+    const cand = reps.find((r) => (r.candidate.standard?.bnsSymbol ?? r.settingMatch?.identity.bnsSymbol ?? "").replace(/\s/g, "") === "Cm'cm'")!;
+    const ops = [...cand.candidate.operations];
+    // Untied: orbit 1 has Mx, My (not orthogonal in a hexagonal cell), orbit 2 one mode; all three free.
+    const free = buildMagneticModel(structure, k, ["Mn1"], ops, { moment: 2 });
+    expect(free.params.map((p) => p.id)).toEqual(["mom_Mn1_0", "mom_Mn1_1", "mom_Mn1_o2_0"]);
+    expect(free.params.every((p) => !p.expression)).toBe(true); // builder rows are fixed until the handoff frees them
+    expect(free.params[1]!.label).toContain("(My)");
+    // Tied: orbit 2's amplitude derives from |M(orbit 1)|; orbit 1's basis is made orthonormal.
+    const tied = buildMagneticModel(structure, k, ["Mn1"], ops, { moment: 2, tieEqualMagnitude: true });
+    expect(tied.magnitudeTies).toHaveLength(1);
+    expect(tied.magnitudeTies[0]!.reference).toBe("Mn1");
+    expect(tied.magnitudeTies[0]!.members).toEqual([{ key: "Mn1#2", label: "Mn1 orbit 2", flipped: false, via: "magnitude" }]);
+    expect(tied.magnitudeTies[0]!.skipped).toEqual([]);
+    const derived = tied.params.find((p) => p.id === "mom_Mn1_o2_0")!;
+    expect(derived.expression).toBe("= hypot(mom_Mn1_0,mom_Mn1_1)");
+    expect(derived.fixed).toBe(true);
+    expect(tied.params[1]!.label).toContain("(Mx+2My)"); // b̂ − (b̂·â)â in a 120° cell
+    // Arbitrary reference amplitudes → identical Cartesian sizes on both orbits.
+    const values = resolveTies(tied.params, { mom_Mn1_0: 0.7, mom_Mn1_1: -1.9, mom_Mn1_o2_0: 0 });
+    const applied = applyMagneticMoments(tied.magnetic, tied.bindings, values);
+    const size = (m: { components: Vec3 }): number => { const c = crystalComponentsToCartesian(structure.cell, m.components); return Math.hypot(c[0]!, c[1]!, c[2]!); };
+    const o1 = applied.moments.find((m) => (m.orbitIndex ?? 1) === 1)!;
+    const o2 = applied.moments.find((m) => m.orbitIndex === 2)!;
+    expect(size(o1)).toBeCloseTo(Math.hypot(0.7, 1.9), 6);
+    expect(size(o2)).toBeCloseTo(size(o1), 6);
+    // Seeding from a model (the page opening on an applied model) keeps the tie.
+    const fit = fitAmplitudesToMoments(tied, applied);
+    expect(fit.values.mom_Mn1_o2_0).toBeCloseTo(Math.hypot(fit.values.mom_Mn1_0!, fit.values.mom_Mn1_1!), 9);
+    expect(fit.rms).toBeLessThan(1e-6);
   });
 
   it("does not tie across elements in the per-element scope", () => {

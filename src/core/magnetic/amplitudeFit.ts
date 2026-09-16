@@ -22,6 +22,7 @@ import type { ParameterBinding } from "@/core/refinement/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import { momentBindingKey } from "@/core/magnetic/types";
 import type { MagneticModelBuild } from "@/core/magnetic/momentModel";
+import { resolveTies } from "@/core/refinement/constraints";
 
 export interface AmplitudeFit {
   /** Fitted amplitude per parameter id (every parameter of the build). */
@@ -38,7 +39,7 @@ export function fitAmplitudesToMoments(build: Pick<MagneticModelBuild, "params" 
   const col = new Map(ids.map((id, j) => [id, j]));
   const targetByKey = new Map(target.moments.map((m) => [momentBindingKey(m), m]));
 
-  // Rows: (sublattice key, part) × 3 components.
+  // Rows: (sublattice key, part) × 3 components, one column per parameter.
   const rows: { a: number[]; b: number }[] = [];
   const parts = new Map<string, Set<"cos" | "sin">>();
   for (const bd of build.bindings) {
@@ -64,15 +65,23 @@ export function fitAmplitudesToMoments(build: Pick<MagneticModelBuild, "params" 
     }
   }
 
-  const x = leastSquares(rows, ids.length);
-  const values: Record<string, number> = {};
-  ids.forEach((id, j) => { values[id] = x[j] ?? 0; });
+  // A tied (derived) amplitude — the |M| tie's "= ±hypot(…)" — is not a free
+  // column: it follows from the reference amplitudes, so the least squares
+  // runs over the free parameters only (a free column would let it spread the
+  // target between the two and break the tie) and the derived values are
+  // resolved afterwards; the misfit is then judged with every parameter.
+  const freeIdx = build.params.map((p, j) => (p.expression ? -1 : j)).filter((j) => j >= 0);
+  const x = leastSquares(rows.map((r) => ({ a: freeIdx.map((j) => r.a[j]!), b: r.b })), freeIdx.length);
+  const seed: Record<string, number> = {};
+  ids.forEach((id) => { seed[id] = 0; });
+  freeIdx.forEach((j, k) => { seed[ids[j]!] = x[k] ?? 0; });
+  const values = resolveTies(build.params, seed);
 
   let sum = 0;
   let maxMisfit = 0;
   for (const r of rows) {
     let pred = 0;
-    for (let j = 0; j < ids.length; j++) pred += r.a[j]! * (x[j] ?? 0);
+    for (let j = 0; j < ids.length; j++) pred += r.a[j]! * (values[ids[j]!] ?? 0);
     const d = pred - r.b;
     sum += d * d;
     maxMisfit = Math.max(maxMisfit, Math.abs(d));

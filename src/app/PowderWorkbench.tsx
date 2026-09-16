@@ -460,7 +460,7 @@ export function PowderWorkbench({
     setSession((s) => ({
       ...s,
       magnetic,
-      powderParams: [...s.powderParams.filter((p) => !isMomentParameterKind(p.kind)), ...momentParams.map((p) => ({ ...p, fixed: false }))],
+      powderParams: [...s.powderParams.filter((p) => !isMomentParameterKind(p.kind)), ...momentParams.map((p) => ({ ...p, fixed: !!p.expression }))],
       powderBindings: [...s.powderBindings.filter((b) => !isMomentParameterKind(b.kind)), ...momentBindings],
     }));
     setPowderResult(null);
@@ -925,7 +925,7 @@ export function PowderWorkbench({
       const nuclearFixed = powderParams.filter((p) => !isMomentParameterKind(p.kind)).map((p) => ({ ...p, fixed: true }));
       const result = await client.refineMagneticPowderParallel({
         structure, magnetic, pattern,
-        parameters: [...nuclearFixed, ...momentParams.map((p) => ({ ...p, fixed: false }))],
+        parameters: [...nuclearFixed, ...momentParams.map((p) => ({ ...p, fixed: !!p.expression }))],
         bindings: [...pBindings.filter((b) => !isMomentParameterKind(b.kind)), ...momentBindings],
         ...(phaseList.length > 0 ? { extraPhases: phaseList } : {}),
         ...magneticProfile,

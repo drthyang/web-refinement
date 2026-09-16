@@ -104,6 +104,43 @@ describe("overlaySavedParameters", () => {
   });
 });
 
+describe("a tied moment amplitude survives the file", () => {
+  it("keeps the |M| tie's expression and fixed flag through save → parse → restore", () => {
+    const tied: RefinementParameter = {
+      id: "mom_Mn1_o2_0", label: "Mn1 orbit 2 M (−Mx+My) = |M(Mn1)|", kind: "momentMode",
+      value: 0.6124, initialValue: 2, fixed: true, min: -12, max: 12,
+      expression: "= hypot(mom_Mn1_0,mom_Mn1_1)",
+    };
+    const refs: RefinementParameter[] = [
+      { id: "mom_Mn1_0", label: "Mn1 M 1 (Mx)", kind: "momentMode", value: 0.3511, initialValue: 2, fixed: false },
+      { id: "mom_Mn1_1", label: "Mn1 M 2 (Mx+2My)", kind: "momentMode", value: 0.5018, initialValue: 0, fixed: false },
+    ];
+    const bindings: ParameterBinding[] = [...refs, tied].map((p) => ({
+      parameterId: p.id, kind: "momentMode" as const, targetId: "mn3ga-mag", targetKey: "Mn1", momentBasis: [1, 0, 0] as const,
+    }));
+    const magnetic: MagneticModel = {
+      id: "mn3ga-mag", structureId: structure.id, propagation: [[0, 0, 0]],
+      moments: [{ siteLabel: "Mn1", frame: "crystallographic", components: [0.64, 0.58, 0] }],
+    };
+    const session = {
+      ...newSession(structure),
+      magnetic,
+      powderParams: [...newSession(structure).powderParams, ...refs, tied],
+      powderBindings: [...newSession(structure).powderBindings, ...bindings],
+    };
+    const ws = powderWorkspaceFrom(session, null, DEFAULT_INSTRUMENT, false, { fitRange: null, displayUnit: null, manualPeakD: [] });
+    const file = parseProject(serializeProject(projectFileFor({ structures: [structure], workspace: ws, title: "t" })));
+    const saved = file.workspace.technique === "powder" ? file.workspace.refinement.parameters : [];
+    expect(saved.find((p) => p.id === "mom_Mn1_o2_0")).toMatchObject({ fixed: true, expression: "= hypot(mom_Mn1_0,mom_Mn1_1)" });
+    // Moment rows are appended to the rebuilt spec, so the tie comes back whole.
+    const restored = overlaySavedParameters(newSession(structure).powderParams, saved, (p) => p.kind === "momentMode");
+    const back = restored.find((p) => p.id === "mom_Mn1_o2_0")!;
+    expect(back.expression).toBe("= hypot(mom_Mn1_0,mom_Mn1_1)");
+    expect(back.fixed).toBe(true);
+    expect(back.value).toBeCloseTo(0.6124, 6);
+  });
+});
+
 describe("single-crystal capture / restore", () => {
   const dataset = buildSyntheticSingleCrystal(structure);
   const spec = buildSingleCrystalSpec(structure, dataset, { extinction: 0 });

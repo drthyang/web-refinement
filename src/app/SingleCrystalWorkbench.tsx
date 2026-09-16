@@ -455,7 +455,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
     setMomentBindings(mag ? mBindings : []);
     setParams((prev) => [
       ...prev.filter((p) => !isMomentParameterKind(p.kind)),
-      ...(mag ? momentParams.map((p) => ({ ...p, fixed: false })) : []),
+      ...(mag ? momentParams.map((p) => ({ ...p, fixed: !!p.expression })) : []),
     ]);
   }
 

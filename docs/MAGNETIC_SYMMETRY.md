@@ -114,10 +114,26 @@ viewer draws no arrow there and says why). Tested in
 (−1,1,0) is √3 µ_B long in a hexagonal cell — Mn₃Ga/Cm'cm' previously seeded
 one sublattice √3× larger than the other). The refinable quantities are the
 per-mode amplitudes themselves: only what the magnetic symmetry allows is
-refined, and nothing beyond it is imposed. (An earlier equal-|m| constraint —
-one shared magnitude per site with per-orbit direction angles — was removed:
-same-size moments across sublattices are a physical prior, not a symmetry
-requirement, and the fit should be free to disagree.)
+refined, and nothing beyond it is imposed by default — same-size moments
+across sublattices are a physical prior, not a symmetry requirement.
+
+That prior is available as an **opt-in tie** in step 5 ("Equal |M|", per
+element or across all selected sites, with per-sublattice flips). The
+reference is the sublattice with the most allowed modes. A sublattice with
+the same mode geometry *shares* the reference's amplitude parameters through
+its own basis (same size for any amplitudes). A sublattice with a **single**
+allowed mode — a split orbit pinned to one direction, a site on a rotation
+axis — gets a **derived** amplitude `= ±hypot(reference amplitudes)`; the
+reference's modes are re-expressed orthonormally (Gram–Schmidt in the
+Cartesian metric, first mode unchanged) so that hypot is exactly |M|. The
+derived row appears as "tied" everywhere (magnetic page, parameter panel,
+project file, report) and follows its reference through the tie resolution
+every problem builder already applies. This is the Mn₃Ga Cm′cm′ case: orbit 1
+keeps (Mx, Mx+2My), orbit 2's amplitude is |M(orbit 1)|, and a refinement
+cannot pull the two sizes apart. Two multi-mode sublattices of different
+geometry still cannot be tied (that needs direction-angle parameters) and are
+listed as skipped, with the reason. Tested in
+[`momentMagnitudeTie.test.ts`](../src/core/magnetic/momentMagnitudeTie.test.ts).
 
 **Report.** The header's Export ▾ → Report writes one self-contained HTML
 report of the whole study ([`core/export/report.ts`](../src/core/export/report.ts));

@@ -20,6 +20,7 @@ import type {
   RefinementStatus,
 } from "@/core/refinement/types";
 import { chiSquared, computeAgreementFactors } from "@/core/refinement/factors";
+import { resolveTies } from "@/core/refinement/constraints";
 import {
   pseudoInverseSymmetric,
   solveSymmetricPseudoInverse,
@@ -127,7 +128,21 @@ function limitShift(delta: number, value: number): number {
   return cap > 0 && Math.abs(delta) > cap ? Math.sign(delta) * cap : delta;
 }
 
-/** Build the full id→value record from base params overlaid with free values. */
+/**
+ * Build the full id→value record from base params overlaid with free values,
+ * with tie expressions resolved.
+ *
+ * Resolving matters for the RESULT: a tied parameter is not refined (its value
+ * follows another's), and the residual already sees the resolved value —
+ * every problem builder calls `resolveTies` before evaluating. Returning the
+ * stale stored value instead would hand the caller a result that disagrees
+ * with the fit it just ran: an equal-|M| moment amplitude, say, would keep the
+ * magnitude it was seeded with while the reference amplitudes moved.
+ *
+ * A tie referencing a parameter outside this problem cannot be evaluated here;
+ * the unresolved record is then returned rather than failing a finished
+ * refinement (the builders that DO see the reference resolve it themselves).
+ */
 function valuesRecord(
   params: readonly RefinementParameter[],
   freeIds: readonly string[],
@@ -136,7 +151,12 @@ function valuesRecord(
   const rec: Record<string, number> = {};
   for (const p of params) rec[p.id] = p.value;
   for (let i = 0; i < freeIds.length; i++) rec[freeIds[i]!] = freeValues[i]!;
-  return rec;
+  if (!params.some((p) => p.expression)) return rec;
+  try {
+    return resolveTies(params, rec);
+  } catch {
+    return rec;
+  }
 }
 
 function weightedResiduals(
