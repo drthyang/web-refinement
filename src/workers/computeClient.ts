@@ -27,7 +27,7 @@ import type {
 import type { MagneticModel } from "@/core/magnetic/types";
 import { leBailCellPrefit, type LeBailPrefitResult } from "@/core/workflow/leBailPrefit";
 import type { RefinementResult, RefinementOptions, AgreementFactors, RefinementParameter } from "@/core/refinement/types";
-import { refine, refineParallel, type BatchEvaluator, type RefinementProblem } from "@/core/refinement/engine";
+import { refine, refineParallel, type BatchEvaluator, type ParallelDriverCapabilities, type RefinementProblem } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem, applyMagneticMoments } from "@/core/workflow/magnetic";
 import { runPowderRefinement, runPdfRefinement, runMpdfRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
@@ -68,6 +68,25 @@ function spawnWorker(): Worker {
  *  (same browser), used to decide whether to try the GPU |F|² evaluator. */
 function hasWebGpu(): boolean {
   return typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu;
+}
+
+/**
+ * Whether the PARALLEL driver may compute this spec's analytic Jacobian columns
+ * on the driver thread — which in the browser is the UI thread. True for the
+ * real-space PDF problem only: its analytic layer is a FUSED pass (one pair-loop
+ * traversal yields G(r) and every requested ∂G/∂p), so the driver pays about one
+ * extra `calculate` per iteration — the same order as the baseline/trial
+ * evaluations it already runs there — and the pool is spared TWO evaluations per
+ * analytic column. The powder template computes a full pattern synthesis per
+ * column, which would drag exactly the work the pool exists for back onto the
+ * main thread, so powder (and every other spec) keeps its columns on the pool.
+ */
+function analyticDriverPolicy(
+  spec: EvaluatorSpec,
+  options: Partial<RefinementOptions>,
+): { opts: Partial<RefinementOptions>; driver: ParallelDriverCapabilities } {
+  if (spec.kind !== "pdf") return { opts: options, driver: {} };
+  return { opts: { analyticDerivatives: true, ...options }, driver: { analyticOnDriver: true } };
 }
 
 /** Write a refinement result's converged values + esds back onto a copy of the
@@ -503,9 +522,10 @@ export class ComputeClient {
         ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
             onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
         : undefined;
+      const policy = analyticDriverPolicy(spec, { ...options, ...(onIteration ? { onIteration } : {}) });
       const runOnce = async (start: readonly RefinementParameter[]): Promise<{ parameters: RefinementParameter[]; final: RefinementResult }> => {
         const problem = buildProblemForSpec({ ...spec, parameters: [...start] });
-        const result = await refineParallel(problem, { ...options, ...(onIteration ? { onIteration } : {}) }, pool);
+        const result = await refineParallel(problem, policy.opts, pool, policy.driver);
         return { parameters: applyResultToParams(start, result), final: result };
       };
       return await refineMultiStart(spec.parameters, runOnce, multiStart);
@@ -609,11 +629,13 @@ export class ComputeClient {
       return await refineSequentialAsync(req.parameters, datasets, seqOptions, async (problem, options, _dataset, index) => {
         const w = windows[index]!;
         await pool.init({ ...base, fitRange: { min: w.min, max: w.max } });
+        const policy = analyticDriverPolicy(base, options);
         return solveBox(problem, w, async (params) =>
           refineParallel(
             buildProblemForSpec({ ...base, parameters: [...params], fitRange: { min: w.min, max: w.max } }),
-            options,
+            policy.opts,
             pool,
+            policy.driver,
           ),
         );
       });
@@ -751,13 +773,13 @@ export class ComputeClient {
         ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
             onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
         : undefined;
-      const opts = { ...options, ...(onIteration ? { onIteration } : {}) };
+      const policy = analyticDriverPolicy(spec, { ...options, ...(onIteration ? { onIteration } : {}) });
       const out = await refineStagedAsync(
         spec.parameters,
         (params) => buildProblemForSpec({ ...spec, parameters: [...params] }),
         stagesFromKindGroups(staged),
-        opts,
-        (problem, o) => refineParallel(problem, o, pool),
+        policy.opts,
+        (problem, o) => refineParallel(problem, o, pool, policy.driver),
       );
       if (!out.final) throw new Error("staged refinement unlocked no parameters");
       return out.final;
@@ -936,7 +958,7 @@ export class ComputeClient {
       try {
         engaged = await gpuEval.init(spec);
       } catch {
-        engaged = false;
+        // No adapter, a failed worker load, a rejected device: stay on the CPU pool.
       }
       if (engaged) {
         this.activeGpu = gpuEval;
@@ -954,7 +976,8 @@ export class ComputeClient {
     this.activePool = pool;
     try {
       await pool.init(spec);
-      return await refineParallel(buildProblemForSpec(spec), opts, pool);
+      const policy = analyticDriverPolicy(spec, opts);
+      return await refineParallel(buildProblemForSpec(spec), policy.opts, pool, policy.driver);
     } finally {
       pool.dispose();
       if (this.activePool === pool) this.activePool = null;

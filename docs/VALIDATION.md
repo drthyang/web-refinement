@@ -227,8 +227,11 @@ tight tolerances run with termination off.
 ## GPU acceleration precision
 
 The WebGPU kernels compute in f32, so they are approximate accelerators and
-never bit-identical to the CPU path ([LIMITATIONS.md](./LIMITATIONS.md)). Their
-reference is the f64 CPU path, itself validated above against GSAS-II. Two gates
+never bit-identical to the CPU path ([LIMITATIONS.md](./LIMITATIONS.md)). The
+nuclear structure-factor kernel is the one the app requests by default where an
+adapter exists, so this contract is what a default fit relies on; the header's
+GPU chip turns it off. Their reference is the f64 CPU path, itself validated
+above against GSAS-II. Two gates
 enforce the precision contract before a refinement trusts a GPU value:
 
 1. **CI (Node, no GPU).** The WGSL struct field counts must equal the JS

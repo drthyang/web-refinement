@@ -112,7 +112,6 @@ describe.skipIf(!dataExists(MNO_FGR))("TUTORIAL MnO — experimental mPDF from t
       ssTot += fit.gdiff[j]! ** 2;
     }
     const rw = Math.sqrt(ssRes / ssTot);
-    // eslint-disable-next-line no-console
     console.log(`[MnO mPDF] ordScale=${ordScale.toFixed(4)} paraScale=${paraScale.toFixed(4)} · Rw=${(100 * rw).toFixed(2)}% · explained=${(100 * (1 - rw * rw)).toFixed(1)}%`);
 
     // The tutorial's own least_squares fit of the same residual gives
@@ -158,7 +157,6 @@ describe.skipIf(!dataExists(MNTE_GR))("TUTORIAL MnTe — nuclear + magnetic co-r
       .find(({ build }) => build.magnetic.moments.length > 0);
     expect(allowed, "no magnetic subgroup of P6₃/mmc allows a moment on Mn").toBeDefined();
     const mag = allowed!.build;
-    // eslint-disable-next-line no-console
     console.log(`[MnTe] subgroup ${allowed!.c.label ?? allowed!.c.bns ?? "?"} (index ${allowed!.c.index}) allows m = ${JSON.stringify(mag.magnetic.moments[0]!.components)}`);
     const pattern: PdfPattern = {
       ...parsed.pattern,
@@ -191,7 +189,6 @@ describe.skipIf(!dataExists(MNTE_GR))("TUTORIAL MnTe — nuclear + magnetic co-r
     const cellA = Object.entries(refined.result.parameters).find(([id]) => id.startsWith("cell_"))?.[1] ?? 0;
     const magFrac = Math.max(...refined.components.gMagnetic.map(Math.abs)) /
       Math.max(...refined.components.gNuclear.map(Math.abs));
-    // eslint-disable-next-line no-console
     console.log(`[MnTe co-refine] ${refined.result.status} · Rw=${(100 * rw).toFixed(2)}% · a=${(cellA as number).toFixed(4)} (ref 4.193) · |m|=${moment.toFixed(2)} µ_B · magnetic/nuclear=${(100 * magFrac).toFixed(1)}%`);
 
     expect(refined.warnings).toEqual([]);
@@ -256,7 +253,6 @@ describe.skipIf(!dataExists(MNSB_CIF))("TUTORIAL MnSb — ferromagnet: net-momen
     // with the residual mean, so this could not pass with the line omitted.
     const volume = s.cell.a * s.cell.b * s.cell.c * Math.sin((s.cell.gamma * Math.PI) / 180);
     const lineAtRbar = 4 * Math.PI * w.rBar * (fmSpins.length / volume) * netMag * netMag;
-    // eslint-disable-next-line no-console
     console.log(`[MnSb FM] mean=${w.mean.toFixed(3)} rms=${w.rms.toFixed(2)} · analytic line at r̄=${w.rBar.toFixed(1)} Å is ${lineAtRbar.toFixed(1)}`);
     expect(lineAtRbar).toBeGreaterThan(20 * Math.abs(w.mean));
 

@@ -173,7 +173,6 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF workflow (POWGEN, local-
     const conv = (magnetic.moments.length / structure.sites.length) * (BARN_TO_FM2 / (w.bAvg * w.bAvg));
     const ordRef = (ord * conv) / g.ordWeightConvention;
     const paraRef = (para * conv) / g.paraWeightConvention;
-    // eslint-disable-next-line no-console
     console.log(
       `[Mn3Sn mPDF workflow 1] status=${result.status} iters=${result.history.length} ` +
       `ord=${ord.toFixed(4)} (ref-units ${((ord * conv) / g.ordWeightConvention).toFixed(3)} vs ${g.reference.ordscale.toFixed(3)}) ` +
@@ -261,7 +260,6 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF workflow (POWGEN, local-
     const rwWith = rwOver(idx, calcWith, fgr.gObs, fgr.gObs);
     const rwZero = rwOver(idx, calcZero, fgr.gObs, fgr.gObs);
 
-    // eslint-disable-next-line no-console
     console.log(
       `[Mn3Sn mPDF workflow 2] with-moments: status=${resultWith.status} iters=${resultWith.history.length} ` +
       `Rw=${(rwWith * 100).toFixed(2)}% scale=${resultWith.parameters["pdfScale"]!.toFixed(4)} ` +

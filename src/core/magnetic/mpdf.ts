@@ -254,8 +254,8 @@ export function computeNormalizedMpdf(
 
   // Histogram the delta weights (s1) and the baseline weights B/r³ (s2), binned
   // to the nearest grid point (bin edges at r ± step/2, the reference binning).
-  let s1 = new Float64Array(n);
-  let s2 = new Float64Array(n);
+  let s1 = new Float64Array(n); // rebound by the resolution convolution below
+  const s2 = new Float64Array(n);
   for (const pair of pairList) {
     const idx = Math.floor((pair.rij - r0 + step / 2) / step);
     if (idx < 0 || idx >= n) continue;

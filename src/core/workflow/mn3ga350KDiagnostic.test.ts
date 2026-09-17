@@ -191,7 +191,6 @@ describe.skipIf(!hasData)("Mn3Ga 350K — Phase 1a magnetic instability diagnost
     const nearGolden = runs.filter((r) => distFromGolden(r) < 0.4).length;
     const withinChi = runs.filter((r) => r.chi <= best.chi * 1.001).length;
 
-    /* eslint-disable no-console */
     console.log("\n================ PHASE 1a DIAGNOSTIC: Mn3Ga 350K ================");
     console.log(`Nuclear scaffold converged (moments=0): wR = ${(100 * (r2.agreement.rWeighted ?? 0)).toFixed(3)}%`);
     console.log(`Golden moments |m0|=${mag(cell, gm0).toFixed(2)} |m1|=${mag(cell, gm1).toFixed(2)} µB, χ²(held)=${goldenChi.toExponential(4)}`);
@@ -215,6 +214,5 @@ describe.skipIf(!hasData)("Mn3Ga 350K — Phase 1a magnetic instability diagnost
       );
     }
     console.log("================================================================\n");
-    /* eslint-enable no-console */
   });
 });

@@ -70,7 +70,8 @@ import {
   type BoxcarDirection,
 } from "@/core/workflow/pdfBoxcar";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
-import { parseFullProfInt, looksLikeFullProfInt, writeFullProfInt } from "@/parsers/fullprofInt";
+import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
+import { writeFullProfInt } from "@/core/export/fullprofInt";
 import { parseHklRows } from "@/parsers/hkl";
 import {
   mergeToMagneticSupercell,
@@ -984,11 +985,17 @@ export async function refine_pdf(args: {
   warnings: string[];
   parallel: { workers: number } | null;
 }> {
-  const options = { maxIterations: args.maxIterations ?? 30 };
+  // The MCP server has no UI thread, so the driver may compute the PDF
+  // problem's analytic columns itself: one fused pass yields G(r) and every
+  // supported ∂G/∂p (Qdamp/Qbroad, δ1/δ2, spdiameter, occupancy, B_iso,
+  // U_aniso, mode shifts), which is exact and 2.3× faster on the Ni golden than
+  // the finite-difference Jacobian. Unsupported kinds still fall back to FD.
+  const options = { maxIterations: args.maxIterations ?? 30, analyticDerivatives: true };
   const multi = args.extraPhases && args.extraPhases.length > 0;
 
   // Parallel fast path (flat fits): the Jacobian fans out over the node
-  // worker-thread pool when the runtime supports it; bit-identical to serial.
+  // worker-thread pool when the runtime supports it; the analytic columns are
+  // computed on the driver and the finite-difference ones on the pool.
   let parallel: { workers: number } | null = null;
   let result: RefinementResult | null = null;
   if (!args.staged) {
@@ -1005,7 +1012,7 @@ export async function refine_pdf(args: {
     const pool = await createNodeEvaluatorPool(spec);
     if (pool) {
       try {
-        result = await refineParallel(buildProblemForSpec(spec), options, pool);
+        result = await refineParallel(buildProblemForSpec(spec), options, pool, { analyticOnDriver: true });
         parallel = { workers: pool.size };
       } finally {
         await pool.dispose();
@@ -1114,7 +1121,9 @@ export async function refine_pdf_boxcar(args: {
   }
   const windows = boxcarWindows(plan);
 
-  const options = { maxIterations: args.maxIterations ?? 20 };
+  // Analytic PDF columns for every box (see refine_pdf): exact, and one fused
+  // pass per iteration instead of two evaluations per supported column.
+  const options = { maxIterations: args.maxIterations ?? 20, analyticDerivatives: true };
   const restarts = Math.max(0, Math.floor(args.restarts ?? 0));
   const baseSpec: EvaluatorSpec = {
     kind: "pdf",
@@ -1154,7 +1163,10 @@ export async function refine_pdf_boxcar(args: {
         // seed-only answer — restarts can improve a box, never move it for free.
         const solve = async (params: readonly RefinementParameter[]): Promise<RefinementResult> => {
           const p = buildProblemForSpec({ ...baseSpec, parameters: [...params], fitRange });
-          return pool ? refineParallel(p, refineOptions, pool) : refine(p, refineOptions);
+          // Analytic PDF columns on the driver (no UI thread in node), FD on the pool.
+          return pool
+            ? refineParallel(p, refineOptions, pool, { analyticOnDriver: true })
+            : refine(p, refineOptions);
         };
         if (restarts === 0) return solve(problem.parameters);
         // A per-box seed: one shared seed would draw the identical perturbation
@@ -1631,7 +1643,9 @@ export function calibrate_qdamp(args: {
     fixed: !free.has(p.id) && !free.has(p.kind),
   }));
   const problem = buildPdfProblem(args.structure, args.pattern, params, spec.bindings, spec.restraints, args.fitRange);
-  const result = refine(problem, { maxIterations: args.maxIterations ?? 30, convergenceTolerance: 1e-9 });
+  // Every freed parameter here (scale, Qdamp, Qbroad) has a closed-form column,
+  // so this fit runs entirely on exact derivatives.
+  const result = refine(problem, { maxIterations: args.maxIterations ?? 30, convergenceTolerance: 1e-9, analyticDerivatives: true });
   return {
     qdamp: result.parameters["qdamp"] ?? 0,
     qbroad: result.parameters["qbroad"] ?? 0,

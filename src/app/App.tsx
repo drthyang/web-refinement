@@ -122,6 +122,31 @@ interface ProjectMeta {
   readonly notes?: string;
 }
 
+/**
+ * The GPU-acceleration preference, remembered per browser. It is a machine
+ * capability choice, not part of the science, so it lives here rather than in a
+ * saved project. Storage can throw or be unavailable (private windows, blocked
+ * site data), and the default is on, so every access is guarded and a failure
+ * simply means the preference is not remembered.
+ */
+const GPU_PREF_KEY = "materia.gpuAcceleration";
+
+function readGpuPreference(): boolean {
+  try {
+    return localStorage.getItem(GPU_PREF_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function writeGpuPreference(on: boolean): void {
+  try {
+    localStorage.setItem(GPU_PREF_KEY, on ? "on" : "off");
+  } catch {
+    // Nothing to do: the fit still honours the in-session choice.
+  }
+}
+
 export function App(): JSX.Element {
   // The workbench opens clean (no data): the shell shows a landing view until the
   // user loads the bundled Mn₃Ga POWGEN demo (the header "Demo" toggle) or their
@@ -742,6 +767,17 @@ export function App(): JSX.Element {
   // session, so it reads that directly; the single-crystal and PDF engines own
   // theirs and report it (one flag each — both can be mounted at once, and the
   // active technique decides which counts).
+  // GPU acceleration preference, owned by the shell because the header chip is
+  // its control and the powder engine is its consumer. On by default where a
+  // WebGPU adapter exists (the kernel is validated far below esd and falls back
+  // to the CPU pool wherever it does not apply); the chip turns it off for
+  // anyone who wants the exact f64 CPU path as the reference, and the choice is
+  // remembered per browser.
+  const [gpuEnabled, setGpuEnabled] = useState(readGpuPreference);
+  const setGpu = useCallback((on: boolean): void => {
+    setGpuEnabled(on);
+    writeGpuPreference(on);
+  }, []);
   const [scMagnetic, setScMagnetic] = useState(false);
   const [pdfMagnetic, setPdfMagnetic] = useState(false);
   const magneticInModel = pdfDataset
@@ -780,6 +816,7 @@ export function App(): JSX.Element {
         onExitDemo={onExitDemo}
         onOpenProject={onOpenProject}
         {...(hasContent ? { onSaveProject } : {})}
+        gpu={{ enabled: gpuEnabled, onChange: setGpu }}
       />
       {notice && (
         <div role="alert" style={noticeBar}>
@@ -825,6 +862,7 @@ export function App(): JSX.Element {
         onLoadDemo={onLoadDemo}
         demos={demos}
         onOpenProject={onOpenProject}
+        useGpu={gpuEnabled}
         {...(restore.powderView ? { viewRestore: restore.powderView } : {})}
       />
       {pdfDataset && (

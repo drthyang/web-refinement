@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseFullProfInt, looksLikeFullProfInt, parseFortranFields, writeFullProfInt } from "@/parsers/fullprofInt";
+import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
+import { parseFortranFields, writeFullProfInt } from "@/core/export/fullprofInt";
 
 // FullProf single-crystal .int: title, Fortran format, wavelength, then
 // fixed-width `h k l I σ [domain] [6 geometry]` rows. The domain code and first

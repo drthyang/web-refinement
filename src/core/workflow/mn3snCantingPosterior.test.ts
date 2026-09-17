@@ -110,7 +110,6 @@ describe.skipIf(!dataExists(MANIFEST) || !dataExists(SQ))("REAL Mn3Sn canting-an
     }
     const q = (arr: number[], p: number): number => arr.slice().sort((x, y) => x - y)[Math.floor(p * (arr.length - 1))]!;
     const mean = (arr: number[]): number => arr.reduce((s, v) => s + v, 0) / arr.length;
-    // eslint-disable-next-line no-console
     console.log(
       `[Mn3Sn canting posterior] ${res.status} acc=${res.acceptanceFraction.toFixed(2)} n=${cnt1.length} ` +
       `cnt1=${mean(cnt1).toFixed(2)}° [${q(cnt1, 0.025).toFixed(2)}, ${q(cnt1, 0.975).toFixed(2)}] (ref ${g.reference.cnt1Deg.toFixed(2)}) ` +

@@ -155,7 +155,6 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF golden (POWGEN, local-on
     const ours = idx.map((i) => calc[i]!);
     const theirs = idx.map((i) => fgr.gCalc[i]!);
     const { corr, kappa } = corrKappa(theirs, ours);
-    // eslint-disable-next-line no-console
     console.log(`[Mn3Sn nuclear] corr=${corr.toFixed(5)} κ=${kappa.toFixed(4)} over ${idx.length} pts (${fitRange.min}–${fitRange.max} Å)`);
     expect(corr).toBeGreaterThan(g.gates.minNuclearCorr);
     expect(Math.abs(kappa - 1)).toBeLessThan(g.gates.maxNuclearKappaErr);
@@ -218,7 +217,6 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF golden (POWGEN, local-on
     // Our scales in the reference fit's units (see Golden interface).
     const ordRef = alpha / g.ordWeightConvention;
     const paraRef = beta / g.paraWeightConvention;
-    // eslint-disable-next-line no-console
     console.log(
       `[Mn3Sn mPDF] corr=${corr.toFixed(4)} Rw=${(rw * 100).toFixed(2)}% rwVsObs=${(rwVsObs * 100).toFixed(2)}% ` +
       `(reference ${(g.reference.rwFinalVsObs * 100).toFixed(2)}%) ` +
@@ -265,7 +263,6 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF golden (POWGEN, local-on
       peakF = Math.max(peakF, Math.abs(fx.f[k]!));
       maxDiffF = Math.max(maxDiffF, Math.abs(f[k]! - fx.f[k]!));
     }
-    // eslint-disable-next-line no-console
     console.log(`[Mn3Sn pointwise f] maxdiff=${maxDiffF.toExponential(3)} peak=${peakF.toExponential(3)} rel=${(maxDiffF / peakF).toExponential(3)}`);
     expect(maxDiffF).toBeLessThan(1e-6 * peakF);
 
@@ -282,7 +279,6 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF golden (POWGEN, local-on
       maxDiffD = Math.max(maxDiffD, Math.abs(d[k]! - fx.d[k]!));
     }
     const { corr, kappa } = corrKappa(fx.d, d);
-    // eslint-disable-next-line no-console
     console.log(`[Mn3Sn pointwise d] corr=${corr.toFixed(6)} κ=${kappa.toFixed(5)} maxdiff=${maxDiffD.toExponential(3)} peak=${peakD.toExponential(3)} rel=${(maxDiffD / peakD).toExponential(3)}`);
     expect(corr).toBeGreaterThan(0.9999);
     expect(Math.abs(kappa - 1)).toBeLessThan(0.005);

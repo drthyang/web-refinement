@@ -320,13 +320,16 @@ export interface RefinementOptions {
   readonly maxReportedCorrelations?: number;
   /**
    * Opt into the problem's closed-form Jacobian columns (roadmap F1.1), when it
-   * provides any. Default false, so `refine` and `refineParallel` stay
-   * bit-identical (both finite-difference) out of the box. The parallel driver
-   * ignores this even when set: an analytic column is computed inline on the
-   * thread running the generator, which for `refineParallel` is the UI/driver
-   * thread — running a structure-factor derivative there would block the UI, and
-   * the pool already evaluates FD columns off-thread. Meant for serial callers
-   * with no UI (node/MCP) that want fewer evaluations.
+   * provides any. Default false, so an unaware caller gets the plain
+   * finite-difference Jacobian and the two drivers stay bit-identical. Analytic
+   * columns are exact (no truncation error) and cost no evaluation batch, so
+   * where a problem supplies them the fit is both steadier and faster.
+   *
+   * Because a column is computed inline on the thread driving the generator,
+   * `refineParallel` honours this only when the caller also declares its driver
+   * thread can afford the work (`ParallelDriverCapabilities.analyticOnDriver`);
+   * the serial `refine` always runs off the UI thread and needs no such
+   * declaration.
    */
   readonly analyticDerivatives?: boolean;
   /**

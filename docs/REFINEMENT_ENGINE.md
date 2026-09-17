@@ -106,9 +106,15 @@ where `r_i = √w_i · (y_obs,i − y_calc,i)` and `J_ij = ∂r_i/∂p_j`.
 
 For each free parameter, `jacobianPlan` asks `RefinementProblem.analyticColumns`
 for a closed-form column. Any column the problem does not supply falls back to
-the central finite difference, so analytic columns are purely additive. Only the
-serial `refine` driver uses them, and only with `analyticDerivatives: true`;
-`refineParallel` keeps every column on the worker pool. An analytic-vs-FD
+the central finite difference, so analytic columns are purely additive. An
+analytic column is computed inline on the thread driving the generator, so who
+takes them is a question about *where that thread runs*. The serial `refine`
+driver always may (it runs in a worker in the browser, in-process under the MCP
+server); `refineParallel` may only when the caller declares its driver thread can
+afford the work (`analyticOnDriver`), since in the browser that thread is the UI
+thread — cheap for the fused PDF pass, ruinous for the powder template. Both
+remain gated behind `analyticDerivatives`, which the worker runners and the MCP
+server now set. An analytic-vs-FD
 agreement test gates every kind.
 
 The powder builder supplies occupancy and isotropic B columns when the problem

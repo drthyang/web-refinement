@@ -57,7 +57,6 @@ describe("powderReflectionObsCalc — multi-phase decomposition", () => {
     };
     const rmsMulti = rms(multi);
     const rmsSingle = rms(single);
-    // eslint-disable-next-line no-console
     console.log(`[multiphase] primary-phase RMS |Iobs/Icalc-1| — single=${(rmsSingle * 100).toFixed(1)}%  multi=${(rmsMulti * 100).toFixed(1)}%`);
     expect(rmsMulti).toBeLessThan(rmsSingle);
     expect(rmsMulti).toBeLessThan(0.05);

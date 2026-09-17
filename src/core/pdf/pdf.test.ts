@@ -176,7 +176,6 @@ describe.skipIf(!dataExists(GOLD))("golden: PDFgui G_calc for Fe0.1Co0.9Sn 1.7K 
     let sr = 0, sg = 0;
     for (let i = 0; i < mine.length; i++) { const d = mine[i]! - goldG[i]!; sr += d * d; sg += goldG[i]! * goldG[i]!; }
     const relRms = Math.sqrt(sr / sg);
-    // eslint-disable-next-line no-console
     console.log(`[golden] corr(full)=${rc.toFixed(4)} corr(r≥3)=${rc3.toFixed(4)} κ=${kappa.toFixed(4)} relRMS=${relRms.toFixed(4)}`);
     // Achieved 0.9998 / 0.9998 / κ≈1.000 WITHOUT the Qmax termination convolution
     // (P3); locked in as a regression gate with a small margin.

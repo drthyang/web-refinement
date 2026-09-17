@@ -49,7 +49,7 @@ pure numeric core in `src/core` (no UI imports); worker-pooled evaluators in
 
 ## Repo gates (apply to every phase)
 
-- `npm run typecheck` and `npm test` must pass (bare `npx tsc` checks nothing).
+- `npm run typecheck`, `npm run lint` and `npm test` must pass (bare `npx tsc` checks nothing).
 - Tests reading `data/` must gate on `existsSync` (data/ is git-ignored; CI deploy runs
   the suite). Commit small format fixtures under `src/testSupport` instead where possible.
 - Any new ParameterKind must pass the analytic-vs-FD derivative gate.

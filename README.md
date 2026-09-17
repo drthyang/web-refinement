@@ -211,6 +211,7 @@ powder, single-crystal, and PDF tracks (the PDF tools: `parse_pdf_data`,
 npm install     # install dependencies
 npm run dev     # start the local dev server
 npm run build   # type-check and build the static site
+npm run lint    # ESLint (flat config, typescript-eslint + react-hooks)
 npm run test    # run the test suite (Vitest)
 npm run test:ganb4se8  # required real-data powder regression
 ```
@@ -254,7 +255,8 @@ one-directional dependencies. `src/core/**` is **pure TypeScript** — no React,
 DOM, or workers — so every scientific function is pure and independently
 testable. UI components handle presentation only; long calculations run in Web
 Workers, and WebGPU kernels add f32 acceleration where the browser supports
-them, validated against the f64 CPU path (WebAssembly is skipped). Full detail in
+them, validated against the f64 CPU path and switched off from the header's GPU
+chip (WebAssembly is skipped). Full detail in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Documentation

@@ -107,7 +107,6 @@ describe.skipIf(!has)("benchmark vs GSAS-II good fit — GaNb4Se8 298.8 K", () =
       params.length,
     );
     const ourWR = 100 * (agree.rWeighted ?? 0);
-    // eslint-disable-next-line no-console
     console.log(`BENCHMARK GaNb4Se8 298.8K — GSAS-II wR = 7.34% (TCH pseudo-Voigt) | OUR wR (fixed atoms, single pseudo-Voigt) = ${ourWR.toFixed(2)}%`);
     expect(Number.isFinite(ourWR)).toBe(true);
     // With the structure-factor special-position fix and the Lorentz factor
@@ -163,7 +162,6 @@ describe.skipIf(!has)("benchmark vs GSAS-II good fit — GaNb4Se8 298.8 K", () =
       params.length,
     );
     const ourWR = 100 * (agree.rWeighted ?? 0);
-    // eslint-disable-next-line no-console
     console.log(`BENCHMARK GaNb4Se8 298.8K — GSAS-II wR = 7.34% | OUR TCH+FCJ wR (fixed atoms) = ${ourWR.toFixed(2)}%`);
     expect(Number.isFinite(ourWR)).toBe(true);
     // After the two computation fixes — the structure-factor special-position sum

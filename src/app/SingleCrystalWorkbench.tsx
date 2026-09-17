@@ -39,7 +39,7 @@ import { FobsFcalc, NormalProb } from "@/app/ui/QualityPlots";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { structureToCif, type CifRefinementMeta } from "@/core/export/cif";
-import { writeFullProfInt } from "@/parsers/fullprofInt";
+import { writeFullProfInt } from "@/core/export/fullprofInt";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { expandStructureToSupercell, buildModulatedMomentModel, mergeToMagneticSupercell, type ModulatedIon } from "@/core/magnetic/magneticSupercell";
 import type { MomentDegeneracy } from "@/core/magnetic/canonicalize";

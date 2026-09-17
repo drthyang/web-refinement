@@ -22,7 +22,6 @@ function report(name: string, refined: Awaited<ReturnType<typeof tools.refine_pd
     params.filter((p) => p.kind === kind)
       .map((p) => `${p.label}=${(r.parameters[p.id] ?? p.value).toPrecision(6)}${r.esd[p.id] ? `(${r.esd[p.id]!.toPrecision(2)})` : ""}`)
       .join(" ");
-  // eslint-disable-next-line no-console
   console.log(`[${name}] ${r.status} in ${r.history.length} cycles · Rw=${((r.agreement.rWeighted ?? 0) * 100).toFixed(2)}%
   cell: ${byKind("cellLength")}
   scale: ${byKind("pdfScale")} qdamp: ${byKind("qdamp")} qbroad: ${byKind("qbroad")} δ2: ${byKind("delta2")}
@@ -60,7 +59,6 @@ describe.skipIf(!dataExists(NI_GR))("REAL Ni standard (28-ID X-ray) — calibrat
     });
     report("Ni standard", refined, params);
     const cal = tools.calibrate_qdamp({ structure: NI_STRUCTURE, pattern, fitRange: { min: 1.5, max: 28 }, maxIterations: 30 });
-    // eslint-disable-next-line no-console
     console.log(`[Ni calibrate_qdamp] qdamp=${cal.qdamp.toPrecision(4)}(${cal.esd.qdamp?.toPrecision(2)}) qbroad=${cal.qbroad.toPrecision(4)} Rw=${((cal.rw ?? 0) * 100).toFixed(2)}%`);
     expect(refined.result.status).toBe("converged");
     expect(refined.result.agreement.rWeighted ?? 1).toBeLessThan(0.15);
@@ -102,7 +100,6 @@ describe.skipIf(!dataExists(FCS_GR) || !dataExists(FCS_CIF))("REAL Fe0.1Co0.9Sn 
 describe.skipIf(!dataExists(GANB_GR) || !dataExists(GANB_CIF))("REAL GaNb4Se8 5.8K (28-ID X-ray)", () => {
   it("cubic (100 K) model against the base-T frame", async () => {
     const { structure } = tools.parse_structure({ cif: readData(GANB_CIF) });
-    // eslint-disable-next-line no-console
     console.log(`[GaNb4Se8 model] ${structure.spaceGroup.hermannMauguin ?? "?"} · a=${structure.cell.a} · ${structure.sites.length} sites`);
     const parsed = tools.parse_pdf_data({ text: readData(GANB_GR), filename: "ganb.gr" });
     const pattern = truncate(parsed.pattern, 30);
@@ -126,7 +123,6 @@ describe.skipIf(!dataExists(GANB_GR) || !dataExists(GANB_CIF))("REAL GaNb4Se8 5.
 describe.skipIf(!dataExists(GTS_GR) || !dataExists(GTS_CIF))("REAL GaTa4Se8 5K (NOMAD neutron)", () => {
   it("5 K model against the 5 K frame", async () => {
     const { structure } = tools.parse_structure({ cif: readData(GTS_CIF) });
-    // eslint-disable-next-line no-console
     console.log(`[GTS model] ${structure.spaceGroup.hermannMauguin ?? "?"} · a=${structure.cell.a} · ${structure.sites.length} sites`);
     const parsed = tools.parse_pdf_data({ text: readData(GTS_GR), filename: "gts.gr" });
     const pattern = truncate(parsed.pattern, 30);
@@ -168,7 +164,6 @@ async function localFit(structure: object, pattern: PdfPattern, qdamp: number, q
   });
   const rw = refined.result.agreement.rWeighted ?? 1;
   const aP = params.find((p) => p.kind === "cellLength")!;
-  // eslint-disable-next-line no-console
   console.log(`[${label}] ${refined.result.status} · Rw(2–10 Å)=${(rw * 100).toFixed(2)}% · a=${(refined.result.parameters[aP.id] ?? 0).toFixed(5)} · free=${params.filter((p) => !p.fixed && !p.expression).length}`);
   expect(refined.result.status).toBe("converged");
   return rw;
@@ -179,7 +174,6 @@ describe.skipIf(!dataExists(GANB_GR) || !dataExists(P213_CIF))("GaNb4Se8 5.8K �
     const pattern = trunc2(tools.parse_pdf_data({ text: readData(GANB_GR), filename: "g.gr" }).pattern, 12);
     const cubic = tools.parse_structure({ cif: readData(GANB_CIF) }).structure;
     const p213 = tools.parse_structure({ cif: readData(P213_CIF) }).structure;
-    // eslint-disable-next-line no-console
     console.log(`[models] cubic ${cubic.spaceGroup.hermannMauguin} ${cubic.sites.length} sites · p213 ${p213.spaceGroup.hermannMauguin} ${p213.sites.length} sites`);
     const rwCubic = await localFit(cubic, pattern, 0.0383, 0.0472, "GaNb cubic 2–10");
     const rwP213 = await localFit(p213, pattern, 0.0383, 0.0472, "GaNb P213 2–10");
@@ -213,7 +207,6 @@ describe.skipIf(!dataExists(GANB_GR) || !dataExists(P213_CIF) || !dataExists(GAN
     const parent = tools.parse_structure({ cif: readData(GANB_CIF) }).structure;
     const p213 = tools.parse_structure({ cif: readData(P213_CIF) }).structure;
     const set = buildDistortionModes(parent, p213);
-    // eslint-disable-next-line no-console
     console.log(`[modes] ${set.parameters.length} modes over ${p213.sites.length} sites · A_total=${set.totalAmplitude.toFixed(4)} Å · A1=${set.modes[0]!.observedAmplitude.toFixed(4)} Å · unpaired: ${set.unpaired.join(",") || "none"}`);
     expect(set.unpaired).toEqual([]);
     expect(set.parameters).toHaveLength(13);
@@ -235,7 +228,6 @@ describe.skipIf(!dataExists(GANB_GR) || !dataExists(P213_CIF) || !dataExists(GAN
     });
     const rw = refined.result.agreement.rWeighted ?? 1;
     const amp = refined.result.parameters["mode_1"] ?? 0;
-    // eslint-disable-next-line no-console
     console.log(`[mode fit] ${refined.result.status} · Rw(2–10 Å)=${(rw * 100).toFixed(2)}% · A1=${amp.toFixed(4)} Å (obs ${set.modes[0]!.observedAmplitude.toFixed(4)}) · free=${params.filter((p) => !p.fixed && !p.expression).length}`);
     expect(["converged", "stalled"]).toContain(refined.result.status);
     // One amplitude must beat the CUBIC average (9.19 %) — the frozen mode IS

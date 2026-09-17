@@ -46,12 +46,16 @@ approximate, however plausible its output looks.
   newly freed parameter again when it makes the fit degenerate.
 
 **Approximate**
-- Fits in the app and in the agent tools use central finite differences for
-  every non-linear parameter.
-- Validated analytic derivatives exist — powder occupancy and isotropic B; PDF
-  Qdamp, Qbroad, δ1, δ2, particle diameter, occupancy, isotropic B, anisotropic
-  U and symmetry-mode position shifts. The NUTS sampler uses the PDF ones, but
-  no least-squares fit in the app or the agent tools switches them on yet.
+- Fits fall back to central finite differences for every non-linear parameter
+  with no validated analytic column — powder coordinates, cell, profile, zero
+  shift and moments among them.
+- Validated analytic derivatives are used where they exist — powder occupancy
+  and isotropic B; PDF Qdamp, Qbroad, δ1, δ2, particle diameter, occupancy,
+  isotropic B, anisotropic U and symmetry-mode position shifts. Every serial fit
+  (the worker runners and the agent tools) and the pool-parallel PDF fits take
+  them; pooled powder fits do not, because a powder analytic column costs a full
+  pattern synthesis on the driver thread where the fused PDF pass costs one
+  traversal for all of them.
 
 **Not yet**
 - Global optimization. The engine is local, so it needs a reasonable starting

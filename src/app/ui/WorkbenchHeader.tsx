@@ -64,12 +64,19 @@ interface Props {
   readonly onOpenProject?: (file: File) => void;
   /** Save the current session as a project file (absent while nothing is loaded). */
   readonly onSaveProject?: () => void;
+  /**
+   * The GPU-acceleration preference and its setter. The badge IS the control
+   * (one home for "GPU" in the UI): lit = the WebGPU |F|² kernel is engaged
+   * where it applies, off = every fit stays on the exact f64 CPU path. Omitted
+   * (e.g. in tests) leaves the badge a read-only capability indicator.
+   */
+  readonly gpu?: { readonly enabled: boolean; readonly onChange: (on: boolean) => void };
 }
 
 /** File-picker filter for project files (any .json is accepted; the reader decides). */
 const PROJECT_ACCEPT = ".materia.json,.json,application/json";
 
-export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo, onOpenProject, onSaveProject }: Props): JSX.Element {
+export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo, onOpenProject, onSaveProject, gpu }: Props): JSX.Element {
   return (
     <header className="wb-header" style={headerBar}>
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
@@ -96,7 +103,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
             beta
             <span className="wb-version-chip" style={betaVersion}>{version}</span>
           </span>
-          <GpuBadge />
+          <GpuBadge {...(gpu ? { control: gpu } : {})} />
         </div>
       </div>
       <div className="wb-header-divider" style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
@@ -127,12 +134,16 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
 }
 
 /**
- * Capability badge: lit when this machine can GPU-accelerate refinement, dimmed
- * otherwise. `navigator.gpu` may exist without a usable adapter, so support is
- * confirmed by actually requesting one. Purely informational — the per-refinement
- * status line still reports whether a given fit used the GPU ("· GPU |F|²").
+ * The GPU chip: capability indicator AND the acceleration control. `navigator.gpu`
+ * may exist without a usable adapter, so support is confirmed by actually
+ * requesting one; without one the chip is dimmed and inert. Where a GPU IS
+ * available the chip is a button that turns the WebGPU |F|² kernel on or off —
+ * on by default, since it is validated to ≤5e-7 relative (far below esd) and
+ * falls back to the CPU pool wherever it does not apply, and off for anyone who
+ * wants the exact f64 CPU path as the reference. The per-refinement status line
+ * still reports whether a given fit actually used it ("· GPU |F|²").
  */
-function GpuBadge(): JSX.Element {
+function GpuBadge({ control }: { readonly control?: { readonly enabled: boolean; readonly onChange: (on: boolean) => void } }): JSX.Element {
   const [supported, setSupported] = useState<boolean>(
     () => typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu,
   );
@@ -151,21 +162,44 @@ function GpuBadge(): JSX.Element {
       cancelled = true;
     };
   }, []);
+  const on = supported && (control?.enabled ?? true);
+  const bolt = (
+    <svg width={8} height={11} viewBox="0 0 8 11" aria-hidden style={{ display: "block" }}>
+      <path d="M4.7 0 0 6.4h2.7L2.1 11 8 4.2H4.8z" fill="currentColor" />
+    </svg>
+  );
+  if (!supported || !control) {
+    return (
+      <span
+        className="wb-gpu-badge"
+        style={{ ...gpuBadgeBase, ...(on ? gpuBadgeOn : gpuBadgeOff) }}
+        title={
+          supported
+            ? "GPU acceleration available — single-phase powder refinement runs structure factors on the WebGPU kernel (validated f32, far below esd)."
+            : "GPU acceleration unavailable in this browser — refinement runs on the CPU."
+        }
+      >
+        {bolt}
+        GPU
+      </span>
+    );
+  }
   return (
-    <span
+    <button
+      type="button"
       className="wb-gpu-badge"
-      style={{ ...gpuBadgeBase, ...(supported ? gpuBadgeOn : gpuBadgeOff) }}
+      aria-pressed={on}
+      onClick={() => control.onChange(!control.enabled)}
+      style={{ ...gpuBadgeBase, ...(on ? gpuBadgeOn : gpuBadgeOff), cursor: "pointer" }}
       title={
-        supported
-          ? "GPU acceleration available — single-phase powder refinement runs structure factors on the WebGPU kernel (validated f32, far below esd)."
-          : "GPU acceleration unavailable in this browser — refinement runs on the CPU."
+        on
+          ? "GPU acceleration ON — single-phase powder refinement takes its structure factors from the WebGPU kernel (validated f32, ≤5e-7 relative, far below esd). Click to refine on the exact f64 CPU path instead."
+          : "GPU acceleration OFF — every refinement runs on the exact f64 CPU path. Click to use the WebGPU |F|² kernel where it applies."
       }
     >
-      <svg width={8} height={11} viewBox="0 0 8 11" aria-hidden style={{ display: "block" }}>
-        <path d="M4.7 0 0 6.4h2.7L2.1 11 8 4.2H4.8z" fill="currentColor" />
-      </svg>
-      GPU
-    </span>
+      {bolt}
+      {on ? "GPU" : "GPU off"}
+    </button>
   );
 }
 
@@ -571,6 +605,11 @@ const gpuBadgeBase: CSSProperties = {
   gap: 4,
   padding: "0 8px 0 7px",
   cursor: "default",
+  // The control variant renders as a <button>: drop the user agent's button box
+  // so it stays the same chip as the read-only variant (metaPill already fixes
+  // the type ramp, which overrides the UA font).
+  appearance: "none",
+  margin: 0,
   transition: "opacity 160ms, color 160ms, background 160ms",
 };
 

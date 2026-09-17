@@ -66,7 +66,9 @@ numbered order.
 
 **Done**
 - 🚧 **F1.1 Analytic derivatives:** powder occupancy and B_iso, and most PDF
-  parameters in one fused pass ([`gradients.ts`](../src/core/pdf/gradients.ts)).
+  parameters in one fused pass ([`gradients.ts`](../src/core/pdf/gradients.ts)),
+  on by default for every serial fit and the pooled PDF fits. Powder
+  coordinates, cell, profile and zero shift remain finite-difference.
 - ✅ **F1.2 Windows and caching:** peaks sum over ±20 FWHM, and structure
   factors are reused while the geometry holds ([`powder.ts`](../src/core/workflow/powder.ts)).
 - ✅ **F1.3 Starting values:** automatic scale, an envelope background and a

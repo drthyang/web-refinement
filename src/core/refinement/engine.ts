@@ -464,14 +464,16 @@ function* refineCore(
   problem: RefinementProblem,
   options: Partial<RefinementOptions> = {},
   // Whether this driver may consult the problem's closed-form columns (roadmap
-  // F1.1). Only the serial `refine` passes true; the parallel driver passes
-  // false because an analytic column is computed inline on the thread running
-  // the generator — for `refineParallel` that is the UI/driver thread, so an
-  // analytic structure-factor derivative would drag heavy synthesis back onto
-  // the main thread and freeze the UI (the pool already evaluates FD columns
-  // off-thread). Even for `refine`, analytic is gated behind
-  // `options.analyticDerivatives` (default off) so the two drivers stay
-  // bit-identical out of the box.
+  // F1.1) — a statement about WHERE the generator runs, not about the numerics:
+  // an analytic column is computed inline on the thread driving the generator.
+  // The serial `refine` always passes true (it runs in a worker in the browser,
+  // in-process in node/MCP). `refineParallel` passes it only when the caller
+  // declares its driver thread can afford the work (`analyticOnDriver`), since
+  // in the browser that thread is the UI thread — cheap for the fused PDF pass
+  // (one traversal yields every column), ruinous for the powder template (one
+  // pattern synthesis per column). Either way analytic is also gated behind
+  // `options.analyticDerivatives` (default off), so both drivers stay
+  // finite-difference and bit-identical out of the box.
   allowAnalytic = false,
 ): Generator<Record<string, number>[], RefinementResult, Float64Array[]> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
@@ -721,20 +723,42 @@ export interface BatchEvaluator {
 }
 
 /**
+ * What the driver thread may take on itself, beyond the single evaluations it
+ * already runs. Only the caller knows where its driver runs, so only the caller
+ * can answer this.
+ */
+export interface ParallelDriverCapabilities {
+  /**
+   * The driver thread may compute the problem's analytic Jacobian columns
+   * inline (still subject to `options.analyticDerivatives`). Pass true when the
+   * driver is NOT a UI thread (node/MCP), or when the problem's analytic pass is
+   * cheap enough to belong there — the PDF problem's fused pass yields G(r) and
+   * every requested column in ONE traversal, so it costs about one extra
+   * `calculate` per iteration while removing 2×N finite-difference evaluations
+   * from the pool. Leave it false for the powder template, whose columns cost a
+   * full pattern synthesis EACH.
+   */
+  readonly analyticOnDriver?: boolean;
+}
+
+/**
  * Parallel driver: multi-evaluation batches (the Jacobian columns — the bulk
  * of every iteration's cost) go to the evaluator; single evaluations
  * (baseline, trial steps — inherently sequential) run in-process where the
  * problem's geometry cache stays warm. Identical trajectory to `refine` for
- * any faithful evaluator, enforced by engineParallel.test.ts.
+ * any faithful evaluator (and for the same `analyticDerivatives` setting),
+ * enforced by engineParallel.test.ts.
  */
 export async function refineParallel(
   problem: RefinementProblem,
   options: Partial<RefinementOptions>,
   evaluator: BatchEvaluator,
+  driver: ParallelDriverCapabilities = {},
 ): Promise<RefinementResult> {
-  // allowAnalytic=false: keep every column's evaluation on the worker pool
-  // rather than computing analytic derivatives on the UI/driver thread.
-  const gen = refineCore(problem, options, false);
+  // Analytic columns are computed on THIS thread, so they need the caller's
+  // permission as well as the numerical opt-in; without it every column's
+  // evaluation stays on the worker pool.
+  const gen = refineCore(problem, options, driver.analyticOnDriver ?? false);
   let step = gen.next();
   while (!step.done) {
     const sets = step.value;

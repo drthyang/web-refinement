@@ -4,7 +4,8 @@ Browser-native refinement workbench for atomic and magnetic structures: a static
 web app (React + TypeScript + Vite) that deploys to GitHub Pages and needs no
 backend for the core workflow. Heavy computation runs in Web Workers. Optional
 WebGPU kernels add f32 acceleration, each validated against the f64 CPU path,
-which stays the reference. WebAssembly is deliberately skipped.
+which stays the reference; the header's GPU chip turns them off to hold every
+fit on that path. WebAssembly is deliberately skipped.
 
 This document is the map. Detailed models live in
 [DATA_MODEL.md](./DATA_MODEL.md) and [REFINEMENT_ENGINE.md](./REFINEMENT_ENGINE.md).
@@ -231,10 +232,14 @@ comes from the GPU and there is no second forward model. The GPU batches run in
 a Web Worker; the driver thread keeps only the single baseline and trial
 evaluations.
 
-The `useGpu` request flag is off by default. The powder workbench sets it for
-every single-phase nuclear refinement that is not staged, so a browser with
-WebGPU runs that refinement on the kernel. Without WebGPU it falls back to the
-CPU pool.
+The `useGpu` request flag is off by default in the `ComputeClient` API — a
+caller opts in per request. The powder workbench sets it for every single-phase
+nuclear refinement that is not staged, so a browser with WebGPU runs that
+refinement on the kernel; without WebGPU it falls back to the CPU pool. In the
+app that choice is the user's: the header's GPU chip is the control, lit by
+default where an adapter exists, and turning it off holds every fit on the exact
+f64 CPU path. The post-fit status line reports whether a given refinement
+actually used the kernel ("· GPU |F|²").
 
 **WebAssembly** is deliberately skipped. The windowed CPU kernels and worker
 pools already cover its niche. A second implementation of the same physics in
@@ -243,14 +248,20 @@ another language is exactly the maintenance drift this architecture avoids.
 ## Implementation rules (enforced)
 
 - Strict TypeScript (`strict: true`), type-checked in CI by `npm run build`.
-  Explicit `any` is avoided, though no linter checks it.
+  Explicit `any` is avoided, and ESLint now enforces it: a flat config
+  (`eslint.config.js`, typescript-eslint) runs `no-explicit-any` alongside the
+  `react-hooks` rules and a no-leftover-logging rule, and CI runs `npm run lint`
+  beside `tsc -b` and the suite. The rule set is small on purpose — a rule is
+  enabled only where the code already holds to it, so every remaining
+  `eslint-disable` comment marks a deliberate exception rather than describing a
+  linter that was never there.
 - Scientific functions pure and independently testable.
 - React components handle UI state and presentation only.
 - Long-running calculations run in Web Workers.
-- GPU kernels only as f32 accelerators *over* a correct, tested f64 CPU path. A
-  caller must request one (`useGpu`), each is validated against the CPU path on
-  hardware, and the CPU path stays the reference. No WebAssembly
-  (dual-implementation drift).
+- GPU kernels only as f32 accelerators *over* a correct, tested f64 CPU path.
+  Each is validated against the CPU path on hardware, each falls back to it
+  wherever it does not apply, and the f64 path stays the reference even where a
+  kernel is on by default. No WebAssembly (dual-implementation drift).
 - Every piece of work ends with passing tests, updated docs, a working local
   app, and no broken intermediate state.
 - **Layout: edges line up** (`src/app/workbench.css`, header comment).

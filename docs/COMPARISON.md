@@ -100,7 +100,7 @@ in-app flows.
 | Data types | CW + **TOF** X-ray/neutron powder; single-crystal F² (`.int`, `.hkl`); **PDF** `G(r)` (`.gr`/`.sq`/`.fq`) | electron diffraction |
 | Profile | Gaussian / pseudo-Voigt / **TCH** + FCJ asymmetry; TOF back-to-back exponential; Chebyshev / Fourier / power backgrounds; March-Dollase PO; displacement / transparency / absorption / roughness corrections; Stephens microstrain, uniaxial size | spherical-harmonic texture, Ikeda–Carpenter TOF shape |
 | Symmetry | **all 230 built-in tables** + CIF/mCIF operations; Wyckoff/site constraints; absences; magnetic subgroup enumeration with **BNS/OG labels**; isotropy + t-subgroup (Bärnighausen) lattices | superspace (3+d), full 1651 magnetic tables incl. type IV |
-| Engine | Levenberg-Marquardt (SVD, esds, correlations), bounds/ties/restraints, staged controller, **multi-start**, worker pool, WebGPU f32 kernels | full-Hessian options, rigid bodies, restraint libraries |
+| Engine | Levenberg-Marquardt (SVD, esds, correlations), bounds/ties/restraints, staged controller, **multi-start**, worker pool, WebGPU f32 kernels (on by default where available) | full-Hessian options, rigid bodies, restraint libraries |
 | Uncertainty | LM esds + correlations; **Bayesian posterior sampling** (ensemble MCMC and NUTS on the same problem seam — a prototype on the powder and PDF pages; split-R̂/ESS/credible intervals; posterior-vs-esd ratio ≈ 1 validated on the Ni golden) | — (none of the three ships posterior sampling; their uncertainties are the least-squares covariance) |
 | Multi-phase / multi-dataset | Yes (powder 2-phase; PDF multi-phase + multi-dataset co-refinement; sequential Rietveld + PDF) | larger joint-histogram breadth |
 | Intensity extraction | **Le Bail** | + Pawley |
@@ -125,7 +125,10 @@ formal benchmarks. This app runs Levenberg–Marquardt in pure TypeScript. Speed
 comes from reflection-windowed evaluation, dependency caching, a
 parallel-Jacobian pool of Web Workers (bit-identical to the serial driver), and
 WebGPU f32 kernels for the structure-factor sums when the browser supports
-them. That is adequate for the pattern sizes shown here. Validated analytic
-derivatives exist too — on the PDF path they made a refinement 2.3× faster in
-tests — but fits in the app do not switch them on yet. WebAssembly is
-deliberately skipped (see [ARCHITECTURE.md](./ARCHITECTURE.md)).
+them, on by default where the browser has an adapter. That is adequate for the
+pattern sizes shown here. Validated analytic derivatives are on as well: every
+serial fit and the pooled PDF fits take closed-form columns where one exists —
+on the PDF path that made a refinement 2.3× faster in tests. Pooled powder fits
+stay finite-difference, because there one analytic column costs a full pattern
+synthesis on the driver thread. WebAssembly is deliberately skipped (see
+[ARCHITECTURE.md](./ARCHITECTURE.md)).

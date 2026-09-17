@@ -124,13 +124,18 @@ export interface PowderWorkbenchProps {
    *  restores the session itself; this is applied once per `token`, after the
    *  pattern-change resets have run, so the restored window and unit win. */
   viewRestore?: PowderViewState & { readonly token: number };
+  /** The shell's GPU-acceleration preference (the header's GPU chip). When off,
+   *  the fit never requests the WebGPU |F|² kernel and stays on the exact f64
+   *  CPU path. Default true — the kernel applies to the flat single-phase
+   *  nuclear fit only, and the client falls back to the CPU pool otherwise. */
+  useGpu?: boolean;
 }
 
 export function PowderWorkbench({
   session, setSession, powderResult, setPowderResult, instrument, instrumentLoaded, ownStructure,
   client, active, step, onStep, setMessage, exportsRef,
   onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, onLoadInstrument, onLoadDemo, demos = [],
-  onOpenProject, viewRestore,
+  onOpenProject, viewRestore, useGpu = true,
 }: PowderWorkbenchProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
@@ -652,7 +657,9 @@ export function PowderWorkbench({
       // The WebGPU structure-factor kernel accelerates only the flat single-phase
       // nuclear-powder Jacobian; the client itself gates on that + WebGPU support
       // and falls back to the CPU pool otherwise, so requesting it here is safe.
-      const gpuActive = !guided && session.extraPhases.length === 0 && !session.magnetic
+      // `useGpu` is the header chip's preference: off means this fit never asks
+      // for the kernel and stays on the exact f64 CPU path.
+      const gpuActive = useGpu && !guided && session.extraPhases.length === 0 && !session.magnetic
         && typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu;
       // Parallel-Jacobian path for the flat single-phase case; the client
       // falls back to the single-worker path for staged/multi-phase requests.
@@ -662,7 +669,7 @@ export function PowderWorkbench({
         ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),
         ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         options: { maxIterations: guided ? 15 : 20 },
-        useGpu: true,
+        useGpu,
       }, onPowderProgress);
       setSession((s) => ({
         ...s,

@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import type { StructureModel, AtomSite, UnitCell } from "@/core/crystal/types";
 import type { PdfPattern } from "@/core/diffraction/types";
-import type { EvaluatorSpec } from "@/workers/protocol";
+import type { EvaluatorSpec, RefinePdfRequest } from "@/workers/protocol";
 import { IDENTITY3 } from "@/core/math/mat3";
 import { refine, refineParallel, type BatchEvaluator } from "@/core/refinement/engine";
-import { buildProblemForSpec } from "@/workers/runPowder";
+import { buildProblemForSpec, runPdfRefinement } from "@/workers/runPowder";
 import { buildPdfSpec, buildPdfProblem } from "@/core/workflow/pdf";
 import { computeGofR, makeRGrid } from "@/core/pdf/forwardModel";
 import { expandStructureAtoms } from "@/core/diffraction/structureFactor";
@@ -91,5 +91,45 @@ describe("EvaluatorSpec {kind:'pdf'} — pooled ≡ serial", () => {
     for (const p of built.params) values[p.id] = p.value;
     expect(Array.from(fromSpec.calculate(values))).toEqual(Array.from(direct.calculate(values)));
     expect(Array.from(fromSpec.weights)).toEqual(Array.from(direct.weights));
+  });
+});
+
+/**
+ * The serial runner's Jacobian policy. `refine` runs off the UI thread wherever
+ * `runPdfRefinement` does (a Web Worker in the browser, in-process in node/MCP),
+ * so it takes the problem's exact closed-form columns instead of paying two
+ * evaluations per column for a finite difference.
+ */
+describe("runPdfRefinement — analytic columns by default", () => {
+  const setUp = (): { req: RefinePdfRequest; problem: () => ReturnType<typeof buildPdfProblem> } => {
+    const pattern = truthPattern();
+    const structure = structureWith(4.03, 0.8);
+    const built = buildPdfSpec(structure, pattern);
+    // A realistic mix: the linear scale (exact column either way), qdamp and
+    // B_iso (analytic), and the cell length (no analytic column yet → FD).
+    const free = new Set(["pdfScale", "qdamp", "bIso", "cellLength"]);
+    const parameters = built.params.map((p) => ({ ...p, fixed: !free.has(p.kind) }));
+    return {
+      req: {
+        type: "refinePdf", requestId: 0, structure, pattern,
+        parameters, bindings: built.bindings, options: { maxIterations: 4 },
+      },
+      problem: () => buildPdfProblem(structure, pattern, parameters, built.bindings, [], undefined),
+    };
+  };
+
+  it("takes the analytic path unless the request pins finite differences", () => {
+    const { req, problem } = setUp();
+    const opts = { maxIterations: 4 };
+    const analytic = refine(problem(), { ...opts, analyticDerivatives: true });
+    const fd = refine(problem(), opts);
+    // The two Jacobians are genuinely different (FD carries truncation error),
+    // so matching one and not the other pins which path the runner took.
+    expect(analytic.parameters).not.toEqual(fd.parameters);
+
+    expect(runPdfRefinement(req).parameters).toEqual(analytic.parameters);
+    expect(
+      runPdfRefinement({ ...req, options: { ...opts, analyticDerivatives: false } }).parameters,
+    ).toEqual(fd.parameters);
   });
 });
