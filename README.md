@@ -217,9 +217,10 @@ npm run test:ganb4se8  # required real-data powder regression
 ```
 
 Use `npm run test:ganb4se8` for refinement-engine changes. It requires the local
-`data/GaNb4Se8_XRD/` files and fails if they are missing; this dataset is the
-primary real-data check because it exposes the current build's powder-refinement
-failure modes much better than synthetic examples.
+`data/GaNb4Se8_XRD/` files (`data/GaNb4Se8_XRD_28ID/` is accepted as well) and
+fails if they are missing; this dataset is the primary real-data check because it
+exposes the current build's powder-refinement failure modes much better than
+synthetic examples.
 
 ## Scope
 

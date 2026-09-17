@@ -166,7 +166,7 @@ describe.skipIf(!has)("benchmark vs GSAS-II good fit — GaNb4Se8 298.8 K", () =
     expect(Number.isFinite(ourWR)).toBe(true);
     // After the two computation fixes — the structure-factor special-position sum
     // and the Lorentz factor — the full profile (Gaussian U/V/W + Lorentzian X/Y +
-    // FCJ asymmetry) refines to ~20% on this coarse grid, from a ~63% floor when
+    // FCJ asymmetry) refines to ~23% on this coarse grid, from a ~63% floor when
     // |F|² was wrong. The remaining gap to GSAS-II's 7.34% is ADP, polarization,
     // and a tighter solve. (Earlier this test wrongly concluded the residual was
     // profile-limited; the benchmark itself exposed the real intensity bug.)
