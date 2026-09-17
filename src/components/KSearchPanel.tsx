@@ -563,7 +563,7 @@ export function KSearchPanel({
   // both the 3D moment arrows and the allowed-reflection tick row.
   const appliedMagnetic = useMemo(
     () => (magBuild ? applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps) : null),
-    [magBuild, amps],
+    [magBuild, resolvedAmps],
   );
 
   // Moment entries for the 3D view (one per site — or per split orbit when the
@@ -727,7 +727,7 @@ export function KSearchPanel({
       agreement: refineWR,
       agreementLabel,
     });
-  }, [onReportModel, magBuild, amps, k, reportGroup, refineWR, agreementLabel]);
+  }, [onReportModel, magBuild, resolvedAmps, k, reportGroup, refineWR, agreementLabel]);
   // Unmount (or a page switch that remounts the panel) withdraws the candidate.
   useEffect(() => () => onReportModel?.(null), [onReportModel]);
 

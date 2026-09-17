@@ -339,7 +339,11 @@ export function PowderWorkbench({
     const lp = livePreview.current;
     if (!busy || !lp || lp.yCalc.length !== displayCurves.yObs.length) return displayCurves;
     return { ...displayCurves, yCalc: lp.yCalc, diff: displayCurves.yObs.map((o, i) => o - (lp.yCalc[i] ?? 0)) };
-    // liveTick bumps each animation frame to pull the latest ref value.
+    // `liveTick` is deliberately not read in the body, so the rule calls it
+    // unnecessary. It is not: the live curve lives in a ref the worker
+    // mutates between renders, and the throttled tick is the only thing that
+    // makes this memo re-read it. Dropping it freezes the plot mid-refinement.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick-gated ref read
   }, [displayCurves, busy, liveTick]);
   const displayXLabel = axisLabel(effectiveUnit);
   // Fit-range handles live in display space; convert to/from the native window.

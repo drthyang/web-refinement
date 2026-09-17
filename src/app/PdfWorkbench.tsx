@@ -263,7 +263,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     // preset. Rows the file does not know keep the spec's defaults.
     if (restoring) params = overlaySavedParameters(params, restoring.refinement.parameters);
     return { ...raw, params };
-  }, [fitStructure, modeSet, extraPhases, multiPhase, phases, pattern, defaultRange, presetValues, spinFit, restoring]);
+  }, [fitStructure, modeSet, modes?.fromActivation, extraPhases, multiPhase, phases, pattern, defaultRange, presetValues, spinFit, restoring]);
 
   const [params, setParams] = useState<readonly RefinementParameter[]>(spec.params);
   const [result, setResult] = useState<RefinementResult | null>(restoring?.refinement.lastResult ?? null);
