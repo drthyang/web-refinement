@@ -162,6 +162,8 @@ export type EvaluatorSpec =
       readonly extraPhases?: readonly { readonly structure: StructureModel; readonly id: string }[];
       readonly shape: PeakShape;
       readonly eta?: number;
+      readonly lorentz?: boolean;
+      readonly backgroundType?: BackgroundType;
       readonly fitRange?: { readonly min?: number; readonly max?: number };
     }
   | {

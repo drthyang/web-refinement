@@ -857,6 +857,13 @@ export class ComputeClient {
     const frozenNuclear = params.map((p) =>
       !isMoment(p) && !p.fixed && !p.expression ? { ...p, fixed: true } : { ...p },
     );
+    // With no free moment parameter there is no moment subspace to search: the
+    // magnetic model is then a FIXED contribution to the calculated pattern (the
+    // "Show on refinement pattern" preview, which applies a model without its
+    // moment rows). Restarts over an empty free set would re-solve the identical
+    // problem `restarts` times, so skip straight to the joint solve — and report
+    // restartsRun 0, so the caller does not claim a search that never ran.
+    const searchable = params.some((p) => isMoment(p) && !p.fixed && !p.expression);
 
     // Each restart is a moment-only solve. The moment subspace is a handful of
     // columns, so on a CHEAP observable (a powder profile) an in-thread solve
@@ -887,7 +894,9 @@ export class ComputeClient {
         this.activePool = pool;
         await pool.init(specWith(frozenNuclear));
       }
-      const ms = pool
+      const ms = !searchable
+        ? { parameters: frozenNuclear, restartsRun: 0, bestStartIndex: 0, improved: false, costByStart: [] }
+        : pool
         ? await refineMultiStart(frozenNuclear, async (start) => {
             const result = await refineParallel(buildProblemForSpec(specWith(start)), options, pool);
             return { parameters: applyResultToParams(start, result), final: result };

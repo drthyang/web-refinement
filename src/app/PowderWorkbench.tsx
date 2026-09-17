@@ -21,7 +21,8 @@ import { downloadText, downloadBlob } from "@/app/download";
 import { fullprofBundle, gsas2Bundle, type BundleOptions } from "@/core/export/bundle";
 import { zipStore } from "@/core/export/zip";
 import type { StructureModel } from "@/core/crystal/types";
-import type { PowderPattern } from "@/core/diffraction/types";
+import type { PowderPattern, PowderXUnit } from "@/core/diffraction/types";
+import type { DetectedFormat, DetectionSource } from "@/parsers/detectFormat";
 import type { RefinementParameter, RefinementResult, ParameterBinding } from "@/core/refinement/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
@@ -87,6 +88,16 @@ const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({
 import type { StructureExport } from "@/app/ui/StructureView";
 
 const UNIT_LABEL: Record<string, string> = { twoTheta: "2θ", q: "Q (Å⁻¹)", dSpacing: "d (Å)", tof: "TOF (µs)" };
+/** How the x-unit was decided, for the Data card. The wording is the evidence,
+ *  not the resolver's internal name: what the user would check next if the unit
+ *  looked wrong. */
+const DETECTION_LABEL: Record<DetectionSource, string> = {
+  override: "set by you",
+  header: "from the file header",
+  instrument: "from the instrument file",
+  filename: "from the file name",
+  heuristic: "guessed from the value range",
+};
 
 export interface PowderWorkbenchProps {
   session: Session;
@@ -113,6 +124,12 @@ export interface PowderWorkbenchProps {
   onAddPhase: (file: File) => void;
   onRemovePhase: (id: string) => void;
   onClearStructures: () => void;
+  /** How the loaded powder file was classified (null when the reader knew its
+   *  own format, or nothing was auto-detected). Shown on the Data card. */
+  detection?: DetectedFormat | null;
+  /** Re-read the loaded file under an explicit x-unit. Absent when the file's
+   *  text is no longer held (a demo, or a restored project). */
+  onOverrideXUnit?: (unit: PowderXUnit) => void;
   onLoadInstrument: (file: File) => void;
   /** Load a bundled demo (from the empty-state prompt). */
   onLoadDemo?: (kind: DemoId) => void;
@@ -134,7 +151,8 @@ export interface PowderWorkbenchProps {
 export function PowderWorkbench({
   session, setSession, powderResult, setPowderResult, instrument, instrumentLoaded, ownStructure,
   client, active, step, onStep, setMessage, exportsRef,
-  onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, onLoadInstrument, onLoadDemo, demos = [],
+  onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, detection, onOverrideXUnit,
+  onLoadInstrument, onLoadDemo, demos = [],
   onOpenProject, viewRestore, useGpu = true,
 }: PowderWorkbenchProps): JSX.Element {
   const [busy, setBusy] = useState(false);
@@ -210,6 +228,16 @@ export function PowderWorkbench({
   // pattern keeps the shape at "gaussian" and stays view-only.
   const tofViewOnly = powderIsTof && session.powderProfile.shape !== "tof";
   const pBindings = session.powderBindings;
+  // A magnetic model on the session is part of the CALCULATED pattern, whether or
+  // not its moments are refinable — the plot below draws nuclear + magnetic, so
+  // every fit path has to score against that same model or the wR it reports
+  // would belong to a model nobody is looking at. With moment rows this is the
+  // nuclear + magnetic co-refinement; without them ("Show on refinement pattern"
+  // applies a model but no rows) the moments are held and the nuclear set refines
+  // against nuclear + magnetic.
+  const magneticApplied = !!session.magnetic && session.magnetic.moments.length > 0;
+  /** Moment rows are present, i.e. the moments themselves are being refined. */
+  const momentRowsFree = (): boolean => powderParams.some((p) => isMomentParameterKind(p.kind));
 
   // Every phase's structure with the CURRENT parameter values applied (lattice,
   // positions, occupancies, ADPs) — the refined cell each phase's Bragg ticks,
@@ -630,32 +658,53 @@ export function PowderWorkbench({
     setMessage("Parameters reset to initial values.");
   }
 
+  /**
+   * Reflect a guided run in the parameter table. Guided unlocks a SPECIFIC set of
+   * kinds (`guidedPowderParams`) — occupancies deliberately not among them — so
+   * the table must show exactly those rows as free. Marking every row free would
+   * both misreport what was refined and silently hand the next plain Refine a
+   * freed occupancy the user never chose.
+   */
+  function guidedFixedFlags(sent: readonly RefinementParameter[]): Map<string, boolean> {
+    return new Map(sent.map((p) => [p.id, p.expression ? true : p.fixed ?? false]));
+  }
+
   /** Flat co-refinement of the currently-freed parameters. */
   async function runPowder(guided = false): Promise<void> {
     setBusy(true);
     try {
-      // Magnetic-aware branch: when a magnetic model + moment parameters are
-      // present, refine nuclear + moments together (shared scale) with the
-      // Jacobian parallelized over the evaluator-worker pool (falls back to an
-      // in-thread solve when workers are unavailable).
-      if (session.magnetic && powderParams.some((p) => isMomentParameterKind(p.kind))) {
+      // Magnetic-aware branch: an applied magnetic model joins the calculated
+      // pattern, with the Jacobian parallelized over the evaluator-worker pool
+      // (falls back to an in-thread solve when workers are unavailable). With
+      // moment rows this refines nuclear + moments together (shared scale); with
+      // a previewed model and no rows the moments are held and only the nuclear
+      // set moves — either way the fit is scored against what the plot shows.
+      if (magneticApplied) {
         await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
         const magParams = guided ? guidedPowderParams(powderParams) : powderParams;
+        const guidedFixed = guided ? guidedFixedFlags(magParams) : null;
+        const coRefined = momentRowsFree();
         const result = await client.refineMagneticPowderParallel({
-          structure, magnetic: session.magnetic, pattern, parameters: [...magParams], bindings: [...pBindings],
+          structure, magnetic: session.magnetic!, pattern, parameters: [...magParams], bindings: [...pBindings],
           ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
-          shape: session.powderProfile.shape,
-          ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+          ...profileReq(),
           ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         }, { maxIterations: guided ? 15 : 20 });
-        const refinedMag = applyMagneticMoments(session.magnetic, pBindings, result.parameters);
+        const refinedMag = applyMagneticMoments(session.magnetic!, pBindings, result.parameters);
         setSession((s) => ({
           ...s,
           magnetic: refinedMag,
-          powderParams: s.powderParams.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value, ...(guided ? { fixed: false } : {}) })),
+          powderParams: s.powderParams.map((p) => ({
+            ...p,
+            value: result.parameters[p.id] ?? p.value,
+            ...(guidedFixed?.has(p.id) ? { fixed: guidedFixed.get(p.id)! } : {}),
+          })),
         }));
         setPowderResult(result);
-        setMessage(`Nuclear + magnetic refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`);
+        setMessage(
+          `${coRefined ? "Nuclear + magnetic" : "Nuclear (magnetic model held)"} ${guided ? "guided " : ""}refinement ${result.status}: ` +
+          `wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`,
+        );
         return;
       }
       // The WebGPU structure-factor kernel accelerates only the flat single-phase
@@ -667,8 +716,10 @@ export function PowderWorkbench({
         && typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu;
       // Parallel-Jacobian path for the flat single-phase case; the client
       // falls back to the single-worker path for staged/multi-phase requests.
+      const sentParams = guided ? guidedPowderParams(powderParams) : powderParams;
+      const guidedFixed = guided ? guidedFixedFlags(sentParams) : null;
       const result = await client.refinePowderParallel({
-        structure, pattern, parameters: guided ? guidedPowderParams(powderParams) : powderParams, bindings: pBindings, ...profileReq(),
+        structure, pattern, parameters: sentParams, bindings: pBindings, ...profileReq(),
         ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
         ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),
         ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
@@ -677,11 +728,11 @@ export function PowderWorkbench({
       }, onPowderProgress);
       setSession((s) => ({
         ...s,
-        // Guided refinement frees parameters internally; reflect that in the table.
+        // Guided refinement frees parameters internally; reflect exactly those.
         powderParams: s.powderParams.map((p) => ({
           ...p,
           value: result.parameters[p.id] ?? p.value,
-          ...(guided ? { fixed: false } : {}),
+          ...(guidedFixed?.has(p.id) ? { fixed: guidedFixed.get(p.id)! } : {}),
         })),
       }));
       setPowderResult(result);
@@ -720,13 +771,12 @@ export function PowderWorkbench({
       let rerun: (init?: SampleResult["resume"]) => Promise<SampleResult>;
       if (prior) {
         rerun = prior.rerun;
-      } else if (session.magnetic && powderParams.some((p) => isMomentParameterKind(p.kind))) {
+      } else if (magneticApplied) {
         const spec = {
-          structure, magnetic: session.magnetic, pattern,
+          structure, magnetic: session.magnetic!, pattern,
           parameters: [...powderParams], bindings: [...pBindings],
           ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
-          shape: session.powderProfile.shape,
-          ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+          ...profileReq(),
           ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         };
         rerun = (init) => client.sampleMagneticPowderPosterior(spec, { ...baseOptions, ...(init ? { init } : {}) });
@@ -759,7 +809,9 @@ export function PowderWorkbench({
    *     structural solve. Only the cell is seeded back.
    *  2. Multi-start: one baseline fit plus perturbed restarts, keeping the
    *     lowest-χ² result.
-   * Nuclear / multi-phase only (the magnetic co-refinement keeps the plain Refine).
+   * With an applied magnetic model the search runs over the moment subspace
+   * instead (see the magnetic branch below), so the Le Bail stage is nuclear /
+   * multi-phase only.
    */
   async function runThorough(): Promise<void> {
     // One engine, two faces: with no fit yet it's a "Prefit" (broad cold-start
@@ -772,16 +824,16 @@ export function PowderWorkbench({
       // then one joint LM; the global ±m sign is canonicalized and the
       // data-limited (flat) moment directions are reported. Prefit casts a wide
       // net (more restarts); Escape is a lighter nudge around a converged fit.
-      if (session.magnetic && powderParams.some((p) => isMomentParameterKind(p.kind))) {
+      if (magneticApplied) {
         await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
         const msOptions = mode === "prefit" ? { restarts: 12 } : { restarts: 6, escapeSigma: 3 };
         const ms = await client.refineMagneticPowderMultiStart({
-          structure, magnetic: session.magnetic, pattern, parameters: [...powderParams], bindings: [...pBindings],
-          shape: session.powderProfile.shape,
-          ...(session.powderProfile.eta !== undefined ? { eta: session.powderProfile.eta } : {}),
+          structure, magnetic: session.magnetic!, pattern, parameters: [...powderParams], bindings: [...pBindings],
+          ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
+          ...profileReq(),
           ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         }, msOptions, { maxIterations: 20 }, onPowderProgress);
-        const refinedMag = applyMagneticMoments(session.magnetic, pBindings, ms.final.parameters);
+        const refinedMag = applyMagneticMoments(session.magnetic!, pBindings, ms.final.parameters);
         setSession((s) => ({
           ...s,
           magnetic: refinedMag,
@@ -792,7 +844,11 @@ export function PowderWorkbench({
         const degNote = ms.degeneracies.length > 0
           ? ` Data-limited: ${ms.degeneracies[0]!.message}`
           : "";
-        const bestNote = ms.improved
+        // restartsRun 0 = no free moment row to perturb (a previewed model): the
+        // engine went straight to the joint solve, so don't report a search.
+        const bestNote = ms.restartsRun === 0
+          ? "no free moment row to search — joint solve with the magnetic model held"
+          : ms.improved
           ? `found a lower minimum (start ${ms.bestStartIndex} of ${ms.restartsRun})`
           : `baseline held over ${ms.restartsRun + 1} starts`;
         setMessage(`Magnetic ${mode === "prefit" ? "prefit" : "escape"}: ${bestNote} — wR ${wr}%.${degNote}`);
@@ -950,9 +1006,10 @@ export function PowderWorkbench({
 
   /** "Show on refinement pattern": put a candidate model on the session WITHOUT
    *  its parameter rows — the refinement page then plots nuclear + this model
-   *  and refines nuclear only; Continue is what adds the moment rows. Rows a
-   *  previous Continue left behind are dropped so they cannot drive a model
-   *  they do not belong to. */
+   *  and refines the nuclear set against it, with the moments HELD at the values
+   *  previewed here; Continue is what adds the moment rows and frees them. Rows a
+   *  previous Continue left behind are dropped so they cannot drive a model they
+   *  do not belong to. */
   function applyMagneticPreview(mag: MagneticModel | null): void {
     setSession((s) => {
       const { magnetic: _previous, ...rest } = s;
@@ -1217,10 +1274,10 @@ export function PowderWorkbench({
             onRemovePhase,
           }
         : {}),
-      // Once the user has loaded their own structure(s), offer a one-click reset
-      // back to the bundled example (the app always needs a structure loaded).
+      // Once the user has loaded their own structure(s), offer a one-click way
+      // back to the empty start page (structures, data and instrument all go).
       ...(ownStructure
-        ? { headerControl: <button style={clearStructuresBtn} onClick={onClearStructures} title="Remove all loaded structures and reset to the bundled example">Clear</button> }
+        ? { headerControl: <button style={clearStructuresBtn} onClick={onClearStructures} title="Clear the workbench: remove the loaded structure(s), data and instrument, and return to the start page">Clear</button> }
         : {}),
     },
     {
@@ -1234,6 +1291,17 @@ export function PowderWorkbench({
       meta: !hasContent
         ? "Powder or single crystal"
         : `${pattern.points.length} points · ${UNIT_LABEL[pattern.xUnit]} ${patternExtent.min.toFixed(0)}–${patternExtent.max.toFixed(0)}`,
+      ...(hasContent && !isSynthetic && (detection || onOverrideXUnit)
+        ? {
+            control: (
+              <UnitDetection
+                unit={pattern.xUnit}
+                detection={detection ?? null}
+                {...(onOverrideXUnit ? { onOverride: onOverrideXUnit } : {})}
+              />
+            ),
+          }
+        : {}),
     },
     {
       label: "Instrument",
@@ -1454,6 +1522,7 @@ export function PowderWorkbench({
                 esd={powderResult?.esd}
                 onChange={patchPowder}
                 onRefine={() => runPowder(false)}
+                {...(tofViewOnly ? {} : { onGuided: () => runPowder(true) })}
                 onThorough={() => runThorough()}
                 thoroughMode={powderResult ? "escape" as const : "prefit" as const}
                 onCancel={cancelPowder}
@@ -1699,6 +1768,56 @@ const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 
 const clearStructuresBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "3px 10px", fontSize: 11.5, color: theme.secondary, cursor: "pointer" };
 const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "2px 6px", fontSize: 12, color: theme.ink, cursor: "pointer" };
 const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };
+
+/**
+ * Data card footer: how the x-unit was resolved, and the override.
+ *
+ * The resolver follows a priority chain (override → file header → instrument →
+ * filename → value range) and reports which link decided, with what confidence
+ * and why — showing it is what keeps the unit from being a silent guess. A
+ * heuristic result is the one that most deserves a second look, so it is
+ * flagged; every result can be overruled.
+ *
+ * The override is a genuine RE-LOAD of the same file under the chosen unit: the
+ * radiation, profile shape and parameter set all follow from it.
+ */
+function UnitDetection({ unit, detection, onOverride }: {
+  unit: PowderXUnit;
+  detection: DetectedFormat | null;
+  onOverride?: (u: PowderXUnit) => void;
+}): JSX.Element {
+  const unsure = detection?.confidence === "low" || detection?.source === "heuristic";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <span style={themeLabel}>unit</span>
+      {onOverride ? (
+        <select
+          value={unit}
+          onChange={(e) => onOverride(e.target.value as PowderXUnit)}
+          style={bgSelect}
+          title="Read the same file as this abscissa instead. The unit decides the radiation, the peak-shape model and the whole parameter set, so the file is re-read — any unsaved parameter edits go with it."
+        >
+          {(["twoTheta", "q", "dSpacing", "tof"] as const).map((u) => (
+            <option key={u} value={u}>{UNIT_LABEL[u]}</option>
+          ))}
+        </select>
+      ) : (
+        <span style={{ fontSize: fz.small, fontFamily: themeMono, color: theme.ink }}>{UNIT_LABEL[unit]}</span>
+      )}
+      {detection && (
+        <>
+          <span style={{ fontSize: fz.small, color: unsure ? theme.warnInk : theme.secondary }}>
+            {DETECTION_LABEL[detection.source]}
+          </span>
+          <InfoBadge
+            width={300}
+            text={`${detection.note} The unit was taken ${DETECTION_LABEL[detection.source]} (${detection.confidence} confidence)${unsure ? " — nothing in the file or the instrument stated it, so check it before you refine" : ""}. Pick a different unit to re-read the file.`}
+          />
+        </>
+      )}
+    </div>
+  );
+}
 
 /** Empty-state panel shown in place of the plot/parameters on a clean start.
  *  The two converged demos (one per technique, matching the header chips) are

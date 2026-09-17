@@ -1830,6 +1830,7 @@ export function KSearchPanel({
                   <button
                     style={{ ...btn, marginTop: 0, background: "#fff", color: theme.primary, border: `1px solid ${theme.primary}` }}
                     onClick={() => onApply(applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps))}
+                    title="Put this candidate on the refinement page: it joins the calculated pattern with its moments HELD at the amplitudes shown here, so Refine fits the nuclear parameters against nuclear + magnetic. Continue instead to add the moment rows and refine them too."
                   >
                     Show on refinement pattern
                   </button>

@@ -51,6 +51,8 @@ export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
     return buildMagneticPowderProblem(spec.structure, spec.magnetic, spec.pattern, spec.parameters, spec.bindings, {
       shape: spec.shape,
       ...(spec.eta !== undefined ? { eta: spec.eta } : {}),
+      ...(spec.lorentz !== undefined ? { lorentz: spec.lorentz } : {}),
+      ...(spec.backgroundType !== undefined ? { backgroundType: spec.backgroundType } : {}),
     }, spec.fitRange, spec.extraPhases ?? []);
   }
   const profile: PowderProfile = {

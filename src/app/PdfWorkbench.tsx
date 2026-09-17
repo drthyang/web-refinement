@@ -9,7 +9,7 @@
  * shell mounts it (keyed on the dataset) whenever a reduced `.gr` PDF is loaded.
  */
 
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { PdfWorkspace } from "@/core/project/types";
 import { overlaySavedParameters, pdfWorkspaceFrom } from "@/app/projectIo";
@@ -73,7 +73,7 @@ import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
 import { downloadText } from "@/app/download";
 import { structureToCif, magneticStructureToMcif } from "@/core/export/cif";
 import { reportHtml } from "@/core/export/report";
-import { pdfReportInput } from "@/app/reportInputs";
+import { pdfReportInput, type MagneticExploration } from "@/app/reportInputs";
 import { card as themeCard, color, mono, secondaryButton, uppercaseLabel, fz, toolbarBtn, resetRangeBtn, space } from "@/app/theme";
 
 const DATA_ACCEPT = ".gr,.sgr,.sq,.fq,.dat,.txt,text/plain";
@@ -1118,6 +1118,14 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       exportPhaseCifRef.current(applyParameters(phase.structure, b, values).model, phase.id, phaseMagnetic(phase.structure));
     }
   };
+  // The mPDF page's current candidate, for the report — published by KSearchPanel;
+  // null when nothing is selected there. The same contract the powder and
+  // single-crystal pages use, so "report: Export ▾" means the same on all three.
+  const exploredMagnetic = useRef<MagneticExploration | null>(null);
+  const publishExploration = useCallback((m: MagneticExploration | null): void => {
+    exploredMagnetic.current = m;
+  }, []);
+
   const exportReportRef = useRef<() => void>(noop);
   exportReportRef.current = (): void => {
     // Every phase AS REFINED, each through its own bindings (as the CIF export).
@@ -1137,6 +1145,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       curves,
       positionMode,
       spinModel: spinFit ? refinedMagnetic ?? spinFit.magnetic : null,
+      explored: exploredMagnetic.current,
       ...(motionConflict ? { warnings: [motionConflict] } : {}),
     }));
     downloadText(`${pattern.id}_report.html`, html, "text/html");
@@ -1812,6 +1821,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           // not match the bindings we already hold. "Continue" adds the rows.
           onApply={(m) => setSpinModel(m ? { magnetic: m, params: [], bindings: [] } : null)}
           onContinue={(m, mp, mb) => { adoptSpinModel(m, mp, mb); onStep?.(0); }}
+          onReportModel={publishExploration}
         />
       </div>
     </>

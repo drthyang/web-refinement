@@ -411,6 +411,8 @@ export function pdfReportInput(o: {
   readonly curves: FigureCurves;
   readonly positionMode: "atomic" | "irreps";
   readonly spinModel: MagneticModel | null;
+  /** The mPDF page's current candidate, when one is selected but not adopted. */
+  readonly explored: MagneticExploration | null;
   readonly warnings?: readonly string[];
 }): ReportInput {
   const params = withEsds(o.params, o.result);
@@ -426,7 +428,7 @@ export function pdfReportInput(o: {
     applied: o.spinModel,
     params,
     result: o.result,
-    explored: null,
+    explored: o.explored,
     against: "G(r)",
   });
   const phases: ReportPhase[] = o.phases.map((st, i) => ({
@@ -461,7 +463,9 @@ export function pdfReportInput(o: {
   const summary =
     `Real-space PDF refinement of ${primary.name || primary.id}${primary.spaceGroup.hermannMauguin ? ` (${primary.spaceGroup.hermannMauguin})` : ""}${multi ? ` with ${o.phases.length - 1} additional phase${o.phases.length === 2 ? "" : "s"}` : ""} against ${pattern.scatteringType} G(r) over ${num(o.fitRange.min, 1)}–${num(o.fitRange.max, 1)} Å: ` +
     `Rw = ${pct(o.rw)} with ${free} free parameter${free === 1 ? "" : "s"}. ` +
-    (o.spinModel ? magnetic.summary.replace("Magnetic structure:", "Magnetic PDF (mPDF) spin model:") : "No magnetic (mPDF) component is included.");
+    (o.spinModel || o.explored
+      ? magnetic.summary.replace("Magnetic structure:", "Magnetic PDF (mPDF) spin model:")
+      : "No magnetic (mPDF) component is included.");
   const notes = [
     "Rw = √(Σ (G_obs − G_calc)² / Σ G_obs²) over the fit window with uniform weights. G(r) point errors are strongly correlated (finite-Q sine transform), so Rw is a relative quality indicator, not a statistical one (Toby & Billinge 2004); esds from this fit are correspondingly optimistic.",
     "G(r) = 4πr[ρ(r) − ρ₀]; the calculated PDF applies the Q_max termination and the Q_damp / Q_broad instrument envelope as loaded.",

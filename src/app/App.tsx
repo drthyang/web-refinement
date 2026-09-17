@@ -30,6 +30,7 @@ import { parseFullProfInstrm6, looksLikeInstrm6 } from "@/parsers/fullprofInstrm
 import { parseGsasCsvPattern } from "@/parsers/gsasPattern";
 import { isGsasHistogram, parseGsasHistogramPattern } from "@/parsers/gsasHistogram";
 import { detectDataFormat, type DetectedFormat } from "@/parsers/detectFormat";
+import type { PowderXUnit } from "@/core/diffraction/types";
 import { parsePdfData } from "@/parsers/pdfData";
 import { looksLikeFgr, parseFgr, fgrToPattern } from "@/parsers/fgrData";
 import { parseInstrumentParameters } from "@/parsers/instrument";
@@ -202,6 +203,11 @@ export function App(): JSX.Element {
   // A user-facing problem from the last project open. The app has no status
   // bar (status goes to the console), but a refused file must be seen.
   const [notice, setNotice] = useState<string | null>(null);
+  // How the loaded powder file was classified — shown on the Data card, so the
+  // unit is never a silent guess, and re-runnable with an explicit override.
+  // Only the auto-detected path sets it; a reader that reads its own header
+  // (FullProf INSTRM=6, ILL D1B) or a demo leaves it null.
+  const [detection, setDetection] = useState<DetectedFormat | null>(null);
   // The status bar under the header is gone (results and diagnostics live in
   // the parameter panel / quality rail); status texts go to the console so
   // load/refine errors are still traceable.
@@ -259,6 +265,7 @@ export function App(): JSX.Element {
     setProjectMeta(null);
     setRestore((r) => ({ token: r.token }));
     setNotice(null);
+    setDetection(null);
   }
 
   function onClearStructures(): void {
@@ -270,6 +277,7 @@ export function App(): JSX.Element {
   function onLoadDemo(kind: DemoId): void {
     // A demo is the bundled snapshot, not the user's project.
     setProjectMeta(null);
+    setDetection(null);
     setRestore((r) => ({ token: r.token }));
     if (kind === "magnetic") {
       // LOCAL data (dev server + data folder only): 6 K POWGEN histogram with
@@ -489,6 +497,8 @@ export function App(): JSX.Element {
     setStep(magneticPage ? wantStep : 0);
     setProjectMeta({ title: file.metadata.title, createdAt: file.metadata.createdAt, ...(file.metadata.notes !== undefined ? { notes: file.metadata.notes } : {}) });
     setNotice(null);
+    // A project stores the resolved pattern, not the detector's reasoning.
+    setDetection(null);
     setMessage(`Opened project “${file.metadata.title}” — ${TECHNIQUE_LABEL[ws.technique]}, saved by v${file.metadata.appVersion}.`);
   }
 
@@ -526,6 +536,7 @@ export function App(): JSX.Element {
           setScNuclearDataset(null);
           setPdfDataset(parsed);
           setStep(0);
+          setDetection(null);
           const provenance =
             parsed.sourceKind === "sq" ? " (S(Q) → G(r) transformed at load)" :
             parsed.sourceKind === "fq" ? " (F(Q) → G(r) transformed at load)" :
@@ -550,6 +561,7 @@ export function App(): JSX.Element {
           if (loaded.kept < 1) throw new Error("no usable reflections in the file");
           setPdfDataset(null);
           setScNuclearDataset(loaded.dataset);
+          setDetection(null);
           setMessage(
             `Loaded single-crystal “${file.name}” · ${loaded.kept} reflections [${loaded.format}]` +
             `${describeDrops(loaded)}. Merge report + F² refinement ready.`,
@@ -559,6 +571,7 @@ export function App(): JSX.Element {
         setScNuclearDataset(null); // powder data → leave single-crystal mode
         setPdfDataset(null); // …and PDF mode
         applyPowder(text, file.name, fmt, tag);
+        setDetection(fmt);
       } catch (e) {
         setMessage(`Data load failed: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -593,6 +606,7 @@ export function App(): JSX.Element {
   // from the file header (or the loaded CW instrument, which then supplies the
   // Caglioti widths when its .irf is loaded).
   function applyInstrm6Powder(text: string, filename: string): void {
+    setDetection(null); // this reader knows the format from the header itself
     const id = `${structure.id}-powder`;
     const cw = instrumentLoaded && instrument.kind === "constantWavelength" ? instrument : null;
     const parsed = parseFullProfInstrm6(text, {
@@ -614,6 +628,7 @@ export function App(): JSX.Element {
   }
 
   function applyIllPowder(text: string, filename: string): void {
+    setDetection(null); // this reader knows the format from the header itself
     const id = `${structure.id}-powder`;
     const cw = instrumentLoaded && instrument.kind === "constantWavelength" ? instrument : null;
     const wavelength = cw?.wavelength ?? 2.52; // D1B graphite λ
@@ -631,6 +646,29 @@ export function App(): JSX.Element {
       `Loaded ILL powder “${filename}” · ${parsed.points.length} pts · 2θ ${parsed.points[0]!.x.toFixed(2)}–${last.x.toFixed(2)}° · neutron λ=${wavelength} Å` +
       `${cw ? " (Caglioti widths from instrument)" : " — load the .irf for Caglioti widths"}.`,
     );
+  }
+
+  /**
+   * Data card unit override: re-read the loaded powder file with the user's unit
+   * at the top of the detector's priority chain. Everything the unit implies —
+   * radiation, profile shape, the whole parameter spec — is rebuilt from it, so
+   * this is a genuine re-load, not a relabelled axis. Only possible while the
+   * file's text is still held (`rawData`), i.e. for a file the user loaded.
+   */
+  function onOverrideXUnit(xUnit: PowderXUnit): void {
+    const raw = session.rawData;
+    if (!raw) return;
+    const fmt = detectDataFormat({
+      text: raw.text,
+      filename: raw.name,
+      instrument: instrumentLoaded ? instrument : undefined,
+      override: { xUnit },
+    });
+    setDemoActive(false);
+    setScNuclearDataset(null);
+    setPdfDataset(null);
+    applyPowder(raw.text, raw.name, fmt, `[${fmt.source}/${fmt.confidence}]`);
+    setDetection(fmt);
   }
 
   function applyPowder(text: string, filename: string, fmt: DetectedFormat, tag: string): void {
@@ -858,6 +896,8 @@ export function App(): JSX.Element {
         onAddPhase={onAddPhase}
         onRemovePhase={onRemovePhase}
         onClearStructures={onClearStructures}
+        detection={detection}
+        {...(session.rawData ? { onOverrideXUnit } : {})}
         onLoadInstrument={onLoadInstrument}
         onLoadDemo={onLoadDemo}
         demos={demos}

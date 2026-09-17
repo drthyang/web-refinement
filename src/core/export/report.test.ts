@@ -8,7 +8,8 @@ import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { reportHtml, formatParameterValue, type ReportInput } from "@/core/export/report";
 import { formatWithEsd } from "@/core/export/cif";
 import { niceTicks, patternFigureSvg } from "@/core/export/reportFigures";
-import { groupOfOperations, magneticReportSection, reportFileName } from "@/app/reportInputs";
+import { groupOfOperations, magneticReportSection, pdfReportInput, reportFileName } from "@/app/reportInputs";
+import type { PdfPattern } from "@/core/diffraction/types";
 
 const DATE = new Date("2026-09-16T00:00:00Z");
 
@@ -247,5 +248,42 @@ describe("magnetic report section (reportInputs)", () => {
     const none = magneticReportSection({ structure, applied: null, params, result: null, explored: null, against: "x" });
     expect(none.section).toBeNull();
     expect(none.summary).toBe("No magnetic model is included.");
+  });
+});
+
+describe("PDF report (reportInputs)", () => {
+  // The mPDF page shows "report: Export ▾" beside a selected candidate, promising
+  // the report carries it until you Continue — so the PDF report must honour the
+  // same contract as the powder and single-crystal ones.
+  it("carries the mPDF page's candidate, labelled as under exploration", () => {
+    const { structure, k, params, magnetic } = cmcm();
+    const pattern: PdfPattern = {
+      id: "gr", name: "Mn3Sn.gr", scatteringType: "neutron",
+      points: Array.from({ length: 50 }, (_, i) => ({ r: 1 + i * 0.1, gObs: Math.sin(i) })),
+    };
+    const curves = {
+      x: pattern.points.map((pt) => pt.r),
+      yObs: pattern.points.map((pt) => pt.gObs),
+      yCalc: pattern.points.map(() => 0),
+      diff: pattern.points.map((pt) => pt.gObs),
+    };
+    const base = {
+      phases: [structure], params, bindings: [], result: null, pattern, rw: 0.081,
+      fitRange: { min: 1.5, max: 20 }, curves, positionMode: "atomic" as const, spinModel: null,
+    };
+    const explored = {
+      magnetic, params, bindings: [], k, group: { symbol: "Cm′cm′ (explored)" }, agreement: 0.074, agreementLabel: "Rw",
+    };
+
+    const withCandidate = pdfReportInput({ ...base, explored });
+    expect(withCandidate.magnetic?.status).toContain("Candidate under exploration");
+    expect(withCandidate.magnetic?.group.symbol).toBe("Cm′cm′ (explored)");
+    expect(withCandidate.summary).toContain("not part of the refinement");
+    expect(withCandidate.summary).not.toContain("No magnetic (mPDF) component");
+
+    // Nothing selected on the magnetic page: the report says so plainly.
+    const nuclearOnly = pdfReportInput({ ...base, explored: null });
+    expect(nuclearOnly.magnetic).toBeNull();
+    expect(nuclearOnly.summary).toContain("No magnetic (mPDF) component is included.");
   });
 });
