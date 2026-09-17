@@ -60,8 +60,10 @@ An operation is an affine map on fractional coordinates,
 `x' = rotation·x + translation (mod 1)`, plus the Jones–Faithful `xyz` string for
 CIF round-tripping. A `SpaceGroup` is, minimally, a **list of operations** — which
 is exactly what a CIF `_symmetry_equiv_pos_as_xyz` loop provides — with optional
-IT number and Hermann–Mauguin symbol as metadata. This keeps Phase 1 free of a
-built-in 230-group table; that table becomes an optional lookup later.
+IT number and Hermann–Mauguin symbol as metadata. All 230 groups are also built
+in, in their standard settings: `buildSpaceGroup(number | symbol)` returns the
+operation list, and `completeSpaceGroup` closes a partial list read from a CIF
+([`crystal/spaceGroups.ts`](../src/core/crystal/spaceGroups.ts)).
 
 ### `StructureModel`
 `id + name + cell + spaceGroup + sites`. The asymmetric unit is stored; the full
@@ -70,7 +72,8 @@ fields** — magnetism is layered separately.
 
 ## Diffraction data (`core/diffraction/types.ts`)
 
-Two observation types, one engine (Phase 2 goal).
+Two reciprocal-space observation types share one engine. The real-space PDF
+pattern (below) is a separate type that feeds the same engine.
 
 ### Single crystal
 ```ts
@@ -88,6 +91,19 @@ xUnit ∈ "twoTheta" | "dSpacing" | "q" | "tof"
 `Radiation` is a tagged union (`neutron` | `xray` | `neutron-tof`) so the
 calculator picks the right scattering table and knows whether a single
 wavelength exists (TOF does not).
+
+### Pair distribution function
+```ts
+PdfPoint   = { r, gObs, sigma? }
+PdfPattern = { id, name, scatteringType, points[], qmax?, qdamp?, qbroad?, rpoly?, composition?, … }
+scatteringType ∈ "neutron" | "xray"
+```
+
+`G(r)` has a real-space abscissa and a signed ordinate, so it is its own type
+rather than a powder pattern with another x-unit. The header metadata (Qmax,
+Qdamp, Qbroad, composition) feeds the real-space calculator. `sigma` is
+informational only: G(r) points are correlated, so PDF fits use uniform
+weights (see [LIMITATIONS.md](./LIMITATIONS.md)).
 
 ### Calculated side
 `CalculatedReflection` keeps **nuclear and magnetic contributions separate**
@@ -109,9 +125,16 @@ Layered over a `StructureModel` by id; **imports no crystal-refinement code**.
 - `MagneticMoment` — `siteLabel`, a `frame` (`crystallographic` | `cartesian`),
   and `components: Vec3` in μ_B. Storing the vector (not magnitude+angles) avoids
   a redundant, drift-prone representation; magnitude and direction are derived.
-- `PropagationVector = Vec3` in reciprocal-lattice units; `(0,0,0)` = commensurate.
-- `MagneticModel` — `structureId`, `propagation[]` (single k in Phase 5),
-  `moments[]`, and optional `domainPopulations` (future multi-domain).
+  For a k whose ±k arms are distinct, the optional `sinComponents` holds the
+  sine (quadrature) amplitude, so the moment of cell n is
+  `components·cos(2πk·n) + sinComponents·sin(2πk·n)`.
+- `PropagationVector = Vec3` in reciprocal-lattice units; `(0,0,0)` means the
+  magnetic cell is the nuclear cell (k = 0).
+- `MagneticModel` — `structureId`, `propagation[]` (one k today; the array
+  leaves room for multi-k), `moments[]`, the optional magnetic `operations` of
+  the chosen subgroup (each with its time-reversal sign), and optional
+  `domainPopulations` (stored and validated in project files, but not yet used
+  by any calculation).
 
 The perpendicular-moment projection `M⊥ = M − q̂ (M·q̂)` and the magnetic
 structure factor are computed in functions, not stored on the model.

@@ -1,27 +1,32 @@
 # Validation
 
-Validation is mandatory, not optional. This document records **what is tested**,
-**what is validated against external tools**, and **what is only approximate**.
-Every claim about correctness must be traceable to a test or an external
-comparison recorded here.
+Validation is mandatory. This page records the evidence: what is tested, and
+what is checked against external tools. Every correctness claim must trace to a
+test or a comparison recorded here. What is only approximate is listed in
+[LIMITATIONS.md](./LIMITATIONS.md).
 
 ## Principles
 
 1. Every scientific function in `src/core` has unit tests.
-2. Key calculators have **golden-value** tests: a known input produces a recorded
-   output, and the test fails if the number changes. This prevents silent drift.
-3. Selected end-to-end examples are compared against established tools
-   (GSAS-II, FullProf, Jana2020) where feasible; agreement and tolerances are
-   recorded below.
-4. Documentation states plainly which features are *validated* vs *approximate*.
+2. Key calculators have **golden-value** tests: a known input gives a recorded
+   output, and the test fails if the number changes, so nothing drifts silently.
+3. Selected end-to-end examples are compared with established tools where
+   feasible: GSAS-II, FullProf, PDFfit2, diffpy.mpdf and WinGX. Agreement and
+   tolerances are recorded below.
+4. The docs state plainly which features are *validated* and which are
+   *approximate*.
 
-> **GSAS-II is the primary external reference** for the golden-value and
-> benchmark tests below — Toby & Von Dreele (2013), *J. Appl. Cryst.* **46**, 544
+> GSAS-II is the primary external reference for the golden-value and benchmark
+> tests below: Toby & Von Dreele (2013), *J. Appl. Cryst.* **46**, 544
 > ([10.1107/S0021889813003531](https://doi.org/10.1107/S0021889813003531)). We
-> reimplement independently (no code copied), but its outputs are our correctness
-> gate and must be cited. Full bibliography in [`REFERENCES.md`](./REFERENCES.md).
+> reimplement independently and copy no code, but its outputs are our
+> correctness gate and must be cited. The full bibliography is in
+> [`REFERENCES.md`](./REFERENCES.md).
 
-## Test matrix (1111 passing, 59 real-data/slow tests skipped without local `data/`)
+## Test matrix
+
+Run `npm test` for the current counts. Tests that read the git-ignored `data/`
+folder skip when it is absent (CI, fresh clones).
 
 | Area | Test kind | Status |
 | --- | --- | --- |
@@ -93,22 +98,24 @@ comparison recorded here.
 
 ## Golden examples
 
-Golden fixtures live under `src/examples/` with recorded expected outputs. Each
-golden test names its source of truth (an analytic value, a hand calculation, or
-an external-tool run). Updating a golden value requires an explicit, reviewed
-change — it cannot happen silently.
+A golden test pins a recorded expected output and names its source of truth: an
+analytic value, a hand calculation, or an external-tool run. Updating a golden
+value requires an explicit, reviewed change — it cannot happen silently.
 
-Planned reference structures:
-- **bcc Fe** — trivial one-site cell; exercises symmetry expansion and `F_N`.
-- A simple oxide (e.g. rock-salt MgO) — two sites, neutron + X-ray form factors.
-- A simple collinear antiferromagnet — magnetic projection and `F_M`.
+Golden inputs live in two places:
+- **Committed fixtures** run everywhere, including CI — for example the PDFfit2
+  curves in `core/pdf/pdffit2Golden.ts` and the diffpy.mpdf curves in
+  `core/magnetic/mpdfGolden.ts` and `mnoGolden.ts`.
+- **Real measured data** in the git-ignored `data/` folder (GSAS-II, FullProf
+  and WinGX outputs), read through `src/testSupport`; these tests skip when
+  the folder is absent.
 
 ## External comparisons
 
-For each cross-check we record: the external tool, the input, the compared
-quantity, the agreement achieved, and the tolerance we accept. The source is the
-GSAS-II refinement bundled in `data/` (`isothermal_hex/Untitled.lst` and the
-CIFs), a two-phase (Mn₃Ga + MnO) TOF neutron powder Rietveld.
+Each row records the quantity, our value, the reference value, the tolerance
+we accept and the source. The main source is a two-phase (Mn₃Ga + MnO) TOF
+neutron powder Rietveld refinement in GSAS-II. Its output sits in the
+git-ignored `data/` folder (`isothermal_hex/Untitled.lst` and the CIFs).
 
 | Quantity | Our value | GSAS-II value | Tolerance | Source |
 | --- | --- | --- | --- | --- |
@@ -128,89 +135,111 @@ CIFs), a two-phase (Mn₃Ga + MnO) TOF neutron powder Rietveld.
 | Magnetic moment \|M\| Mn3 (30 K) | 2.530 μB | 2.530 μB | 1e-2 | `30K/.lst` |
 | BNS group / ops (30 K, 350 K) | P2₁'/m' 4 / Cm'cm' 16 | mCIF | exact | mCIF |
 
-The magnetic moment magnitudes are a particularly strong check: the components are
-given in crystal axes for a monoclinic cell (β = 60.69°), so reproducing GSAS-II's
-reported magnitude confirms both the mCIF parse and the normalized-axis metric
-used for `momentCartesian`.
+The moment magnitudes are a particularly strong check. The components are given
+along the crystal axes of a monoclinic cell (β = 60.69°). Reproducing GSAS-II's
+magnitudes therefore confirms both the mCIF parse and the normalized-axis metric
+in `momentCartesian`.
 
-The 200 K reflection list (`fitted_results_Cmcm_hkl.dat`) contains both phases;
-its cubic MnO subset satisfies d·√(h²+k²+l²) = 4.438 Å, and our `dSpacing()`
+The 200 K reflection list (`fitted_results_Cmcm_hkl.dat`) contains both phases.
+Its cubic MnO subset satisfies d·√(h²+k²+l²) = 4.438 Å, and our `dSpacing()`
 reproduces GSAS-II's listed d-spacings for those reflections to < 2×10⁻³ Å.
 
-**Scope note.** These validate the *crystallographic and scattering
-foundations* — the quantities our engine shares with GSAS-II. The full
-end-to-end fit is **not** compared: GSAS-II ran a two-phase TOF Rietveld with
-instrument profile functions, background, and profile coefficients beyond this
-minimal engine's scope (see [LIMITATIONS.md](./LIMITATIONS.md)). Our
-refinement is validated only as *self-consistent* (recovers known parameters
-from synthetic data), not against GSAS-II's wR.
+**Scope note.** The table above pins the *crystallographic and scattering
+foundations* against this Mn₃Ga refinement. It does not compare the fit itself;
+the whole-fit and whole-workflow comparisons are in the next table.
+
+### Fits and workflows checked against external tools
+
+"Gate" is what the test asserts; where a run measured more than that, the
+measured value is given too. Tests marked *data* read the git-ignored `data/`
+folder.
+
+| Reference | Case | Compared | Result | Test |
+| --- | --- | --- | --- | --- |
+| GSAS-II | GaNb₄Se₈ 298.8 K synchrotron XRD (28-ID) | wR of our staged Rietveld fit vs GSAS-II's fit of the same data | 5.7% vs GSAS-II's 7.34% (gate: < 12%) | `core/workflow/realPowderXRD.test.ts` · *data* |
+| GSAS-II | Mn₃Ga 350 K, POWGEN neutron | \|F_M\|² per reflection at GSAS-II's refined moments | all 82 reflections within ±5%; symmetry-forbidden ones ≈ 0 | `core/workflow/mn3ga350KGolden.test.ts` · *data* |
+| PDFfit2 1.6.0 | Ni and MnO X-ray G(r) | G_calc(r); cell, scale and ADPs refined from a perturbed start | corr ≈ 0.9998 (gate > 0.999); cell within 2 mÅ | `core/pdf/pdffit2Golden.test.ts` |
+| diffpy.mpdf | MnO, MAGNDATA 1.31 (32-Mn magnetic cell) | f(r) and D(r) for a fixed spin configuration | f(r) to 1e-11 of the peak away from r = 0; D(r) corr > 0.9999, κ within 0.5% | `core/magnetic/mnoGolden.test.ts` |
+| diffpy.mpdf tutorials | MnO and MnTe measured neutron PDFs | refined ordered scale (MnO); nuclear + magnetic co-refinement (MnTe) | MnO ordered scale 1.6716 vs diffpy's 1.6685 | `core/workflow/mpdfTutorialData.test.ts` · *data* |
+| WinGX | Eu₃In₂Te₄ rod crystal, neutron λ = 1.0 Å | per-reflection absorption transmission factor | Pearson r ≈ 0.99 with a fitted μ (gate > 0.95) | `core/absorption/eu324Absorption.test.ts` · *data* |
+| FullProf files | Eu₃In₂Te₄ HB-3A `_nuc` / `_mag` → `_ALL_magcell.int` | the merged magnetic-supercell reflection list | identical on every (h, k, l, I, σ) | `core/magnetic/magneticSupercell.test.ts` · *data* |
 
 ## Bayesian posterior sampling
 
-The ensemble MCMC sampler (`core/refinement/bayes/`) is validated on three
-levels before any posterior is trusted:
+The samplers in `core/refinement/bayes/` are validated on three levels before
+any posterior is trusted. How they work is in
+[REFINEMENT_ENGINE.md](./REFINEMENT_ENGINE.md#posterior-sampling).
 
-1. **Exact-posterior recovery (analytic truth):** on a linear-Gaussian problem
-   the posterior is known in closed form; the sampler recovers the exact mean
-   within 0.1σ, the exact std within 15%, and the exact pairwise correlation
-   within ±0.05 — and a flat posterior inside bounds is sampled uniformly,
-   pinning the logit-transform `logJacobian` measure term end-to-end.
-2. **Structural invariants:** serial and worker-pool drivers produce
-   bit-identical chains (RNG lives only in the sans-io generator); one 400-step
-   run equals 200+200 steps through the resume token; the same seed reproduces
-   and a different seed differs.
-3. **Gaussian-limit consistency with LM (Ni golden):** sampling the PDFfit2 Ni
-   fixture around the converged LM minimum gives posterior std / linearized LM
-   esd (`esdRatio`) of **0.99–1.01** per parameter — the sampler and the
-   least-squares esds validate each other in the limit where both must agree.
+1. **Exact-posterior recovery.** On a linear-Gaussian problem the posterior is
+   known in closed form. The ensemble sampler recovers the exact mean within
+   0.1σ, the std within 15% and the pairwise correlation within ±0.05. NUTS
+   recovers the mean within 0.12σ, the std within 10% and the correlation within
+   ±0.05 on a ρ ≈ −0.998 ridge, with no divergences. The `poisson` model recovers
+   an exact Gamma posterior, and `studentT` resists outliers that bias the
+   Gaussian posterior.
+2. **Measure and structural invariants.** Both samplers draw a flat posterior
+   uniformly inside bounds, which pins the transform's `logJacobian` measure term
+   end to end. Serial and worker-pool ensemble drivers produce bit-identical
+   chains, because the RNG lives only in the sans-io generator. A 400-step
+   ensemble run equals 200 + 200 steps through the resume token (NUTS: 200 draws
+   equal 100 + 100), and the same seed reproduces while a different seed differs.
+3. **Gaussian-limit consistency with LM (Ni golden).** Sampling the PDFfit2 Ni
+   fixture around the converged LM minimum gives an `esdRatio` (posterior std
+   over linearized LM esd) of 0.99–1.01 per parameter with the ensemble sampler.
+   With NUTS it is 0.95–0.98. The test gate is 0.7–1.4, with the posterior
+   median within 0.25 esd of the LM value. The sampler and the least-squares
+   esds thus validate each other where both must agree.
 
-The default likelihood is **marginalized noise** — `logL = −(N/2)·ln χ²`, the
-unknown error scale integrated out under a Jeffreys prior — because reduced-PDF
-data carry correlated point errors and are fitted with deliberate unit weights
-(see [LIMITATIONS.md](./LIMITATIONS.md)). Convergence is reported the way
-McCluskey et al. (2023, *J. Appl. Cryst.* **56**, 12) advise for Bayesian
-analysis of scattering data: split-R̂ (Gelman–Rubin), ESS (Geyer
-initial-monotone truncation), and quantile credible intervals — never a bare
-std. The crystallographic precedent for MCMC posterior refinement is Fancher
-et al. (2016, *Sci. Rep.* **6**, 31625).
+The exact-posterior gates use the `fixed` likelihood. The Ni golden uses the
+default `marginalized` likelihood, because reduced PDF data carry correlated
+point errors and are fitted with unit weights ([LIMITATIONS.md](./LIMITATIONS.md)).
+Convergence is reported as McCluskey et al. (2023, *J. Appl. Cryst.* **56**, 12)
+advise: split-R̂, ESS and quantile credible intervals, never a bare std.
 
 ## PDF analytic gradients
 
-The fused-pass gradient kernel (`core/pdf/gradients.ts`) is gated by
-`pdfAnalyticJacobian.test.ts`:
+[`pdfAnalyticJacobian.test.ts`](../src/core/workflow/pdfAnalyticJacobian.test.ts)
+gates the fused-pass gradient kernel (`core/pdf/gradients.ts`):
 
-- the fused value curve is **bit-identical** to `computeGofR` on the Ni golden;
-- every analytic ∂G/∂p column (envelopes, widths, occupancy, B_iso, U_aniso,
-  symmetry-mode position shifts — including orbit images under rotated
-  operations) matches a central finite difference;
-- unsupported kinds (`cell`, `sratio`/`rcut`, tie-referenced parameters)
-  correctly return null and fall back to FD, and restraint rows carry the term
-  coefficients;
-- FD-driven and analytic-driven refinements land in the **same basin** on the
-  Ni golden (analytic is 2.3× faster);
-- the scalar `gradChi2` (analytic columns + central-FD fill-in) matches central
-  differences of χ².
+- The fused value curve is **bit-identical** to `computeGofR` on the Ni golden.
+- Every analytic ∂G/∂p column matches a central finite difference within 1e-5
+  of the column's maximum, with termination off. This covers envelopes, widths,
+  occupancy, B_iso, U_aniso and symmetry-mode position shifts, including orbit
+  images under rotated operations. A smoke check repeats U_aniso with
+  termination on, at 2e-2.
+- Unsupported kinds (`cell`, `sratio`/`rcut`, tie-referenced parameters) return
+  null and fall back to finite differences. Restraint rows carry the term
+  coefficients.
+- `refineParallel` never calls `analyticColumns`.
+- Finite-difference and analytic refinements land in the **same basin** on the
+  Ni golden: Rw within 1e-4 and parameters within 1e-6 relative. The analytic
+  run is 2.3× faster.
+- The scalar `gradChi2` (analytic columns plus central-difference fill-in)
+  matches central differences of χ².
 
-**FD-oracle caveat (methodology):** the ±5σ Gaussian evaluation window is
-quantized on the r-grid, so the *finite-difference oracle* — not the analytic
-column — shows 1/h spikes when a pair crosses a window edge, and the Qmax
-band-limit delocalizes those spikes across the whole grid. The gates therefore
-apply a **Richardson h-vs-h/2 consistency filter** (only h-stable FD points are
-compared) and run the tight tolerances with termination off.
+**FD-oracle caveat.** The ±5σ evaluation window is quantized on the r grid. So
+the finite-difference oracle, not the analytic column, shows 1/h spikes when a
+pair crosses a window edge, and the Qmax band limit spreads those spikes across
+the grid. The gates therefore compare only points where FD(h) and FD(h/2) agree,
+a Richardson consistency filter. Excluded points must stay below 2%, and the
+tight tolerances run with termination off.
 
 ## GPU acceleration precision
 
-The WebGPU kernels are **approximate f32 accelerators, opt-in and never
-bit-identical** (see [LIMITATIONS.md](./LIMITATIONS.md)). Their reference is the
-CPU f64 path — itself validated above against GSAS-II. Two gates enforce the
-precision contract before any refinement trusts a GPU value:
+The WebGPU kernels compute in f32, so they are approximate accelerators and
+never bit-identical to the CPU path ([LIMITATIONS.md](./LIMITATIONS.md)). Their
+reference is the f64 CPU path, itself validated above against GSAS-II. Two gates
+enforce the precision contract before a refinement trusts a GPU value:
 
-1. **CI (node, no GPU):** the WGSL struct field-counts must equal the JS
-   marshaling strides, and the kernel's formula reimplemented in f64 must
-   reproduce the CPU structure factor (`< 1e-9`) — catches marshaling/stride
-   drift without hardware.
-2. **Hardware (browser, `window.__gpuValidate`):** the actual kernel vs the CPU
-   f64 truth. Measured on Apple GPU (metal-3), max relative deviation:
+1. **CI (Node, no GPU).** The WGSL struct field counts must equal the JS
+   marshaling strides. The kernel's formula, reimplemented in f64, must
+   reproduce the CPU structure factor to a relative `< 1e-9`. Together these
+   catch marshaling and stride drift without hardware.
+2. **Hardware (browser).** The real kernel runs against the CPU f64 truth. The
+   structure-factor rows below come from `window.__gpuValidate`, a dev-build
+   harness; the profile-synthesis row comes from the synthesizer's own
+   `gpuValidation`. Maximum relative deviation, measured on an Apple GPU
+   (metal-3):
 
 | Kernel | Case | Max rel. deviation |
 | --- | --- | --- |
@@ -221,13 +250,13 @@ precision contract before any refinement trusts a GPU value:
 | Magnetic \|F_M\|² | Mn₃Ga AFM k=(½,0,0), 175 satellites | 4.5e-7 |
 | Profile synthesis | 20k pts × 5.5k pseudo-Voigt peaks | 1.1e-5 of pattern max |
 
-All are **far below counting statistics and esd scales (≥1e-3 relative)**.
-End-to-end, a GPU-accelerated powder refinement converges to the *same minimum*
-as the CPU pool (both wR 5.00% on a Mn₃Ga occupancy+ADP fit) — the f32 |F|²
+All are far below counting statistics and esd scales (≥ 1e-3 relative). End to
+end, a GPU-accelerated powder refinement converges to the *same minimum* as the
+CPU pool: both reach wR 5.00% on a Mn₃Ga occupancy + ADP fit. The f32 |F|²
 nudges the LM path but not the answer.
 
 ## Honesty rule
 
 If a number has not been checked against an independent source, the docs and UI
-must not imply it has. See [LIMITATIONS.md](./LIMITATIONS.md) for the standing
+must not imply it has. [LIMITATIONS.md](./LIMITATIONS.md) holds the standing
 scope statement that accompanies all results.

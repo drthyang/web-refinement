@@ -1,7 +1,7 @@
 # Refinement Notes — Magnetic Powder Stability
 
 Methods notes for the magnetic refinement engine, written to be usable as the
-basis of a methods section. Companion to [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md)
+basis of a methods section. Companion to [IMPROVEMENT_PLAN.md](archive/IMPROVEMENT_PLAN.md)
 (Phase 1 magnetic-powder stability, §1–§7; single-crystal magnetic refinement via
 the single-k supercell merge, §8) and the local least-squares core in
 [REFINEMENT_ENGINE.md](REFINEMENT_ENGINE.md).
@@ -131,7 +131,7 @@ what they are — symmetry/data facts, not solver noise (`canonicalize.ts`):
   k = (0,0,½)): recovers the true moment from a bad cold start; deterministic under a
   fixed seed; canonicalizes a negative start onto the positive representative; and
   the fit range is threaded through the multi-start's problem-builder seam
-  (regression for a previously dropped magnetic fit-range window).
+  (a regression test: magnetic paths had dropped the fit-range window).
 - **Data-gated acceptance** (`src/workers/magneticMultiStartGolden.test.ts`, real
   Mn₃Ga 350 K): from ≥20 seeded starts, ≥95 % share the best χ² (observed 21/21) and
   the run recovers the golden topology (|m0| ≈ 2.06 µ_B along a, |m1| ≈ 1.70 µ_B along
@@ -142,9 +142,10 @@ what they are — symmetry/data facts, not solver noise (`canonicalize.ts`):
 
 ## 7. UI
 
-The "Prefit ↻ / Escape min ↻" control (previously nuclear/multi-phase only) now
-drives the magnetic path too: Prefit casts a wide moment-subspace net (more
-restarts) from a cold start, Escape is a light nudge around a converged fit. The
+The "Prefit ↻ / Escape min ↻" control drives the nuclear, multi-phase and
+magnetic paths. On the magnetic path, Prefit casts a wide moment-subspace net
+(more restarts) from a cold start, and Escape is a light nudge around a
+converged fit. The
 result message reports the best-of-N outcome and, when present, the leading
 data-limited direction from the degeneracy report.
 

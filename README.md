@@ -88,8 +88,9 @@ This project aims to lower that barrier:
   instrument files from GSAS-II (`.instprm`), classic GSAS (`.prm` INS/ICONS),
   and FullProf (`.irf` — CW Caglioti and TOF, plus the D2B/3T2/G4.2 `INSTRM=6`
   variant) — with format
-  auto-detection that reports *how* each decision was made, lets you override
-  it, and names the beamline · facility when the file identifies one.
+  auto-detection: the Data card shows the unit and range it settled on, the
+  `parse_powder_data` agent tool reports *how* each decision was made, and the
+  instrument card names the beamline · facility when the file identifies one.
 - **Transparent by design.** A guided step-by-step procedure that starts from
   a small, safe set of choices; fit quality judged with F_obs vs F_calc and
   normal-probability plots, not wR alone. Every scientific function is pure,
@@ -109,13 +110,13 @@ This is a complement to the established packages, not a replacement — see
 ## Status
 
 **Public beta.** A working app — atomic/nuclear refinement (single-crystal +
-powder) plus a commensurate single-k magnetic workflow — and a first agent-tool
+powder) plus a single-k magnetic workflow — and a first agent-tool
 layer over the same core. The scientific core, Levenberg–Marquardt refinement
 engine, symmetry-adapted constrained parameters, CIF parsing, a 3D
 structure/moment viewer, plots, and Web Worker compute are implemented and
-tested (**1111 passing tests**). Crystallographic and scattering foundations are
+tested (**1,300+ passing tests**). Crystallographic and scattering foundations are
 validated against bundled GSAS-II refinements (see
-[docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
+[docs/VALIDATION.md](docs/VALIDATION.md)).
 As with any beta, results intended for publication must be validated against
 established tools ([docs/LIMITATIONS.md](docs/LIMITATIONS.md)).
 
@@ -176,9 +177,9 @@ decomposed against a parent CIF — activate a symmetry-breaking Γ mode from th
 **isotropy-subgroup tree**, or pick a target subgroup from the full
 **translationengleiche (Bärnighausen) subgroup lattice**; clicking a mode draws
 its eigenvector on the 3D model. The nuclear track (P0–P3) and its agent slice
-are done, and the **magnetic PDF (mPDF) core** is validated against
-diffpy.mpdf; the mPDF page and the symmetry-constrained local-spin model are
-the next milestones. Full plan in
+are done, and **magnetic PDF (mPDF)** — validated against diffpy.mpdf — is
+live on the PDF page for neutron data; the symmetry-constrained local-spin
+model is the next milestone. Full plan in
 [docs/PDF_MPDF_ROADMAP.md](docs/PDF_MPDF_ROADMAP.md).
 
 **Bayesian uncertainty (new — prototype).** The engine can now *sample the
@@ -252,27 +253,24 @@ A static web app (React + TypeScript + Vite) with strict layering and
 one-directional dependencies. `src/core/**` is **pure TypeScript** — no React,
 DOM, or workers — so every scientific function is pure and independently
 testable. UI components handle presentation only; long calculations run in Web
-Workers, with optional WebGPU kernels adding opt-in f32 acceleration over the
-correct f64 CPU path (WebAssembly is skipped). Full detail in
+Workers, and WebGPU kernels add f32 acceleration where the browser supports
+them, validated against the f64 CPU path (WebAssembly is skipped). Full detail in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Documentation
 
+The full index, grouped by what you want to do, is [docs/README.md](docs/README.md).
+The most-used pages:
+
+- [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — how to run a refinement in the app, task by task
+- [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — what is supported, what is approximate, what is not there yet
+- [docs/COMPARISON.md](docs/COMPARISON.md) — features vs GSAS-II / Jana2020 / FullProf
+- [docs/VALIDATION.md](docs/VALIDATION.md) — what is tested, and against which external tools
 - [docs/ROADMAP.md](docs/ROADMAP.md) — **the single authoritative roadmap** (vision, foundations, milestones, agent layer)
-- [docs/PDF_MPDF_ROADMAP.md](docs/PDF_MPDF_ROADMAP.md) — the real-space PDF / mPDF track (nuclear done; mPDF next)
 - [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) — agent tools, skills, and the LLM-guided refinement plan
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layers, source tree, conventions
-- [docs/DATA_MODEL.md](docs/DATA_MODEL.md) — data types and their reasoning
-- [docs/REFINEMENT_ENGINE.md](docs/REFINEMENT_ENGINE.md) — the least-squares design
-- [docs/SCATTERING_TABLES.md](docs/SCATTERING_TABLES.md) — neutron / X-ray / magnetic form-factor tables
-- [docs/VALIDATION.md](docs/VALIDATION.md) — testing & external comparison strategy
-- [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — scope and known simplifications
 - [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project file format (save / reopen a session)
-- [docs/REFINEMENT_PROCEDURE.md](docs/REFINEMENT_PROCEDURE.md) — the guided 7-step workflow
-- [docs/COMPARISON.md](docs/COMPARISON.md) — features vs GSAS-II / Jana2020 / FullProf
 - [docs/REFERENCES.md](docs/REFERENCES.md) — bibliography: papers, data sources, and GSAS-II (validation reference)
-- [docs/REPORT.md](docs/REPORT.md) — build & validation report
-- [docs/archive/](docs/archive/) — superseded plans (POWDER_ROADMAP, MATURITY_PLAN), kept for detail
 
 ## License
 

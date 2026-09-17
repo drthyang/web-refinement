@@ -8,7 +8,7 @@ form factors; extend the records here, not the calculators.
 
 The scattering variable throughout is `s = sinθ/λ = 1/(2d)` (Å⁻¹).
 
-## What exists today
+## The tables
 
 | Table | File | Form | Coverage | Source |
 |---|---|---|---|---|
@@ -35,14 +35,15 @@ Only **neutral-atom** X-ray form factors are tabulated; the structure-factor
 code looks up by element symbol and does not yet use ionic X-ray species (the
 DABAX source carries them, so `gen_xray_ff.py` can be widened when needed).
 
-Neutron scattering lengths are used for **both** nuclear structure factors and,
-via ⟨j0⟩/⟨j2⟩, the magnetic form factor of an ion — so "the neutron table for
-magnetic ions" is the magnetic ⟨j0⟩/⟨j2⟩ table below.
+The neutron `b` table covers nuclear scattering only. For magnetic neutron
+scattering, an ion's form factor comes from the ⟨j0⟩/⟨j2⟩ table below.
 
 ## Magnetic form factor — spin-only and dipole
 
-The current magnetic structure factor uses the **spin-only** approximation
-`f(s) ≈ ⟨j0⟩(s)` ([`structureFactor.ts`](../src/core/magnetic/structureFactor.ts)).
+Every magnetic calculation uses the **spin-only** approximation
+`f(s) ≈ ⟨j0⟩(s)`: the magnetic structure factor
+([`structureFactor.ts`](../src/core/magnetic/structureFactor.ts)), the GPU
+magnetic kernel, and the magnetic PDF envelope.
 
 For moments with an orbital contribution (Landé `g ≠ 2`) — most real magnetic
 refinements — the **dipole approximation** is required:
@@ -52,15 +53,15 @@ f(s) ≈ ⟨j0⟩(s) + (1 − 2/g)·⟨j2⟩(s)
 ```
 
 `⟨j2⟩` carries an `s²` prefactor, so it vanishes at `s = 0` and the total form
-factor is still 1 there. The full API is in place:
+factor is still 1 there. The functions exist, but no calculation calls them yet:
 
 - `magneticFormFactorJ2(ion, s)` — ⟨j2⟩, or `NaN` when the ion has no ⟨j2⟩ row.
 - `magneticFormFactorDipole(ion, s, g)` — the full expression; **falls back to
   spin-only ⟨j0⟩** when `g = 2` or the ion has no ⟨j2⟩, so it is always safe to call.
 - `magneticTable.dipole` / `magneticTable.hasJ2` expose the same via the table.
 
-Both ⟨j0⟩ and ⟨j2⟩ are now populated for the full ITC-C ion set, so `g ≠ 2`
-(orbital) refinements are unblocked at the form-factor level.
+Both ⟨j0⟩ and ⟨j2⟩ cover the full ITC-C ion set, so the tables are ready for
+`g ≠ 2`. Using the dipole form in the structure factor is the remaining step.
 
 ## Validation
 
@@ -69,23 +70,25 @@ The generated coefficients are guarded by
 a spread of 3d/rare-earth/actinide ions, ⟨j2⟩(0) = 0, the dipole term reduces to
 ⟨j0⟩ at `g = 2`, and an **external reference lock** against `periodictable`'s
 Fe²⁺ doctest (`M_Q([0, 0.1, 0.2]) = [1, 0.99935, 0.99741]`), which pins both the
-coefficients and the `s = sinθ/λ` convention. Building this table also corrected
-a bad **Cr³⁺** ⟨j0⟩ row that had been in the hand-entered table (it normalized to
-1 but matched no ITC-C Cr valence).
+coefficients and the `s = sinθ/λ` convention.
 
-## Remaining for magnetic refinement (roadmap M4)
+End to end, the magnetic |F_M|² matches GSAS-II within ±5% on all 82 reflections
+of the Mn₃Ga 350 K data
+([`mn3ga350KGolden.test.ts`](../src/core/workflow/mn3ga350KGolden.test.ts)).
 
-1. **5d transition ions (W–Ir)** — not in the CrysFML table; GSAS-II sources
-   these from Kobayashi, Nagao & Ito, *Acta Cryst.* A67, 473–480 (2011). Add if a
-   5d magnet needs them, from that reference, through the generator.
-2. **End-to-end |F_mag|² cross-check** — where a GSAS-II `.lst`/reflection list is
-   available, confirm our magnetic |F|² is a flat multiple of GSAS-II's, the same
-   gate used for the nuclear structure factor in
-   [`neutronSfValidation.test.ts`](../src/core/diffraction/neutronSfValidation.test.ts).
+## Not yet
 
-**Do not hand-edit `magneticFormFactorData.ts`** — a wrong 7-coefficient row
-silently corrupts the magnetic calculation. Extend the upstream source or the
-generator and regenerate, keeping the validation gates above.
+1. **The dipole form factor in calculations** — the structure factor, GPU kernel
+   and magnetic PDF use ⟨j0⟩ only (above).
+2. **5d transition ions (W–Ir)** — not in the CrysFML table. GSAS-II takes them
+   from Kobayashi, Nagao & Ito, *Acta Cryst.* A67, 473–480 (2011); add them from
+   that reference, through the generator, when a 5d magnet needs them.
+3. **Ionic X-ray form factors** — only neutral atoms are tabulated (above).
+
+**Do not hand-edit `magneticFormFactorData.ts`.** A wrong 7-coefficient row
+silently corrupts the magnetic calculation — a hand-entered Cr³⁺ row once
+normalized to 1 while matching no ITC-C valence. Extend the upstream source or
+the generator and regenerate, keeping the validation gates above.
 
 ## Sources & citations
 

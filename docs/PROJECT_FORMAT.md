@@ -6,9 +6,10 @@ its value and fixed/free state, the technique-specific model settings, and the
 last result, so a session can be saved, shared, and reopened where it was left.
 
 - **Save:** header ▸ *Project ▾* ▸ *Save project* — downloads `<title>.materia.json`.
-- **Open:** *Project ▾* ▸ *Open project…*, the *open a saved project* link on the
-  landing page, or drop the file on any *Load data…* button (the loader
-  recognizes the envelope).
+- **Open:** *Project ▾* ▸ *Open project…*, or the *open a saved project* link on
+  the landing page. A project file chosen through a *Load data…* button also
+  opens as a project, because the data loader recognizes it — though that
+  button's file filter may hide `.json` files.
 
 The authoritative schema is the `ProjectFile` type in
 [`src/core/project/types.ts`](../src/core/project/types.ts); the reader is
