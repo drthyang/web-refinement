@@ -183,4 +183,70 @@ describe("loadReflectionDataset — the 0 0 0 forward-beam row", () => {
     expect(loaded.kept).toBe(1);
     expect(loaded.forwardBeamSkipped).toBe(0);
   });
+
+  it("drops the forward beam from a fixed-column .hkl and keeps it for the magnetic partner", () => {
+    const text = [
+      "   0   0   0  120.00    1.00   1",
+      "   1   0   0  253.71    3.42   1",
+      "   0   0   0    0.00    0.00   0",
+    ].join("\n");
+    const nuclear = loadReflectionDataset(text, structure, "ds", "x_nuc.hkl");
+    expect(nuclear.kept).toBe(1);
+    expect(nuclear.forwardBeamSkipped).toBe(1);
+    const mag = loadReflectionDataset(text, structure, "ds", "x_mag.hkl", { role: "magnetic" });
+    expect(mag.kept).toBe(2);
+    expect(mag.forwardBeamSkipped).toBe(0);
+  });
+});
+
+/**
+ * Regression: both formats used to fall through to the whitespace splitter in
+ * `parsers/hkl.ts`, which reads columns 1-5 positionally. That is the wrong
+ * parse for each of them, and it fails SILENTLY — a plausible h k l I σ comes
+ * back, just not the file's.
+ */
+describe("loadReflectionDataset — fixed-column .hkl and header-ordered .fcf", () => {
+  const structure = exampleStructure();
+
+  it("reads an HKLF 4 row whose intensity fills its F8.2 field (no space before l)", () => {
+    // SHELX FORMAT 3I4,2F8.2,I4. I = 10000.00 uses all eight columns, so
+    // whitespace-splitting gives l = 310000 and σ = 100 as the intensity.
+    const loaded = loadReflectionDataset("   1   2   310000.00  100.00   1\n", structure, "ds", "x.hkl");
+    expect(loaded.format).toBe("shelx");
+    expect(loaded.dataset.reflections[0]).toEqual({ h: 1, k: 2, l: 3, iObs: 10000, sigma: 100 });
+    // What the generic splitter returns for the same row — the bug, pinned.
+    expect(parseHkl("   1   2   310000.00  100.00   1\n")[0]).toEqual({ h: 1, k: 2, l: 310000, iObs: 100, sigma: 1 });
+  });
+
+  it("takes .fcf intensities from the loop header, not by column position", () => {
+    // LIST 4 writes F²calc BEFORE F²meas, so columns 4-6 are calc, meas, sigma:
+    // reading positionally makes the calculated intensity the observation.
+    const text = [
+      "data_x",
+      "loop_",
+      "_refln_index_h",
+      "_refln_index_k",
+      "_refln_index_l",
+      "_refln_F_squared_calc",
+      "_refln_F_squared_meas",
+      "_refln_F_squared_sigma",
+      "_refln_observed_status",
+      "   1   2   3  950.00  1000.00  20.00 o",
+    ].join("\n");
+    const loaded = loadReflectionDataset(text, structure, "ds", "x.fcf");
+    expect(loaded.format).toBe("fcf");
+    expect(loaded.dataset.reflections[0]).toEqual({ h: 1, k: 2, l: 3, iObs: 1000, sigma: 20 });
+  });
+
+  it("still reads a hand-edited free-format .hkl", () => {
+    const loaded = loadReflectionDataset("1 0 0 253.71 3.42\n2 0 0 118.06 2.90\n", structure, "ds", "x.hkl");
+    expect(loaded.kept).toBe(2);
+    expect(loaded.dataset.reflections[0]!.iObs).toBeCloseTo(253.71, 6);
+  });
+
+  it("leaves a plain h k l I σ list on the generic reader", () => {
+    const loaded = loadReflectionDataset("1 0 0 253.71 3.42\n", structure, "ds", "peaks.txt");
+    expect(loaded.format).toBe("list");
+    expect(loaded.dataset.reflections[0]!.iObs).toBeCloseTo(253.71, 6);
+  });
 });

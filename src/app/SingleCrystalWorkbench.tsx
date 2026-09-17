@@ -51,7 +51,7 @@ import { card as themeCard, color, mono, fz, uppercaseLabel, secondaryButton, sp
 // Lazy so three.js stays out of the main bundle until the 3D view is opened.
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 
-const DATA_ACCEPT = ".xye,.xy,.dat,.txt,.gr,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,text/plain";
+const DATA_ACCEPT = ".xye,.xy,.dat,.txt,.gr,.sgr,.fgr,.sq,.fq,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,text/plain";
 const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
 const noop = (): void => {};
 

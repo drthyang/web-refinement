@@ -15,7 +15,7 @@ import { buildSpaceGroup } from "@/core/crystal/spaceGroups";
 import { generateMagneticCandidatesForK } from "@/core/magnetic/magneticGroups";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { refine } from "@/core/refinement/engine";
-import { buildMpdfProblem, buildMpdfSpec, mpdfComponents, MPDF_STAGE_KINDS } from "@/core/workflow/mpdf";
+import { buildMpdfProblem, buildMpdfSpec, mpdfComponents, unsupportedMpdfK, unsupportedMpdfModel, MPDF_STAGE_KINDS } from "@/core/workflow/mpdf";
 
 const IDENTITY_OP: SymmetryOperation = { rotation: IDENTITY3, translation: [0, 0, 0], xyz: "x,y,z" };
 
@@ -264,5 +264,39 @@ describe("mPDF co-refinement round trip", () => {
     expect(Math.abs(result.parameters["mom_Mn1_0"]!)).toBeCloseTo(MOMENT, 3);
     expect(result.parameters["pdfScale"]!).toBeCloseTo(1, 4);
     expect(result.agreement.rWeighted ?? 1).toBeLessThan(1e-4);
+  });
+});
+
+/**
+ * The spin field is a periodic box (`expandSpinField`). An incommensurate k has
+ * none: `magneticSupercell` returns 1 for such a component, so the box silently
+ * becomes the parent cell and the modulation freezes at its n = 0 snapshot —
+ * a wrong magnetic G(r) that looks entirely plausible. Refuse it instead.
+ */
+describe("mPDF refuses a k it cannot represent", () => {
+  it("accepts commensurate k (including the long-period ones) and rejects irrational ones", () => {
+    expect(unsupportedMpdfK([0, 0, 0])).toBeNull();
+    expect(unsupportedMpdfK([0, 0, 0.5])).toBeNull();
+    expect(unsupportedMpdfK([1 / 3, 1 / 3, 0])).toBeNull();
+    expect(unsupportedMpdfK([0, 0, 1 / 12])).toBeNull();
+    // Irrational, and rational past the denominator-12 box limit.
+    expect(unsupportedMpdfK([0.137, 0, 0])).toMatch(/incommensurate/);
+    expect(unsupportedMpdfK([0, 0, 1 / 13])).toMatch(/incommensurate/);
+    expect(unsupportedMpdfModel({ ...magnetic("mn"), propagation: [[0.137, 0, 0]] })).toMatch(/incommensurate/);
+  });
+
+  it("throws out of the problem builder rather than computing the parent-cell field", () => {
+    const s = structure();
+    const { pattern, params, bindings } = truthPattern();
+    const incommensurate: MagneticModel = { ...magnetic(s.id), propagation: [[0, 0, 0.137]] };
+    expect(() => buildMpdfProblem(s, incommensurate, pattern, params, bindings)).toThrow(/incommensurate/);
+    expect(() => mpdfComponents(s, incommensurate, pattern, params, bindings)).toThrow(/incommensurate/);
+  });
+
+  it("leaves a nuclear-only fit (no moments) alone whatever k says", () => {
+    const s = structure();
+    const { pattern, params, bindings } = truthPattern();
+    const noMoments: MagneticModel = { ...magnetic(s.id), propagation: [[0, 0, 0.137]], moments: [] };
+    expect(() => buildMpdfProblem(s, noMoments, pattern, params, bindings)).not.toThrow();
   });
 });

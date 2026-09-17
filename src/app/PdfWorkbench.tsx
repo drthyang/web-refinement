@@ -31,7 +31,7 @@ import {
   correlatedMotionConflict,
   zeroAdpWarning,
 } from "@/core/workflow/pdf";
-import { buildMpdfSpec, mpdfComponents } from "@/core/workflow/mpdf";
+import { buildMpdfSpec, mpdfComponents, unsupportedMpdfK, unsupportedMpdfModel } from "@/core/workflow/mpdf";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import type { MagneticModel } from "@/core/magnetic/types";
 import { isMomentParameterKind } from "@/core/refinement/types";
@@ -76,7 +76,7 @@ import { reportHtml } from "@/core/export/report";
 import { pdfReportInput, type MagneticExploration } from "@/app/reportInputs";
 import { card as themeCard, color, mono, secondaryButton, uppercaseLabel, fz, toolbarBtn, resetRangeBtn, space } from "@/app/theme";
 
-const DATA_ACCEPT = ".gr,.sgr,.sq,.fq,.dat,.txt,text/plain";
+const DATA_ACCEPT = ".gr,.sgr,.fgr,.sq,.fq,.dat,.txt,text/plain";
 const noop = (): void => {};
 const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
 
@@ -171,7 +171,13 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // and `buildMpdfSpec` is single-phase (it wraps `buildPdfSpec`, not the
   // multi-phase builder). Outside those conditions the page stays purely nuclear.
   const magneticCapable = !multiPhase && pattern.scatteringType === "neutron";
-  const spinFit = magneticCapable ? spinModel : null;
+  // A model the mPDF spin field cannot represent (an incommensurate k) is held
+  // OUT of the fit entirely rather than fitted approximately: `expandSpinField`
+  // would fall back to the parent cell and return a wrong magnetic G(r). The
+  // check is here, not only at adoption, because a reopened project or an mCIF
+  // load can put such a model into this state directly.
+  const spinBlockedReason = spinModel ? unsupportedMpdfModel(spinModel.magnetic) : null;
+  const spinFit = magneticCapable && !spinBlockedReason ? spinModel : null;
   const symModes = useMemo(() => (multiPhase ? null : buildSymmetryModes(structure)), [structure, multiPhase]);
   // An empty symmetry set (every site pinned by symmetry) cannot replace the
   // position rows — fall back to atomic (the toggle is disabled in that case).
@@ -1231,6 +1237,10 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // real-space sibling of the single-crystal F² backend.
   const magneticFit: MagneticFit = {
     agreementLabel: "Rw",
+    // The mPDF spin field is a periodic box, so an incommensurate k has nothing
+    // to sum over. The panel disables the moment fit, the ranking run, Apply and
+    // Continue, and shows this reason instead of a number.
+    unsupportedK: unsupportedMpdfK,
     refine: async (mag, momentParams, mBindings) => {
       // Only the moments move: the nuclear scaffold (and the mPDF envelope
       // rows, which include the ordScale that is exactly degenerate with |m|)
@@ -1273,11 +1283,29 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     momentParams: readonly RefinementParameter[],
     momentBindings: readonly ParameterBinding[],
   ): void {
+    const unsupported = unsupportedMpdfModel(magnetic);
+    if (unsupported) {
+      console.info(`[status] spin model NOT applied to the PDF fit — ${unsupported}`);
+      return;
+    }
     setSpinModel({ magnetic, params: momentParams, bindings: momentBindings });
     console.info(
       `[status] spin model applied to the PDF fit — ${momentParams.length} moment parameter${momentParams.length === 1 ? "" : "s"} added. ` +
       "Refine now fits nuclear + magnetic G(r) together.",
     );
+  }
+
+  /** "Show on refinement pattern" — a preview of the model's own moments (no
+   *  refinable rows). Same commensurability gate as {@link adoptSpinModel}. */
+  function previewSpinModel(magnetic: MagneticModel | null): void {
+    if (magnetic) {
+      const unsupported = unsupportedMpdfModel(magnetic);
+      if (unsupported) {
+        console.info(`[status] spin model NOT shown on the PDF fit — ${unsupported}`);
+        return;
+      }
+    }
+    setSpinModel(magnetic ? { magnetic, params: [], bindings: [] } : null);
   }
 
   return (
@@ -1819,7 +1847,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           // field so the magnetic curve appears on the fit plot, but no
           // refinable rows are added — a different model's moment rows would
           // not match the bindings we already hold. "Continue" adds the rows.
-          onApply={(m) => setSpinModel(m ? { magnetic: m, params: [], bindings: [] } : null)}
+          onApply={previewSpinModel}
           onContinue={(m, mp, mb) => { adoptSpinModel(m, mp, mb); onStep?.(0); }}
           onReportModel={publishExploration}
         />

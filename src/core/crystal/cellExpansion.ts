@@ -148,6 +148,16 @@ export function displayMoment(
 /**
  * Magnetic supercell size for a commensurate k: Nᵢ = smallest integer making
  * Nᵢ·kᵢ an integer (the denominator of kᵢ). k = 0 → (1,1,1); k = (0,0,½) → (1,1,2).
+ *
+ * **Incommensurate k has no supercell, and this returns 1 for that component**
+ * — the box then degenerates to the parent cell, where the modulation is
+ * frozen at its n = 0 value. That is deliberate for the mCIF/viewer path (a
+ * parent-cell snapshot is the honest thing to draw and export for a k with no
+ * finite cell), but it is WRONG as a spin field to compute from: every caller
+ * that sums over the box — {@link expandSpinField} and the mPDF workflow — must
+ * first reject the k with `classifyPropagation(k).kind === "incommensurate"`,
+ * because the parent-cell field is a different magnetic structure, not an
+ * approximation of the modulated one.
  */
 export function magneticSupercell(k: Vec3): [number, number, number] {
   const denom = (v: number): number => {
@@ -628,6 +638,10 @@ export function expandSpinField(
   structure: StructureModel,
   magnetic: MagneticModel,
 ): MagneticSupercellExpansion {
+  // Callers own the commensurability check: an incommensurate k collapses the
+  // box to the parent cell (see {@link magneticSupercell}), which is a
+  // DIFFERENT spin field, not a coarse one. `core/workflow/mpdf.ts` refuses
+  // such a k before it reaches here.
   const k = magnetic.propagation[0] ?? [0, 0, 0];
   return expandMagneticBox(structure, magnetic, k, magneticSupercell(k));
 }

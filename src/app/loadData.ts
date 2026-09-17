@@ -17,6 +17,7 @@ import { powderParameters, singleCrystalParameters } from "@/examples/synthetic"
 import { powderCurves } from "@/core/workflow/powder";
 import { singleCrystalComparison } from "@/core/workflow/singleCrystal";
 import { parseHklRows } from "@/parsers/hkl";
+import { isCifReflectionLoop, parseFcf, parseShelxHkl, type ShelxHklParse } from "@/parsers/shelxHkl";
 import { parseReflectionList } from "@/parsers/reflectionList";
 import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
 import { dSpacing } from "@/core/crystal/unitCell";
@@ -107,7 +108,7 @@ export interface LoadedReflections {
   readonly dropped: number;
   /** `0 0 0` forward-beam rows skipped (nuclear role only; the all-zero SHELX terminator is not counted). */
   readonly forwardBeamSkipped: number;
-  readonly format: "gsas" | "shelx" | "fullprof";
+  readonly format: "gsas" | "shelx" | "fcf" | "fullprof" | "list";
 }
 
 export interface LoadReflectionOptions {
@@ -121,6 +122,12 @@ export function isGsasReflectionList(text: string): boolean {
   return /Reflection List|Fo\*\*2|Fc\*\*2/i.test(text);
 }
 
+/** Lower-case final extension of a filename ("" when it has none). */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
+}
+
 /**
  * Build a single-crystal dataset from a reflection file, using observed |F|² as
  * the intensity. GSAS-II `*_hkl.dat` lists are multi-phase (the histogram sees
@@ -128,6 +135,14 @@ export function isGsasReflectionList(text: string): boolean {
  * the file's d-spacing **in this structure's cell** — dropping impurity-phase
  * reflections the loaded model cannot describe. A plain `h k l Iobs [σ]` list is
  * taken as-is (no d column to filter on).
+ *
+ * Format routing is deliberate, not one permissive whitespace splitter: a SHELX
+ * `.hkl` is FIXED-COLUMN (`3I4,2F8.2,I4`, so an intensity ≥ 10000.00 butts
+ * against `l` and whitespace-splitting silently reads σ as the intensity) and a
+ * `.fcf` is a CIF loop whose column ORDER is declared in its header (LIST 4
+ * writes F²calc before F²meas, so taking columns 4–6 positionally reads the
+ * calculated intensity as observed). Each goes to its own reader; the generic
+ * splitter keeps the plain `h k l I σ` lists and hand-edited files.
  */
 export function loadReflectionDataset(
   text: string,
@@ -170,13 +185,32 @@ export function loadReflectionDataset(
       format: "gsas",
     };
   }
+  // `.fcf` is recognized by content (the CIF reflection loop) so a renamed
+  // export still reads correctly; `.hkl` has no content signature that
+  // distinguishes it from a plain list, so it goes by extension.
+  const shelx: { parse: ShelxHklParse; format: "shelx" | "fcf" } | null =
+    isCifReflectionLoop(text) ? { parse: parseFcf(text, { skipForwardBeam }), format: "fcf" }
+    : extensionOf(name) === "hkl" ? { parse: parseShelxHkl(text, { skipForwardBeam }), format: "shelx" }
+    : null;
+  if (shelx) {
+    const reflections: SingleCrystalReflection[] = shelx.parse.reflections.map((r) => ({
+      h: r.h, k: r.k, l: r.l, iObs: r.intensity, sigma: r.sigma,
+    }));
+    return {
+      dataset: { id: datasetId, name, radiation: { kind: "neutron" as const, wavelength: 1.54 }, reflections },
+      kept: reflections.length,
+      dropped: shelx.parse.skipped,
+      forwardBeamSkipped: shelx.parse.forwardBeamSkipped,
+      format: shelx.format,
+    };
+  }
   const { reflections, forwardBeamSkipped } = parseHklRows(text, { skipForwardBeam });
   return {
     dataset: { id: datasetId, name, radiation: { kind: "neutron" as const, wavelength: 1.54 }, reflections },
     kept: reflections.length,
     dropped: 0,
     forwardBeamSkipped,
-    format: "shelx",
+    format: "list",
   };
 }
 

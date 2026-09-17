@@ -472,9 +472,10 @@ Each rule came from a failed or missing gate, and each still guides new work.
   convention: m = g·S, with g-factors of 1.
 - **Commensurate, single-k, single-phase mPDF.** The spin field is an explicit
   magnetic box, so k must be 0 or commensurate. Incommensurate fields need the
-  `fourierMoment.ts` route (§5). An incommensurate k, or a denominator above
-  12, is not rejected yet: the box silently stays one parent cell, so the
-  magnetic G(r) is wrong.
+  `fourierMoment.ts` route (§5). Such a k — including one whose denominator
+  exceeds 12, which `classifyPropagation` also calls incommensurate — is now
+  refused before the problem is built (`unsupportedMpdfK`), instead of silently
+  collapsing the box to one parent cell and returning a wrong magnetic G(r).
 - **Local optimizer.** LM needs a reasonable starting model. Multi-start
   mitigates moment-sign and shape-versus-scale minima, but it is not a global
   search.

@@ -122,6 +122,14 @@ export interface MagneticFit {
   ) => Promise<{ values: Record<string, number>; agreement: number | null }>;
   /** Agreement readout label, e.g. "wR" (powder) or "R1" (single crystal). */
   agreementLabel: string;
+  /**
+   * Why this backend cannot model the applied k, or null when it can. The
+   * panel then disables every action that would produce a number — the moment
+   * fit, the ranking run, "show on pattern", "continue" — and shows the reason
+   * instead. Bragg-data backends accept any k; the mPDF backend uses this to
+   * refuse an incommensurate one, whose spin field has no periodic box.
+   */
+  unsupportedK?: (k: Vec3) => string | null;
 }
 
 /**
@@ -694,7 +702,11 @@ export function KSearchPanel({
     setRefineWR(null);
   }, [fitRange?.min, fitRange?.max, pattern]);
   const canPowderRefine = !!(pattern && nuclearParams && nuclearBindings && profile);
-  const canRefine = !!(magBuild && magBuild.params.length > 0 && (magneticFit || canPowderRefine));
+  // A k the fit backend cannot model at all (mPDF: incommensurate). Everything
+  // that would report a number against the data is held back — the symmetry
+  // analysis above stays live, since it is valid for any k.
+  const kUnsupported = magneticFit?.unsupportedK?.(k) ?? null;
+  const canRefine = !!(magBuild && magBuild.params.length > 0 && (magneticFit || canPowderRefine)) && !kUnsupported;
   const agreementLabel = magneticFit?.agreementLabel ?? "wR";
 
   // What this page shows right now, for the header's report (Export ▾ →
@@ -772,7 +784,7 @@ export function KSearchPanel({
     },
     [magneticFit, pattern, nuclearParams, nuclearBindings, profile, fitStructure, structure, fitRange, extraPhases],
   );
-  const canFit = !!magneticFit || canPowderRefine;
+  const canFit = (!!magneticFit || canPowderRefine) && !kUnsupported;
 
   // ── Rank the candidates against the data ─────────────────────────────────
   // Every moment-allowing candidate is fitted the same way "Refine moments"
@@ -1103,6 +1115,12 @@ export function KSearchPanel({
             <span style={{ fontSize: 12, color: theme.noteInk }}>edited — press Enter or Set k</span>
           )}
         </div>
+        {kUnsupported && (
+          <p style={{ ...help, marginTop: 8, color: theme.noteInk }} role="status">
+            <b>This k cannot be fitted against the loaded data.</b> {kUnsupported} The symmetry
+            analysis below still applies — only the fit against the data is held back.
+          </p>
+        )}
         {/* Detected residual peaks: the quantitative input to the k-search.
             Each row has a numbered tick (#n) in the pattern preview; criteria
             (and per-peak checkboxes) decide what feeds the search. */}
@@ -1828,24 +1846,30 @@ export function KSearchPanel({
                 )}
                 {onApply && (
                   <button
-                    style={{ ...btn, marginTop: 0, background: "#fff", color: theme.primary, border: `1px solid ${theme.primary}` }}
+                    style={{ ...btn, marginTop: 0, background: "#fff", color: theme.primary, border: `1px solid ${theme.primary}`, ...(kUnsupported ? { opacity: 0.5 } : {}) }}
                     onClick={() => onApply(applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps))}
-                    title="Put this candidate on the refinement page: it joins the calculated pattern with its moments HELD at the amplitudes shown here, so Refine fits the nuclear parameters against nuclear + magnetic. Continue instead to add the moment rows and refine them too."
+                    disabled={!!kUnsupported}
+                    title={kUnsupported ?? "Put this candidate on the refinement page: it joins the calculated pattern with its moments HELD at the amplitudes shown here, so Refine fits the nuclear parameters against nuclear + magnetic. Continue instead to add the moment rows and refine them too."}
                   >
                     Show on refinement pattern
                   </button>
                 )}
                 {onContinue && (
                   <button
-                    style={{ ...btn, marginTop: 0 }}
+                    style={{ ...btn, marginTop: 0, ...(kUnsupported ? { opacity: 0.5 } : {}) }}
                     onClick={() => onContinue(
                       applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps),
                       magBuild.params.map((p) => ({ ...p, value: resolvedAmps[p.id] ?? p.value, initialValue: resolvedAmps[p.id] ?? p.value })),
                       magBuild.bindings,
                     )}
+                    disabled={!!kUnsupported}
+                    {...(kUnsupported ? { title: kUnsupported } : {})}
                   >
                     Continue in refinement page →
                   </button>
+                )}
+                {kUnsupported && (
+                  <span style={{ fontSize: 12, color: theme.noteInk }}>this k is not fittable against the loaded data — see above</span>
                 )}
                 <span style={{ fontSize: 12, color: theme.secondary }} title="The HTML report (Export ▾ → Report) includes the candidate shown here, labelled as such, until you Continue.">
                   report: Export ▾

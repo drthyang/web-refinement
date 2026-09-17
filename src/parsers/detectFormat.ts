@@ -147,9 +147,17 @@ export function detectDataFormat(input: DetectInput): DetectedFormat {
   // A PDFgui fit export (`.fgr`) also routes there; the .fgr reader (not the
   // generic one) then owns its column semantics.
   const isFgr = looksLikeFgr(text, input.filename);
+  // A SHELX `.hkl`/`.fcf` is reflection data by name. The content heuristic
+  // alone is not enough for either: HKLF 4 is fixed-column, so rows with an
+  // intensity ≥ 10000.00 whitespace-split into a huge `l` that fails the
+  // small-Miller-index test, and an `.fcf` carries CIF tag lines between its
+  // numeric rows — a file of strong reflections can slip through as powder.
+  const isReflectionFile = /\.(hkl|fcf)$/i.test(input.filename);
   const dataType: DataType =
     override?.dataType ??
-    (isFgr || looksLikePdf(text, input.filename) ? "pdf" : looksLikeReflectionList(text) ? "single-crystal" : "powder");
+    (isFgr || looksLikePdf(text, input.filename) ? "pdf"
+      : isReflectionFile || looksLikeReflectionList(text) ? "single-crystal"
+      : "powder");
 
   if (dataType === "pdf") {
     return {
@@ -169,7 +177,7 @@ export function detectDataFormat(input: DetectInput): DetectedFormat {
       dataType,
       xUnit: "twoTheta", // not used for reflection data
       radiation: instrument?.kind === "tof" ? { kind: "neutron-tof" } : radiationFor("twoTheta", instrument),
-      source: override?.dataType ? "override" : looksLikeReflectionList(text) ? "header" : "heuristic",
+      source: override?.dataType ? "override" : isReflectionFile ? "filename" : looksLikeReflectionList(text) ? "header" : "heuristic",
       confidence: "high",
       note: "Reflection list (h k l I) — refined as single-crystal / extracted intensities.",
     };

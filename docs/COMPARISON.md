@@ -97,7 +97,7 @@ in-app flows.
 
 | Area | This app | Mature packages still add |
 | --- | --- | --- |
-| Data types | CW + **TOF** X-ray/neutron powder; single-crystal F² (`.int`, `.hkl`); **PDF** `G(r)` (`.gr`/`.sq`/`.fq`) | electron diffraction |
+| Data types | CW + **TOF** X-ray/neutron powder; single-crystal F² (`.hkl`/`.fcf`/`.int`); **PDF** `G(r)` (`.gr`/`.sq`/`.fq`/`.fgr`) | electron diffraction |
 | Profile | Gaussian / pseudo-Voigt / **TCH** + FCJ asymmetry; TOF back-to-back exponential; Chebyshev / Fourier / power backgrounds; March-Dollase PO; displacement / transparency / absorption / roughness corrections; Stephens microstrain, uniaxial size | spherical-harmonic texture, Ikeda–Carpenter TOF shape |
 | Symmetry | **all 230 built-in tables** + CIF/mCIF operations; Wyckoff/site constraints; absences; magnetic subgroup enumeration with **BNS/OG labels**; isotropy + t-subgroup (Bärnighausen) lattices | superspace (3+d), full 1651 magnetic tables incl. type IV |
 | Engine | Levenberg-Marquardt (SVD, esds, correlations), bounds/ties/restraints, staged controller, **multi-start**, worker pool, WebGPU f32 kernels (on by default where available) | full-Hessian options, rigid bodies, restraint libraries |

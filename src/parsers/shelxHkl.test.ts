@@ -34,6 +34,33 @@ describe("parseShelxHkl (HKLF 4)", () => {
     expect(reflections).toHaveLength(2);
     expect(reflections[0]!.intensity).toBeCloseTo(253.71, 6);
   });
+
+  it("reads an intensity that fills its F8.2 field and butts against l", () => {
+    // The whole point of reading by column: "   1   2   310000.00  100.00   1"
+    // whitespace-splits into l = 310000, I = 100, σ = 1.
+    const { reflections } = parseShelxHkl("   1   2   310000.00  100.00   1\n");
+    expect(reflections[0]).toEqual({ h: 1, k: 2, l: 3, intensity: 10000, sigma: 100 });
+  });
+
+  it("keeps the forward beam by default and drops it on request", () => {
+    // A 0 0 0 row WITH intensity is the forward beam (nuclear) or the satellite
+    // at k (fundamental-indexed magnetic); the all-zero row below it ends the data.
+    const text = [
+      "   0   0   0  120.00    1.00   1",
+      "   1   0   0  253.71    3.42   1",
+      "   0   0   0    0.00    0.00   0",
+    ].join("\n");
+    expect(parseShelxHkl(text).reflections).toHaveLength(2);
+    const dropped = parseShelxHkl(text, { skipForwardBeam: true });
+    expect(dropped.reflections).toHaveLength(1);
+    expect(dropped.forwardBeamSkipped).toBe(1);
+  });
+
+  it("ignores comment lines instead of counting them as unreadable rows", () => {
+    const { reflections, skipped } = parseShelxHkl("! exported by hand\n   1   0   0  253.71    3.42\n");
+    expect(reflections).toHaveLength(1);
+    expect(skipped).toBe(0);
+  });
 });
 
 describe("parseFcf", () => {
@@ -53,6 +80,23 @@ describe("parseFcf", () => {
     const { reflections } = parseFcf(text);
     expect(reflections).toHaveLength(2);
     expect(reflections[0]).toEqual({ h: 1, k: 0, l: 0, intensity: 253.71, sigma: 3.42 });
+  });
+
+  it("drops a 0 0 0 row on request (a CIF loop has no terminator row)", () => {
+    const text = [
+      "loop_",
+      "_refln_index_h",
+      "_refln_index_k",
+      "_refln_index_l",
+      "_refln_F_squared_meas",
+      "_refln_F_squared_sigma",
+      " 0 0 0 120.00 1.00",
+      " 1 0 0 253.71 3.42",
+    ].join("\n");
+    expect(parseFcf(text).reflections).toHaveLength(2);
+    const dropped = parseFcf(text, { skipForwardBeam: true });
+    expect(dropped.reflections).toHaveLength(1);
+    expect(dropped.forwardBeamSkipped).toBe(1);
   });
 
   it("squares F and propagates σ for a LIST 6 (F) loop", () => {

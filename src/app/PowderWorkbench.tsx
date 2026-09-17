@@ -1250,7 +1250,7 @@ export function PowderWorkbench({
       label: "Structure",
       help: "Load a crystal structure from a CIF. Up to two phases are supported — load a second CIF to add an impurity or secondary phase.",
       loadLabel: ownStructure ? "Add CIF…" : "Load CIF…",
-      accept: ".cif,text/plain",
+      accept: ".cif,.mcif,text/plain",
       onFile: ownStructure ? onAddPhase : onLoadCif,
       muted: !hasContent,
       chip: session.extraPhases.length > 0 ? `✓ ${session.extraPhases.length + 1} phases` : "✓ parsed",
@@ -1283,7 +1283,7 @@ export function PowderWorkbench({
     {
       label: "Data",
       help: "Loads most powder and single-crystal formats from the major facilities (POWGEN/GSAS, FullProf, ILL, .xye, .hkl, …). If your file isn't recognized, contact the author.",
-      loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.hkl,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
+      loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.sgr,.fgr,.sq,.fq,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
       muted: !hasContent,
       chip: isSynthetic ? "⚠ synthetic" : "✓ loaded",
       chipTone: isSynthetic ? "warn" : "ok",

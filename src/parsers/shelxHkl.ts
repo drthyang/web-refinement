@@ -6,11 +6,20 @@
  *
  * HKLF 4 is a fixed-column format — `3I4, 2F8.2, I4` = h,k,l, F², σ(F²), batch —
  * NOT free whitespace: a batch number can butt against σ with no space, and a
- * blank field is a real zero. We read by column, and fall back to whitespace
- * splitting only for rows that clearly are not fixed-width (e.g. hand-edited
- * exports), so both the canonical file and lax variants load. A line whose
- * indices are all zero terminates the data block (SHELX convention); trailing
- * batch/scale directives after it are ignored.
+ * blank field is a real zero. Reading it by whitespace is not a lax variant of
+ * this, it is a DIFFERENT parse: an intensity of 10000.00 or more fills its
+ * F8.2 field and butts against `l`, so `   1   2   310000.00  100.00   1`
+ * splits as l = 310000 and I = 100 — the σ column silently becomes the
+ * intensity. We read by column, and fall back to whitespace splitting only for
+ * rows that clearly are not fixed-width (e.g. hand-edited exports), so both the
+ * canonical file and lax variants load.
+ *
+ * The `0 0 0` row. An all-zero line with no intensity terminates the data block
+ * (SHELX convention); trailing batch/scale directives after it are ignored. A
+ * `0 0 0` row that CARRIES an intensity is the forward beam in a nuclear file
+ * (not a Bragg reflection) but the satellite at k itself in a
+ * fundamental-indexed magnetic file — so dropping it is opt-in
+ * (`skipForwardBeam`), the same contract `parsers/hkl.ts` offers.
  *
  * References: G. M. Sheldrick, "A short history of SHELX", Acta Cryst. A64
  * (2008) 112; SHELX-2018 manual, HKLF instruction and .fcf LIST 4.
@@ -18,12 +27,24 @@
 
 import type { Reflection2 } from "@/core/diffraction/merge";
 
+export interface ShelxParseOptions {
+  /** Drop `0 0 0` rows that carry an intensity (the forward beam). Default false. */
+  readonly skipForwardBeam?: boolean;
+}
+
 export interface ShelxHklParse {
   readonly reflections: Reflection2[];
   /** True when at least one row carried a batch number ≠ 1 (multi-scan data). */
   readonly hasBatches: boolean;
   /** Rows skipped as unparseable (diagnostic; 0 for a clean file). */
   readonly skipped: number;
+  /** `0 0 0` rows dropped by `skipForwardBeam` (the all-zero terminator is not counted). */
+  readonly forwardBeamSkipped: number;
+}
+
+/** True when the text is a CIF reflection loop (a SHELX `.fcf`, LIST 4/6). */
+export function isCifReflectionLoop(text: string): boolean {
+  return /^\s*_refln[_.]index_h\b/im.test(text);
 }
 
 function fixedField(line: string, start: number, width: number): number | null {
@@ -63,20 +84,25 @@ function parseHklfLine(line: string): (Reflection2 & { batch: number }) | null {
 }
 
 /** Parse SHELX HKLF-4 intensity data. Stops at the `0 0 0` terminator line. */
-export function parseShelxHkl(text: string): ShelxHklParse {
+export function parseShelxHkl(text: string, opts: ShelxParseOptions = {}): ShelxHklParse {
   const reflections: Reflection2[] = [];
   let hasBatches = false;
   let skipped = 0;
+  let forwardBeamSkipped = 0;
   for (const rawLine of text.split(/\r?\n/)) {
-    if (rawLine.trim() === "") continue;
+    const trimmed = rawLine.trim();
+    if (trimmed === "" || trimmed.startsWith("#") || trimmed.startsWith("!")) continue;
     const row = parseHklfLine(rawLine);
     if (!row) { skipped++; continue; }
-    // The all-zero index line terminates HKLF data.
-    if (row.h === 0 && row.k === 0 && row.l === 0) break;
+    if (row.h === 0 && row.k === 0 && row.l === 0) {
+      // End-of-data terminator: all zero, no σ — nothing after it is data.
+      if (row.intensity === 0 && row.sigma <= 0) break;
+      if (opts.skipForwardBeam) { forwardBeamSkipped++; continue; }
+    }
     if (row.batch !== 1) hasBatches = true;
     reflections.push({ h: row.h, k: row.k, l: row.l, intensity: row.intensity, sigma: row.sigma, ...(row.batch !== 1 ? { batch: row.batch } : {}) });
   }
-  return { reflections, hasBatches, skipped };
+  return { reflections, hasBatches, skipped, forwardBeamSkipped };
 }
 
 /**
@@ -85,10 +111,11 @@ export function parseShelxHkl(text: string): ShelxHklParse {
  * `_refln_F_meas` for LIST 6, squared on read). Column order is taken from the
  * loop header, so exports with reordered columns still load.
  */
-export function parseFcf(text: string): ShelxHklParse {
+export function parseFcf(text: string, opts: ShelxParseOptions = {}): ShelxHklParse {
   const lines = text.split(/\r?\n/);
   const reflections: Reflection2[] = [];
   let skipped = 0;
+  let forwardBeamSkipped = 0;
 
   // Find a loop_ whose headers include the reflection index tags.
   for (let i = 0; i < lines.length; i++) {
@@ -124,6 +151,9 @@ export function parseFcf(text: string): ShelxHklParse {
       const rawI = Number(parts[iCol]);
       const rawS = sCol >= 0 ? Number(parts[sCol]) : 0;
       if (![h, k, l, rawI].every(Number.isFinite)) { skipped++; continue; }
+      // A CIF loop has no terminator row, so every `0 0 0` here is a forward
+      // beam (nuclear) or the satellite at k (fundamental-indexed magnetic).
+      if (h === 0 && k === 0 && l === 0 && opts.skipForwardBeam) { forwardBeamSkipped++; continue; }
       // LIST 6 gives F and σ(F); convert to F² with error propagation σ(F²)=2Fσ(F).
       const intensity = squared ? rawI : rawI * rawI;
       const sigma = squared ? (Number.isFinite(rawS) ? rawS : 0) : 2 * Math.abs(rawI) * (Number.isFinite(rawS) ? rawS : 0);
@@ -131,5 +161,5 @@ export function parseFcf(text: string): ShelxHklParse {
     }
     if (reflections.length) break;
   }
-  return { reflections, hasBatches: false, skipped };
+  return { reflections, hasBatches: false, skipped, forwardBeamSkipped };
 }

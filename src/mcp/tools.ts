@@ -41,7 +41,7 @@ import {
   PDF_STAGE_KINDS,
 } from "@/core/workflow/pdf";
 import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
-import { buildMpdfSpec, mpdfComponents, MPDF_STAGE_KINDS } from "@/core/workflow/mpdf";
+import { buildMpdfSpec, mpdfComponents, unsupportedMpdfModel, MPDF_STAGE_KINDS } from "@/core/workflow/mpdf";
 import { computeAgreementFactors, excludedPointMask, weightsFromSigma } from "@/core/refinement/factors";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
 import { generateReflections } from "@/core/diffraction/reflections";
@@ -73,6 +73,7 @@ import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
 import { writeFullProfInt } from "@/core/export/fullprofInt";
 import { parseHklRows } from "@/parsers/hkl";
+import { isCifReflectionLoop, parseFcf, parseShelxHkl } from "@/parsers/shelxHkl";
 import {
   mergeToMagneticSupercell,
   expandStructureToSupercell,
@@ -642,10 +643,18 @@ export async function refine_magnetic_powder(args: {
 }
 
 /**
- * Parse single-crystal integrated intensities (FullProf `.int` h k l I σ, or a
- * SHELX HKLF4 `.hkl`) into a SingleCrystalDataset — the entry point for the
- * single-crystal and joint co-refinement paths. Detection is by content; GSAS
- * reflection lists (which need a cell to d-filter) are out of scope here.
+ * Parse single-crystal integrated intensities (FullProf `.int`, SHELX HKLF 4
+ * `.hkl`, a `.fcf` CIF reflection loop, or a plain `h k l I σ` list) into a
+ * SingleCrystalDataset — the entry point for the single-crystal and joint
+ * co-refinement paths. GSAS reflection lists (which need a cell to d-filter)
+ * are out of scope here.
+ *
+ * `.int` and `.fcf` are recognized by content. **HKLF 4 is recognized only from
+ * `name`**, because nothing in its rows distinguishes it from a free-format
+ * list — and the two parse differently: HKLF 4 is fixed-column (`3I4,2F8.2,I4`),
+ * so a whitespace split of a row whose F² ≥ 10000.00 fills its field reads σ as
+ * the intensity. Pass the filename for a `.hkl`.
+ *
  * A `0 0 0` row is dropped by default (the forward beam); pass
  * skipForwardBeam:false for a fundamental-indexed magnetic file, whose `0 0 0`
  * is the satellite at k itself.
@@ -656,7 +665,7 @@ export function parse_single_crystal_data(args: { text: string; name?: string; i
   dropped: number;
   /** `0 0 0` forward-beam rows dropped (the all-zero SHELX terminator is never counted). */
   forwardBeamSkipped: number;
-  format: "fullprof" | "shelx";
+  format: "fullprof" | "shelx" | "fcf" | "list";
   /** Propagation vectors declared in the file ([] for a plain nuclear file). */
   kVectors: [number, number, number][];
   /** Line-numbered {line, expected, found} diagnostics for skipped rows ([] when clean). */
@@ -681,13 +690,31 @@ export function parse_single_crystal_data(args: { text: string; name?: string; i
       problems: parsed.problems.map((p) => ({ ...p })),
     };
   }
+  const isHkl = /\.hkl$/i.test(args.name ?? "");
+  if (isHkl || isCifReflectionLoop(args.text)) {
+    const parsed = isHkl && !isCifReflectionLoop(args.text)
+      ? parseShelxHkl(args.text, { skipForwardBeam })
+      : parseFcf(args.text, { skipForwardBeam });
+    return {
+      dataset: {
+        id, name, radiation: { kind: "neutron", wavelength: 1.54 },
+        reflections: parsed.reflections.map((r) => ({ h: r.h, k: r.k, l: r.l, iObs: r.intensity, sigma: r.sigma })),
+      },
+      kept: parsed.reflections.length,
+      dropped: parsed.skipped,
+      forwardBeamSkipped: parsed.forwardBeamSkipped,
+      format: isHkl && !isCifReflectionLoop(args.text) ? "shelx" : "fcf",
+      kVectors: [],
+      problems: [],
+    };
+  }
   const { reflections, forwardBeamSkipped } = parseHklRows(args.text, { skipForwardBeam });
   return {
     dataset: { id, name, radiation: { kind: "neutron", wavelength: 1.54 }, reflections },
     kept: reflections.length,
     dropped: 0,
     forwardBeamSkipped,
-    format: "shelx",
+    format: "list",
     kVectors: [],
     problems: [],
   };
@@ -1253,6 +1280,11 @@ export function build_mpdf_model(args: {
   freeCount: number;
   warnings: string[];
 } {
+  // Commensurate-only (see `workflow/mpdf.ts`): an incommensurate k has no
+  // periodic spin box, and the expander would quietly fall back to the parent
+  // cell — a different magnetic structure, fitted and reported as this one.
+  const unsupported = unsupportedMpdfModel(args.magnetic);
+  if (unsupported) throw new Error(`build_mpdf_model: ${unsupported}`);
   const spec = buildMpdfSpec(args.structure, args.pattern, {
     magnetic: args.magnetic,
     params: args.parameters,
@@ -1332,6 +1364,8 @@ export async function refine_mpdf(args: {
   warnings: string[];
   parallel: { workers: number } | null;
 }> {
+  const unsupported = unsupportedMpdfModel(args.magnetic);
+  if (unsupported) throw new Error(`refine_mpdf: ${unsupported}`);
   const options = { maxIterations: args.maxIterations ?? 30 };
 
   // Parallel fast path (flat fits): the Jacobian fans out over the node
@@ -1428,6 +1462,8 @@ export function compute_mpdf_components(args: {
   /** Peak |magnetic| G(r) in the window — 0 means no magnetic term at all. */
   magneticPeak: number;
 } {
+  const unsupported = unsupportedMpdfModel(args.magnetic);
+  if (unsupported) throw new Error(`compute_mpdf_components: ${unsupported}`);
   const c = mpdfComponents(args.structure, args.magnetic, args.pattern, args.parameters, args.bindings, args.fitRange);
   const nuclearPeak = peakAbs(c.yNuclear);
   const magneticPeak = peakAbs(c.yMagnetic);

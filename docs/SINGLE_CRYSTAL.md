@@ -76,6 +76,17 @@ Both paths then apply parameters with
   `.int` export writes the pair back.
 - SHELX-style `h k l I [σ]` lists ([hkl.ts](../src/parsers/hkl.ts)) and GSAS-II
   reflection lists filtered to the loaded cell.
+- SHELX **HKLF 4** fixed-column files (`3I4,2F8,I4` → h k l F² σ batch), with a
+  whitespace fallback for hand-edited files and the `0 0 0` terminator honoured,
+  and `.fcf` / CIF reflection loops (LIST 4 F², and LIST 6 F squared with σ
+  propagated) whose column order comes from the loop header
+  ([shelxHkl.ts](../src/parsers/shelxHkl.ts)).
+- `loadReflectionDataset` routes by content: a `.fcf` by its CIF reflection loop,
+  a `.hkl` by extension, everything else to the free-form reader. The split is
+  not cosmetic — whitespace-splitting an HKLF 4 row reads σ as the intensity once
+  F² ≥ 10000.00 fills its `F8.2` field, and taking `.fcf` columns positionally
+  reads LIST 4's F²calc as the observation
+  ([loadData.test.ts](../src/app/loadData.test.ts)).
 
 **Approximate**
 - No golden covers the k-vector header, which follows the FullProf manual and
@@ -85,9 +96,6 @@ Both paths then apply parameters with
   enters L, Pol and y.
 
 **Not yet**
-- Wiring the tested fixed-column HKLF 4 and `.fcf` readers to a loader
-  ([shelxHkl.ts](../src/parsers/shelxHkl.ts)); the free-form reader drops batch
-  numbers and `.fcf` loop headers.
 - Placing k-header satellites at H + k: no refinement reads `kIndex`.
 
 ### 2.3 Corrections and agreement
