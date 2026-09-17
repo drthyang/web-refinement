@@ -50,6 +50,26 @@ describe("buildGpxScript", () => {
     expect(py).toContain("gpx.save()");
   });
 
+  it("probes legacy flat-directory installs before giving up on the import", () => {
+    const py = buildGpxScript({
+      gpxName: "MnO.gpx", cifFile: "MnO.cif", phaseName: "MnO",
+      dataFile: "MnO.xye", instprmFile: "MnO.instprm", histogramKind: "powder",
+    });
+    expect(py).toContain("from GSASII import GSASIIscriptable as G2sc");
+    expect(py).toContain("os.environ.get('GSASII_HOME')");
+    for (const probe of [
+      "os.path.join(_home, 'gsas2full', 'GSASII')",
+      "os.path.join(_home, 'g2full', 'GSAS-II')",
+      "os.path.join(_home, 'gsas2main', 'GSAS-II')",
+    ]) {
+      expect(py).toContain(probe);
+    }
+    expect(py).toContain("sys.path.insert(0, _dir)");
+    // The retry import comes after the probe, so the script still ends up
+    // with G2sc bound when a legacy install is found.
+    expect(py.indexOf("sys.path.insert(0, _dir)")).toBeLessThan(py.lastIndexOf("import GSASIIscriptable as G2sc"));
+  });
+
   it("emits a single-crystal script using add_single_histogram", () => {
     const py = buildGpxScript({
       gpxName: "Eu324.gpx", cifFile: "Eu324.cif", phaseName: "Eu3In2Te4",
