@@ -4,8 +4,9 @@
  * sample microstructure; the instrument profile, background, zero, and TOF
  * calibration are **shared** across phases (one beam, one detector). Wraps the
  * single-phase {@link buildPowderSpec} per phase and merges: per-phase parameter
- * ids are prefixed `p{i}_`, the scale is re-bound to that phase's id, and the
- * shared instrument rows are kept once (from the first phase).
+ * ids are prefixed `p{i}_`, every pattern-targeted per-phase binding (scale,
+ * anisotropic microstructure, per-phase corrections) is re-bound to that phase's
+ * id, and the shared instrument rows are kept once (from the first phase).
  *
  * The result feeds `buildMultiPhasePowderProblem` / `multiPhaseCurves`. Validated
  * on the Mn₃Ga + MnO POWGEN data: single-phase wR ≈ 36% → two-phase ≈ 8.5%.
@@ -57,12 +58,15 @@ export function buildMultiPhaseSpec(
     }
     for (const b of spec.bindings) {
       if (SHARED_KINDS.has(b.kind)) { if (i === 0) bindings.push(b); continue; }
-      // Per-phase: prefix the param id; re-bind the scale from the pattern to
-      // this phase's id so multiPhase routes it to just this phase.
+      // Per-phase: prefix the param id; re-bind anything targeting the pattern
+      // (scale, Stephens strain, uniaxial size/mustrain, per-phase corrections)
+      // to this phase's id so phaseBindingsFor routes it to just this phase —
+      // a pattern-targeted non-shared binding would otherwise be dropped for
+      // every phase and the parameter would silently have no effect.
       bindings.push({
         ...b,
         parameterId: `p${i}_${b.parameterId}`,
-        ...(b.kind === "scale" ? { targetId: structure.id } : {}),
+        ...(b.targetId === pattern.id ? { targetId: structure.id } : {}),
       });
     }
   });
