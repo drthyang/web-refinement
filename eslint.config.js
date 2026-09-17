@@ -16,10 +16,23 @@
  *     rule the workbenches suppress deliberately, per component, with a stated
  *     reason. Advisory (warn), as the React docs intend.
  *
- * Deliberately NOT enabled: the React-Compiler rules that ship in
- * eslint-plugin-react-hooks v7 (`refs`, `set-state-in-effect`, `immutability`,
- * `preserve-manual-memoization`). They report ~95 findings against components
- * that were never written to them — a separate piece of work, not a lint gate.
+ *   - `react-hooks/immutability` + `react-hooks/preserve-manual-memoization` —
+ *     two of the React-Compiler rules from eslint-plugin-react-hooks v7, now on
+ *     as errors. They paid for themselves on the way in: `immutability` found
+ *     two real temporal-dead-zone reads in `KSearchPanel` (a `useState` setter
+ *     and a `const` callback used by effects declared above them), and
+ *     `preserve-manual-memoization` found a `WorkbenchPlot` memo the compiler
+ *     could not keep, because it built three filtered copies of an intermediate
+ *     object array. Both were fixed rather than suppressed. The single standing
+ *     exception is the three.js material update in `StructureView`, disabled in
+ *     place with its reason: that scene graph is mutated live by design.
+ *
+ * Deliberately NOT enabled yet: the two remaining React-Compiler rules,
+ * `react-hooks/refs` (67 findings, almost all in the three workbenches) and
+ * `react-hooks/set-state-in-effect` (20, spread over seven files). Both report
+ * against components that were never written to them, and unlike the two above
+ * they need real restructuring rather than local fixes — a separate piece of
+ * work, not a lint gate.
  *
  * Type-aware linting is off: CI already runs `tsc -b`, so a second full type
  * build per lint would buy nothing.
@@ -51,6 +64,8 @@ export default tseslint.config(
     plugins: { "react-hooks": reactHooks },
     rules: {
       "react-hooks/rules-of-hooks": "error",
+      "react-hooks/preserve-manual-memoization": "error",
+      "react-hooks/immutability": "error",
       "react-hooks/exhaustive-deps": "warn",
       "no-console": ["error", { allow: ["info", "warn", "error"] }],
       "@typescript-eslint/no-explicit-any": "error",

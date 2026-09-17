@@ -687,6 +687,12 @@ export function StructureView({
   useEffect(() => {
     const { shininess, specular } = FINISHES[finish];
     for (const m of atomMatsRef.current) {
+      // The compiler's immutability rule asks that a value reachable from a ref
+      // not be mutated in an effect. That is the wrong shape for the three.js
+      // layer: these are live GPU-side materials owned by the scene graph, and
+      // updating them in place IS the cheap path. Honouring the rule would mean
+      // rebuilding materials (and re-uploading them) on every finish change.
+      // eslint-disable-next-line react-hooks/immutability -- three.js scene graph is mutated in place by design
       m.shininess = shininess;
       m.specular.set(specular);
     }

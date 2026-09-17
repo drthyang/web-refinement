@@ -493,6 +493,20 @@ export function KSearchPanel({
     return magBuild.magnetic.moments.some((m) => (m.orbitIndex ?? 1) > 1);
   }, [magBuild]);
 
+  // Optional moment refinement against the loaded pattern: nuclear model held
+  // fixed (the handoff convention), moment-mode amplitudes freed, shared scale.
+  const [refining, setRefining] = useState(false);
+  const [refineWR, setRefineWR] = useState<number | null>(null);
+
+  /** Confirm a k: sync the inputs, apply it, and drop the previous k's group pick. */
+  const applyK = (kk: Vec3): void => {
+    setKText([String(kk[0]), String(kk[1]), String(kk[2])]);
+    setAppliedK([kk[0], kk[1], kk[2]]);
+    setSelIdx(null);
+    setChosenIrreps(new Set());
+    setOpenIndices(new Set([2]));
+  };
+
   // Amplitude seeds waiting for the build they belong to, identified by the
   // operation-set signature: a ranked candidate's refined values when its row
   // is clicked, or the moments of a model this page was asked to open on.
@@ -674,10 +688,6 @@ export function KSearchPanel({
     setPeakFocusToken((t) => t + 1);
   }
 
-  // Optional moment refinement against the loaded pattern: nuclear model held
-  // fixed (the handoff convention), moment-mode amplitudes freed, shared scale.
-  const [refining, setRefining] = useState(false);
-  const [refineWR, setRefineWR] = useState<number | null>(null);
   // The readout describes a fit against a specific window/pattern — a changed
   // fit range (draggable from this page's own plot) or new data invalidates it.
   useEffect(() => {
@@ -867,14 +877,6 @@ export function KSearchPanel({
     });
   }
 
-  /** Confirm a k: sync the inputs, apply it, and drop the previous k's group pick. */
-  const applyK = (kk: Vec3): void => {
-    setKText([String(kk[0]), String(kk[1]), String(kk[2])]);
-    setAppliedK([kk[0], kk[1], kk[2]]);
-    setSelIdx(null);
-    setChosenIrreps(new Set());
-    setOpenIndices(new Set([2]));
-  };
 
   // The candidate drawn ON the pattern: the nuclear fit plus this model's
   // magnetic contribution at the current amplitudes, the magnetic part also as
