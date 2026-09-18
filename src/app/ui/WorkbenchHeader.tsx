@@ -6,7 +6,8 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { color, mono, radius, shadow } from "@/app/theme";
+import { color, mono, radius, shadow, space } from "@/app/theme";
+import type { DemoId } from "@/app/demos";
 
 /** Display face for the MATERIA wordmark — geometric, loaded in index.html. */
 const display = '"Space Grotesk", "IBM Plex Sans", system-ui, sans-serif';
@@ -16,6 +17,15 @@ export interface Step {
   /** Greyed and non-clickable — e.g. Magnetic on the PDF page until mPDF, or
    *  both chips before any data is loaded. */
   readonly disabled?: boolean;
+  /**
+   * This step's content is part of the CURRENT model even though the user is
+   * on another step — the Magnetic chip once moments are in the refinement.
+   * Lights the chip (accent tint + a dot) without claiming to be the active
+   * page, so the nuclear page shows at a glance that the fit is nuclear +
+   * magnetic. Nuclear is never marked: it is always in the model, so the mark
+   * would carry no information.
+   */
+  readonly present?: boolean;
   /** Tooltip (shown on the chip). */
   readonly hint?: string;
 }
@@ -26,6 +36,8 @@ export interface Step {
 export interface ExportAction {
   readonly label: string;
   readonly onClick: () => void;
+  /** Tooltip: what the file contains. */
+  readonly hint?: string;
 }
 
 interface Props {
@@ -42,15 +54,29 @@ interface Props {
    * crystal appears as a third chip only while active.
    */
   readonly technique?: "rietveld" | "pdf" | "sc" | null;
-  /** The bundled demos (one per technique) for the Demos ▾ menu. */
-  readonly demos?: readonly { readonly id: "rietveld" | "pdf"; readonly label: string }[];
+  /** The bundled demos (one per workflow) for the Demos ▾ menu. */
+  readonly demos?: readonly { readonly id: DemoId; readonly label: string }[];
   /** Which demo is loaded (adds "Exit demo" to the menu and lights the button). */
-  readonly activeDemo?: "rietveld" | "pdf" | null;
-  readonly onLoadDemo?: (id: "rietveld" | "pdf") => void;
+  readonly activeDemo?: DemoId | null;
+  readonly onLoadDemo?: (id: DemoId) => void;
   readonly onExitDemo?: () => void;
+  /** Open a saved project file — offered even on the landing, before any data. */
+  readonly onOpenProject?: (file: File) => void;
+  /** Save the current session as a project file (absent while nothing is loaded). */
+  readonly onSaveProject?: () => void;
+  /**
+   * The GPU-acceleration preference and its setter. The badge IS the control
+   * (one home for "GPU" in the UI): lit = the WebGPU |F|² kernel is engaged
+   * where it applies, off = every fit stays on the exact f64 CPU path. Omitted
+   * (e.g. in tests) leaves the badge a read-only capability indicator.
+   */
+  readonly gpu?: { readonly enabled: boolean; readonly onChange: (on: boolean) => void };
 }
 
-export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo }: Props): JSX.Element {
+/** File-picker filter for project files (any .json is accepted; the reader decides). */
+const PROJECT_ACCEPT = ".materia.json,.json,application/json";
+
+export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo, onOpenProject, onSaveProject, gpu }: Props): JSX.Element {
   return (
     <header className="wb-header" style={headerBar}>
       <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
@@ -69,9 +95,15 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
               WORKBENCH
             </span>
           </div>
-          <span style={betaBadge} title="MATERIA is in public beta — validate results against established tools before publication">beta</span>
-          <span className="wb-version-chip" style={versionChip}>{version}</span>
-          <GpuBadge />
+          {/* One meta pill, not three: the release state and the version are
+              the same fact about this build, so they share a chip instead of
+              lining up two boxes in two colours beside the wordmark. The
+              version hides itself on a phone (wb-version-chip). */}
+          <span style={betaBadge} title="MATERIA is in public beta — validate results against established tools before publication">
+            beta
+            <span className="wb-version-chip" style={betaVersion}>{version}</span>
+          </span>
+          <GpuBadge {...(gpu ? { control: gpu } : {})} />
         </div>
       </div>
       <div className="wb-header-divider" style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
@@ -83,13 +115,15 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
             key: s.label,
             label: s.label,
             active: i === active && !s.disabled,
-            dimmed: !!s.disabled || i !== active,
+            dimmed: !!s.disabled || (i !== active && !s.present),
+            ...(s.present ? { present: true } : {}),
             ...(s.hint !== undefined ? { hint: s.hint } : {}),
             ...(s.disabled ? {} : { onClick: () => onStep(i) }),
           }))}
         />
       </nav>
       <div className="wb-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
+        {onOpenProject && <ProjectMenu onOpenProject={onOpenProject} {...(onSaveProject ? { onSaveProject } : {})} />}
         {demos && demos.length > 0 && onLoadDemo && (
           <DemosMenu demos={demos} activeDemo={activeDemo} onLoadDemo={onLoadDemo} onExitDemo={onExitDemo} />
         )}
@@ -100,12 +134,16 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
 }
 
 /**
- * Capability badge: lit when this machine can GPU-accelerate refinement, dimmed
- * otherwise. `navigator.gpu` may exist without a usable adapter, so support is
- * confirmed by actually requesting one. Purely informational — the per-refinement
- * status line still reports whether a given fit used the GPU ("· GPU |F|²").
+ * The GPU chip: capability indicator AND the acceleration control. `navigator.gpu`
+ * may exist without a usable adapter, so support is confirmed by actually
+ * requesting one; without one the chip is dimmed and inert. Where a GPU IS
+ * available the chip is a button that turns the WebGPU |F|² kernel on or off —
+ * on by default, since it is validated to ≤5e-7 relative (far below esd) and
+ * falls back to the CPU pool wherever it does not apply, and off for anyone who
+ * wants the exact f64 CPU path as the reference. The per-refinement status line
+ * still reports whether a given fit actually used it ("· GPU |F|²").
  */
-function GpuBadge(): JSX.Element {
+function GpuBadge({ control }: { readonly control?: { readonly enabled: boolean; readonly onChange: (on: boolean) => void } }): JSX.Element {
   const [supported, setSupported] = useState<boolean>(
     () => typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu,
   );
@@ -124,63 +162,127 @@ function GpuBadge(): JSX.Element {
       cancelled = true;
     };
   }, []);
+  const on = supported && (control?.enabled ?? true);
+  const bolt = (
+    <svg width={8} height={11} viewBox="0 0 8 11" aria-hidden style={{ display: "block" }}>
+      <path d="M4.7 0 0 6.4h2.7L2.1 11 8 4.2H4.8z" fill="currentColor" />
+    </svg>
+  );
+  if (!supported || !control) {
+    return (
+      <span
+        className="wb-gpu-badge"
+        style={{ ...gpuBadgeBase, ...(on ? gpuBadgeOn : gpuBadgeOff) }}
+        title={
+          supported
+            ? "GPU acceleration available — single-phase powder refinement runs structure factors on the WebGPU kernel (validated f32, far below esd)."
+            : "GPU acceleration unavailable in this browser — refinement runs on the CPU."
+        }
+      >
+        {bolt}
+        GPU
+      </span>
+    );
+  }
   return (
-    <span
+    <button
+      type="button"
       className="wb-gpu-badge"
-      style={{ ...gpuBadgeBase, ...(supported ? gpuBadgeOn : gpuBadgeOff) }}
+      aria-pressed={on}
+      onClick={() => control.onChange(!control.enabled)}
+      style={{ ...gpuBadgeBase, ...(on ? gpuBadgeOn : gpuBadgeOff), cursor: "pointer" }}
       title={
-        supported
-          ? "GPU acceleration available — single-phase powder refinement runs structure factors on the WebGPU kernel (validated f32, far below esd)."
-          : "GPU acceleration unavailable in this browser — refinement runs on the CPU."
+        on
+          ? "GPU acceleration ON — single-phase powder refinement takes its structure factors from the WebGPU kernel (validated f32, ≤5e-7 relative, far below esd). Click to refine on the exact f64 CPU path instead."
+          : "GPU acceleration OFF — every refinement runs on the exact f64 CPU path. Click to use the WebGPU |F|² kernel where it applies."
       }
     >
-      <svg width={8} height={11} viewBox="0 0 8 11" aria-hidden style={{ display: "block" }}>
-        <path d="M4.7 0 0 6.4h2.7L2.1 11 8 4.2H4.8z" fill="currentColor" />
-      </svg>
-      GPU
-    </span>
+      {bolt}
+      {on ? "GPU" : "GPU off"}
+    </button>
   );
 }
 
 /**
- * The header nav is four chips in two matching groups — technique
- * (Rietveld | PDF) and refinement target (Nuclear | Magnetic) — so "what am I
- * fitting, and in which space" is one glance. Nothing loaded → all neutral;
- * once data picks the direction, the active chip in each group lights and the
- * inactive one dims.
+ * The header nav is six chips in three groups — sample form (Powder | Crystal),
+ * technique (Rietveld | PDF) and refinement target (Nuclear | Magnetic) — so
+ * "what am I fitting, and in which space" is one glance. The first two only
+ * REPORT what the loaded data is, so they render as quiet segmented controls
+ * ({@link ChipVariant}); only the step group, the one you click, carries the
+ * accent. Nothing loaded → all neutral; once data picks the direction, the
+ * selected chip in each group lifts and the others dim.
  */
+/**
+ * How a chip group carries its weight. The header holds three groups, and they
+ * are not equal: the step chips are the navigation (you click them), while the
+ * sample-form and technique chips only report what the data is. Painting all
+ * three in accent blue put four saturated blocks across the bar — the brand
+ * mark included — and flattened that difference. "nav" keeps the accent fill;
+ * "indicator" is a quiet segmented control (a raised white segment on a warm
+ * track), legible at a glance but never competing with the thing you act on.
+ */
+type ChipVariant = "nav" | "indicator";
+
 interface Chip {
   readonly key: string;
   readonly label: string;
   readonly active: boolean;
   readonly dimmed: boolean;
+  /** In the model but not the open page — lit, not selected (see {@link Step}). */
+  readonly present?: boolean;
   readonly hint?: string;
   /** Present = clickable (the Nuclear/Magnetic chips navigate); absent = indicator only. */
   readonly onClick?: () => void;
 }
 
-function ChipGroup({ chips }: { chips: readonly Chip[] }): JSX.Element {
+function ChipGroup({ chips, variant = "nav" }: { chips: readonly Chip[]; variant?: ChipVariant }): JSX.Element {
+  const indicator = variant === "indicator";
   return (
-    <span style={{ display: "inline-flex", border: `1px solid ${color.control}`, borderRadius: radius.pill, overflow: "hidden" }}>
-      {chips.map((c) => <GroupChip key={c.key} chip={c} />)}
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        // The indicator track is inset by 2px so its selected segment reads as
+        // a tile floating on the track rather than a slab filling the pill.
+        gap: indicator ? 2 : 0,
+        padding: indicator ? 2 : 0,
+        border: `1px solid ${indicator ? color.subtle : color.control}`,
+        background: indicator ? color.chipBg : "transparent",
+        borderRadius: radius.pill,
+        overflow: "hidden",
+      }}
+    >
+      {chips.map((c) => <GroupChip key={c.key} chip={c} variant={variant} />)}
     </span>
   );
 }
 
-function GroupChip({ chip }: { chip: Chip }): JSX.Element {
+function GroupChip({ chip, variant = "nav" }: { chip: Chip; variant?: ChipVariant }): JSX.Element {
   const [rawHover, setHover] = useState(false);
   const hover = rawHover && chip.onClick !== undefined && !chip.active;
+  const indicator = variant === "indicator";
+  // Lit but not selected: the accent tint of hover, made permanent, plus a dot
+  // so the state reads as "in the model" rather than "the cursor is here".
+  const lit = !!chip.present && !chip.active;
+  const background = chip.active
+    ? indicator ? color.surface : color.primary
+    : lit || hover ? color.primaryTintBg : "transparent";
+  const ink = chip.active
+    ? indicator ? color.ink : "#fff"
+    : lit || hover ? color.primary : chip.dimmed ? (indicator ? color.faint : color.faintest) : color.secondary;
   const style: CSSProperties = {
     fontFamily: mono,
-    fontSize: 11,
+    fontSize: indicator ? 10.5 : 11,
     fontWeight: 600,
     letterSpacing: "0.07em",
     textTransform: "uppercase",
-    padding: "7px 14px",
+    padding: indicator ? "4px 11px" : "7px 14px",
     whiteSpace: "nowrap",
     border: "none",
-    background: chip.active ? color.primary : hover ? color.primaryTintBg : "transparent",
-    color: chip.active ? "#fff" : hover ? color.primary : chip.dimmed ? color.faintest : color.secondary,
+    borderRadius: indicator ? radius.pill : 0,
+    background,
+    color: ink,
+    ...(indicator && chip.active ? { boxShadow: "0 1px 2px rgba(25,23,20,0.10)" } : {}),
     cursor: chip.onClick && !chip.active ? "pointer" : "default",
     transition: "color 160ms, background 160ms",
   };
@@ -190,10 +292,30 @@ function GroupChip({ chip }: { chip: Chip }): JSX.Element {
     onMouseEnter: () => setHover(true),
     onMouseLeave: () => setHover(false),
   };
+  const content = (
+    <>
+      {lit && <span aria-hidden style={presentDot} />}
+      {chip.label}
+    </>
+  );
   return chip.onClick
-    ? <button className="wb-header-step" {...shared} onClick={chip.onClick}>{chip.label}</button>
-    : <span {...shared}>{chip.label}</span>;
+    ? <button className="wb-header-step" {...shared} onClick={chip.onClick}>{content}</button>
+    : <span {...shared}>{content}</span>;
 }
+
+/** The "in the model" marker on a lit (present, not active) chip: a small
+ *  accent dot with a soft halo, so it reads as a status light on the tint
+ *  rather than a stray bullet glued to the label. */
+const presentDot: CSSProperties = {
+  display: "inline-block",
+  width: 4.5,
+  height: 4.5,
+  borderRadius: "50%",
+  background: color.primary,
+  boxShadow: `0 0 0 2.5px ${color.primaryTintBorder}66`,
+  marginRight: 7,
+  verticalAlign: "middle",
+};
 
 /** Sample form: Powder (Bragg profile or total scattering) vs Single crystal (F²). */
 function FormChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | null }): JSX.Element {
@@ -204,6 +326,7 @@ function FormChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | null 
   ] as const;
   return (
     <ChipGroup
+      variant="indicator"
       chips={chips.map((c) => ({
         key: c.id,
         label: c.label,
@@ -224,6 +347,7 @@ function TechniqueChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | 
   ] as const;
   return (
     <ChipGroup
+      variant="indicator"
       chips={chips.map((c) => ({
         key: c.id,
         label: c.label,
@@ -237,9 +361,9 @@ function TechniqueChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | 
 
 /** "Demos ▾": one bundled, converged example per technique. */
 function DemosMenu({ demos, activeDemo, onLoadDemo, onExitDemo }: {
-  demos: readonly { readonly id: "rietveld" | "pdf"; readonly label: string }[];
-  activeDemo: "rietveld" | "pdf" | null;
-  onLoadDemo: (id: "rietveld" | "pdf") => void;
+  demos: readonly { readonly id: DemoId; readonly label: string }[];
+  activeDemo: DemoId | null;
+  onLoadDemo: (id: DemoId) => void;
   onExitDemo?: (() => void) | undefined;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -270,6 +394,59 @@ function DemosMenu({ demos, activeDemo, onLoadDemo, onExitDemo }: {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * "Project ▾": save the whole session as one `.materia.json`, or open a saved
+ * one. Lives beside Demos/Export because a project is the session-level
+ * counterpart of the per-mode exports (see workbenchEngine.ts).
+ */
+function ProjectMenu({ onOpenProject, onSaveProject }: { onOpenProject: (file: File) => void; onSaveProject?: () => void }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <ActionButton onClick={() => setOpen((o) => !o)} active={open}>Project ▾</ActionButton>
+      {open && (
+        <div style={menu}>
+          {onSaveProject && (
+            <MenuItem onClick={() => { setOpen(false); onSaveProject(); }}>Save project</MenuItem>
+          )}
+          <MenuFileItem accept={PROJECT_ACCEPT} onFile={(f) => { setOpen(false); onOpenProject(f); }}>
+            Open project…
+          </MenuFileItem>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A menu row that opens the file picker (a label wrapping a hidden input). */
+function MenuFileItem({ children, accept, onFile }: { children: React.ReactNode; accept: string; onFile: (file: File) => void }): JSX.Element {
+  const [hover, setHover] = useState(false);
+  return (
+    <label onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ ...menuItem(hover), boxSizing: "border-box" }}>
+      {children}
+      <input
+        type="file"
+        accept={accept}
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onFile(f);
+          e.target.value = "";
+        }}
+      />
+    </label>
   );
 }
 
@@ -318,7 +495,7 @@ function ExportMenu({ exports }: { exports: readonly ExportAction[] }): JSX.Elem
       {open && (
         <div style={menu}>
           {exports.map((e) => (
-            <MenuItem key={e.label} onClick={() => { setOpen(false); e.onClick(); }}>{e.label}</MenuItem>
+            <MenuItem key={e.label} onClick={() => { setOpen(false); e.onClick(); }} {...(e.hint ? { title: e.hint } : {})}>{e.label}</MenuItem>
           ))}
         </div>
       )}
@@ -326,31 +503,28 @@ function ExportMenu({ exports }: { exports: readonly ExportAction[] }): JSX.Elem
   );
 }
 
-function MenuItem({ children, onClick }: { children: React.ReactNode; onClick: () => void }): JSX.Element {
+function MenuItem({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title?: string }): JSX.Element {
   const [hover, setHover] = useState(false);
   return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: "block",
-        width: "100%",
-        textAlign: "left",
-        whiteSpace: "nowrap",
-        border: "none",
-        background: hover ? color.primaryTintBg : "transparent",
-        color: hover ? color.primary : color.ink,
-        padding: "8px 14px",
-        fontSize: 13,
-        fontWeight: 500,
-        cursor: "pointer",
-      }}
-    >
+    <button onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={menuItem(hover)} {...(title ? { title } : {})}>
       {children}
     </button>
   );
 }
+
+const menuItem = (hover: boolean): CSSProperties => ({
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  whiteSpace: "nowrap",
+  border: "none",
+  background: hover ? color.primaryTintBg : "transparent",
+  color: hover ? color.primary : color.ink,
+  padding: "8px 14px",
+  fontSize: 13,
+  fontWeight: 500,
+  cursor: "pointer",
+});
 
 const menu: CSSProperties = {
   position: "absolute",
@@ -369,7 +543,7 @@ const headerBar: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 22,
-  padding: "15px 28px",
+  padding: `15px ${space.edge}`,
   borderBottom: `1px solid ${color.border}`,
   background: color.raised,
   boxShadow: shadow.header,
@@ -391,42 +565,51 @@ const brandMark: CSSProperties = {
 
 /** Engine-mode badge (Rietveld / PDF / single crystal): primary-tinted pill so
  *  the active engine is always one glance away, next to the workflow steps. */
-const versionChip: CSSProperties = {
-  fontFamily: mono,
-  fontSize: 11,
-  color: color.secondary,
-  background: color.chipBg,
-  border: `1px solid ${color.border}`,
-  borderRadius: radius.chip,
-  padding: "2px 8px",
-};
-
-const betaBadge: CSSProperties = {
+/**
+ * The meta pills beside the wordmark (release + build, GPU). They share one
+ * geometry — same height, radius, type scale and optical padding — so they read
+ * as one quiet cluster rather than three unrelated boxes.
+ */
+const metaPill: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+  height: 20,
   fontFamily: mono,
   fontSize: 10,
   fontWeight: 600,
   letterSpacing: "0.09em",
   textTransform: "uppercase",
+  borderRadius: radius.pill,
+  padding: "0 8px",
+  whiteSpace: "nowrap",
+};
+
+const betaBadge: CSSProperties = {
+  ...metaPill,
   color: color.noteInk,
   background: color.noteBg,
   border: `1px solid ${color.noteBorder}`,
-  borderRadius: radius.chip,
-  padding: "2px 7px",
+};
+
+/** The build number inside the beta pill: same chip, lighter voice. */
+const betaVersion: CSSProperties = {
+  fontWeight: 500,
+  letterSpacing: "0.04em",
+  textTransform: "none",
+  opacity: 0.72,
 };
 
 const gpuBadgeBase: CSSProperties = {
-  fontFamily: mono,
-  fontSize: 10,
-  fontWeight: 600,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-  borderRadius: radius.chip,
-  padding: "2px 7px",
-  display: "inline-flex",
-  alignItems: "center",
+  ...metaPill,
   gap: 4,
-  whiteSpace: "nowrap",
+  padding: "0 8px 0 7px",
   cursor: "default",
+  // The control variant renders as a <button>: drop the user agent's button box
+  // so it stays the same chip as the read-only variant (metaPill already fixes
+  // the type ramp, which overrides the UA font).
+  appearance: "none",
+  margin: 0,
   transition: "opacity 160ms, color 160ms, background 160ms",
 };
 

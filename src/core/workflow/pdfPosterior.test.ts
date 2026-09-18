@@ -101,7 +101,6 @@ describe("PDF posterior sampling — Ni golden (gate b)", () => {
     expect(result.acceptanceFraction).toBeGreaterThan(0.2);
     expect(result.diagnostics.maxRHat).toBeLessThan(1.1);
 
-    // eslint-disable-next-line no-console
     console.log(
       `[posterior:ni] ${result.posterior.parameters
         .map((p) => `${p.id}=${p.median.toPrecision(4)}±${p.std.toPrecision(2)} (esdRatio ${p.esdRatio!.toFixed(2)})`)
@@ -149,7 +148,6 @@ describe("PDF posterior sampling — Ni golden (gate b)", () => {
       expect(p.esdRatio!, p.id).toBeGreaterThan(0.7);
       expect(p.esdRatio!, p.id).toBeLessThan(1.4);
     }
-    // eslint-disable-next-line no-console
     console.log(
       `[posterior:ni:nuts] ${result.posterior.parameters
         .map((p) => `${p.id}=${p.median.toPrecision(4)}±${p.std.toPrecision(2)} (esdRatio ${p.esdRatio!.toFixed(2)})`)

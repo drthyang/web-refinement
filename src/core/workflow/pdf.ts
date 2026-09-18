@@ -29,7 +29,7 @@ import type { StageKinds } from "@/core/workflow/structureRefinement";
 import type { FitRange } from "@/core/workflow/powder";
 import type { PdfPair } from "@/core/pdf/pairEnumerator";
 import { applyExclusionMask, fitRangeMask } from "@/core/refinement/factors";
-import { parseTie, resolveTies } from "@/core/refinement/constraints";
+import { tieReferences, resolveTies } from "@/core/refinement/constraints";
 import { applyParameters } from "@/core/workflow/apply";
 import { buildStructureRefinement } from "@/core/workflow/structureRefinement";
 import {
@@ -190,7 +190,7 @@ export function buildPdfProblem(
   for (const p of parameters) {
     if (!p.expression) continue;
     try {
-      tieReferencedIds.add(parseTie(p.expression).refId);
+      for (const id of tieReferences(p.expression)) tieReferencedIds.add(id);
     } catch {
       // An unparsable tie fails loudly in resolveTies; nothing to guard here.
     }

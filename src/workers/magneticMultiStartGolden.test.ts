@@ -106,7 +106,6 @@ describe.skipIf(!hasData)("Mn3Ga 350K — Phase 1c magnetic multi-start acceptan
     expect(magnitude(cell, m0)).toBeLessThan(2.9);
 
     // (iii) The data-limited (flat) partition direction is surfaced, not hidden.
-    /* eslint-disable-next-line no-console */
     console.log(`Phase 1c: best χ²=${best.toExponential(3)}, ${within}/${ms.costByStart.length} within 1%; |m0|=${magnitude(cell, m0).toFixed(2)} |m1|=${magnitude(cell, m1).toFixed(2)}; degeneracies=${ms.degeneracies.map((d) => d.kind).join(",") || "none"}`);
     for (const d of ms.degeneracies) expect(d.message.length).toBeGreaterThan(0);
 

@@ -305,17 +305,24 @@ export function WorkbenchPlot({
   // click resolve to exactly the same peak.
   const highlight = useMemo(() => {
     if (!highlightSel || !phases) return null;
-    const indexed = phases.map((p, row) => ({ p, row }));
-    const rowsInOrder = [
-      ...indexed.filter(({ p }) => highlightSel.phaseId !== undefined && p.id === highlightSel.phaseId),
-      ...indexed.filter(({ p }) => p.kind === highlightSel.kind),
-      ...indexed.filter(({ p }) => p.kind !== highlightSel.kind),
-    ];
-    for (const { p, row } of rowsInOrder) {
-      const t = p.ticks.find((tk) => tk.hkl === highlightSel.hkl);
-      if (t) return { x: t.x, hkl: t.hkl, d: t.d, color: p.color, row, label: p.label };
+    // One pass, ranking each row instead of building three filtered copies:
+    // 0 = the phase id matches, 1 = the kind matches, 2 = anything else. The
+    // best rank wins, and among equal ranks the earlier row does — the same
+    // peak the three-pass form resolved to.
+    const sel = highlightSel;
+    let best: { x: number; hkl: string; d: number; color: string; row: number; label: string } | null = null;
+    let bestRank = 3;
+    for (let row = 0; row < phases.length; row++) {
+      const p = phases[row]!;
+      const rank = sel.phaseId !== undefined && p.id === sel.phaseId ? 0 : p.kind === sel.kind ? 1 : 2;
+      if (rank >= bestRank) continue;
+      const t = p.ticks.find((tk) => tk.hkl === sel.hkl);
+      if (t) {
+        best = { x: t.x, hkl: t.hkl, d: t.d, color: p.color, row, label: p.label };
+        bestRank = rank;
+      }
     }
-    return null;
+    return best;
   }, [highlightSel, phases]);
 
   // Row geometry: at up to three phase rows the fixed spacing applies; more
@@ -674,7 +681,10 @@ export function WorkbenchPlot({
                 label: o.label,
                 shape: "dash" as const,
               })),
-              ...(overlays && overlays.length > 0 ? [] : phaseEntries),
+              // Overlays replace the generic "hkl" key only; explicit Bragg rows
+              // (the magnetic page draws its candidate over the pattern AND
+              // needs its tick rows named) stay in the legend.
+              ...(overlays && overlays.length > 0 && !(phases && phases.length > 0) ? [] : phaseEntries),
             ];
             let x = X0 + 182;
             return entries.map((e, i) => {

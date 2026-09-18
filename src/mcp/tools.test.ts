@@ -26,8 +26,9 @@ import {
 import { exampleStructure } from "@/examples/mn3ga";
 import { exampleMagnetic, magneticParameters, magneticBindings } from "@/examples/mn3gaMagnetic";
 import type { RefinementParameter } from "@/core/refinement/types";
+import { dataDir } from "@/testSupport/data";
 
-const DATA = resolve(__dirname, "../../data/GaNb4Se8_XRD");
+const DATA = dataDir("GaNb4Se8_XRD");
 const read = (f: string): string => readFileSync(resolve(DATA, f), "utf8");
 // The GaNb4Se8 regression dataset lives in the git-ignored `data/` folder —
 // present in a local checkout, absent on CI / a fresh clone — so the file-backed

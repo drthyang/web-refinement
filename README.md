@@ -13,10 +13,12 @@ workbench; the same pure core is exposed to agents as tools (see
 
 **▶ Try it in your browser: [drthyang.github.io/web-refinement](https://drthyang.github.io/web-refinement/)** — a
 fully static GitHub Pages app; nothing to install, and your data never leaves
-your machine. Two bundled demos open converged from the start page: a two-phase
-**Mn₃Ga neutron TOF Rietveld** fit (wR 3.9%) and a **GaTa₄Se₈ X-ray PDF** fit
-of the local structure, where the average-structure model is deliberately
-left to disagree with the data at short range.
+your machine. Two bundled demos open converged from the start page: a
+two-phase **Mn₃Ga neutron TOF Rietveld** fit at 600 K (wR 3.9%) and a
+**GaTa₄Se₈ X-ray PDF** fit of the local structure, where the average-structure
+model is deliberately left to disagree with the data at short range. (A third,
+magnetic demo — the AWO₄ k = (½ 0 0) structure — appears only in a local dev
+build with the git-ignored data folder present; its data are unpublished.)
 
 <p align="center">
   <img src="docs/screenshots/desktop.png" alt="Two-phase Mn₃Ga + MnO Rietveld refinement of POWGEN time-of-flight data, converged at wR 3.86%: observed/calculated/difference curves, per-phase Bragg ticks, and the symmetry-allowed parameter table with esds" width="100%" />
@@ -86,8 +88,9 @@ This project aims to lower that barrier:
   instrument files from GSAS-II (`.instprm`), classic GSAS (`.prm` INS/ICONS),
   and FullProf (`.irf` — CW Caglioti and TOF, plus the D2B/3T2/G4.2 `INSTRM=6`
   variant) — with format
-  auto-detection that reports *how* each decision was made, lets you override
-  it, and names the beamline · facility when the file identifies one.
+  auto-detection: the Data card shows the unit and range it settled on, the
+  `parse_powder_data` agent tool reports *how* each decision was made, and the
+  instrument card names the beamline · facility when the file identifies one.
 - **Transparent by design.** A guided step-by-step procedure that starts from
   a small, safe set of choices; fit quality judged with F_obs vs F_calc and
   normal-probability plots, not wR alone. Every scientific function is pure,
@@ -107,13 +110,13 @@ This is a complement to the established packages, not a replacement — see
 ## Status
 
 **Public beta.** A working app — atomic/nuclear refinement (single-crystal +
-powder) plus a commensurate single-k magnetic workflow — and a first agent-tool
+powder) plus a single-k magnetic workflow — and a first agent-tool
 layer over the same core. The scientific core, Levenberg–Marquardt refinement
 engine, symmetry-adapted constrained parameters, CIF parsing, a 3D
 structure/moment viewer, plots, and Web Worker compute are implemented and
-tested (**1111 passing tests**). Crystallographic and scattering foundations are
+tested (**1,300+ passing tests**). Crystallographic and scattering foundations are
 validated against bundled GSAS-II refinements (see
-[docs/REPORT.md](docs/REPORT.md) and [docs/VALIDATION.md](docs/VALIDATION.md)).
+[docs/VALIDATION.md](docs/VALIDATION.md)).
 As with any beta, results intended for publication must be validated against
 established tools ([docs/LIMITATIONS.md](docs/LIMITATIONS.md)).
 
@@ -127,12 +130,17 @@ refinement rather than just running it. See
 
 The magnetic workflow runs end to end: **auto-detect magnetic peaks → k-vector
 search → little-group magnetic subgroups → editable moment preview → moment
-refinement** (k = 0 *and* k ≠ 0, CW and TOF, on one shared scale). Occupancy-
+refinement** (k = 0, commensurate *and* incommensurate k ≠ 0 — sinusoidal,
+helical and cycloidal modulations through cosine + sine Fourier amplitudes,
+gated by a brute-force real-space supercell oracle — CW and TOF, on one shared
+scale). Occupancy-
 disorder sites refine with tied position/ADP, a Σ(occupancy) restraint (optionally
 = 1), and an optional shared moment. Fit quality is judged with **F_obs vs F_calc
 and normal-probability plots**, not just wR. Candidate magnetic groups carry
 their standard **BNS/OG labels** (bundled ISO-MAG table), and refined structures
-export as CIF/mCIF with esds (k ≠ 0 writes the magnetic supercell). The star of
+export as CIF/mCIF with esds (k ≠ 0 writes the magnetic supercell in its own
+magnetic space group — coset representatives, centering and anti-translations,
+asymmetric unit — never a P1 atom list). The star of
 k / multi-k and full representation analysis are the next milestones; see
 [docs/ROADMAP.md](docs/ROADMAP.md) and
 [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
@@ -169,9 +177,9 @@ decomposed against a parent CIF — activate a symmetry-breaking Γ mode from th
 **isotropy-subgroup tree**, or pick a target subgroup from the full
 **translationengleiche (Bärnighausen) subgroup lattice**; clicking a mode draws
 its eigenvector on the 3D model. The nuclear track (P0–P3) and its agent slice
-are done, and the **magnetic PDF (mPDF) core** is validated against
-diffpy.mpdf; the mPDF page and the symmetry-constrained local-spin model are
-the next milestones. Full plan in
+are done, and **magnetic PDF (mPDF)** — validated against diffpy.mpdf — is
+live on the PDF page for neutron data; the symmetry-constrained local-spin
+model is the next milestone. Full plan in
 [docs/PDF_MPDF_ROADMAP.md](docs/PDF_MPDF_ROADMAP.md).
 
 **Bayesian uncertainty (new — prototype).** The engine can now *sample the
@@ -203,14 +211,16 @@ powder, single-crystal, and PDF tracks (the PDF tools: `parse_pdf_data`,
 npm install     # install dependencies
 npm run dev     # start the local dev server
 npm run build   # type-check and build the static site
+npm run lint    # ESLint (flat config, typescript-eslint + react-hooks)
 npm run test    # run the test suite (Vitest)
 npm run test:ganb4se8  # required real-data powder regression
 ```
 
 Use `npm run test:ganb4se8` for refinement-engine changes. It requires the local
-`data/GaNb4Se8_XRD/` files and fails if they are missing; this dataset is the
-primary real-data check because it exposes the current build's powder-refinement
-failure modes much better than synthetic examples.
+`data/GaNb4Se8_XRD/` files (`data/GaNb4Se8_XRD_28ID/` is accepted as well) and
+fails if they are missing; this dataset is the primary real-data check because it
+exposes the current build's powder-refinement failure modes much better than
+synthetic examples.
 
 ## Scope
 
@@ -227,9 +237,17 @@ nuclear and magnetic structures:
   (crystallite size & microstrain, isotropic / uniaxial / generalized Mustrain),
   and magnetic moments — with fixed/free states, bounds, and constraints.
 - Compare observed vs calculated, track refinement history, and export the
-  refinement — a reproducible project JSON, or a one-click FullProf / GSAS-II
-  cross-check bundle (control file + data + instrument, with your original
-  instrument and data files included verbatim).
+  refinement — a one-click FullProf / GSAS-II cross-check bundle (control file
+  + data + instrument, with your original instrument and data files included
+  verbatim).
+- Write a **report** (Export ▾ → Report) for any technique: one self-contained
+  HTML page with the headline agreement factors, the fit figure, the refined
+  atomic structure with standard uncertainties, the magnetic structure (k,
+  magnetic space group, moments, projected figure) when there is one, every
+  parameter, and the refinement's diagnostics and conventions.
+- Save the whole session as a project file (`.materia.json`) and reopen it
+  later to continue — powder, single-crystal, and PDF sessions each in their
+  own validated block, so a file can never be read as the wrong technique.
 
 ## Architecture in one paragraph
 
@@ -237,27 +255,25 @@ A static web app (React + TypeScript + Vite) with strict layering and
 one-directional dependencies. `src/core/**` is **pure TypeScript** — no React,
 DOM, or workers — so every scientific function is pure and independently
 testable. UI components handle presentation only; long calculations run in Web
-Workers, with optional WebGPU kernels adding opt-in f32 acceleration over the
-correct f64 CPU path (WebAssembly is skipped). Full detail in
+Workers, and WebGPU kernels add f32 acceleration where the browser supports
+them, validated against the f64 CPU path and switched off from the header's GPU
+chip (WebAssembly is skipped). Full detail in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Documentation
 
+The full index, grouped by what you want to do, is [docs/README.md](docs/README.md).
+The most-used pages:
+
+- [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — how to run a refinement in the app, task by task
+- [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — what is supported, what is approximate, what is not there yet
+- [docs/COMPARISON.md](docs/COMPARISON.md) — features vs GSAS-II / Jana2020 / FullProf
+- [docs/VALIDATION.md](docs/VALIDATION.md) — what is tested, and against which external tools
 - [docs/ROADMAP.md](docs/ROADMAP.md) — **the single authoritative roadmap** (vision, foundations, milestones, agent layer)
-- [docs/PDF_MPDF_ROADMAP.md](docs/PDF_MPDF_ROADMAP.md) — the real-space PDF / mPDF track (nuclear done; mPDF next)
 - [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) — agent tools, skills, and the LLM-guided refinement plan
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layers, source tree, conventions
-- [docs/DATA_MODEL.md](docs/DATA_MODEL.md) — data types and their reasoning
-- [docs/REFINEMENT_ENGINE.md](docs/REFINEMENT_ENGINE.md) — the least-squares design
-- [docs/SCATTERING_TABLES.md](docs/SCATTERING_TABLES.md) — neutron / X-ray / magnetic form-factor tables
-- [docs/VALIDATION.md](docs/VALIDATION.md) — testing & external comparison strategy
-- [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — scope and known simplifications
-- [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project JSON format
-- [docs/REFINEMENT_PROCEDURE.md](docs/REFINEMENT_PROCEDURE.md) — the guided 7-step workflow
-- [docs/COMPARISON.md](docs/COMPARISON.md) — features vs GSAS-II / Jana2020 / FullProf
+- [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project file format (save / reopen a session)
 - [docs/REFERENCES.md](docs/REFERENCES.md) — bibliography: papers, data sources, and GSAS-II (validation reference)
-- [docs/REPORT.md](docs/REPORT.md) — build & validation report
-- [docs/archive/](docs/archive/) — superseded plans (POWDER_ROADMAP, MATURITY_PLAN), kept for detail
 
 ## License
 

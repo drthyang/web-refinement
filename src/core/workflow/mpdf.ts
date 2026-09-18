@@ -21,9 +21,18 @@
  * ordinary `momentMode` parameters (`applyMagneticMoments`), so the whole
  * magnetic-symmetry stack (k-search, subgroups, allowed-moment bases) plugs in
  * unchanged.
+ *
+ * **Commensurate k only** (PDF_MPDF_ROADMAP §8). An incommensurate k has no
+ * finite box: `magneticSupercell` returns 1 for such a component and the field
+ * silently degenerates to the parent cell — a helix or SDW would be computed
+ * as the frozen n = 0 snapshot of itself, giving a plausible-looking but wrong
+ * magnetic G(r). {@link unsupportedMpdfK} is the gate, and
+ * {@link buildMpdfProblem} throws rather than compute it; the real fix is the
+ * `fourierMoment.ts` complex-coefficient route (deferred).
  */
 
 import type { StructureModel } from "@/core/crystal/types";
+import type { Vec3 } from "@/core/math/types";
 import type { PdfPattern } from "@/core/diffraction/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type {
@@ -47,6 +56,7 @@ import { computeGofR, PAIR_REACH_MARGIN, type PdfModelParams } from "@/core/pdf/
 import { bandLimit } from "@/core/pdf/termination";
 import { compositionWeights } from "@/core/totalscattering/weights";
 import { expandSpinField } from "@/core/crystal/cellExpansion";
+import { classifyPropagation } from "@/core/magnetic/propagation";
 import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
 import { magneticTable } from "@/core/scattering/magnetic";
 import {
@@ -90,6 +100,28 @@ interface SpinField {
   readonly spins: MpdfSpin[];
   readonly boxVolumeCells: number;
   readonly cell: StructureModel["cell"];
+}
+
+/**
+ * Why this propagation vector cannot enter an mPDF fit, or null when it can.
+ * The one restriction is commensurability — see the module doc: the spin field
+ * is an explicit periodic box, which an incommensurate k does not have.
+ */
+export function unsupportedMpdfK(k: Vec3): string | null {
+  if (classifyPropagation(k).kind !== "incommensurate") return null;
+  const kText = k.map((c) => +c.toFixed(6)).join(", ");
+  return (
+    `k = (${kText}) is incommensurate: it has no finite magnetic supercell, ` +
+    "so there is no periodic spin box to sum the magnetic pair correlations over. " +
+    "The magnetic PDF is commensurate-only (a component's denominator must be 12 or less) — " +
+    "use a nearby commensurate approximant, or refine this k against Bragg satellites on the " +
+    "powder or single-crystal page, which carry the incommensurate Fourier route."
+  );
+}
+
+/** {@link unsupportedMpdfK} for a whole magnetic model (its single k). */
+export function unsupportedMpdfModel(magnetic: MagneticModel): string | null {
+  return unsupportedMpdfK(magnetic.propagation[0] ?? [0, 0, 0]);
 }
 
 function buildSpinField(structure: StructureModel, magnetic: MagneticModel): SpinField {
@@ -187,6 +219,13 @@ export function buildMpdfProblem(
   // grid extends the model grid down to its 0-phase start (the para hump and
   // the ordered convolution need low-r support) and up by the mPDF margin.
   const magneticActive = pattern.scatteringType === "neutron" && magnetic.moments.length > 0;
+  // Refuse before building, not per evaluation: an unrepresentable k must not
+  // reach `buildSpinField`, where the box would silently collapse to the parent
+  // cell and return a wrong magnetic curve instead of an error.
+  if (magneticActive) {
+    const unsupported = unsupportedMpdfModel(magnetic);
+    if (unsupported) throw new Error(unsupported);
+  }
   const momentIds = [...new Set(bindings.filter((b) => MOMENT_KINDS.has(b.kind)).map((b) => b.parameterId))];
   const step = modelGrid.length > 1 ? modelGrid[1]! - modelGrid[0]! : 0.01;
   const nDown = Math.max(0, Math.floor((modelGrid[0] ?? 0) / step + 1e-9));

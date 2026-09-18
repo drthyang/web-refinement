@@ -53,10 +53,15 @@ describe("buildSingleCrystalSpec", () => {
     const spec = buildSingleCrystalSpec(structure, data);
     const scale = spec.params.find((p) => p.id === "scale")!;
     expect(scale.fixed).toBe(false);
-    // Cell + positions + ADP all present but fixed.
+    // Positions + ADP present but fixed.
     expect(spec.params.filter((p) => p.kind === "positionShift").length).toBeGreaterThan(0);
-    expect(spec.params.filter((p) => p.kind === "cellLength").every((p) => p.fixed)).toBe(true);
     expect(spec.params.filter((p) => p.kind === "bIso").every((p) => p.fixed)).toBe(true);
+  });
+
+  it("offers no lattice rows: the cell is fixed input from indexing, as in SHELXL / Jana / FullProf / GSAS-II", () => {
+    const spec = buildSingleCrystalSpec(structure, truthDataset(3));
+    expect(spec.params.some((p) => p.kind === "cellLength" || p.kind === "cellAngle")).toBe(false);
+    expect(spec.bindings.some((b) => b.kind === "cellLength" || b.kind === "cellAngle")).toBe(false);
   });
 
   it("emits an extinction parameter only when requested", () => {

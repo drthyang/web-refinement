@@ -42,6 +42,13 @@ export interface MultiStartOptions {
   readonly relFraction?: number;
   /** Seed for the deterministic RNG (reproducible restarts/tests). Default set. */
   readonly seed?: number;
+  /** Absolute floor on a parameter's kick scale (in its own units), by
+   *  parameter. The esd- and value-relative kicks both vanish for a mode that
+   *  sits at 0 with a tiny esd — a single-crystal positional shift pinned at a
+   *  bound, say — so a caller that knows the physical basin scale (≈0.05 in
+   *  fractional coordinates, ≈0.5 Å² in B) supplies it here. Still capped at
+   *  half the bound span. Default: no floor. */
+  readonly minKick?: (parameter: RefinementParameter) => number | undefined;
   /** Restrict the perturbation to a parameter subspace: when set, only free
    *  parameters for which this returns true are kicked between restarts (the
    *  rest keep their baseline value). Used by the magnetic path to perturb only
@@ -104,13 +111,19 @@ export function perturbParameters(
   base: readonly RefinementParameter[],
   esd: Readonly<Record<string, number>>,
   rng: () => number,
-  opts: { escapeSigma: number; relFraction: number; shouldPerturb?: (p: RefinementParameter) => boolean },
+  opts: {
+    escapeSigma: number;
+    relFraction: number;
+    shouldPerturb?: (p: RefinementParameter) => boolean;
+    minKick?: (p: RefinementParameter) => number | undefined;
+  },
 ): RefinementParameter[] {
   return base.map((p) => {
     if (p.fixed || p.expression) return { ...p };
     if (opts.shouldPerturb && !opts.shouldPerturb(p)) return { ...p };
     const e = esd[p.id];
-    let scale = Math.max(e !== undefined && e > 0 ? e * opts.escapeSigma : 0, Math.abs(p.value) * opts.relFraction);
+    const floor = opts.minKick?.(p) ?? 0;
+    let scale = Math.max(e !== undefined && e > 0 ? e * opts.escapeSigma : 0, Math.abs(p.value) * opts.relFraction, floor > 0 ? floor : 0);
     if (p.min !== undefined && p.max !== undefined && p.max > p.min) {
       scale = Math.min(scale, 0.5 * (p.max - p.min));
     }
@@ -153,6 +166,7 @@ export async function refineMultiStart(
       escapeSigma,
       relFraction,
       ...(options.shouldPerturb ? { shouldPerturb: options.shouldPerturb } : {}),
+      ...(options.minKick ? { minKick: options.minKick } : {}),
     });
     const cand = await runOnce(perturbed);
     const cost = refinementCost(cand.final);

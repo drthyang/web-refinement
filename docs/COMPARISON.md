@@ -97,20 +97,21 @@ in-app flows.
 
 | Area | This app | Mature packages still add |
 | --- | --- | --- |
-| Data types | CW + **TOF** X-ray/neutron powder; single-crystal F² (`.hkl`/`.fcf`/`.int`); **PDF** `G(r)` (`.gr`/`.sq`/`.fq`) | electron diffraction |
+| Data types | CW + **TOF** X-ray/neutron powder; single-crystal F² (`.hkl`/`.fcf`/`.int`); **PDF** `G(r)` (`.gr`/`.sq`/`.fq`/`.fgr`) | electron diffraction |
 | Profile | Gaussian / pseudo-Voigt / **TCH** + FCJ asymmetry; TOF back-to-back exponential; Chebyshev / Fourier / power backgrounds; March-Dollase PO; displacement / transparency / absorption / roughness corrections; Stephens microstrain, uniaxial size | spherical-harmonic texture, Ikeda–Carpenter TOF shape |
 | Symmetry | **all 230 built-in tables** + CIF/mCIF operations; Wyckoff/site constraints; absences; magnetic subgroup enumeration with **BNS/OG labels**; isotropy + t-subgroup (Bärnighausen) lattices | superspace (3+d), full 1651 magnetic tables incl. type IV |
-| Engine | Levenberg-Marquardt (SVD, esds, correlations), bounds/ties/restraints, staged controller, **multi-start**, worker pool, opt-in WebGPU | full-Hessian options, rigid bodies, restraint libraries |
-| Uncertainty | LM esds + correlations; **Bayesian posterior sampling** (affine-invariant ensemble MCMC on the same problem seam — prototype, PDF-first; split-R̂/ESS/credible intervals; posterior-vs-esd ratio ≈ 1 validated on the Ni golden) | — (none of the three ships posterior sampling; their uncertainties are the least-squares covariance) |
+| Engine | Levenberg-Marquardt (SVD, esds, correlations), bounds/ties/restraints, staged controller, **multi-start**, worker pool, WebGPU f32 kernels (on by default where available) | full-Hessian options, rigid bodies, restraint libraries |
+| Uncertainty | LM esds + correlations; **Bayesian posterior sampling** (ensemble MCMC and NUTS on the same problem seam — a prototype on the powder and PDF pages; split-R̂/ESS/credible intervals; posterior-vs-esd ratio ≈ 1 validated on the Ni golden) | — (none of the three ships posterior sampling; their uncertainties are the least-squares covariance) |
 | Multi-phase / multi-dataset | Yes (powder 2-phase; PDF multi-phase + multi-dataset co-refinement; sequential Rietveld + PDF) | larger joint-histogram breadth |
 | Intensity extraction | **Le Bail** | + Pawley |
-| Magnetism | mCIF in/out, single-crystal + powder moment refinement, k = 0 **and** k ≠ 0 commensurate, k-search, subgroup candidates + comparison | representation analysis (built-in), incommensurate/helical |
+| Magnetism | mCIF in/out, single-crystal + powder moment refinement, k = 0 **and** k ≠ 0 (commensurate **and** incommensurate single-k: cosine + sine Fourier amplitudes, brute-force-supercell gated), k-search, subgroup candidates + comparison; representation analysis at k = 0 for every parent group and at any k for abelian little groups | representation analysis for non-abelian little groups at k ≠ 0, harmonics / superspace, multi-k |
 | Validation | GSAS-II golden values + real-data benchmarks; PDFfit2/PDFgui and diffpy.mpdf goldens | decades of community validation |
-| Platform / API | **Static web app, no install**; **33 MCP agent tools** | desktop; Python scripting ecosystems |
+| Session files | **Save / reopen the whole session** as one readable `.materia.json` (data, phases, parameters, settings, last result; one validated block per technique, so a file can never load as the wrong measurement) | `.gpx` / `.m50`+`.m40` / `.pcr` project files with decades of tooling around them |
+| Platform / API | **Static web app, no install**; an **MCP agent-tool layer** ([catalog](./AGENT_TOOLS.md)) | desktop; Python scripting ecosystems |
 
-**Honest gaps** (the road to maturity): incommensurate / multi-k and
-helical/conical magnetism; built-in representation analysis for the magnetic
-workflow; spherical-harmonic texture; powder extinction and anomalous
+**Honest gaps** (the road to maturity): multi-k, modulation harmonics and
+(3+1)D superspace magnetism; representation analysis for non-abelian little
+groups at k ≠ 0; spherical-harmonic texture; powder extinction and anomalous
 dispersion; twinning and absolute structure (single crystal); rigid bodies and
 a restraints library; Pawley extraction. These are laid out in
 [ROADMAP.md](./ROADMAP.md) and [LIMITATIONS.md](./LIMITATIONS.md).
@@ -120,12 +121,14 @@ a restraints library; Pawley extraction. These are laid out in
 The mature tools are compiled (Fortran/C cores; GSAS-II wraps C/Fortran under
 NumPy/SciPy) with full-matrix solvers; their scaling story is automation and
 multi-dataset throughput rather than single-fit speed, and none publishes
-formal benchmarks. This app runs Levenberg-Marquardt in Web Workers in pure
-TypeScript, with reflection-windowed evaluation, dependency caching, a
-parallel-Jacobian worker pool (bit-identical to the serial driver), analytic
-columns for a validated subset of parameters (on the PDF path a fused
-single-pass ∂G/∂p kernel, measured 2.3× faster on the Ni golden), and opt-in
-WebGPU f32 kernels for
-the structure-factor sums — adequate for the pattern sizes shown here;
-WebAssembly is deliberately skipped (see
+formal benchmarks. This app runs Levenberg–Marquardt in pure TypeScript. Speed
+comes from reflection-windowed evaluation, dependency caching, a
+parallel-Jacobian pool of Web Workers (bit-identical to the serial driver), and
+WebGPU f32 kernels for the structure-factor sums when the browser supports
+them, on by default where the browser has an adapter. That is adequate for the
+pattern sizes shown here. Validated analytic derivatives are on as well: every
+serial fit and the pooled PDF fits take closed-form columns where one exists —
+on the PDF path that made a refinement 2.3× faster in tests. Pooled powder fits
+stay finite-difference, because there one analytic column costs a full pattern
+synthesis on the driver thread. WebAssembly is deliberately skipped (see
 [ARCHITECTURE.md](./ARCHITECTURE.md)).

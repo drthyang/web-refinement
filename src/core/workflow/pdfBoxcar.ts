@@ -17,6 +17,8 @@
  * ends so the UI can say so.
  */
 
+import type { SequentialResult } from "@/core/refinement/sequential";
+
 export type BoxcarDirection = "up" | "down";
 
 /** One box of the plan: the inclusive fit window and its center (the abscissa
@@ -130,4 +132,50 @@ export function boxcarPlanIssue(opts: BoxcarPlanOptions): string | null {
 
 function fmt(x: number): string {
   return String(+x.toFixed(3));
+}
+
+// ---------------------------------------------------------------------------
+// A boxcar RUN — the plan the user asked for and the series it produced. Data
+// only (the panel that draws it lives in app/ui/BoxcarPanel), so a project file
+// can carry a finished scan and the panel can redraw it on reopen.
+// ---------------------------------------------------------------------------
+
+/** Scan order the user asked for: one direction, or both for the comparison. */
+export type BoxcarDirectionChoice = BoxcarDirection | "both";
+
+/** The scan the controls describe (owned by the workbench, edited in the panel). */
+export interface BoxcarPlan {
+  readonly width: number;
+  readonly step: number;
+  readonly direction: BoxcarDirectionChoice;
+  /** Re-search each box from perturbed starts instead of the seed alone. */
+  readonly randomStart: boolean;
+  readonly restarts: number;
+}
+
+/** One scan pass: the fits made walking the boxes in one direction. Its
+ *  `result.steps` are in SCAN order, which for a "down" pass is the reverse of
+ *  the run's (ascending) window list — {@link boxcarStepIndex} maps between them. */
+export interface BoxcarSeries {
+  readonly direction: BoxcarDirection;
+  readonly result: SequentialResult;
+}
+
+/** A completed (or in-progress) boxcar scan: the plan and the series it made. */
+export interface BoxcarRun {
+  /** The full plan, ALWAYS ascending in r, whichever way the passes walked it. */
+  readonly windows: readonly BoxcarWindow[];
+  /** One entry per direction scanned (two when the run compares both). */
+  readonly series: readonly BoxcarSeries[];
+  /** Box width used (Å) — reported in the caption, since the plan can be edited
+   *  in the panel after a run without invalidating the run itself. */
+  readonly width: number;
+  /** Randomized restarts each box ran beyond its seeded start (0 = seed only). */
+  readonly restarts: number;
+  /** Ids that were free when this run started — the tracks worth plotting.
+   *  Frozen with the run: the panel's free flags may have changed since. */
+  readonly freeIds: readonly string[];
+  /** True when the scan was cancelled (or failed) partway: some boxes (or a
+   *  whole pass) are missing from the plan. */
+  readonly partial?: boolean;
 }

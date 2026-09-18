@@ -218,7 +218,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "build_magnetic_model",
     title: "Build symmetry-allowed magnetic model",
-    description: "Build the magnetic model + moment-mode parameters for chosen ion sites under a magnetic subgroup: amplitudes over the symmetry-ALLOWED directions only, co-located (occupancy-disorder) ions tied to one moment, split orbits as independent sublattices. The refinement cannot leave the allowed space by construction. Feed the outputs to refine_magnetic_powder.",
+    description: "Build the magnetic model + moment-mode parameters for chosen ion sites under a magnetic subgroup: amplitudes over the symmetry-ALLOWED directions only, co-located (occupancy-disorder) ions tied to one moment, split orbits as independent sublattices. The refinement cannot leave the allowed space by construction. For a k with two distinct arms (−k ≢ k: ¼-, ⅓-type or incommensurate) every mode carries a cosine AND a sine (quadrature) amplitude — complex Fourier coefficients, the representation helices/cycloids need (`fourier: true`); `phaseGaugeParameterId` names the one sine amplitude that must stay FIXED (the global modulation phase is unobservable). Read `propagation` for the k classification. Feed the outputs to refine_magnetic_powder.",
     inputSchema: {
       structure: anyObj,
       ionLabels: z.array(z.string()).min(1).describe("Magnetic site labels, e.g. [\"Mn1\"]"),
@@ -256,11 +256,12 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "parse_single_crystal_data",
     title: "Parse single-crystal reflections",
-    description: "Parse single-crystal integrated intensities — a FullProf .int (h k l I σ) or a SHELX HKLF4 .hkl — into a SingleCrystalDataset. Parse the nuclear and magnetic files, then merge_magnetic_supercell into one dataset for the magnetic refinement.",
+    description: "Parse single-crystal integrated intensities — a FullProf .int, a SHELX HKLF 4 .hkl, a .fcf CIF reflection loop, or a plain h k l I σ list — into a SingleCrystalDataset. ALWAYS pass `name`: .int and .fcf are detected from the text, but HKLF 4 is fixed-column and looks exactly like a free-format list, so only the .hkl filename selects the column-exact reader (whitespace-splitting an HKLF 4 row reads σ as the intensity once F² ≥ 10000.00 fills its field). `format` reports which reader ran. Parse the nuclear and magnetic files, then merge_magnetic_supercell into one dataset for the magnetic refinement. A 0 0 0 row (the forward beam, not a Bragg reflection) is skipped by default — pass skipForwardBeam:false for a fundamental-indexed MAGNETIC file, where 0 0 0 is the satellite at k itself.",
     inputSchema: {
-      text: z.string().describe("FullProf .int or SHELX .hkl file text"),
-      name: z.string().optional(),
+      text: z.string().describe("FullProf .int, SHELX .hkl, .fcf, or plain h k l I σ file text"),
+      name: z.string().optional().describe("The FILE NAME — required for a SHELX .hkl, which is only recognized by extension"),
       id: z.string().optional().describe("Dataset id (bind a scale to it)"),
+      skipForwardBeam: z.boolean().optional().describe("Skip a 0 0 0 row — the forward beam (default true). Pass false for a fundamental-indexed magnetic file, whose 0 0 0 is the satellite at k."),
     },
     handler: tools.parse_single_crystal_data,
   },
@@ -313,8 +314,12 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "parse_pdf_data",
     title: "Parse reduced PDF G(r)",
-    description: "Parse a reduced pair-distribution-function file (.gr/.sq/.fq — diffpy PDFgetX3 or Mantid dialect) into a PdfPattern with its total-scattering metadata (Qmax, Qdamp, composition). The real-space entry point: feed `pattern` to build_pdf_model / refine_pdf.",
-    inputSchema: { text: z.string().describe("Reduced PDF file text"), filename: z.string().optional() },
+    description: "Parse a reduced pair-distribution-function file (.gr/.sq/.fq — diffpy PDFgetX3 or Mantid dialect) or a PDFgui fit export (.fgr) into a PdfPattern with its total-scattering metadata (Qmax, Qdamp, composition). For .fgr, `signal` picks the curve: 'observed' (default, Gcalc+Gdiff) or 'difference' (the fit residual — the mPDF signal for a neutron nuclear fit). The real-space entry point: feed `pattern` to build_pdf_model / refine_pdf.",
+    inputSchema: {
+      text: z.string().describe("Reduced PDF file text"),
+      filename: z.string().optional(),
+      signal: z.enum(["observed", "difference"]).optional().describe(".fgr only: which curve becomes the pattern"),
+    },
     handler: tools.parse_pdf_data,
   },
   {
@@ -366,7 +371,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "build_mpdf_model",
     title: "Build magnetic-PDF parameter set",
-    description: "Build the magnetic-PDF (mPDF) parameter set: the nuclear PDF rows (scale seeded from the nuclear curve) plus the four mPDF rows — ordered scale, paramagnetic scale, magnetic peak σ, and the short-range-order correlation length ξ — and the symmetry-allowed moment modes from build_magnetic_model. The mPDF rows start FIXED because `mpdfOrdScale` is degenerate with the moment magnitude; free the moments OR the ordered scale, not both. Feed `parameters`/`bindings`/`magnetic` to refine_mpdf. CHECK `warnings`: non-neutron data, an empty spin field, and any site with no displacement parameter (B_iso = 0) all make the result meaningless.",
+    description: "Build the magnetic-PDF (mPDF) parameter set: the nuclear PDF rows (scale seeded from the nuclear curve) plus the four mPDF rows — ordered scale, paramagnetic scale, magnetic peak σ, and the short-range-order correlation length ξ — and the symmetry-allowed moment modes from build_magnetic_model. The mPDF rows start FIXED because `mpdfOrdScale` is degenerate with the moment magnitude; free the moments OR the ordered scale, not both. Feed `parameters`/`bindings`/`magnetic` to refine_mpdf. COMMENSURATE k ONLY (every component a rational with denominator ≤ 12): an incommensurate k has no periodic spin box and is REJECTED, not approximated. CHECK `warnings`: non-neutron data, an empty spin field, and any site with no displacement parameter (B_iso = 0) all make the result meaningless.",
     inputSchema: {
       structure: anyObj.describe("StructureModel from parse_structure"),
       pattern: anyObj.describe("PdfPattern from parse_pdf_data — must be neutron for a magnetic term"),
@@ -379,7 +384,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "refine_mpdf",
     title: "Refine magnetic PDF (real space)",
-    description: "Co-refine the nuclear G(r) and the magnetic d_mag(r) against one observed NEUTRON PDF — the real-space counterpart of refine_magnetic_powder (Frandsen & Billinge 2015 unnormalized mPDF, added into the same residual). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → moments → positions); restrict with `fitRange`. Returns refined values, esds, agreement, diagnostics, the refined magnetic model, and separated nuclear/magnetic component curves. X-ray patterns get no magnetic term (reported in `warnings`).",
+    description: "Co-refine the nuclear G(r) and the magnetic d_mag(r) against one observed NEUTRON PDF — the real-space counterpart of refine_magnetic_powder (Frandsen & Billinge 2015 unnormalized mPDF, added into the same residual). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → moments → positions); restrict with `fitRange`. Returns refined values, esds, agreement, diagnostics, the refined magnetic model, and separated nuclear/magnetic component curves. COMMENSURATE k ONLY — an incommensurate k is rejected (refine it against Bragg satellites with refine_magnetic_powder instead). X-ray patterns get no magnetic term (reported in `warnings`).",
     inputSchema: {
       structure: anyObj, magnetic: anyObj.describe("MagneticModel from build_magnetic_model / build_mpdf_model"),
       pattern: anyObj,

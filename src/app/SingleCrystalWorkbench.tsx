@@ -10,8 +10,11 @@
  * whenever single-crystal data is loaded.
  */
 
-import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, useCallback } from "react";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
+import type { SingleCrystalWorkspace } from "@/core/project/types";
+import { modulatedInputsFrom, restoreMomentBindings, restoreSingleCrystalParameters, singleCrystalWorkspaceFrom } from "@/app/projectIo";
+import { useOnChange } from "@/app/useOnChange";
 import type { StructureModel } from "@/core/crystal/types";
 import type { Radiation, SingleCrystalDataset } from "@/core/diffraction/types";
 import type { Vec3 } from "@/core/math/types";
@@ -36,17 +39,19 @@ import { FobsFcalc, NormalProb } from "@/app/ui/QualityPlots";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { structureToCif, type CifRefinementMeta } from "@/core/export/cif";
-import { writeFullProfInt } from "@/parsers/fullprofInt";
+import { writeFullProfInt } from "@/core/export/fullprofInt";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { expandStructureToSupercell, buildModulatedMomentModel, mergeToMagneticSupercell, type ModulatedIon } from "@/core/magnetic/magneticSupercell";
 import type { MomentDegeneracy } from "@/core/magnetic/canonicalize";
 import { downloadText } from "@/app/download";
+import { reportHtml } from "@/core/export/report";
+import { singleCrystalReportInput, reportFileName, type MagneticExploration } from "@/app/reportInputs";
 import { card as themeCard, color, mono, fz, uppercaseLabel, secondaryButton, space } from "@/app/theme";
 
 // Lazy so three.js stays out of the main bundle until the 3D view is opened.
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 
-const DATA_ACCEPT = ".xye,.xy,.dat,.txt,.gr,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,text/plain";
+const DATA_ACCEPT = ".xye,.xy,.dat,.txt,.gr,.sgr,.fgr,.sq,.fq,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,text/plain";
 const pct = (x: number): string => `${(x * 100).toFixed(2)}%`;
 const noop = (): void => {};
 
@@ -71,10 +76,13 @@ function r1Ink(r1: number): string {
 type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: string };
 
 /** Probe the reflections were measured with. A bare .hkl / reflection list can't
- *  carry this, so the user picks it (seeded from the loaded instrument). */
+ *  carry this, so the user picks it (seeded from the loaded instrument). The UI
+ *  presents it as source × mode — X-ray (always constant-wavelength), neutron
+ *  constant-wavelength, neutron time-of-flight — which collapses to this
+ *  three-way value; the project file stores the same value. */
 type Probe = "xray" | "neutron" | "neutron-tof";
 
-export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, client, step, onStep, instrumentProbe, exportsRef, onLoadData, onLoadMagneticData, onLoadCif }: {
+export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, client, step, onStep, onMagneticPresent, instrumentProbe, exportsRef, onLoadData, onLoadMagneticData, onLoadCif, restore }: {
   structure: StructureModel;
   dataset: SingleCrystalDataset;
   /** Companion magnetic reflection file for joint co-refinement (Phase 2). When
@@ -87,6 +95,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   step: number;
   /** Switch the app-level step (e.g. "continue to refinement" after applying a model). */
   onStep?: (i: number) => void;
+  /** Report whether the model currently carries magnetic moments, so the shell's
+   *  header can light the Magnetic chip from the F² page. */
+  onMagneticPresent?: (present: boolean) => void;
   /** Radiation of the loaded instrument, if any — seeds the probe default so a
    *  loaded X-ray instrument selects X-ray scattering without the user asking. */
   instrumentProbe?: "xray" | "neutron";
@@ -100,13 +111,21 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   onLoadMagneticData?: (file: File) => void;
   /** Load a different structure (CIF). */
   onLoadCif?: (file: File) => void;
+  /** A saved single-crystal workspace to reopen (project open). Read once, on
+   *  mount — the shell remounts this page with a fresh key when it opens a
+   *  project — and only seeds the initial state below. */
+  restore?: SingleCrystalWorkspace;
 }): JSX.Element {
+  // Captured at mount: the shell may drop the prop later without this page
+  // losing what it restored.
+  const restoring = useRef(restore).current;
+  const restoredModulated = restoring?.modulated ? modulatedInputsFrom(restoring.modulated) : null;
   // Probe selection. The reflection file is hardcoded to neutron on load (it can't
   // report its own source), so the user can switch here — and the choice changes
   // the physics (neutron b vs X-ray form factors f(Q) + polarization), rebuilding
   // F_calc and the agreement factors live. Seeded from the instrument when known.
   const baseWavelength = ("wavelength" in dataset.radiation ? dataset.radiation.wavelength : undefined) ?? 1.54;
-  const [probe, setProbe] = useState<Probe>(() => instrumentProbe ?? dataset.radiation.kind);
+  const [probe, setProbe] = useState<Probe>(() => restoring?.probe ?? instrumentProbe ?? dataset.radiation.kind);
   const effectiveRadiation: Radiation = useMemo(() => {
     if (probe === "neutron-tof") return { kind: "neutron-tof" };
     if (probe === "xray") return { kind: "xray", wavelength: baseWavelength, polarization: 0.5 };
@@ -117,7 +136,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
 
   const spec = useMemo(() => buildSingleCrystalSpec(structure, probedDataset, { extinction: 0 }), [structure, probedDataset]);
   const bindings = spec.bindings;
-  const [params, setParams] = useState(spec.params);
+  // Nuclear rows come from the fresh spec (with the saved state overlaid by
+  // id); the saved moment rows, which no builder can regenerate, are appended.
+  const [params, setParams] = useState(() => (restoring ? restoreSingleCrystalParameters(spec.params, restoring) : spec.params));
   // The 3D model tracks the refinement: apply the current parameters (cell,
   // positions, ADPs) to the structure so the viewer shows the refined cell, not
   // the loaded starting structure.
@@ -126,8 +147,10 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
     for (const p of params) values[p.id] = p.value;
     return applyParameters(structure, bindings, values).model;
   }, [structure, params, bindings]);
-  const [result, setResult] = useState<RefinementResult | null>(null);
+  const [result, setResult] = useState<RefinementResult | null>(restoring?.refinement.lastResult ?? null);
   const [busy, setBusy] = useState(false);
+  // Outcome of the last Prefit / Escape-min run, shown beside the refine actions.
+  const [thoroughNote, setThoroughNote] = useState<string | null>(null);
   const [plotKind, setPlotKind] = useState<"fobs" | "npp">("fobs");
   // Reflection spotlighted by a click in the F_obs/F_calc plot (or null).
   const [selected, setSelected] = useState<Selection | null>(null);
@@ -135,14 +158,14 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   // Magnetic model applied from the (shared) symmetry analysis, with its moment
   // bindings. When present, refinement fits nuclear + moments against F² together
   // and the F_obs/F_calc plot shows the total (nuclear + magnetic) intensity.
-  const [magnetic, setMagnetic] = useState<MagneticModel | null>(null);
-  const [momentBindings, setMomentBindings] = useState<readonly ParameterBinding[]>([]);
+  const [magnetic, setMagnetic] = useState<MagneticModel | null>(restoring?.magnetic ?? null);
+  const [momentBindings, setMomentBindings] = useState<readonly ParameterBinding[]>(() => (restoring ? restoreMomentBindings(restoring) : []));
 
   // Outlier filter: reject reflections whose standardized residual |Fo²−Fc²|/σ
   // exceeds `cutoffSigma` (SHELX-style OMIT). Off by default. The threshold is
   // applied against the *current* model, so it stays live as the fit changes.
-  const [filterOn, setFilterOn] = useState(false);
-  const [cutoffSigma, setCutoffSigma] = useState(6);
+  const [filterOn, setFilterOn] = useState(restoring?.outlierFilter?.on ?? false);
+  const [cutoffSigma, setCutoffSigma] = useState(restoring?.outlierFilter?.cutoffSigma ?? 6);
 
   // Comparison over the *full* dataset — the residuals that drive the filter.
   const fullComparison = useMemo(
@@ -222,6 +245,76 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
     }
   }
 
+  /**
+   * Thorough refine — the local-minimum-resistant path the powder and PDF pages
+   * have: one baseline fit plus perturbed restarts, keeping the lowest χ². One
+   * engine, two faces: with no fit yet it is "Prefit" (a broad cold-start
+   * search); once a fit exists it is a lighter "Escape min" nudge out of the
+   * current basin. An F² surface traps LM readily — a positional mode driven
+   * onto its ±bound, or an atom settled into a neighbour's basin, converges
+   * cleanly to a wrong answer with a plausible wR2 — and the esd- and
+   * value-relative kicks both vanish for a mode sitting at 0, so the kicks carry
+   * an absolute floor in the parameter's own units (fractional shift, Å²).
+   * With a magnetic model applied the multi-start is the MAGNETIC one: it
+   * freezes the nuclear scaffold, searches the moment subspace, then runs one
+   * joint LM over everything freed (nuclear minima are not searched there).
+   */
+  async function runThorough(): Promise<void> {
+    const mode: "prefit" | "escape" = result ? "escape" : "prefit";
+    const wide = mode === "prefit";
+    setBusy(true);
+    setThoroughNote(null);
+    try {
+      await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
+      let ms;
+      if (magnetic) {
+        ms = await client.refineMagneticSingleCrystalMultiStart(
+          { structure, magnetic, dataset: activeDataset, parameters: [...params], bindings: [...bindings, ...momentBindings] },
+          wide ? { restarts: 12 } : { restarts: 6, escapeSigma: 3 },
+          { maxIterations: 25 },
+        );
+        setMagnetic(applyMagneticMoments(magnetic, momentBindings, ms.final.parameters));
+      } else {
+        // Kick floors: 0.1 in fractional coordinates (~0.6 Å in a 6 Å cell) for
+        // a positional mode — a seed sweep on a synthetic bound-trapped start
+        // put 0.05 at 2/10 recoveries and 0.1 at 7–9/10 — and a basin-sized
+        // step for the displacement parameters. Prefit casts the wider net
+        // (more restarts, ~4σ kicks), Escape a tighter one.
+        const minKick = (p: RefinementParameter): number | undefined => {
+          switch (p.kind) {
+            case "positionShift": return 0.1;
+            case "bIso": return wide ? 1 : 0.5;
+            case "uAniso": return wide ? 0.01 : 0.005;
+            case "occupancy": return wide ? 0.2 : 0.1;
+            case "extinction": return 0.01;
+            default: return undefined; // scale: the esd-relative kick is right
+          }
+        };
+        ms = await client.refineSingleCrystalMultiStart(
+          { structure, dataset: activeDataset, parameters: [...params], bindings, options: { maxIterations: 25 } },
+          wide ? { restarts: 12, escapeSigma: 4, relFraction: 0.5, minKick } : { restarts: 6, escapeSigma: 2, relFraction: 0.5, minKick },
+        );
+      }
+      setParams((prev) => prev.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value })));
+      setResult(ms.final);
+      const wr = (100 * (ms.final.agreement.rWeighted ?? 0)).toFixed(2);
+      const starts = ms.restartsRun + 1;
+      setThoroughNote(wide
+        ? (ms.improved
+            ? `Prefit found a lower minimum (restart ${ms.bestStartIndex} of ${ms.restartsRun}) — wR2 ${wr}%, best of ${starts} starts. Refine to polish.`
+            : `Prefit: the starting model was already best of ${starts} starts — wR2 ${wr}%. Refine to polish.`)
+        : (ms.improved
+            ? `Escaped a local minimum (restart ${ms.bestStartIndex} of ${ms.restartsRun}) — wR2 ${wr}%, best of ${starts} starts.`
+            : `Already at the best minimum — the baseline beat all ${starts} starts, wR2 ${wr}%.`));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setThoroughNote(`${wide ? "Prefit" : "Escape min"} failed: ${msg}`);
+      console.error(`[status] Single-crystal ${mode} failed: ${msg}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Moment-fit backend handed to the (shared) symmetry panel: it fits the freed
   // moment amplitudes against this dataset's F² with the nuclear model held fixed,
   // through the same worker. This is single-crystal magnetic refinement.
@@ -256,15 +349,19 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   // expands the structure, merges the reflections, builds the k-tied modulated
   // moment model, and runs the single-dataset magnetic multi-start — WITHOUT
   // mutating App state (the shared structure/3D view stay in the base cell).
-  const [kText, setKText] = useState<[string, string, string]>(["1/4", "0", "1/4"]);
+  const [kText, setKText] = useState<[string, string, string]>(() => (restoredModulated ? [...restoredModulated.kText] : ["1/4", "0", "1/4"]));
   const magIons = useMemo(() => magneticIonCandidates(structure), [structure]);
   // Per-candidate hypothesis: whether it carries a moment, its direction (crystal
   // axes), and the modulation phase (0 = node pattern, π/4 = equal-moment).
-  const [ionState, setIonState] = useState<Record<string, { on: boolean; dir: [string, string, string]; phase: string }>>({});
+  const [ionState, setIonState] = useState<Record<string, { on: boolean; dir: [string, string, string]; phase: string }>>(() =>
+    restoredModulated
+      ? Object.fromEntries(Object.entries(restoredModulated.ionState).map(([label, ion]) => [label, { on: ion.on, dir: [...ion.dir] as [string, string, string], phase: ion.phase }]))
+      : {},
+  );
   const ionOf = (label: string) => ionState[label] ?? { on: magIons.length === 1, dir: ["0", "0", "1"] as [string, string, string], phase: "1/4" };
-  const [modMoment, setModMoment] = useState(1);
-  const [modSeed, setModSeed] = useState(1);
-  const [modRestarts, setModRestarts] = useState(8);
+  const [modMoment, setModMoment] = useState(restoredModulated?.moment ?? 1);
+  const [modSeed, setModSeed] = useState(restoredModulated?.seed ?? 1);
+  const [modRestarts, setModRestarts] = useState(restoredModulated?.restarts ?? 8);
   const [modBusy, setModBusy] = useState(false);
   const [modError, setModError] = useState<string | null>(null);
   const [modResult, setModResult] = useState<{
@@ -274,7 +371,8 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   const selectedIonCount = magIons.filter((c) => ionOf(c.siteLabel).on).length;
   // A new structure (CIF load) keeps this workbench mounted (keyed on the dataset
   // id), so clear the stale magnetic hypothesis + results/error for the old cell.
-  useEffect(() => { setIonState({}); setModResult(null); setModError(null); }, [structure]);
+  // (On change only — the mount render may carry a restored hypothesis.)
+  useOnChange(structure, () => { setIonState({}); setModResult(null); setModError(null); });
 
   /** One-pass linear least-squares scale from the nuclear reflections (satellites
    *  carry ~0 nuclear |F|², so they don't bias it): k = Σ Fo²Fc² / Σ (Fc²)². */
@@ -360,7 +458,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
     setMomentBindings(mag ? mBindings : []);
     setParams((prev) => [
       ...prev.filter((p) => !isMomentParameterKind(p.kind)),
-      ...(mag ? momentParams.map((p) => ({ ...p, fixed: false })) : []),
+      ...(mag ? momentParams.map((p) => ({ ...p, fixed: !!p.expression })) : []),
     ]);
   }
 
@@ -371,6 +469,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   function reset(): void {
     setParams(spec.params.map((p) => ({ ...p, value: p.initialValue })));
     setResult(null);
+    setThoroughNote(null);
   }
 
   function exportCif(): void {
@@ -406,29 +505,76 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
     }
   }
 
+  // Tell the shell whether the model includes moments (the header's Magnetic
+  // chip lights up from the F² page); withdrawn when this engine unmounts.
+  useEffect(() => {
+    onMagneticPresent?.(!!magnetic && magnetic.moments.length > 0);
+  }, [onMagneticPresent, magnetic]);
+  useEffect(() => () => onMagneticPresent?.(false), [onMagneticPresent]);
+
+  // The magnetic page's current candidate, for the report (published by KSearchPanel).
+  const exploredMagnetic = useRef<MagneticExploration | null>(null);
+  const publishExploration = useCallback((m: MagneticExploration | null): void => {
+    exploredMagnetic.current = m;
+  }, []);
+
+  // Self-contained HTML report (Export ▾ → Report): data and merge statistics,
+  // the F_obs/F_calc figure, SHELX agreement, the refined structure with esds,
+  // the magnetic model (applied or under exploration), every parameter.
+  function exportReport(): void {
+    const html = reportHtml(singleCrystalReportInput({
+      structure: refinedStructure,
+      params,
+      bindings: [...bindings, ...momentBindings],
+      result,
+      dataset: activeDataset,
+      totalReflections: probedDataset.reflections.length,
+      excluded,
+      filterOn,
+      cutoffSigma,
+      agreement: comparison.agreement,
+      merge: merge.statistics,
+      points: obsCalc.map((r) => ({ obs: r.iObs, calc: r.iCalc, ...(r.kind === "magnetic" ? { magnetic: true } : {}) })),
+      magnetic,
+      explored: exploredMagnetic.current,
+    }));
+    downloadText(reportFileName(structure), html, "text/html");
+  }
+
   // Publish the current exporter so the app header can drive it; clear on unmount
   // (switch back to powder) so the header never calls a stale single-crystal export.
   useEffect(() => {
     if (!exportsRef) return;
-    exportsRef.current = { cif: exportCif, scInt: exportInt };
+    exportsRef.current = {
+      report: exportReport,
+      cif: exportCif,
+      scInt: exportInt,
+      projectWorkspace: () => singleCrystalWorkspaceFrom({
+        dataset, magneticDataset: magneticDataset ?? null, probe,
+        params, bindings: [...bindings, ...momentBindings], result, magnetic,
+        filterOn, cutoffSigma,
+        modulated: { kText, ionState, moment: modMoment, seed: modSeed, restarts: modRestarts },
+      }),
+    };
     return () => { exportsRef.current = null; };
   });
 
   const ag = comparison.agreement;
   const st = merge.statistics;
   const cell = structure.cell;
-  const probeLabel = probe === "xray" ? "X-ray" : probe === "neutron" ? "Neutron" : "Neutron TOF";
+  const probeLabel = probe === "xray" ? "X-ray · CW" : probe === "neutron" ? "Neutron · CW" : "Neutron · TOF";
   const wl = "wavelength" in effectiveRadiation ? ` · λ ${effectiveRadiation.wavelength} Å` : "";
 
   const summaryCards: SummaryCardData[] = [
     {
       label: "Structure",
+      help: "The unit cell is taken from indexing / data reduction and held fixed. Integrated intensities carry no information on peak positions, so no single-crystal program refines the cell against F² (SHELXL's CELL/ZERR, Jana, FullProf and GSAS-II alike); its esds belong to the diffractometer, not to this fit.",
       loadLabel: "Load CIF…",
       accept: ".cif,.mcif,text/plain",
       onFile: onLoadCif ?? noop,
       chip: "✓ parsed",
       title: `${structure.name || "structure"} · ${structure.spaceGroup.hermannMauguin ?? "—"}`,
-      meta: `a ${cell.a.toFixed(4)} · b ${cell.b.toFixed(4)} · c ${cell.c.toFixed(4)} Å · ${structure.sites.length} sites`,
+      meta: `a ${cell.a.toFixed(4)} · b ${cell.b.toFixed(4)} · c ${cell.c.toFixed(4)} Å · ${structure.sites.length} sites · cell fixed`,
     },
     {
       label: "Data · single crystal",
@@ -459,6 +605,11 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       >
         Export CIF
       </button>
+      {thoroughNote && (
+        <span style={{ fontSize: fz.small, color: thoroughNote.includes("failed") ? color.warnInk : color.secondary, alignSelf: "center" }}>
+          {thoroughNote}
+        </span>
+      )}
     </>
   );
 
@@ -571,6 +722,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           esd={result?.esd}
           onChange={onParamChange}
           onRefine={() => runRefine(false)}
+          onThorough={() => void runThorough()}
+          thoroughMode={result ? "escape" : "prefit"}
+          prefitTitle="Prefit from a cold start: a broad set of perturbed restarts of the free parameters (positions kicked by up to ~0.1 in fractional coordinates), keeping the best — lands the structure in a good basin before you refine. (No Le Bail stage: integrated intensities have no profile to pre-fit.)"
           onReset={reset}
           busy={busy}
           result={result}
@@ -583,7 +737,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
             supercell, ties one modulated amplitude per magnetic sublattice, and
             refines with ONE shared scale (nuclear + magnetic = one measurement).
             Non-destructive: the shared structure/3D view stay in the base cell. */}
-        <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="wb-sc-wide" style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <span style={uppercaseLabel}>Magnetic single-k · supercell refinement</span>
             <label style={{ ...secondaryButton, padding: "6px 12px", cursor: "pointer" }} title="Load a companion magnetic reflection file (.int/.hkl): satellites indexed in the nuclear cell as the fundamental h k l of hkl ± k">
@@ -712,7 +866,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       {/* Step 1 — magnetic symmetry analysis. The workflow itself is structure-
           driven and identical to powder; only the moment fit (magneticFit) runs
           against F² reflections instead of a powder pattern. */}
-      <div style={{ display: step === 1 ? "grid" : "none", gap: space.gap }}>
+      <div className="wb-mag-page" style={{ display: step === 1 ? undefined : "none" }}>
         <div style={{ ...themeCard, padding: space.inset }}>
           <div style={{ ...uppercaseLabel, marginBottom: 4 }}>Magnetic symmetry analysis — single crystal ({structure.name || "structure"})</div>
           <p style={{ fontSize: 13, color: color.secondary, margin: 0, lineHeight: 1.5 }}>
@@ -724,6 +878,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           structure={structure}
           magneticFit={magneticFit}
           onContinue={(m, mp, mb) => { applyMagneticModel(m, mp, mb); onStep?.(0); }}
+          onReportModel={publishExploration}
         />
       </div>
     </>
@@ -732,36 +887,76 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
 
 /** Segmented X-ray / Neutron / TOF control for the single-crystal Data card.
  *  A bare reflection file carries no probe, so this is the authoritative source. */
+/**
+ * Source × mode picker for the probe. The reflection file cannot report its
+ * own radiation, so the user states it the way an experiment is described:
+ * the SOURCE (X-ray or neutron) and, for neutrons, the MODE — constant
+ * wavelength (a monochromated reactor / synchrotron-style beam) or time of
+ * flight (a spallation source, no single λ). X-ray single-crystal data is
+ * always constant-wavelength, so its mode control is fixed at CW.
+ */
 function ProbeToggle({ probe, onChange }: { probe: Probe; onChange: (p: Probe) => void }): JSX.Element {
-  const opts: { value: Probe; label: string }[] = [
-    { value: "xray", label: "X-ray" },
-    { value: "neutron", label: "Neutron" },
-    { value: "neutron-tof", label: "TOF" },
-  ];
+  const source: "xray" | "neutron" = probe === "xray" ? "xray" : "neutron";
+  const mode: "cw" | "tof" = probe === "neutron-tof" ? "tof" : "cw";
+  const setSource = (s: "xray" | "neutron"): void => onChange(s === "xray" ? "xray" : mode === "tof" ? "neutron-tof" : "neutron");
+  const setMode = (m: "cw" | "tof"): void => {
+    if (source === "xray") return; // fixed: X-ray is always constant-wavelength
+    onChange(m === "tof" ? "neutron-tof" : "neutron");
+  };
+  const modeFixed = source === "xray";
   return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-      <span
-        style={{ fontSize: fz.micro, color: color.faint }}
-        title="The reflection file cannot report its own radiation. Pick the probe used — it selects neutron scattering lengths (b) vs X-ray form factors f(Q) + polarization, changing every F_calc."
-      >
-        probe
-      </span>
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <ProbeSegment
+        label="source"
+        hint="The reflection file cannot report its own radiation. X-ray uses atomic form factors f(Q) plus the polarization factor; neutron uses scattering lengths b — the choice changes every F_calc."
+        options={[{ value: "xray", label: "X-ray" }, { value: "neutron", label: "Neutron" }]}
+        value={source}
+        onChange={setSource}
+      />
+      <ProbeSegment
+        label="mode"
+        hint={modeFixed
+          ? "X-ray single-crystal data is always constant-wavelength (monochromatic)."
+          : "Constant wavelength: a monochromatic beam, λ from the file (default 1 Å). Time of flight: a spallation source — no single wavelength, so the λ-dependent corrections are not applied."}
+        options={[{ value: "cw", label: "CW" }, { value: "tof", label: "TOF" }]}
+        value={mode}
+        onChange={setMode}
+        disabled={modeFixed}
+      />
+    </div>
+  );
+}
+
+/** One labelled segmented group of the probe picker. */
+function ProbeSegment<T extends string>({ label, hint, options, value, onChange, disabled = false }: {
+  label: string;
+  hint: string;
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  disabled?: boolean;
+}): JSX.Element {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, opacity: disabled ? 0.55 : 1 }} title={hint}>
+      <span style={{ fontSize: fz.micro, color: color.faint }}>{label}</span>
       <span style={{ display: "inline-flex", border: `1px solid ${color.control}`, borderRadius: 6, overflow: "hidden" }}>
-        {opts.map((o) => (
+        {options.map((o) => (
           <button
             key={o.value}
             onClick={() => onChange(o.value)}
+            disabled={disabled}
+            aria-pressed={value === o.value}
             style={{
-              border: "none", padding: "2px 9px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer",
-              background: probe === o.value ? color.primary : "transparent",
-              color: probe === o.value ? "#fff" : color.secondary,
+              border: "none", padding: "2px 9px", fontSize: 11.5, fontFamily: "inherit", cursor: disabled ? "default" : "pointer",
+              background: value === o.value ? color.primary : "transparent",
+              color: value === o.value ? "#fff" : color.secondary,
             }}
           >
             {o.label}
           </button>
         ))}
       </span>
-    </div>
+    </span>
   );
 }
 

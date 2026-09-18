@@ -1,5 +1,9 @@
 # Build & Validation Report
 
+> **Archived.** The first build-and-validation report, a historical record from
+> July 2026. For the current state see [`../LIMITATIONS.md`](../LIMITATIONS.md)
+> and [`../VALIDATION.md`](../VALIDATION.md).
+
 **Project:** MATERIA Workbench — a browser-native refinement workbench for
 atomic and magnetic structures.
 **Stack:** React 18 · TypeScript 5 (strict) · Vite 5 · Vitest · Web Workers.
@@ -14,8 +18,8 @@ validated against the bundled GSAS-II refinements in `data/`
 > **How to read this document:** §1–5 are the **historical validation record**
 > from the first build passes — the golden-value comparisons there remain the
 > foundation tests and still pass, but the "not yet" statements describe the
-> state *at that time*. For current status see the [README](../README.md),
-> [ROADMAP.md](./ROADMAP.md), and [LIMITATIONS.md](./LIMITATIONS.md); §6 lists
+> state *at that time*. For current status see the [README](../../README.md),
+> [ROADMAP.md](../ROADMAP.md), and [LIMITATIONS.md](../LIMITATIONS.md); §6 lists
 > what has landed since.
 
 ---
@@ -40,7 +44,8 @@ in `src/core/**` is pure, framework-free TypeScript.
 | Magnetic | `src/core/magnetic` | Perpendicular-moment projection, magnetic `F_M` |
 | Refinement | `src/core/refinement` | Levenberg–Marquardt engine, R-factors, esds, constraint ties |
 | Workflows | `src/core/workflow` | Single-crystal & powder problem builders + obs/calc comparison |
-| Parsers | `src/parsers` | CIF (esd-aware), hkl, powder, project JSON |
+| Parsers | `src/parsers` | CIF (esd-aware), hkl, powder, instrument files |
+| Project | `src/core/project` | Technique-tagged project file (schema v2): types, readable serializer, per-technique validation, v1→v2 migration |
 | Compute | `src/workers` | Typed worker + client (refinement off the main thread) |
 | Visualization | `src/visualization` | SVG pattern plot, obs-vs-calc scatter |
 | UI | `src/app`, `src/components` | Workbench: structure view, parameter tables, refine, export |
@@ -150,7 +155,7 @@ refinement (Phase 7) is not yet wired — only magnetic single-crystal.
   convention (normalized crystal axes) is a documented simplification, validated
   against GSAS-II moment magnitudes.
 
-Full detail in [LIMITATIONS.md](./LIMITATIONS.md). The scope statement appears
+Full detail in [LIMITATIONS.md](../LIMITATIONS.md). The scope statement appears
 in the app UI, README, and limitations doc.
 
 ---
@@ -177,13 +182,14 @@ k ≠ 0), the TOF back-to-back-exponential profile (the two-phase Mn₃Ga/MnO de
 converges at wR ≈ 3.9 %), the single-crystal F² workbench, refined CIF/mCIF
 export with esds, one-click FullProf / GSAS-II cross-check export, opt-in
 WebGPU structure-factor kernels, the real-space PDF track (PDFfit2-validated,
-with the symmetry-mode distortion workflow), a validated mPDF core, the
-33-tool MCP agent layer, and the Bayesian posterior-sampling prototype
+with the symmetry-mode distortion workflow), magnetic PDF (core and page), the
+MCP agent-tool layer, and the Bayesian posterior-sampling prototype
 (`sample_posterior` + the fused analytic-gradient PDF pass; posterior widths
 validated at esdRatio 0.99–1.01 against the LM esds on the Ni golden).
 Remaining highlights (full ordering in
-[ROADMAP.md](./ROADMAP.md)):
+[ROADMAP.md](../ROADMAP.md)):
 
 1. Single-crystal-mode and multi-phase FullProf `.pcr` export (powder is done).
-2. Representation analysis and the star of k / multi-k magnetic workflow.
-3. The mPDF page and the symmetry-constrained local-spin model (PDF roadmap P5).
+2. Representation analysis for non-abelian little groups at k ≠ 0, and the
+   star of k / multi-k magnetic workflow.
+3. The symmetry-constrained local-spin model for mPDF (PDF roadmap P5).

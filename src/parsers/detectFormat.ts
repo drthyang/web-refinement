@@ -22,6 +22,7 @@ import type { PowderXUnit, Radiation } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { gsasHistogramUnit } from "@/parsers/gsasHistogram";
 import { looksLikePdf } from "@/parsers/pdfData";
+import { looksLikeFgr } from "@/parsers/fgrData";
 
 export type DataType = "powder" | "single-crystal" | "pdf";
 export type DetectionSource = "override" | "header" | "instrument" | "filename" | "heuristic";
@@ -143,18 +144,31 @@ export function detectDataFormat(input: DetectInput): DetectedFormat {
   // --- Data type ---------------------------------------------------------
   // A reduced PDF (`.gr`/`.sq`/`.fq`, or a PDFgetX3/Mantid header) is a
   // real-space G(r) — routed to its own workbench, never a powder pattern.
+  // A PDFgui fit export (`.fgr`) also routes there; the .fgr reader (not the
+  // generic one) then owns its column semantics.
+  const isFgr = looksLikeFgr(text, input.filename);
+  // A SHELX `.hkl`/`.fcf` is reflection data by name. The content heuristic
+  // alone is not enough for either: HKLF 4 is fixed-column, so rows with an
+  // intensity ≥ 10000.00 whitespace-split into a huge `l` that fails the
+  // small-Miller-index test, and an `.fcf` carries CIF tag lines between its
+  // numeric rows — a file of strong reflections can slip through as powder.
+  const isReflectionFile = /\.(hkl|fcf)$/i.test(input.filename);
   const dataType: DataType =
     override?.dataType ??
-    (looksLikePdf(text, input.filename) ? "pdf" : looksLikeReflectionList(text) ? "single-crystal" : "powder");
+    (isFgr || looksLikePdf(text, input.filename) ? "pdf"
+      : isReflectionFile || looksLikeReflectionList(text) ? "single-crystal"
+      : "powder");
 
   if (dataType === "pdf") {
     return {
       dataType,
       xUnit: "dSpacing", // r in Å; not used for a PDF (the parser owns the grid)
       radiation: radiationFor("dSpacing", instrument),
-      source: override?.dataType ? "override" : /\.(gr|sgr|sq|fq)$/i.test(input.filename) ? "filename" : "header",
+      source: override?.dataType ? "override" : /\.(gr|sgr|sq|fq|fgr)$/i.test(input.filename) ? "filename" : "header",
       confidence: "high",
-      note: "Reduced pair distribution function G(r) — fitted in real space (PDF workbench).",
+      note: isFgr
+        ? "PDFgui fit export (.fgr) — G(r) column is the fit; observed = Gcalc + Gdiff (PDF workbench)."
+        : "Reduced pair distribution function G(r) — fitted in real space (PDF workbench).",
     };
   }
 
@@ -163,7 +177,7 @@ export function detectDataFormat(input: DetectInput): DetectedFormat {
       dataType,
       xUnit: "twoTheta", // not used for reflection data
       radiation: instrument?.kind === "tof" ? { kind: "neutron-tof" } : radiationFor("twoTheta", instrument),
-      source: override?.dataType ? "override" : looksLikeReflectionList(text) ? "header" : "heuristic",
+      source: override?.dataType ? "override" : isReflectionFile ? "filename" : looksLikeReflectionList(text) ? "header" : "heuristic",
       confidence: "high",
       note: "Reflection list (h k l I) — refined as single-crystal / extracted intensities.",
     };

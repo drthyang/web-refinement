@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseFullProfInt, looksLikeFullProfInt, parseFortranFields, writeFullProfInt } from "@/parsers/fullprofInt";
+import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
+import { parseFortranFields, writeFullProfInt } from "@/core/export/fullprofInt";
 
 // FullProf single-crystal .int: title, Fortran format, wavelength, then
 // fixed-width `h k l I σ [domain] [6 geometry]` rows. The domain code and first
@@ -242,5 +243,71 @@ describe("writeFullProfInt (writer + round-trips)", () => {
     const text = writeFullProfInt(refl, { title: "X", wavelength: 1.0, format: "(3i4,2x,2f8.2,i4)" });
     const p = parseFullProfInt(text, { strict: true });
     expect(p.reflections[0]).toMatchObject({ h: 1, k: 2, l: 3, iObs: 12345.67, sigma: 234.56, code: 1 });
+  });
+});
+
+// A plain-format file carrying the forward beam as a `0 0 0` row (I = 120, σ = 0 —
+// the σ is dropped on read, so this row would refine at unit weight).
+const WITH_000 = [
+  "Crystal",
+  "(3i4,2f8.2,i4,6f8.0)",
+  "1.0000 0 0",
+  "   0   0   0  120.00    0.00   1 0.00000 0.00000 0.00000 0.00000 0.00000 0.00000",
+  "  -4 -10   1    0.04    0.02   1-0.42101-0.15770-0.49921-0.10071-0.75733 0.98234",
+  "  -3 -11   1    0.18    0.01   1-0.41794-0.01514-0.49563-0.16901-0.76136 0.98550",
+  "",
+].join("\n");
+
+// k variant whose only propagation vector is zero: its `0 0 0 nv=1` row is the
+// forward beam again (H + 0), unlike REAL_MAGNETIC_K's `0 0 0 nv=1` = satellite at k.
+const ZERO_K_000 = [
+  "Single crystal data",
+  "(4i5,2f8.2,i4,3f8.2)",
+  "1.53600  0   0",
+  "1",
+  "1 0.0 0.0 0.0",
+  "    0    0    0    1  415.14   14.32   1",
+  "    1    0    0    1  100.00    5.00   1",
+  "",
+].join("\n");
+
+describe("parseFullProfInt — the 0 0 0 forward-beam row", () => {
+  it("keeps it by default (a fundamental-indexed magnetic file's 0 0 0 is the satellite at k)", () => {
+    const p = parseFullProfInt(WITH_000);
+    expect(p.reflections.length).toBe(3);
+    expect(p.reflections[0]).toMatchObject({ h: 0, k: 0, l: 0, iObs: 120 });
+    expect(p.reflections[0]!.sigma).toBeUndefined();
+    expect(p.forwardBeamSkipped).toBe(0);
+    expect(p.problems).toEqual([]);
+  });
+
+  it("skipForwardBeam drops a plain-format 0 0 0 row and records it by line", () => {
+    const p = parseFullProfInt(WITH_000, { skipForwardBeam: true });
+    expect(p.reflections.map((r) => [r.h, r.k, r.l])).toEqual([[-4, -10, 1], [-3, -11, 1]]);
+    expect(p.skipped).toBe(1);
+    expect(p.forwardBeamSkipped).toBe(1);
+    expect(p.problems).toHaveLength(1);
+    expect(p.problems[0]!.line).toBe(4);
+    expect(p.problems[0]!.expected).toContain("forward beam");
+  });
+
+  it("is not a strict-mode error: the file is well-formed", () => {
+    const p = parseFullProfInt(WITH_000, { skipForwardBeam: true, strict: true });
+    expect(p.reflections.length).toBe(2);
+    expect(p.forwardBeamSkipped).toBe(1);
+  });
+
+  it("keeps a k-variant 0 0 0 nv row whose k is non-zero (the satellite at k)", () => {
+    const plain = parseFullProfInt(REAL_MAGNETIC_K);
+    const skip = parseFullProfInt(REAL_MAGNETIC_K, { skipForwardBeam: true });
+    expect(plain.reflections.some((r) => r.h === 0 && r.k === 0 && r.l === 0)).toBe(true);
+    expect(skip.reflections.length).toBe(plain.reflections.length);
+    expect(skip.forwardBeamSkipped).toBe(0);
+  });
+
+  it("drops a k-variant 0 0 0 nv row whose k-vector is zero (H + 0 = the forward beam)", () => {
+    const p = parseFullProfInt(ZERO_K_000, { skipForwardBeam: true });
+    expect(p.reflections.map((r) => [r.h, r.k, r.l])).toEqual([[1, 0, 0]]);
+    expect(p.forwardBeamSkipped).toBe(1);
   });
 });

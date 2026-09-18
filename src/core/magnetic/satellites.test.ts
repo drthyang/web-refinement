@@ -34,7 +34,12 @@ describe("magneticSatellites", () => {
     // d(±k) = 2a = 8 Å; the parent G = (000) is never in a reflection list, so
     // only the explicit seeding can produce these arms.
     expect(sats.some((s) => Math.abs(s.h - 0.5) < 1e-12 && s.k === 0 && s.l === 0 && Math.abs(s.d - 8) < 1e-9)).toBe(true);
-    expect(sats.some((s) => Math.abs(s.h + 0.5) < 1e-12 && s.k === 0 && s.l === 0)).toBe(true);
+    // The −k arm is the Friedel mate of +k: one Laue family, listed ONCE with
+    // multiplicity 2 (listing both arms separately double-counted every
+    // satellite of a self-conjugate k — here k = (½,0,0) ≡ −k).
+    const pure = sats.filter((s) => Math.abs(Math.abs(s.h) - 0.5) < 1e-12 && s.k === 0 && s.l === 0);
+    expect(pure).toHaveLength(1);
+    expect(pure[0]!.multiplicity).toBe(2);
     // Every satellite is offset by ±k from an integer G, and windowed by its own d.
     for (const s of sats) {
       expect(Math.abs(Math.abs(s.h % 1) - 0.5)).toBeLessThan(1e-9);
@@ -142,15 +147,26 @@ describe("magneticSatellites — weight equals the distinct-node count", () => {
     });
   }
 
-  it("self-conjugate k is an exact node list: every node once, weight 1", () => {
+  it("self-conjugate k: no node belongs to two emitted families", () => {
+    // In P1 the Laue family of a satellite index h is {h, −h}. If the ±k arms
+    // were double-listed, some node would sit in two families and the union of
+    // the families would be smaller than the summed weights.
+    const nodeSet = (sats: readonly { h: number; k: number; l: number }[]): Set<string> => {
+      const out = new Set<string>();
+      for (const s of sats) {
+        for (const sign of [1, -1]) {
+          out.add([s.h, s.k, s.l].map((v) => (sign * v + 0).toFixed(6)).join(","));
+        }
+      }
+      return out;
+    };
     const sats = magneticSatellites(cubic, P1, [0, 0, 0.5], 1.6, 20);
-    expect(sats.every((s) => s.multiplicity === 1)).toBe(true);
-    // No node appears twice — the dedup is global across arms and families.
-    const keys = sats.map((s) => `${s.h.toFixed(6)},${s.k.toFixed(6)},${s.l.toFixed(6)}`);
-    expect(new Set(keys).size).toBe(keys.length);
-    // Two-arm k keeps the representative × parent-multiplicity convention.
-    const third = magneticSatellites(cubic, P1, [0, 0, 1 / 3], 1.6, 20);
-    expect(third.slice(0, 2).map((s) => s.multiplicity)).toEqual([1, 1]); // (000)±k seeds
+    const total = sats.reduce((a, s) => a + s.multiplicity, 0);
+    expect(nodeSet(sats).size).toBe(total);
+    // The (000)±k seeds are present for a two-arm k too.
+    const third = nodeSet(magneticSatellites(cubic, P1, [0, 0, 1 / 3], 1.6, 20));
+    expect(third.has(["0.000000", "0.000000", (1 / 3).toFixed(6)].join(","))).toBe(true);
+    expect(third.has(["0.000000", "0.000000", (-1 / 3).toFixed(6)].join(","))).toBe(true);
   });
 
   it("multi-axis self-conjugate k in a rich Laue group is exact (the constant-arm-weight trap)", () => {

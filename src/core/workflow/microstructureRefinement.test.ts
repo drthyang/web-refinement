@@ -4,6 +4,7 @@ import type { PowderPattern } from "@/core/diffraction/types";
 import { buildSpaceGroup } from "@/core/crystal/spaceGroups";
 import { buildStructureRefinement } from "@/core/workflow/structureRefinement";
 import { powderCurves } from "@/core/workflow/powder";
+import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 
 /**
  * End-to-end wiring check: the Stephens strain and uniaxial size parameters
@@ -32,7 +33,10 @@ const pattern: PowderPattern = {
 
 const profile = { shape: "pseudoVoigt" as const, eta: 0.5 };
 
-function fwhmOfTallestPeakNear(twoTheta: number, spec: { params: any[]; bindings: any[] }): number {
+function fwhmOfTallestPeakNear(
+  twoTheta: number,
+  spec: { params: RefinementParameter[]; bindings: ParameterBinding[] },
+): number {
   const comp = powderCurves(structure, pattern, spec.params, spec.bindings, profile);
   // Crude FWHM: width of the region above half the local max near `twoTheta`.
   let peakIdx = 0;

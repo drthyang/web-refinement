@@ -1,229 +1,209 @@
-# Powder microstructure — crystallite size & microstrain (M6)
+# Powder microstructure: crystallite size and microstrain
 
-The layer that turns the fitted **peak broadening** into the microstructure a
-materials study reports: crystallite size ⟨D⟩, microstrain ε, their anisotropy,
-and instrument-deconvoluted values. It sits on the Thompson–Cox–Hastings profile
-(`profile.ts`): the profile *fits* the broadening; this *interprets* and
-*extends* it. Consistent with the rest of the app — GSAS-II units, the same
-symmetry-constraint discipline, one refinement engine.
+This layer turns fitted peak broadening into crystallite size ⟨D⟩, microstrain ε,
+their anisotropy and instrument-deconvoluted values, in GSAS-II units. The peak
+profile (§1) fits the broadening; this layer interprets and extends it.
+
+Summary: [LIMITATIONS.md](./LIMITATIONS.md#powder-diffraction). Evidence:
+[VALIDATION.md](./VALIDATION.md). Work order: M6 in [ROADMAP.md](./ROADMAP.md).
+Controls: [USER_GUIDE.md](./USER_GUIDE.md#4-powder-rietveld-refinement).
 
 Status legend: ✅ done · 🚧 in progress · ⬜ not started
 
----
+## 1. The broadening model ✅
 
-## 1. The broadening model (existing) ✅
+The Thompson–Cox–Hastings profile combines each peak's Lorentzian and Gaussian
+widths into one pseudo-Voigt ([profile.ts](../src/core/diffraction/profile.ts):
+`lorentzianFwhm`, `cagliotiFwhm`). X and Y refine in the profile stage.
 
-Each peak's Lorentzian and Gaussian widths carry the sample information, combined
-into one pseudo-Voigt by Thompson–Cox–Hastings:
+| Effect | Term | Angular form |
+| --- | --- | --- |
+| Crystallite size (Scherrer) | Lorentzian X | Γ ∝ 1/cosθ |
+| Microstrain, isotropic | Lorentzian Y | Γ ∝ tanθ |
+| Microstrain, Gaussian | Caglioti U | Γ² ∝ tan²θ |
+| Instrument resolution | Caglioti U, V, W | Γ² = U tan²θ + V tanθ + W |
 
-| Effect | Term | Angular form | Channel |
-| --- | --- | --- | --- |
-| Crystallite size (Scherrer) | Lorentzian `X` | Γ ∝ 1/cosθ | `lorentzianFwhm` |
-| Microstrain (isotropic) | Lorentzian `Y` | Γ ∝ tanθ | `lorentzianFwhm` |
-| Microstrain (Gaussian) | Caglioti `U` | Γ² ∝ tan²θ | `cagliotiFwhm` |
-| Instrument resolution | Caglioti `U,V,W` | Γ² = U tan²θ + V tanθ + W | `cagliotiFwhm` |
+| Quantity | Unit |
+| --- | --- |
+| X, Y and their ⊥, ∥ forms | GSAS-II centidegrees; `placePeaks` divides each FWHM by 100 |
+| U, V, W | centidegrees² |
+| Stephens S_HKL | Å⁻⁴, as a variance of 1/d² |
+| TOF Mustrain; TOF σ | ×10⁻⁶ (µstrain); µs |
 
-`X`, `Y`, `U`, `V`, `W` are in GSAS-II **centidegrees** (the FWHM used in
-`placePeaks` divides by 100). `X`, `Y` are refined in the profile stage.
+## 2. Size–strain extraction ✅
 
----
+`extractSizeStrain` converts refined X and Y into physical values, with optional
+instrument deconvolution and esds
+([microstructure.ts](../src/core/diffraction/microstructure.ts)).
 
-## 2. Size–strain extraction ✅ — `diffraction/microstructure.ts`
+| Quantity | Formula | Note |
+| --- | --- | --- |
+| Size (Scherrer) | D = 18000·K·λ / (π·X) [Å], shown in nm | K = 0.9 by default; cosθ cancels, so D is angle-independent; GSAS-II's p = 18000·K·λ/(π·LX) |
+| Microstrain (Williamson–Hall) | ε = π·Y / 72000, shown in % and ×10⁻⁶ | from β = 4·ε·tanθ; ε·10⁶ is GSAS-II's microstrain |
 
-`extractSizeStrain` converts refined `X`, `Y` into physical quantities, with
-optional **instrument-standard deconvolution** and esd propagation:
+- **Deconvolution.** Lorentzian breadths add, so the code subtracts a standard
+  (LaB₆, Si, CeO₂) refined the same way: X_s = X − X_instr, Y_s = Y − Y_instr.
+- **Limits and esds.** X_s ≤ 0 gives D = ∞ and Y_s < 0 gives ε = 0, each with a
+  note. σ_D/D = σ_X/X and σ_ε/ε = σ_Y/Y, in quadrature with the standard's.
+- `williamsonHall`, the model-independent cross-check, fits
+  β·cosθ = K·λ/D + 4·ε·sinθ to separately measured peak breadths and returns
+  size, strain and R².
+- Checked against the GSAS-II constants and a synthetic Williamson–Hall recovery
+  ([microstructure.test.ts](../src/core/diffraction/microstructure.test.ts)).
 
-- **Crystallite size** (Scherrer, from the Lorentzian size term):
-  `D = 18000·K·λ / (π·X)` [Å]. The cosθ cancels between the Scherrer relation
-  and the 1/cosθ shape, so a pure size term gives one angle-independent D. K is
-  the Scherrer constant (default 0.9). Matches GSAS-II's `p = 18000·K·λ/(π·LX)`.
-- **Microstrain** (Williamson–Hall, from the Lorentzian strain term):
-  `ε = π·Y / 72000` (dimensionless, from β = 4·ε·tanθ). Reported as ε, ε·100 (%),
-  and ε·10⁶ (ppm) — the last matching GSAS-II's microstrain.
-- **Instrument deconvolution**: a Lorentzian ⊗ Lorentzian adds *breadths*, so
-  `X_s = X_total − X_instr`, `Y_s = Y_total − Y_instr` (the standard — LaB₆/Si/
-  CeO₂ — is refined the same way and subtracted). Sub-resolution size/strain is
-  flagged rather than reported as a spurious finite value.
-- **esd propagation**: σ_D/D = σ_X/X, σ_ε/ε = σ_Y/Y, combined in quadrature with
-  the standard's errors.
+## 3. Generalized microstrain: Stephens (1999) ✅
 
-`williamsonHall` gives the model-independent cross-check: a linear fit of
-`β·cosθ = K·λ/D + 4·ε·sinθ` over individually-measured peak breadths (e.g. from
-Le Bail / single-peak fits), returning size, strain, and the fit R².
+In the Stephens model the variance of M = 1/d² is a quartic form in the Miller
+indices, with S_HKL restricted by Laue symmetry
+([anisoStrain.ts](../src/core/diffraction/anisoStrain.ts)):
 
-Validated against the GSAS-II constants and a synthetic Williamson–Hall recovery
-([`microstructure.test.ts`](../src/core/diffraction/microstructure.test.ts)).
+    σ²(M) = Σ_{H+K+L=4} S_HKL · hᴴ kᴷ lᴸ
 
----
+| Data | Broadening | Added to |
+| --- | --- | --- |
+| CW | Γ_G(2θ) = 2√(2 ln2) · d² · √σ²(M) · tanθ | the Caglioti width, in quadrature |
+| TOF | σ_T = \|dT/dd\| · ½·d³·√σ²(M) | the TOF Gaussian variance |
 
-## 3. Generalized microstrain — Stephens (1999) ✅ — `diffraction/anisoStrain.ts`
+- The CW form follows from δ(2θ) = 2·tanθ·(δd/d) and δd/d = ½·δM/M. Isotropic
+  strain, σ(M) = 2ε·M, gives exactly Γ = 4√(2 ln2)·ε·tanθ.
+- **Computed terms.** The allowed forms are the Laue-invariant ones. The
+  Reynolds operator P = (1/|G|)·Σ_g ρ(g) projects the 15-term quartic space, and
+  one S refines per symmetrized basis form.
+- Tests confirm Stephens' counts of 15, 9, 6 and 2 terms for triclinic,
+  monoclinic, orthorhombic and cubic m3̄m, but not for tetragonal, trigonal or
+  hexagonal classes.
+  They also check cubic index symmetry, the isotropic limit, and (hk0)-only
+  broadening from Σh²k² ([anisoStrain.test.ts](../src/core/diffraction/anisoStrain.test.ts)).
 
-Direction-dependent strain via the phenomenological **Stephens model**: the
-variance of `M = 1/d²` is a quartic form in the Miller indices,
+References: P. W. Stephens, *J. Appl. Cryst.* **32** (1999) 281–289,
+doi:[10.1107/S0021889898006001](https://doi.org/10.1107/S0021889898006001);
+N. C. Popa, *J. Appl. Cryst.* **31** (1998) 176–180,
+doi:[10.1107/S0021889897009795](https://doi.org/10.1107/S0021889897009795).
 
-    σ²(M) = Σ_{H+K+L=4} S_HKL · hᴴ kᴷ lᴸ ,
+## 4. Anisotropic size: uniaxial spheroid ✅
 
-with the `S_HKL` restricted by Laue symmetry. The broadening (Gaussian, added in
-quadrature to the Caglioti width) is
+A spheroid about a unique reciprocal axis t models platelets and needles, with ψ
+the angle between the reflection and t
+([anisoSize.ts](../src/core/diffraction/anisoSize.ts)):
 
-    Γ_G(2θ) = 2√(2 ln2) · d² · √(σ²(M)) · tanθ ,
+    X(hkl) = X_⊥ + (X_∥ − X_⊥)·cos²ψ ,   Γ_size = X(hkl) / (100·cosθ)
 
-derived from δ(2θ) = 2·tanθ·(δd/d) and δd/d = ½·δM/M. For an isotropic strain
-(σ(M) = 2ε·M) it reduces exactly to Γ = 4√(2 ln2)·ε·tanθ.
+- cosψ uses the reciprocal metric, so any cell works. X_∥ = X_⊥ recovers the
+  isotropic Scherrer term.
+- `uniaxialSizeDimensions` converts X⊥ and X∥ into two sizes with the Scherrer
+  relation (§2).
+- Checked: the cos²ψ limits, the isotropic reduction, and needle versus platelet
+  broadening ([anisoSize.test.ts](../src/core/diffraction/anisoSize.test.ts)).
+  The pipeline test (§6) checks only emission and a finite pattern.
 
-**Symmetry-allowed terms are computed, not tabulated.** A quartic form is
-admissible iff it is invariant under the Laue group acting on the indices, so the
-allowed `S_HKL` are the invariant subspace of the 15-dim quartic space. The code
-builds the Reynolds projector `P = (1/|G|)Σ_g ρ(g)` and takes its symmetrised
-monomials as the basis — one refinable `S` per basis form. This reproduces
-Stephens' Table 1 counts for *every* Laue class (triclinic 15, monoclinic 9,
-orthorhombic 6, cubic m3̄m 2, …) from the operations alone, so hexagonal and
-trigonal — where hand-tabulation is error-prone — come out right automatically.
+**Approximate**
+- Core only: no workbench control or agent option enables it.
+- `placePeaks` adds it on top of the isotropic X, and X⊥ and X∥ start at X, so
+  the start doubles the size broadening.
 
-Validated: invariant counts (15/9/6/2), index-permutation symmetry of the cubic
-variance, the isotropic-limit identity Γ = 4√(2ln2)·ε·tanθ, and genuine
-anisotropy (a Σh²k² strain broadens (hk0) but leaves (h00) untouched)
-([`anisoStrain.test.ts`](../src/core/diffraction/anisoStrain.test.ts)).
+References: J. I. Langford & D. Louër, *Rep. Prog. Phys.* **59** (1996) 131–234,
+doi:[10.1088/0034-4885/59/2/002](https://doi.org/10.1088/0034-4885/59/2/002);
+the FullProf and GSAS-II uniaxial size models.
 
-References: P. W. Stephens, *J. Appl. Cryst.* 32 (1999) 281; N. C. Popa, *J.
-Appl. Cryst.* 31 (1998) 176.
+## 5. Uniaxial microstrain: GSAS-II Mustrain ✅
 
----
+Equatorial Y⊥ and axial Y∥ broaden about a unique axis t, like the uniaxial
+size (`uniaxialStrainFwhmDeg` in `anisoStrain.ts`):
 
-## 4. Anisotropic size — uniaxial / spheroidal ✅ — `diffraction/anisoSize.ts`
+    Y(hkl) = Y_⊥ + (Y_∥ − Y_⊥)·cos²ψ ,   Γ_strain = Y(hkl)·tanθ / 100
 
-Platelet and needle morphologies via a spheroid of revolution about a unique
-reciprocal-lattice axis **t**. The Lorentzian size coefficient interpolates with
-the angle ψ between the reflection's scattering vector and the axis:
+- Y_∥ = Y_⊥ recovers the isotropic Y·tanθ.
+- **Net zero at the start.** `placePeaks` adds
+  `uniaxialStrainFwhmDeg(…) − Y·tanθ/100`, so Y⊥ and Y∥ replace Y. Both start
+  at the Y given to `buildStructureRefinement`.
+- Checked in `anisoStrain.test.ts`: the isotropic reduction, the split about
+  [0, 0, 1] and the zero clamp. §6 checks the net-zero identity.
 
-    X(hkl) = X_⊥ + (X_∥ − X_⊥)·cos²ψ ,   Γ_size = X(hkl)/(100·cosθ) ,
+**Approximate**
+- The workbench and `build_refinement` pass the instrument file's Y, not the
+  refined Y, so switching after an isotropic refinement can change the fit.
+- The workbench fixes t at [0, 0, 1].
 
-with cosψ from the reciprocal metric (correct for any cell). `X_∥ = X_⊥`
-recovers the isotropic Scherrer term, so it is a strict generalization. The two
-coefficients convert to two crystallite dimensions through the same Scherrer
-relation as §2 (`uniaxialSizeDimensions`).
+### 5.1 Isotropic Mustrain for TOF ✅
 
-Validated: cos²ψ limits (1 along the axis, 0 perpendicular), the isotropic
-reduction, and needle/platelet broadening asymmetry
-([`anisoSize.test.ts`](../src/core/diffraction/anisoSize.test.ts)).
+TOF has no Lorentzian Y, so strain enters the Gaussian variance. A constant
+ε = Δd/d spreads d by ε·d, mapped through T(d) = difC·d + difA·d² + difB/d
+(`isotropicStrainSigmaTof`):
 
-References: J. I. Langford & D. Louër, *Rep. Prog. Phys.* 59 (1996) 131;
-FullProf/GSAS-II uniaxial size models.
+    σ_T = |difC + 2·difA·d − difB/d²| · ε·d        [µs, added in quadrature]
 
----
+- The broadening grows ∝ d, against ∝ d² for size.
+- It is exactly the isotropic limit of the Stephens TOF σ (§3), since
+  σ²(M) = 4ε²/d⁴ gives σ_d = ε·d; tests agree to 8 digits.
+- As in GSAS-II, it is a named µstrain parameter, which `buildPowderSpec` starts
+  at Δd/d = 0.0015 (1500 ×10⁻⁶).
+- Emitting it drops the instrument σ₁² term, whose ∝ d² variance would make the
+  pair exactly degenerate. The generalized model keeps σ₁².
+- Checked: the Stephens identity and ∝ d scaling in `anisoStrain.test.ts`, and
+  emission and broadening in
+  [tofMicrostrain.test.ts](../src/core/workflow/tofMicrostrain.test.ts).
 
-## 5. Uniaxial microstrain — Mustrain (GSAS-II) ✅ — `diffraction/anisoStrain.ts`
+### 5.2 Mustrain selector and readout
 
-The direction-dependent counterpart of the isotropic Lorentzian `Y` (§1), for
-samples whose strain is axial rather than fully general. Equatorial `Y_⊥` and
-axial `Y_∥` broaden about a unique reciprocal-lattice axis **t**, interpolating
-with the angle ψ between the reflection and the axis exactly as the uniaxial
-size does:
+The Mustrain selector and the `build_refinement` agent tool offer GSAS-II's
+three models.
 
-    Y(hkl) = Y_⊥ + (Y_∥ − Y_⊥)·cos²ψ ,   Γ_strain = Y(hkl)·tanθ / 100 ,
+| Setting | CW (2θ) | TOF |
+| --- | --- | --- |
+| isotropic | Lorentzian Y | µstrain parameter (§5.1) |
+| uniaxial | Y⊥, Y∥ (§5) | hidden; falls back to isotropic |
+| generalized | Stephens S_HKL (§3) | Stephens S_HKL (§3) |
 
-with cos²ψ from the reciprocal metric (`uniaxialStrainFwhmDeg`). `Y_∥ = Y_⊥`
-recovers the isotropic `Y·tanθ` term, so it is a strict generalization.
+- On CW data, uniaxial and generalized need a Caglioti instrument profile.
+- The Microstructure readout and `interpret_structure` report microstrain, and
+  size for CW. CW values come from `extractSizeStrain`; TOF uses the µstrain
+  parameter.
+- Both subtract starting values, as breadths for CW and as variances in
+  quadrature for TOF.
 
-**Seeded net-zero.** Both coefficients are seeded from the *refined isotropic*
-`Y`, and `placePeaks` applies the uniaxial term as a *correction* on top of the
-isotropic Lorentzian (`Γ += uniaxialStrainFwhmDeg(…) − Y·tanθ/100`). At the seed
-the correction is exactly zero, so switching Mustrain to uniaxial never perturbs
-a converged isotropic fit — it only opens the axial degree of freedom.
-
-Validated: the isotropic reduction (`Y_⊥ = Y_∥`), the axial/equatorial split
-about [0,0,1] ((00l) picks `Y_∥`, (hk0) picks `Y_⊥`), and the zero-clamp
-([`anisoStrain.test.ts`](../src/core/diffraction/anisoStrain.test.ts)).
-
-### Isotropic Mustrain for TOF ✅ — `isotropicStrainSigmaTof`
-
-TOF has no Lorentzian `Y`; the strain instead enters the Gaussian peak variance.
-A constant fractional strain ε = Δd/d spreads d by σ_d = ε·d, which maps to TOF
-through the calibration T(d) = difC·d + difA·d² + difB/d:
-
-    σ_T = |dT/dd|·ε·d = |difC + 2·difA·d − difB/d²|·ε·d        [µs, added in quadrature]
-
-so the strain broadening grows **∝ d** (∝ TOF) — versus ∝ d² for size. This is
-*exactly* the isotropic limit of the Stephens TOF σ (§3): the isotropic variance
-σ²(M) = (2ε·M)² = 4ε²/d⁴ gives σ_d = ½·d³·√(σ²(M)) = ε·d, so the isotropic and
-anisotropic TOF paths agree by construction (checked to 8 digits in the tests).
-
-Like GSAS-II, the isotropic Mustrain is a **named sample parameter** in µstrain
-(×10⁻⁶), seeded from the instrument resolution and refined on top of it. It
-carries the ∝d² Gaussian term that the instrument `σ₁²·d²` also has — the same
-functional form — so when the Mustrain is emitted `σ₁²` is dropped, avoiding an
-exact refinement degeneracy. Across phases the isotropic size/strain is shared
-(one beam), matching the CW `X`/`Y` treatment.
-
-Validated: identity with the Stephens isotropic limit, the ∝d scaling, emission
-(µstrain param present, `σ₁²` dropped; generalized keeps `σ₁²`), and pattern
-broadening ([`anisoStrain.test.ts`](../src/core/diffraction/anisoStrain.test.ts),
-[`tofMicrostrain.test.ts`](../src/core/workflow/tofMicrostrain.test.ts)).
-
-### Mustrain model selector + physical readout (UI)
-
-The workbench exposes the microstrain model as a **Mustrain** selector mirroring
-GSAS-II — `isotropic | uniaxial | generalized` (uniaxial and generalized are 2θ
-CW only; the selector hides uniaxial for TOF):
-
-- **isotropic** — CW: the Lorentzian `Y`; TOF: the µstrain sample parameter above.
-  Both feed a **Microstructure readout** — CW via `extractSizeStrain` (§2) into
-  `microstrain ≈ N ×10⁻⁶ (P %)` and `size ≈ D nm`; TOF reads the µstrain directly,
-  each deconvoluting the instrument seed (Lorentzian breadths subtract for CW,
-  Gaussian variances subtract in quadrature for TOF). Visible once refined.
-- **uniaxial** — adds the `Y_⊥`/`Y_∥` rows above (net-zero seeded). CW only.
-- **generalized** — the Stephens `S_HKL` of §3 (works for CW and TOF).
-
----
+**Approximate**
+- The starting values are not a refined standard: the instrument file's X and
+  Y for CW (X = 1, Y = 0 if absent), and 1500 ×10⁻⁶ for TOF.
+- With uniaxial on, the readout still converts the isotropic Y, although Y⊥ and
+  Y∥ set the width.
 
 ## 6. Refinement integration ✅
 
-Both anisotropic models are wired into the **same** refinement pipeline as every
-other parameter, so they refine through the LM engine with correlations/esds:
+These parameters refine through the one LM engine, with correlations and esds.
 
-- **Parameter kinds** `stephensStrain`, `anisoSizePerp`, `anisoSizePar`,
-  `mustrainPerp`, `mustrainPar`, `mustrainIso`, surfaced on the applied model by
-  `applyParameters` and grouped under **Microstructure** in the parameter tables.
-- **Emission**: `buildStructureRefinement({ stephensStrain: true })` emits one
-  `S` per computed invariant (seeded 0 = isotropic); `{ uniaxialSize: { axis } }`
-  emits `X⊥`, `X∥` (seeded from the isotropic size); `{ uniaxialStrain: { axis } }`
-  emits `Y⊥`, `Y∥` (seeded from the isotropic strain `Y`, net-zero at the seed);
-  `{ mustrainIso: µstrain }` emits the isotropic **TOF** Mustrain (µstrain, ×10⁻⁶)
-  and drops the redundant `σ₁²`. The *anisotropic* kinds (`stephensStrain`,
-  `anisoSize*`, `mustrainPerp/Par`) are unlocked by the **microstructure** stage
-  (after occupancy, before corrections). `mustrainIso` is the exception: because
-  it carries the dropped instrument `σ₁²` (a ∝d² width) it is unlocked in the
-  **profile** stage with the other width terms — mirroring the CW isotropic
-  Mustrain (`Y`), which is likewise a "Microstructure" parameter refined in the
-  profile stage. Refining it later would freeze that width at its seed while the
-  cell/ADP/positions move, and the wR could not reach the previous best.
-- **Evaluation**: `placePeaks` (2θ CW) adds the Stephens Gaussian width in
-  quadrature, the uniaxial-size Lorentzian breadth additively, and the
-  uniaxial-strain Lorentzian breadth as a correction over the isotropic `Y`;
-  `buildTofPeaks` adds the isotropic (`mustrainIso`) and Stephens σ in quadrature
-  to the TOF Gaussian variance. Invariants are cached per space-group operation
-  list. No behavior change when the options are off. Across phases the isotropic
-  size/strain (incl. `mustrainIso`) is shared; anisotropic microstructure is
-  per-phase.
+| Kind | `buildStructureRefinement` option | Start | Stage |
+| --- | --- | --- | --- |
+| `stephensStrain`, one per invariant | `stephensStrain: true` | 0 | microstructure |
+| `anisoSizePerp`, `anisoSizePar` | `uniaxialSize: { axis }` | isotropic X | microstructure |
+| `mustrainPerp`, `mustrainPar` | `uniaxialStrain: { axis }` | isotropic Y | microstructure |
+| `mustrainIso`, which drops σ₁² | `mustrainIso: µstrain` | given value | profile |
 
-End-to-end wiring validated (hkl-dependent broadening through the full powder
-calc, plus the uniaxial-strain net-zero-at-seed identity and directional
-broadening)
-([`microstructureRefinement.test.ts`](../src/core/workflow/microstructureRefinement.test.ts)).
+- The microstructure stage runs after occupancy and before corrections.
+- Rule: refine `mustrainIso` in the profile stage; frozen at its start, its σ₁²
+  width would keep wR above the previous best.
+- `placePeaks` (2θ CW) adds Stephens in quadrature, uniaxial size directly and
+  uniaxial strain as a correction to Y. `buildTofPeaks` adds `mustrainIso` and
+  Stephens in quadrature.
+- Options left off change nothing.
+- Checked end to end: hkl-dependent Stephens broadening, and the uniaxial-strain
+  net-zero identity and directional broadening
+  ([microstructureRefinement.test.ts](../src/core/workflow/microstructureRefinement.test.ts)).
 
----
+**Approximate**
+- All phases share one isotropic size and strain (X, Y, `mustrainIso`); only
+  the anisotropic terms are per phase.
 
-## 7. Still open (M6 remainder) ⬜
+## 7. Still open ⬜
 
-- **Spherical-harmonic size** — the full ellipsoidal/harmonic crystallite-shape
-  model beyond the uniaxial spheroid.
-- **General texture (ODF)** — a spherical-harmonic orientation distribution for
-  arbitrary sample/crystal symmetry, beyond the single-axis March–Dollase fibre
-  texture already in `intensity.ts`.
-- **Microabsorption** (Brindley) and flat-plate absorption geometries.
-- **Size–strain report + UI** — the inline Microstructure readout (⟨D⟩, ε with
-  esd; §5) is done; still open are the Williamson–Hall plot and the anisotropic
-  size/strain surfaces.
-- **Validation gate** — recover a known size/strain from a NIST line-profile
-  standard (LaB₆ 660); match Stephens/March–Dollase coefficients against GSAS-II
-  on the same pattern.
+**Not yet** ([ROADMAP.md](./ROADMAP.md) M6 sets the order of work):
+- Spherical-harmonic size: a full ellipsoidal or harmonic crystallite shape
+  beyond the uniaxial spheroid.
+- General texture: a spherical-harmonic orientation distribution for any sample
+  and crystal symmetry, beyond single-axis March–Dollase (`intensity.ts`).
+- Microabsorption (Brindley) and flat-plate absorption geometries.
+- Size–strain reporting: a Williamson–Hall plot and anisotropic size and strain
+  surfaces in the UI, and derived ⟨D⟩ and ε in the HTML report.
+- A workbench or agent-tool switch for uniaxial size (§4).
+- Validation gate: recover a known size and strain from a NIST line-profile
+  standard (LaB₆ 660), and match Stephens and March–Dollase coefficients against
+  GSAS-II on the same pattern.

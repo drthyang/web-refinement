@@ -5,7 +5,7 @@ software we rely on, **with how it is actually used**. The categories are
 deliberate: they answer "do we actually use this?" honestly, so the reference
 list can't quietly inflate into things we merely read once.
 
-Web resources accessed **2026-07-08**.
+Web resources accessed **2026-07-08**; DOIs verified against Crossref **2026-07-23**.
 
 ## Software we validate against (must cite in any published use)
 
@@ -27,10 +27,37 @@ Web resources accessed **2026-07-08**.
   - Source browsed: <https://github.com/AdvancedPhotonSource/GSAS-II> ·
     `atmdata.py` at <https://subversion.xray.aps.anl.gov/pyGSAS/trunk/atmdata.py>
 
+- **PDFfit2 / PDFgui** — Farrow, C. L., Juhás, P., Liu, J. W., Bryndin, D., Božin,
+  E. S., Bloch, J., Proffen, Th. & Billinge, S. J. L. (2007). "PDFfit2 and PDFgui:
+  computer programs for studying nanostructure in crystals." *J. Phys.: Condens.
+  Matter* **19**, 335219.
+  doi:[10.1088/0953-8984/19/33/335219](https://doi.org/10.1088/0953-8984/19/33/335219);
+  the underlying real-space refinement algorithm is Proffen, Th. & Billinge, S. J. L.
+  (1999). "PDFFIT, a program for full profile structural refinement of the atomic
+  pair distribution function." *J. Appl. Cryst.* **32**, 572–575.
+  doi:[10.1107/S0021889899003532](https://doi.org/10.1107/S0021889899003532). The
+  **external correctness gate for the nuclear PDF track**: committed PDFfit2 1.6.0
+  reference curves and reflection lists pin our `G(r)` forward model to ≤1e-6·peak
+  ([`pdffit2Golden.test.ts`](../src/core/pdf/pdffit2Golden.test.ts),
+  [`pdffit2Golden.ts`](../src/core/pdf/pdffit2Golden.ts)). We reimplement
+  independently — no diffpy source is copied — but its outputs are our reference,
+  so it must be cited. Formula-level uses in the "Real-space total scattering"
+  section below.
+- **diffpy.mpdf** — the magnetic-PDF reference implementation (Frandsen et al.,
+  cited under "Real-space total scattering" below). The **external correctness gate
+  for the mPDF track**: committed diffpy.mpdf fixtures pin our d(r)/f(r) kernel
+  (corr > 0.9999, κ within 0.5% on CI)
+  ([`mpdfGolden.test.ts`](../src/core/magnetic/mpdfGolden.test.ts),
+  [`mpdfGolden.ts`](../src/core/magnetic/mpdfGolden.ts)).
 - Compared against at the *feature* level only (in [`COMPARISON.md`](./COMPARISON.md)),
-  not used as data or validation sources: **FullProf** (Rodríguez-Carvajal 1993,
-  *Physica B* **192**, 55) and **Jana2020** (Petříček et al. 2023,
-  *Z. Kristallogr.*).
+  not used as data or validation sources: **FullProf** — Rodríguez-Carvajal, J.
+  (1993). "Recent advances in magnetic structure determination by neutron powder
+  diffraction." *Physica B* **192**, 55–69.
+  doi:[10.1016/0921-4526(93)90108-I](https://doi.org/10.1016/0921-4526(93)90108-I)
+  — and **Jana2020** — Petříček, V., Palatinus, L., Plášil, J. & Dušek, M. (2023).
+  "Jana2020 – a new version of the crystallographic computing system Jana."
+  *Z. Kristallogr. - Cryst. Mater.* **238**, 271–282.
+  doi:[10.1515/zkri-2023-0005](https://doi.org/10.1515/zkri-2023-0005).
 
 ## Data actually used (values live in the codebase)
 
@@ -50,6 +77,15 @@ Web resources accessed **2026-07-08**.
   Full provenance in [`SCATTERING_TABLES.md`](./SCATTERING_TABLES.md).
 
 ## Referenced but not yet used
+
+- **Waasmaier, D. & Kirfel, A. (1995).** "New analytical scattering-factor
+  functions for free atoms and ions." *Acta Cryst.* **A51**, 416–431.
+  doi:[10.1107/S0108767394013292](https://doi.org/10.1107/S0108767394013292). The
+  5-Gaussian X-ray f(Q) parameterisation (valid to Q ≈ 6 Å⁻¹, wider than the
+  Cromer–Mann 4-Gaussian used for Bragg intensities). Planned for the X-ray PDF
+  reduction path (the `waasmaierKirfelData.ts` table is scoped but **not yet in
+  the codebase** — the real-space X-ray weight currently uses f(0) = Z, the
+  PDFfit2 convention). Cite when that table lands.
 
 - **Kobayashi, K., Nagao, T. & Ito, M. (2011).** *Acta Cryst.* **A67**, 473–480.
   doi:[10.1107/S010876731102633X](https://doi.org/10.1107/S010876731102633X).
@@ -91,6 +127,32 @@ Web resources accessed **2026-07-08**.
   *J. Appl. Cryst.* **19**, 267. → [`diffraction/intensity.ts`](../src/core/diffraction/intensity.ts).
 - **X-ray polarization factor** (1−P)cos²2θ + P — Azaroff, L. V. (1955).
   *Acta Cryst.* **8**, 701; GSAS-II `Polarization`.
+- **Whole-pattern intensity extraction (Le Bail)** — Le Bail, A., Duroy, H. &
+  Fourquet, J. L. (1988). "Ab-initio structure determination of LiSbWO₆ by X-ray
+  powder diffraction." *Mater. Res. Bull.* **23**, 447–452.
+  doi:[10.1016/0025-5408(88)90019-0](https://doi.org/10.1016/0025-5408(88)90019-0)
+  (iterative equipartition of overlapped intensities); the constrained-cell
+  precedent is Pawley, G. S. (1981). "Unit-cell refinement from powder diffraction
+  scans." *J. Appl. Cryst.* **14**, 357–361.
+  doi:[10.1107/S0021889881009618](https://doi.org/10.1107/S0021889881009618).
+  → [`workflow/leBailPrefit.ts`](../src/core/workflow/leBailPrefit.ts) (profile/
+  background/cell pre-fit with intensities extracted, not structure-constrained).
+- **Anisotropic microstrain (Stephens)** — the quartic-in-hkl variance of 1/d²
+  with Laue-symmetry-restricted `S_HKL` — Stephens, P. W. (1999). "Phenomenological
+  model of anisotropic peak broadening in powder diffraction." *J. Appl. Cryst.*
+  **32**, 281–289.
+  doi:[10.1107/S0021889898006001](https://doi.org/10.1107/S0021889898006001); the
+  (hkl)-dependent size/strain broadening framework across all Laue groups is Popa,
+  N. C. (1998). *J. Appl. Cryst.* **31**, 176–180.
+  doi:[10.1107/S0021889897009795](https://doi.org/10.1107/S0021889897009795).
+  → [`diffraction/anisoStrain.ts`](../src/core/diffraction/anisoStrain.ts) (allowed
+  `S_HKL` computed from the Laue group via a Reynolds projector, not tabulated).
+  See [`MICROSTRUCTURE.md`](./MICROSTRUCTURE.md) §3.
+- **Anisotropic (uniaxial) crystallite size** — Langford, J. I. & Louër, D. (1996).
+  "Powder diffraction." *Rep. Prog. Phys.* **59**, 131–234.
+  doi:[10.1088/0034-4885/59/2/002](https://doi.org/10.1088/0034-4885/59/2/002)
+  (line-broadening → size/strain; spheroidal crystallite shapes).
+  → [`diffraction/anisoSize.ts`](../src/core/diffraction/anisoSize.ts).
 - **R factors, R_exp, goodness of fit** (with N = contributing observations) —
   Toby, B. H. (2006). "R factors in Rietveld analysis." *Powder Diffr.* **21**,
   67; Young, R. A. (ed.), *The Rietveld Method* (IUCr/OUP, 1993).
@@ -105,6 +167,14 @@ Web resources accessed **2026-07-08**.
   MCMC Hammer." *Publ. Astron. Soc. Pac.* **125**, 306–312.
   doi:[10.1086/670067](https://doi.org/10.1086/670067) (the walker / stretch-move
   conventions). → [`refinement/bayes/sampler.ts`](../src/core/refinement/bayes/sampler.ts).
+- **No-U-Turn Sampler (NUTS)** — the gradient-based HMC variant that tunes its own
+  trajectory length — Hoffman, M. D. & Gelman, A. (2014). "The No-U-Turn Sampler:
+  Adaptively Setting Path Lengths in Hamiltonian Monte Carlo." *J. Mach. Learn.
+  Res.* **15**, 1593–1623.
+  ([jmlr.org/papers/v15/hoffman14a](https://jmlr.org/papers/v15/hoffman14a.html) ·
+  arXiv:[1111.4246](https://arxiv.org/abs/1111.4246); JMLR carries no DOI). The
+  alternative posterior sampler for smooth, well-conditioned parameter blocks where
+  analytic gradients are available. → [`refinement/bayes/nuts.ts`](../src/core/refinement/bayes/nuts.ts).
 - **MCMC convergence diagnostics — split-R̂ and ESS** — Gelman, A., Carlin,
   J. B., Stern, H. S., Dunson, D. B., Vehtari, A. & Rubin, D. B., *Bayesian
   Data Analysis*, 3rd ed. (CRC, 2013), §11.4–11.5 (split-chain R̂, effective
@@ -148,6 +218,85 @@ Web resources accessed **2026-07-08**.
   Cracknell (1972), Ch. 3 (at Γ the ordinary point-group irreps are the small
   representations, non-symmorphic groups included).
   → [`magnetic/pointGroupIrreps.ts`](../src/core/magnetic/pointGroupIrreps.ts).
+
+## Real-space total scattering — PDF & mPDF (each tied to code)
+
+The real-space track fits the reduced pair distribution function `G(r)` (nuclear)
+and the magnetic pair distribution function `d(r)`/`f(r)` (mPDF). Convention
+provenance is in [`total_scattering_pdf_conventions_knowledge.md`](../knowledge/total_scattering_pdf_conventions_knowledge.md)
+and the build plan in [`PDF_MPDF_ROADMAP.md`](./PDF_MPDF_ROADMAP.md).
+
+- **Correlation-function conventions (which G/S/F/D/T we fit)** — Keen, D. A.
+  (2001). "A comparison of various commonly used correlation functions for
+  describing total scattering." *J. Appl. Cryst.* **34**, 172–177.
+  doi:[10.1107/S0021889800019993](https://doi.org/10.1107/S0021889800019993). The
+  definitive map of the (notoriously inconsistent) total-scattering function zoo;
+  every import classifier and converter resolves against it. →
+  [`totalscattering/`](../src/core/totalscattering/),
+  [`parsers/pdfData.ts`](../src/parsers/pdfData.ts).
+- **Reduced-PDF definition G^PDF(r) = 4πr[ρ(r) − ρ₀]** — Egami, T. & Billinge,
+  S. J. L. (2012). *Underneath the Bragg Peaks: Structural Analysis of Complex
+  Materials*, 2nd ed. (Pergamon Materials Series, Vol. 16; Elsevier).
+  ISBN 978-0-08-097133-9. The foundational text for the function MATERIA fits and
+  the sine-transform / termination physics.
+- **Real-space G(r) forward model** — the Proffen–Billinge real-space sum with
+  Qdamp/Qbroad resolution envelopes, δ₁/δ₂ correlated-motion sharpening, and the
+  finite-Qmax sinc termination — Farrow, C. L. et al. (2007), "PDFfit2 and PDFgui,"
+  *J. Phys.: Condens. Matter* **19**, 335219,
+  doi:[10.1088/0953-8984/19/33/335219](https://doi.org/10.1088/0953-8984/19/33/335219)
+  (Eqs. 4, 6); Proffen, Th. & Billinge, S. J. L. (1999), "PDFFIT," *J. Appl.
+  Cryst.* **32**, 572–575,
+  doi:[10.1107/S0021889899003532](https://doi.org/10.1107/S0021889899003532). Both
+  entered above as the nuclear-PDF validation gate. →
+  [`pdf/forwardModel.ts`](../src/core/pdf/forwardModel.ts),
+  [`pdf/termination.ts`](../src/core/pdf/termination.ts),
+  [`pdf/pairEnumerator.ts`](../src/core/pdf/pairEnumerator.ts),
+  [`totalscattering/fourier.ts`](../src/core/totalscattering/fourier.ts).
+- **Faber–Ziman partials** (element-pair weighting b̄_i·b̄_j/⟨b̄⟩² of the site sum)
+  — Faber, T. E. & Ziman, J. M. (1965). "A theory of the electrical properties of
+  liquid metals. III. The resistivity of binary alloys." *Philos. Mag.* **11**,
+  153–173.
+  doi:[10.1080/14786436508211931](https://doi.org/10.1080/14786436508211931).
+  → [`pdf/partials.ts`](../src/core/pdf/partials.ts).
+- **PDF data-reduction conventions at import** — Juhás, P., Davis, T., Farrow,
+  C. L. & Billinge, S. J. L. (2013). "PDFgetX3: a rapid and highly automatable
+  program for processing powder diffraction data into total scattering pair
+  distribution functions." *J. Appl. Cryst.* **46**, 560–566.
+  doi:[10.1107/S0021889813005190](https://doi.org/10.1107/S0021889813005190) (the
+  `.gr`/`.sq`/`.fq` outputs and the F(Q) = Q[S(Q)−1] usage we import); the
+  multi-information-source modeling framework is Juhás, P., Farrow, C. L., Yang, X.,
+  Knox, K. R. & Billinge, S. J. L. (2015). "Complex modeling: a strategy and
+  software program for combining multiple information sources to solve ill posed
+  structure and nanostructure inverse problems." *Acta Cryst.* **A71**, 562–568.
+  doi:[10.1107/S2053273315014473](https://doi.org/10.1107/S2053273315014473).
+  → [`parsers/pdfData.ts`](../src/parsers/pdfData.ts) (`classifyReducedKind`).
+- **Magnetic PDF (mPDF) kernel** — the spin-pair d(r)/f(r) with the ⟨j₀⟩
+  form-factor envelope and net-moment term — Frandsen, B. A., Yang, X. & Billinge,
+  S. J. L. (2014). "Magnetic pair distribution function analysis of local magnetic
+  correlations." *Acta Cryst.* **A70**, 3–11.
+  doi:[10.1107/S2053273313033081](https://doi.org/10.1107/S2053273313033081)
+  (the theory, our `calculatemPDF`/`calculateDr` port); the fitting protocol and
+  the MnO ground-state determination is Frandsen, B. A. & Billinge, S. J. L. (2015).
+  "Magnetic structure determination from the magnetic pair distribution function
+  (mPDF): ground state of MnO." *Acta Cryst.* **A71**, 325–334.
+  doi:[10.1107/S205327331500306X](https://doi.org/10.1107/S205327331500306X).
+  → [`magnetic/mpdf.ts`](../src/core/magnetic/mpdf.ts),
+  [`workflow/mpdf.ts`](../src/core/workflow/mpdf.ts). diffpy.mpdf is the validation
+  gate (above).
+- **PDF standard uncertainties (correlated errors)** — Toby, B. H. & Billinge,
+  S. J. L. (2004). "Determination of standard uncertainties in fits to pair
+  distribution functions." *Acta Cryst.* **A60**, 315–317.
+  doi:[10.1107/S0108767304011754](https://doi.org/10.1107/S0108767304011754). Why
+  point-to-point correlation in G(r) inflates naive esds — the basis for the PDF
+  uncertainty caveat in [`LIMITATIONS.md`](./LIMITATIONS.md) and
+  [`REFINEMENT_ENGINE.md`](./REFINEMENT_ENGINE.md).
+- **Magnetic diffuse-scattering refinement (context, not implemented)** —
+  Paddison, J. A. M., Ross Stewart, J. & Goodwin, A. L. (2013). "SPINVERT: a
+  program for refinement of paramagnetic diffuse scattering data." *J. Phys.:
+  Condens. Matter* **25**, 454220.
+  doi:[10.1088/0953-8984/25/45/454220](https://doi.org/10.1088/0953-8984/25/45/454220).
+  The reverse-Monte-Carlo alternative for paramagnetic diffuse scattering — grounds
+  the mPDF-vs-reciprocal-space discussion in the roadmap; **not implemented**.
 
 ## Method background (informs the engine; no single source)
 

@@ -18,9 +18,9 @@ import type { PowderPattern } from "@/core/diffraction/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
-import type { ProfilePeak, ProfileOptions, PeakShape } from "@/core/diffraction/profile";
+import type { ProfilePeak, ProfileOptions } from "@/core/diffraction/profile";
 import { weightsFromSigma, applyExclusionMask, fitRangeMask } from "@/core/refinement/factors";
-import type { FitRange } from "@/core/workflow/powder";
+import type { FitRange, PowderProfile } from "@/core/workflow/powder";
 import { resolveTies } from "@/core/refinement/constraints";
 import { applyParameters } from "@/core/workflow/apply";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
@@ -91,8 +91,9 @@ function createCombinedPeakBuilder(
   magnetic: MagneticModel,
   pattern: PowderPattern,
   bindings: readonly ParameterBinding[],
+  applyLorentz = true,
 ): (values: Readonly<Record<string, number>>) => Peaks {
-  const nuclearFor = createPeakBuilder(pattern, bindings, true);
+  const nuclearFor = createPeakBuilder(pattern, bindings, applyLorentz);
   const magGeomIds = [...new Set(bindings.filter((b) => MAGNETIC_GEOMETRY_KINDS.has(b.kind)).map((b) => b.parameterId))];
   const magScaleBinding = bindings.find((b) => b.kind === "magneticScale");
   let lastKey: string | null = null;
@@ -168,7 +169,7 @@ export function magneticComponentCurve(
   pattern: PowderPattern,
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
-  profile: { shape: PeakShape; eta?: number } = { shape: "gaussian" },
+  profile: PowderProfile = { shape: "gaussian" },
   extraPhases: readonly PowderPhase[] = [],
 ): number[] {
   const values: Record<string, number> = {};
@@ -196,8 +197,9 @@ function buildCombinedPeaks(
   pattern: PowderPattern,
   values: Readonly<Record<string, number>>,
   bindings: readonly ParameterBinding[],
+  applyLorentz = true,
 ): Peaks {
-  return createCombinedPeakBuilder(structure, magnetic, pattern, bindings)(values);
+  return createCombinedPeakBuilder(structure, magnetic, pattern, bindings, applyLorentz)(values);
 }
 
 export function buildMagneticPowderProblem(
@@ -206,7 +208,7 @@ export function buildMagneticPowderProblem(
   pattern: PowderPattern,
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
-  profile: { shape: PeakShape; eta?: number } = { shape: "gaussian" },
+  profile: PowderProfile = { shape: "gaussian" },
   fitRange?: FitRange,
   extraPhases: readonly PowderPhase[] = [],
 ): RefinementProblem {
@@ -225,11 +227,12 @@ export function buildMagneticPowderProblem(
   // through its own routed bindings — same per-phase caching as
   // buildMultiPhasePowderProblem, so an impurity phase's parameters can never
   // cross-apply onto the magnetic phase's model.
+  const applyLorentz = profile.lorentz ?? true;
   const primaryBindings = extraPhases.length > 0 ? magneticPhaseBindings(bindings, structure.id) : bindings;
-  const combinedFor = createCombinedPeakBuilder(structure, magnetic, pattern, primaryBindings);
+  const combinedFor = createCombinedPeakBuilder(structure, magnetic, pattern, primaryBindings, applyLorentz);
   const extraBuilders = extraPhases.map((phase) => {
     const phaseBindings = phaseBindingsFor(bindings, phase.id);
-    return { phase, phaseBindings, peaksFor: createPeakBuilder(pattern, phaseBindings, true) };
+    return { phase, phaseBindings, peaksFor: createPeakBuilder(pattern, phaseBindings, applyLorentz) };
   });
 
   const calculate = (values: Readonly<Record<string, number>>): Float64Array => {
@@ -245,6 +248,7 @@ export function buildMagneticPowderProblem(
       shape: profile.shape,
       ...(profile.eta !== undefined ? { eta: profile.eta } : {}),
       ...(applied.background.length ? { background: applied.background } : {}),
+      ...(profile.backgroundType !== undefined ? { backgroundType: profile.backgroundType } : {}),
     };
     return synthesizePattern(xValues, allPeaks, opts);
   };
@@ -258,7 +262,7 @@ export function magneticPowderComponents(
   pattern: PowderPattern,
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
-  profile: { shape: PeakShape; eta?: number } = { shape: "gaussian" },
+  profile: PowderProfile = { shape: "gaussian" },
   extraPhases: readonly PowderPhase[] = [],
 ): MagneticPowderComponents {
   const values: Record<string, number> = {};
@@ -267,13 +271,17 @@ export function magneticPowderComponents(
   const xValues = pattern.points.map((p) => p.x);
   const primaryBindings = extraPhases.length > 0 ? magneticPhaseBindings(bindings, structure.id) : bindings;
   const applied = applyParameters(structure, primaryBindings, resolved);
-  const { nuclear, magnetic: magPeaks } = buildCombinedPeaks(structure, magnetic, pattern, resolved, primaryBindings);
+  const { nuclear, magnetic: magPeaks } = buildCombinedPeaks(structure, magnetic, pattern, resolved, primaryBindings, profile.lorentz ?? true);
   const nuclearPeaks: ProfilePeak[] = [...nuclear];
   for (const phase of extraPhases) {
     const appliedExtra = applyParameters(phase.structure, phaseBindingsFor(bindings, phase.id), resolved);
     nuclearPeaks.push(...buildPeaks(pattern, appliedExtra));
   }
-  const bkgOpts: ProfileOptions = { shape: profile.shape, ...(applied.background.length ? { background: applied.background } : {}) };
+  const bkgOpts: ProfileOptions = {
+    shape: profile.shape,
+    ...(applied.background.length ? { background: applied.background } : {}),
+    ...(profile.backgroundType !== undefined ? { backgroundType: profile.backgroundType } : {}),
+  };
   const yNuclear = Array.from(synthesizePattern(xValues, nuclearPeaks, bkgOpts));
   const yMagnetic = Array.from(synthesizePattern(xValues, magPeaks, { shape: profile.shape }));
   const yObs = pattern.points.map((p) => p.yObs);

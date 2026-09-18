@@ -1,9 +1,12 @@
 /**
- * Reader **and writer** for the FullProf **single-crystal integrated-intensity**
- * format (`.int`, `ABS(Irf) = 4`) — the reflection list produced by DataRed /
- * HB-3A / D9 / D19 pipelines and consumed by FullProf and Mag2Pol. Layout
- * (FullProf manual, "CODFILn.hkl, CODFIL.int or HKLn.hkl" section; verified
- * against real HB-3A files, 2026-07):
+ * Reader for the FullProf **single-crystal integrated-intensity** format
+ * (`.int`, `ABS(Irf) = 4`) — the reflection list produced by DataRed / HB-3A /
+ * D9 / D19 pipelines and consumed by FullProf and Mag2Pol. The format itself
+ * (its reflection type, Fortran-format field machinery, and the **writer**)
+ * lives in [`core/export/fullprofInt.ts`](../core/export/fullprofInt.ts): core
+ * may not import a parser, so the shared pieces live in core and this reader
+ * imports them. Layout (FullProf manual, "CODFILn.hkl, CODFIL.int or HKLn.hkl"
+ * section; verified against real HB-3A files, 2026-07):
  *
  *   line 1 : free-text title
  *   line 2 : Fortran format for the reflection rows, e.g. `(3i4,2f8.2,i4,3f8.4)`
@@ -24,18 +27,18 @@
  * is read free-format (tolerates both the left-justified real-file layout and
  * the `(32x,i2)` layout documented for the older Irf<4 family).
  *
- * PENDING EXTERNAL VALIDATION: no golden currently exercises the k-vector
- * header against FullProf itself — the k path follows the manual + a real
- * HB-3A magnetic file (MnWO4, `(4i5,2f8.2,i4,3f8.2)`); cross-check an exported
- * file in FullProf before trusting it for publication (IMPROVEMENT_PLAN Phase 3).
- *
  * The field widths are taken from the *declared* Fortran format on line 2, so
  * the reader adapts to the width variants across datasets rather than assuming
  * fixed columns; the writer re-emits through the same declared format, making
  * parse → write byte-stable on files this writer produced.
  */
 
-import type { SingleCrystalReflection } from "@/core/diffraction/types";
+import {
+  parseFortranFields,
+  leadingIntCount,
+  type FullProfIntField,
+  type FullProfIntReflection,
+} from "@/core/export/fullprofInt";
 import type { Vec3 } from "@/core/math/types";
 
 /** One malformed-input diagnostic: where, what was expected, what was found. */
@@ -46,13 +49,9 @@ export interface FullProfIntProblem {
   readonly found: string;
 }
 
-/** A parsed reflection row; satellites carry their 1-based k-list ordinal. */
-export interface FullProfIntReflection extends SingleCrystalReflection {
-  /** 1-based index into `kVectors`: this row is the satellite H + k[kIndex−1]. */
-  readonly kIndex?: number;
-  /** Scale-factor / domain code column (`cod`), when the format declares it. */
-  readonly code?: number;
-}
+/** A parsed reflection row; satellites carry their 1-based k-list ordinal.
+ *  Defined with the format in core (see the module header). */
+export type { FullProfIntReflection };
 
 export interface FullProfIntParse {
   readonly reflections: FullProfIntReflection[];
@@ -69,39 +68,14 @@ export interface FullProfIntParse {
   readonly title: string;
   /** Rows skipped as unparseable (diagnostic; see `problems` for details). */
   readonly skipped: number;
+  /** Of `skipped`, the `0 0 0` forward-beam rows dropped by `skipForwardBeam`. */
+  readonly forwardBeamSkipped: number;
   /** Line-numbered diagnostics for every skipped/suspect input line. */
   readonly problems: FullProfIntProblem[];
 }
 
-/** One field of a Fortran format: column width, type, and (f/e/g) decimals. */
-interface Field { readonly width: number; readonly kind: "i" | "f" | "e" | "g" | "a" | "x"; readonly decimals?: number; }
-
-/**
- * Expand a Fortran format like `(3i4,2f8.2,i4,6f8.0)` into a flat field list
- * with column widths (and decimals, kept for re-emission). `nX` (blank) fields
- * are kept as skips so column offsets stay aligned. Descriptors other than
- * i/f/e/g/a/x are ignored.
- */
-export function parseFortranFields(format: string): Field[] {
-  const inner = format.trim().replace(/^\(/, "").replace(/\)\s*$/, "");
-  const fields: Field[] = [];
-  for (const rawTok of inner.split(",")) {
-    const tok = rawTok.trim();
-    // repeat? type-letter width [.decimals]
-    const m = tok.match(/^(\d*)\s*([ifegax])\s*(\d+)?(?:\.(\d+))?/i);
-    if (!m) continue;
-    const repeat = m[1] ? parseInt(m[1], 10) : 1;
-    const kind = m[2]!.toLowerCase() as Field["kind"];
-    const width = m[3] ? parseInt(m[3], 10) : kind === "x" ? repeat : 0;
-    const decimals = m[4] !== undefined ? parseInt(m[4], 10) : undefined;
-    if (kind === "x") { fields.push({ width: repeat, kind: "x" }); continue; }
-    for (let r = 0; r < repeat; r++) fields.push({ width, kind, ...(decimals !== undefined ? { decimals } : {}) });
-  }
-  return fields;
-}
-
 /** Slice a line into values by fixed field widths (per the declared format). */
-function sliceByFields(line: string, fields: readonly Field[]): (number | null)[] {
+function sliceByFields(line: string, fields: readonly FullProfIntField[]): (number | null)[] {
   const out: (number | null)[] = [];
   let col = 0;
   for (const f of fields) {
@@ -125,22 +99,20 @@ export function looksLikeFullProfInt(text: string): boolean {
   return lines.some((l) => FORMAT_RE.test(l) && /[if]\d/i.test(l));
 }
 
-/** Count the leading consecutive integer fields (h k l [nv]) of a format. */
-function leadingIntCount(fields: readonly Field[]): number {
-  let n = 0;
-  for (const f of fields) {
-    if (f.kind === "x") continue;
-    if (f.kind !== "i") break;
-    n++;
-  }
-  return n;
-}
 
 export interface FullProfIntParseOptions {
   /** Throw on the first structural/row problem (line + expected vs found)
    *  instead of skipping — the paired-load path uses this so a malformed file
    *  is rejected loudly rather than silently truncated. Default false. */
   readonly strict?: boolean;
+  /** Skip a `0 0 0` row — the forward beam, not a Bragg reflection — counting
+   *  it in `forwardBeamSkipped` (and `skipped`) and recording it in `problems`,
+   *  never as a strict-mode error (the file is well-formed). Off by default:
+   *  in the FullProf single-k convention a magnetic file is indexed by the
+   *  fundamental of each satellite, so its `0 0 0` row IS the satellite at k
+   *  and must be kept — the nuclear-file loaders opt in. A propagation-vector
+   *  row (`h k l nv`) is skipped only when its k-vector is zero. */
+  readonly skipForwardBeam?: boolean;
 }
 
 /**
@@ -226,6 +198,7 @@ export function parseFullProfInt(text: string, opts: FullProfIntParseOptions = {
 
   const reflections: FullProfIntReflection[] = [];
   let skipped = 0;
+  let forwardBeamSkipped = 0;
   for (let i = cursor; i < lines.length; i++) {
     const line = lines[i]!;
     if (line.trim() === "" || line.trim().startsWith("!")) continue;
@@ -243,6 +216,21 @@ export function parseFullProfInt(text: string, opts: FullProfIntParseOptions = {
       skipped++;
       problem(i + 1, `a 1-based k index (nv ≤ ${kVectors?.length ?? "Nk"}) in field 4`, line.trimEnd());
       continue;
+    }
+    // The forward beam. A plain-format `0 0 0` row — or a k-variant row whose
+    // propagation vector is zero — is not a Bragg reflection: refining it fits
+    // k·|F(000)|² to a meaningless intensity (at unit weight when σ = 0, which
+    // then wrecks the scale), and the σ-outlier filter can never reject a row
+    // that has no σ. Opt-in (see `skipForwardBeam`): in a fundamental-indexed
+    // magnetic file this row is the satellite at k. Recorded, never strict.
+    if (opts.skipForwardBeam && h === 0 && k === 0 && l === 0) {
+      const kv = hasK && kIndex != null ? kVectors?.[kIndex - 1] : undefined;
+      if (!hasK || (kv !== undefined && kv.every((c) => c === 0))) {
+        skipped++;
+        forwardBeamSkipped++;
+        problems.push({ line: i + 1, expected: "a Bragg reflection (0 0 0 is the forward beam — row skipped)", found: line.trimEnd() });
+        continue;
+      }
     }
     if (iObs == null) {
       skipped++;
@@ -267,83 +255,7 @@ export function parseFullProfInt(text: string, opts: FullProfIntParseOptions = {
     format,
     title,
     skipped,
+    forwardBeamSkipped,
     problems,
   };
-}
-
-export interface FullProfIntWriteOptions {
-  readonly title?: string;
-  /** Wavelength (Å) for the R_lambda line. */
-  readonly wavelength: number;
-  /** Itypdata flag (0 = F²/σ(F²), 1 = F/σ(F)). Default 0. */
-  readonly itypdata?: number;
-  /** Ipow flag (0 single crystal / 1 twinned / 2 powder clusters). Default 0. */
-  readonly ipow?: number;
-  /**
-   * Fortran format for the rows. Default `(3i4,2f8.2,i4)`, or `(4i4,2f8.2,i4)`
-   * when `kVectors` are given (the extra leading integer is the nv column).
-   * A parsed file's own `format` can be passed back for a stable round-trip.
-   */
-  readonly format?: string;
-  /** Propagation vectors — written as the k-count + `nv k1 k2 k3` block, with
-   *  each reflection's `kIndex` in the nv column (satellite = H + k_nv). */
-  readonly kVectors?: readonly Vec3[];
-}
-
-/** Fixed-width emit of one value per field; throws when a value cannot fit. */
-function emitField(value: number, f: Field): string {
-  const s = f.kind === "i" ? String(Math.round(value)) : value.toFixed(f.decimals ?? 2);
-  if (s.length > f.width) {
-    throw new Error(`FullProf .int writer: value ${s} does not fit its ${f.kind}${f.width} field — widen the format`);
-  }
-  return s.padStart(f.width);
-}
-
-/**
- * Write a FullProf single-crystal `.int` file (plain or propagation-vector
- * variant). Rows are emitted through the declared Fortran format: h k l [nv]
- * I σ [cod]; declared trailing fields beyond `cod` are left empty (as real
- * DataRed files do), and blank/X descriptors are emitted as spaces so the
- * reader's fixed-width column offsets stay aligned. PENDING EXTERNAL VALIDATION
- * for the k variant (see the module header): cross-check in FullProf itself.
- */
-export function writeFullProfInt(
-  reflections: readonly FullProfIntReflection[],
-  opts: FullProfIntWriteOptions,
-): string {
-  const hasK = opts.kVectors !== undefined && opts.kVectors.length > 0;
-  const format = opts.format ?? (hasK ? "(4i4,2f8.2,i4)" : "(3i4,2f8.2,i4)");
-  const fields = parseFortranFields(format); // keep X descriptors for offset-preserving output
-  const nInt = leadingIntCount(fields);
-  // The nv column is signalled by 4 leading integer fields; keep the format and
-  // the kVectors consistent (both directions) so a mismatched call fails loudly
-  // instead of silently mis-slicing the intensity into the nv slot.
-  if (hasK && nInt < 4) throw new Error(`FullProf .int writer: k vectors given but the format ${format} declares only ${nInt} leading integer fields (need 4 for the nv column)`);
-  if (!hasK && nInt >= 4) throw new Error(`FullProf .int writer: the format ${format} declares ${nInt} leading integer fields (an nv column) but no kVectors were given — the reader would expect a propagation-vector block`);
-
-  const lines: string[] = [
-    opts.title ?? "Crystal",
-    format,
-    `${opts.wavelength.toFixed(4)} ${opts.itypdata ?? 0} ${opts.ipow ?? 0}`,
-  ];
-  if (hasK) {
-    lines.push(String(opts.kVectors!.length));
-    opts.kVectors!.forEach((kv, i) => lines.push(`${i + 1} ${kv[0]} ${kv[1]} ${kv[2]}`));
-  }
-
-  for (const r of reflections) {
-    const values: number[] = hasK
-      ? [r.h, r.k, r.l, r.kIndex ?? 1, r.iObs, r.sigma ?? 0, r.code ?? 1]
-      : [r.h, r.k, r.l, r.iObs, r.sigma ?? 0, r.code ?? 1];
-    let row = "";
-    let vi = 0;
-    for (const f of fields) {
-      if (f.kind === "x") { row += " ".repeat(f.width); continue; } // preserve blank columns
-      if (vi >= values.length) break;
-      row += emitField(values[vi]!, f);
-      vi++;
-    }
-    lines.push(row);
-  }
-  return lines.join("\n") + "\n";
 }

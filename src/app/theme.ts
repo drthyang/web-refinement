@@ -76,6 +76,10 @@ export const fz = {
 export const space = {
   gap: "var(--wb-gap)",
   page: "var(--wb-pad)",
+  /** Inline padding of a full-width band (header, bars, footer) that puts its
+   *  content on the page column's edges — the app's alignment rule; see
+   *  --wb-edge in workbench.css. */
+  edge: "var(--wb-edge)",
   inset: "var(--wb-inset)",
   /** Height of a page's main plot card — viewport-derived so the working area
    *  fills the window on any 16:9 screen (see workbench.css for the budget). */

@@ -32,7 +32,7 @@ function splitCsv(line: string): string[] {
 export function parseGsasCsvPattern(text: string, id: string, name: string): GsasCsvPattern {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
   // Locate the column header row (contains "obs" and "calc").
-  let headerIdx = lines.findIndex((l) => /(^|,)\s*"?obs"?\s*,/i.test(l) && /calc/i.test(l));
+  const headerIdx = lines.findIndex((l) => /(^|,)\s*"?obs"?\s*,/i.test(l) && /calc/i.test(l));
   if (headerIdx < 0) throw new Error("not a GSAS-II CSV pattern (no obs/calc header)");
   const headers = splitCsv(lines[headerIdx]!).map((h) => h.toLowerCase());
   const iX = headers.findIndex((h) => h === "x");

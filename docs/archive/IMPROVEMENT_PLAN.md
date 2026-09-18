@@ -1,15 +1,19 @@
 # Improvement Plan — Magnetic Refinement Stability + Single-Crystal Co-Refinement
 
+> **Archived.** This plan is finished. Its methods and results are written up in
+> [`../REFINEMENT_NOTES.md`](../REFINEMENT_NOTES.md), and its single-crystal work in
+> [`../SINGLE_CRYSTAL.md`](../SINGLE_CRYSTAL.md).
+
 > **Status:** Phases 1–3 implemented (2026-07-16). Phase 2 was built as the
 > physically-correct **single-file supercell merge** (nuclear + magnetic peaks are
 > one measurement → ONE scale), NOT the two-file weighted objective the plan body
 > below describes (§111): the domain requirement is that there is no relative scale
 > to tune between nuclear and magnetic Bragg peaks. The reflection merge is
 > validated byte-exactly against the real `data/fullprof_int_handles/` Eu₃In₂Te₄
-> golden (k = (¼,0,¼)); see [REFINEMENT_NOTES.md](REFINEMENT_NOTES.md) §8. Remaining
+> golden (k = (¼,0,¼)); see [REFINEMENT_NOTES.md](../REFINEMENT_NOTES.md) §8. Remaining
 > **pending external validation**: the Phase-3 `.int` **k-vector header** path (no
-> golden exercises it — real files use the merge; see [SINGLE_CRYSTAL.md](SINGLE_CRYSTAL.md) §2).
-> This is a focused improvement milestone, **separate from [ROADMAP.md](ROADMAP.md)** —
+> golden exercises it — real files use the merge; see [SINGLE_CRYSTAL.md](../SINGLE_CRYSTAL.md) §2).
+> This is a focused improvement milestone, **separate from [ROADMAP.md](../ROADMAP.md)** —
 > it hardens what exists before the next roadmap milestone. Do not fold these items
 > into the roadmap tracks.
 
@@ -45,7 +49,7 @@ pure numeric core in `src/core` (no UI imports); worker-pooled evaluators in
 
 ## Repo gates (apply to every phase)
 
-- `npm run typecheck` and `npm test` must pass (bare `npx tsc` checks nothing).
+- `npm run typecheck`, `npm run lint` and `npm test` must pass (bare `npx tsc` checks nothing).
 - Tests reading `data/` must gate on `existsSync` (data/ is git-ignored; CI deploy runs
   the suite). Commit small format fixtures under `src/testSupport` instead where possible.
 - Any new ParameterKind must pass the analytic-vs-FD derivative gate.
@@ -92,7 +96,8 @@ Classify every distinct terminal state as one of:
   magnetic subspace (FullProf precedent: Rodríguez-Carvajal, Physica B 192, 55, 1993),
   reusing the same seeded RNG.
 - Moment-mode amplitude bounds: |amplitude| ≤ 10 µB (above any real ion; Eu²⁺ = 7 µB),
-  via the engine's existing bounds support.
+  via the engine's existing bounds support. (Implemented as ±12 µB — see
+  [REFINEMENT_NOTES.md](../REFINEMENT_NOTES.md) §2.)
 
 **1c. Acceptance (gate to Phase 2).**
 

@@ -50,10 +50,7 @@ import {
   rotationKey,
   type MagneticCandidate,
 } from "./magneticGroups";
-import {
-  identifyMagneticGroupAnySetting,
-  type TransformedIdentification,
-} from "./bnsOg";
+import { identifyMagneticGroupAnySetting, type TransformedIdentification, formatMagneticSymbol } from "./bnsOg";
 
 export interface LatticeCandidate {
   /** The magnetic group itself (operations, label, BNS/OG identification). */
@@ -310,4 +307,30 @@ export function latticeRepresentatives(
   lattice: readonly LatticeCandidate[],
 ): LatticeCandidate[] {
   return lattice.filter((c) => c.classRepresentative);
+}
+
+/** How a lattice candidate is named wherever it is shown (the magnetic page's
+ *  rows, the report, the project): the standard BNS symbol with its BNS/OG
+ *  numbers when the operations match a tabulated group directly, the symbol
+ *  plus the setting transformation when they match after a basis change, and
+ *  otherwise the candidate's own descriptive label without its type prefix. */
+export function latticeCandidateLabel(c: LatticeCandidate): { symbol: string; numbers: string | null; setting: string | null } {
+  if (c.candidate.standard) {
+    return {
+      symbol: c.candidate.label,
+      numbers: `BNS ${c.candidate.standard.bnsNumber} · OG ${c.candidate.standard.ogNumber}`,
+      setting: null,
+    };
+  }
+  if (c.settingMatch) {
+    return {
+      symbol: formatMagneticSymbol(c.settingMatch.identity.bnsSymbol),
+      numbers: `BNS ${c.settingMatch.identity.bnsNumber} · OG ${c.settingMatch.identity.ogNumber}`,
+      setting: c.settingMatch.transformation,
+    };
+  }
+  const bare = c.candidate.label
+    .replace(/^type III · /, "")
+    .replace(/^type I \(no time reversal\)$/, "no time reversal");
+  return { symbol: bare, numbers: null, setting: null };
 }

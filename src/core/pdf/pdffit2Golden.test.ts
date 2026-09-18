@@ -122,7 +122,6 @@ describe.each(PDFFIT2_GOLDEN.map((c) => [c.name, c] as const))("PDFfit2 golden �
     const relRms = Math.sqrt(
       c.g.reduce((s, g, i) => s + (mine[i]! - g) ** 2, 0) / denG,
     );
-    // eslint-disable-next-line no-console
     console.log(`[pdffit2:${c.name}] corr=${corr.toFixed(5)} κ=${kappa.toFixed(4)} relRMS=${relRms.toFixed(4)} max|Δ|/peak=${(maxAbs / peak).toFixed(4)}`);
     expect(corr).toBeGreaterThan(0.999);
     // Neutron cases containing Mn: PDFfit2's b table has Mn −3.75018 / O 5.8054
@@ -184,7 +183,6 @@ describe("PDFfit2 refined-parameter recovery (P1 gate)", () => {
       const refB = spec.params.find((q) => q.id === p.id)!.value / 1.5;
       expect(Math.abs(result.parameters[p.id]! - refB) / refB).toBeLessThan(tol.bTol);
     }
-    // eslint-disable-next-line no-console
     console.log(`[pdffit2:refit:${name}] a=${result.parameters[aId]!.toFixed(5)} (ref ${c.a}) scale=${result.parameters["pdfScale"]!.toFixed(4)} Rw=${((result.agreement.rWeighted ?? 0) * 100).toFixed(2)}%`);
   });
 });

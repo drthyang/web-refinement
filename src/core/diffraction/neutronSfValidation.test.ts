@@ -67,7 +67,6 @@ function assertFlatRatio(model: StructureModel, refl: Refl[], label: string, tol
   const c = median(strong.map((r) => r.ratio));
   const within = strong.filter((r) => Math.abs(r.ratio / c - 1) <= tol);
   const worst = strong.slice().sort((a, b) => Math.abs(b.ratio / c - 1) - Math.abs(a.ratio / c - 1))[0]!;
-  // eslint-disable-next-line no-console
   console.log(
     `\n${label}: SG=${model.spaceGroup.hermannMauguin ?? "?"} ops=${model.spaceGroup.operations.length} · ` +
       `${rows.length} refl, ${strong.length} strong\n` +

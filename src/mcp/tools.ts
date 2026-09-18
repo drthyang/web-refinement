@@ -21,6 +21,7 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import { parseMagneticCif } from "@/parsers/cif";
 import { parsePowderData } from "@/parsers/powderData";
 import { parsePdfData } from "@/parsers/pdfData";
+import { looksLikeFgr, parseFgr, fgrToPattern, type FgrSignal } from "@/parsers/fgrData";
 import { detectDataFormat } from "@/parsers/detectFormat";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 import { buildPowderSpec, type MustrainModel } from "@/app/powderSpec";
@@ -40,7 +41,7 @@ import {
   PDF_STAGE_KINDS,
 } from "@/core/workflow/pdf";
 import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
-import { buildMpdfSpec, mpdfComponents, MPDF_STAGE_KINDS } from "@/core/workflow/mpdf";
+import { buildMpdfSpec, mpdfComponents, unsupportedMpdfModel, MPDF_STAGE_KINDS } from "@/core/workflow/mpdf";
 import { computeAgreementFactors, excludedPointMask, weightsFromSigma } from "@/core/refinement/factors";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
 import { generateReflections } from "@/core/diffraction/reflections";
@@ -53,6 +54,7 @@ import { searchPropagationVector, type KSearchOptions } from "@/core/magnetic/kS
 import { magneticSubgroupLattice, latticeRepresentatives } from "@/core/magnetic/subgroupLattice";
 import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
+import { describePropagation } from "@/core/magnetic/propagation";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { rankNextParameterGroups } from "@/core/workflow/nextParameters";
 import { buildPowderProblem } from "@/core/workflow/powder";
@@ -68,8 +70,10 @@ import {
   type BoxcarDirection,
 } from "@/core/workflow/pdfBoxcar";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
-import { parseFullProfInt, looksLikeFullProfInt, writeFullProfInt } from "@/parsers/fullprofInt";
-import { parseHkl } from "@/parsers/hkl";
+import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
+import { writeFullProfInt } from "@/core/export/fullprofInt";
+import { parseHklRows } from "@/parsers/hkl";
+import { isCifReflectionLoop, parseFcf, parseShelxHkl } from "@/parsers/shelxHkl";
 import {
   mergeToMagneticSupercell,
   expandStructureToSupercell,
@@ -525,7 +529,19 @@ export function build_magnetic_model(args: {
   k?: Vec3;
   moment?: number;
   tieSameSite?: boolean;
-}): { magnetic: MagneticModel; parameters: RefinementParameter[]; bindings: ParameterBinding[]; activeSites: string[] } {
+}): {
+  magnetic: MagneticModel;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  activeSites: string[];
+  /** k classification: "zero" | "commensurate" | "incommensurate", arms, supercell. */
+  propagation: { kind: string; selfConjugate: boolean; twoArms: boolean; supercell: [number, number, number] | null; description: string };
+  /** True when k has two distinct arms and the parameters are cosine + sine
+   *  (quadrature) amplitudes — complex Fourier coefficients. */
+  fourier: boolean;
+  /** The quadrature parameter that must stay FIXED (global modulation phase). */
+  phaseGaugeParameterId?: string;
+} {
   const build = buildMagneticModel(
     args.structure,
     args.k ?? [0, 0, 0],
@@ -536,7 +552,22 @@ export function build_magnetic_model(args: {
       ...(args.tieSameSite !== undefined ? { tieSameSite: args.tieSameSite } : {}),
     },
   );
-  return { magnetic: build.magnetic, parameters: build.params, bindings: build.bindings, activeSites: build.activeSites };
+  const cls = build.propagation;
+  return {
+    magnetic: build.magnetic,
+    parameters: build.params,
+    bindings: build.bindings,
+    activeSites: build.activeSites,
+    propagation: {
+      kind: cls.kind,
+      selfConjugate: cls.selfConjugate,
+      twoArms: cls.twoArms,
+      supercell: cls.supercell ? [cls.supercell[0], cls.supercell[1], cls.supercell[2]] : null,
+      description: describePropagation(cls),
+    },
+    fourier: build.fourier,
+    ...(build.phaseGauge ? { phaseGaugeParameterId: build.phaseGauge.parameterId } : {}),
+  };
 }
 
 /**
@@ -612,16 +643,29 @@ export async function refine_magnetic_powder(args: {
 }
 
 /**
- * Parse single-crystal integrated intensities (FullProf `.int` h k l I σ, or a
- * SHELX HKLF4 `.hkl`) into a SingleCrystalDataset — the entry point for the
- * single-crystal and joint co-refinement paths. Detection is by content; GSAS
- * reflection lists (which need a cell to d-filter) are out of scope here.
+ * Parse single-crystal integrated intensities (FullProf `.int`, SHELX HKLF 4
+ * `.hkl`, a `.fcf` CIF reflection loop, or a plain `h k l I σ` list) into a
+ * SingleCrystalDataset — the entry point for the single-crystal and joint
+ * co-refinement paths. GSAS reflection lists (which need a cell to d-filter)
+ * are out of scope here.
+ *
+ * `.int` and `.fcf` are recognized by content. **HKLF 4 is recognized only from
+ * `name`**, because nothing in its rows distinguishes it from a free-format
+ * list — and the two parse differently: HKLF 4 is fixed-column (`3I4,2F8.2,I4`),
+ * so a whitespace split of a row whose F² ≥ 10000.00 fills its field reads σ as
+ * the intensity. Pass the filename for a `.hkl`.
+ *
+ * A `0 0 0` row is dropped by default (the forward beam); pass
+ * skipForwardBeam:false for a fundamental-indexed magnetic file, whose `0 0 0`
+ * is the satellite at k itself.
  */
-export function parse_single_crystal_data(args: { text: string; name?: string; id?: string }): {
+export function parse_single_crystal_data(args: { text: string; name?: string; id?: string; skipForwardBeam?: boolean }): {
   dataset: SingleCrystalDataset;
   kept: number;
   dropped: number;
-  format: "fullprof" | "shelx";
+  /** `0 0 0` forward-beam rows dropped (the all-zero SHELX terminator is never counted). */
+  forwardBeamSkipped: number;
+  format: "fullprof" | "shelx" | "fcf" | "list";
   /** Propagation vectors declared in the file ([] for a plain nuclear file). */
   kVectors: [number, number, number][];
   /** Line-numbered {line, expected, found} diagnostics for skipped rows ([] when clean). */
@@ -629,23 +673,48 @@ export function parse_single_crystal_data(args: { text: string; name?: string; i
 } {
   const id = args.id ?? "sc-hkl";
   const name = args.name ?? "single crystal";
+  // A `0 0 0` row is the forward beam in a nuclear file — never a Bragg
+  // reflection, and (with σ = 0) a unit-weight observation that wrecks the
+  // scale — so it is dropped by default. A fundamental-indexed MAGNETIC file's
+  // `0 0 0` is the satellite at k: the caller passes skipForwardBeam:false.
+  const skipForwardBeam = args.skipForwardBeam ?? true;
   if (looksLikeFullProfInt(args.text)) {
-    const parsed = parseFullProfInt(args.text);
+    const parsed = parseFullProfInt(args.text, { skipForwardBeam });
     return {
       dataset: { id, name, radiation: { kind: "neutron", wavelength: parsed.wavelength ?? 1.0 }, reflections: parsed.reflections },
       kept: parsed.reflections.length,
-      dropped: parsed.skipped,
+      dropped: parsed.skipped - parsed.forwardBeamSkipped,
+      forwardBeamSkipped: parsed.forwardBeamSkipped,
       format: "fullprof",
       kVectors: (parsed.kVectors ?? []).map((k) => [...k] as [number, number, number]),
       problems: parsed.problems.map((p) => ({ ...p })),
     };
   }
-  const reflections = parseHkl(args.text);
+  const isHkl = /\.hkl$/i.test(args.name ?? "");
+  if (isHkl || isCifReflectionLoop(args.text)) {
+    const parsed = isHkl && !isCifReflectionLoop(args.text)
+      ? parseShelxHkl(args.text, { skipForwardBeam })
+      : parseFcf(args.text, { skipForwardBeam });
+    return {
+      dataset: {
+        id, name, radiation: { kind: "neutron", wavelength: 1.54 },
+        reflections: parsed.reflections.map((r) => ({ h: r.h, k: r.k, l: r.l, iObs: r.intensity, sigma: r.sigma })),
+      },
+      kept: parsed.reflections.length,
+      dropped: parsed.skipped,
+      forwardBeamSkipped: parsed.forwardBeamSkipped,
+      format: isHkl && !isCifReflectionLoop(args.text) ? "shelx" : "fcf",
+      kVectors: [],
+      problems: [],
+    };
+  }
+  const { reflections, forwardBeamSkipped } = parseHklRows(args.text, { skipForwardBeam });
   return {
     dataset: { id, name, radiation: { kind: "neutron", wavelength: 1.54 }, reflections },
     kept: reflections.length,
     dropped: 0,
-    format: "shelx",
+    forwardBeamSkipped,
+    format: "list",
     kVectors: [],
     problems: [],
   };
@@ -826,15 +895,43 @@ export function interpret_structure(args: {
 // JSON → JSON wrapper per capability over the tested core.
 // ---------------------------------------------------------------------------
 
-/** Parse a reduced PDF file (.gr/.sq/.fq — PDFgetX3 or Mantid dialect). */
-export function parse_pdf_data(args: { text: string; filename?: string }): {
+/** Parse a reduced PDF file (.gr/.sq/.fq — PDFgetX3 or Mantid dialect) or a
+ *  PDFgui fit export (.fgr; `signal` picks observed vs residual). */
+export function parse_pdf_data(args: { text: string; filename?: string; signal?: FgrSignal }): {
   detected: { dataType: string; source: string; confidence: string; note?: string };
   pattern: PdfPattern;
   summary: {
     points: number; rMin: number; rMax: number; rStep?: number;
     scatteringType: string; qmax?: number; qdamp?: number; composition?: string;
+    dscale?: number; fitrmin?: number; fitrmax?: number;
   };
 } {
+  // PDFgui .fgr fit exports first: the generic reader's column heuristics
+  // would land on the CALCULATED curve, so they get their own path.
+  if (looksLikeFgr(args.text, args.filename ?? "")) {
+    const fgr = parseFgr(args.text);
+    const signal = args.signal ?? "observed";
+    const pattern = fgrToPattern(fgr, { id: "pdf", signal, ...(args.filename ? { filename: args.filename } : {}) });
+    if (pattern.points.length < 3) throw new Error("fewer than 3 usable G(r) rows");
+    const note = signal === "difference"
+      ? "PDFgui fit export: pattern carries the fit RESIDUAL Gdiff (the mPDF signal), not a total G(r)"
+      : "PDFgui fit export: observed rebuilt as Gcalc + Gdiff";
+    return {
+      detected: { dataType: "pdf", source: "header", confidence: "high", note },
+      pattern,
+      summary: {
+        points: pattern.points.length, rMin: pattern.points[0]!.r, rMax: pattern.points[pattern.points.length - 1]!.r,
+        ...(pattern.rstep !== undefined ? { rStep: pattern.rstep } : {}),
+        scatteringType: pattern.scatteringType,
+        ...(pattern.qmax !== undefined ? { qmax: pattern.qmax } : {}),
+        ...(pattern.qdamp !== undefined ? { qdamp: pattern.qdamp } : {}),
+        ...(fgr.dscale !== undefined ? { dscale: fgr.dscale } : {}),
+        ...(fgr.fitrmin !== undefined ? { fitrmin: fgr.fitrmin } : {}),
+        ...(fgr.fitrmax !== undefined ? { fitrmax: fgr.fitrmax } : {}),
+      },
+    };
+  }
+  if (args.signal !== undefined) throw new Error("`signal` applies only to PDFgui .fgr fit exports");
   const fmt = detectDataFormat({ text: args.text, filename: args.filename ?? "data.gr" });
   if (fmt.dataType !== "pdf") throw new Error(`detected ${fmt.dataType} data, not a reduced PDF — use the powder/single-crystal path`);
   const pattern = parsePdfData(args.text, { id: "pdf", ...(args.filename ? { filename: args.filename } : {}) });
@@ -915,11 +1012,17 @@ export async function refine_pdf(args: {
   warnings: string[];
   parallel: { workers: number } | null;
 }> {
-  const options = { maxIterations: args.maxIterations ?? 30 };
+  // The MCP server has no UI thread, so the driver may compute the PDF
+  // problem's analytic columns itself: one fused pass yields G(r) and every
+  // supported ∂G/∂p (Qdamp/Qbroad, δ1/δ2, spdiameter, occupancy, B_iso,
+  // U_aniso, mode shifts), which is exact and 2.3× faster on the Ni golden than
+  // the finite-difference Jacobian. Unsupported kinds still fall back to FD.
+  const options = { maxIterations: args.maxIterations ?? 30, analyticDerivatives: true };
   const multi = args.extraPhases && args.extraPhases.length > 0;
 
   // Parallel fast path (flat fits): the Jacobian fans out over the node
-  // worker-thread pool when the runtime supports it; bit-identical to serial.
+  // worker-thread pool when the runtime supports it; the analytic columns are
+  // computed on the driver and the finite-difference ones on the pool.
   let parallel: { workers: number } | null = null;
   let result: RefinementResult | null = null;
   if (!args.staged) {
@@ -936,7 +1039,7 @@ export async function refine_pdf(args: {
     const pool = await createNodeEvaluatorPool(spec);
     if (pool) {
       try {
-        result = await refineParallel(buildProblemForSpec(spec), options, pool);
+        result = await refineParallel(buildProblemForSpec(spec), options, pool, { analyticOnDriver: true });
         parallel = { workers: pool.size };
       } finally {
         await pool.dispose();
@@ -1045,7 +1148,9 @@ export async function refine_pdf_boxcar(args: {
   }
   const windows = boxcarWindows(plan);
 
-  const options = { maxIterations: args.maxIterations ?? 20 };
+  // Analytic PDF columns for every box (see refine_pdf): exact, and one fused
+  // pass per iteration instead of two evaluations per supported column.
+  const options = { maxIterations: args.maxIterations ?? 20, analyticDerivatives: true };
   const restarts = Math.max(0, Math.floor(args.restarts ?? 0));
   const baseSpec: EvaluatorSpec = {
     kind: "pdf",
@@ -1085,7 +1190,10 @@ export async function refine_pdf_boxcar(args: {
         // seed-only answer — restarts can improve a box, never move it for free.
         const solve = async (params: readonly RefinementParameter[]): Promise<RefinementResult> => {
           const p = buildProblemForSpec({ ...baseSpec, parameters: [...params], fitRange });
-          return pool ? refineParallel(p, refineOptions, pool) : refine(p, refineOptions);
+          // Analytic PDF columns on the driver (no UI thread in node), FD on the pool.
+          return pool
+            ? refineParallel(p, refineOptions, pool, { analyticOnDriver: true })
+            : refine(p, refineOptions);
         };
         if (restarts === 0) return solve(problem.parameters);
         // A per-box seed: one shared seed would draw the identical perturbation
@@ -1172,6 +1280,11 @@ export function build_mpdf_model(args: {
   freeCount: number;
   warnings: string[];
 } {
+  // Commensurate-only (see `workflow/mpdf.ts`): an incommensurate k has no
+  // periodic spin box, and the expander would quietly fall back to the parent
+  // cell — a different magnetic structure, fitted and reported as this one.
+  const unsupported = unsupportedMpdfModel(args.magnetic);
+  if (unsupported) throw new Error(`build_mpdf_model: ${unsupported}`);
   const spec = buildMpdfSpec(args.structure, args.pattern, {
     magnetic: args.magnetic,
     params: args.parameters,
@@ -1251,6 +1364,8 @@ export async function refine_mpdf(args: {
   warnings: string[];
   parallel: { workers: number } | null;
 }> {
+  const unsupported = unsupportedMpdfModel(args.magnetic);
+  if (unsupported) throw new Error(`refine_mpdf: ${unsupported}`);
   const options = { maxIterations: args.maxIterations ?? 30 };
 
   // Parallel fast path (flat fits): the Jacobian fans out over the node
@@ -1347,6 +1462,8 @@ export function compute_mpdf_components(args: {
   /** Peak |magnetic| G(r) in the window — 0 means no magnetic term at all. */
   magneticPeak: number;
 } {
+  const unsupported = unsupportedMpdfModel(args.magnetic);
+  if (unsupported) throw new Error(`compute_mpdf_components: ${unsupported}`);
   const c = mpdfComponents(args.structure, args.magnetic, args.pattern, args.parameters, args.bindings, args.fitRange);
   const nuclearPeak = peakAbs(c.yNuclear);
   const magneticPeak = peakAbs(c.yMagnetic);
@@ -1562,7 +1679,9 @@ export function calibrate_qdamp(args: {
     fixed: !free.has(p.id) && !free.has(p.kind),
   }));
   const problem = buildPdfProblem(args.structure, args.pattern, params, spec.bindings, spec.restraints, args.fitRange);
-  const result = refine(problem, { maxIterations: args.maxIterations ?? 30, convergenceTolerance: 1e-9 });
+  // Every freed parameter here (scale, Qdamp, Qbroad) has a closed-form column,
+  // so this fit runs entirely on exact derivatives.
+  const result = refine(problem, { maxIterations: args.maxIterations ?? 30, convergenceTolerance: 1e-9, analyticDerivatives: true });
   return {
     qdamp: result.parameters["qdamp"] ?? 0,
     qbroad: result.parameters["qbroad"] ?? 0,

@@ -1,26 +1,36 @@
 /**
  * Single-crystal **F² structure refinement** — the integrated-Bragg counterpart
  * of the powder `structureRefinement`, assembled from the *same* symmetry-
- * constraint layer (independent cell parameters, symmetry-adapted position and
- * ADP modes, occupancy) so a special-position atom is reduced identically
- * whichever data type refines it. What differs is the observable: one integrated
- * intensity per reflection, corrected by the single-crystal Lorentz-polarization
- * geometry and (optionally) secondary extinction, with SHELX F² agreement
- * factors (R1, wR2, GooF) instead of a profile wR.
+ * constraint layer (symmetry-adapted position and ADP modes, occupancy) so a
+ * special-position atom is reduced identically whichever data type refines it.
+ * What differs is the observable: one integrated intensity per reflection,
+ * corrected by the single-crystal Lorentz-polarization geometry and
+ * (optionally) secondary extinction, with SHELX F² agreement factors (R1, wR2,
+ * GooF) instead of a profile wR.
  *
  *   I_calc(hkl) = k · L(θ) · P(θ) · y_ext(Fc²) · |F(hkl)|²
+ *
+ * The **unit cell is input, not a parameter.** Integrated intensities carry no
+ * information about peak positions; the cell enters |F|² only through the weak
+ * Q-dependence of form factors and displacement factors, fully correlated with
+ * scale and ADPs. Every single-crystal program treats it so — SHELXL's
+ * CELL/ZERR lines (esds propagate into geometry, the cell itself never
+ * varies), Jana's cell refinement living under the *powder* profile options,
+ * FullProf's "codewords for cell constants must be equal to zero if there is no
+ * powder profile", GSAS-II computing cell derivatives only on the powder path.
+ * The spec therefore emits no lattice rows: the cell comes from indexing and is
+ * shown on the Structure card as fixed input.
  *
  * Parameter-freeing convention matches the powder path: scale (and extinction,
  * when present) refine on the first "Refine"; structural rows (positions, ADP,
  * occupancy) start **fixed** and are freed per row or by the staged sequence, in
- * the expert order scale → cell → ADP → positions.
+ * the expert order scale → ADP → positions.
  */
 
 import type { AtomSite, StructureModel } from "@/core/crystal/types";
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
-import { independentCellParameters } from "@/core/crystal/cellConstraints";
 import { allowedPositionShifts } from "@/core/crystal/siteConstraints";
 import { allowedAnisotropicAdpModes } from "@/core/crystal/adpConstraints";
 import { weightsFromSigma } from "@/core/refinement/factors";
@@ -133,14 +143,10 @@ export function buildSingleCrystalSpec(
     bindings.push({ parameterId: "extinction", kind: "extinction", targetId: dataset.id });
   }
 
-  // Cell (symmetry-reduced) — held fixed by default on single-crystal data (the
-  // cell comes from indexing); freed per row if the user refines it.
-  for (const spec of independentCellParameters(structure)) {
-    params.push({ id: spec.id, label: spec.label, kind: spec.kind, value: spec.value, initialValue: spec.value, fixed: true });
-    for (const target of spec.targets) {
-      bindings.push({ parameterId: spec.id, kind: spec.kind, targetId: structure.id, targetKey: target });
-    }
-  }
+  // No cell rows — see the module comment: the cell is fixed input from
+  // indexing, as in every single-crystal refinement program. (A project saved
+  // by an earlier build that still carried fixed cell rows reopens cleanly: the
+  // restore overlays saved rows onto this spec by id and drops the rest.)
 
   const groups = groupSites(structure.sites, tieSharedSites);
 

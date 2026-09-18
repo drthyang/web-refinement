@@ -358,10 +358,17 @@ describe("PDF analytic Jacobian — nulls, restraints, engine contract", () => {
     }
   });
 
-  it("refineParallel never calls analyticColumns (engine contract)", async () => {
+  /** A problem that counts `analyticColumns` calls, plus a faithful evaluator. */
+  const counting = (): {
+    problem: PdfRefinementProblem;
+    evaluator: BatchEvaluator;
+    sets: () => number;
+    calls: () => number;
+  } => {
     const base = problemFor(ni, new Set(["delta2", "qdamp"]));
     let calls = 0;
-    const problem = {
+    let sets = 0;
+    const problem: PdfRefinementProblem = {
       ...base,
       analyticColumns: (fp: readonly RefinementParameter[], fv: readonly number[]) => {
         calls++;
@@ -369,10 +376,40 @@ describe("PDF analytic Jacobian — nulls, restraints, engine contract", () => {
       },
     };
     const evaluator: BatchEvaluator = {
-      evaluate: (sets) => Promise.resolve(sets.map((s) => problem.calculate(s))),
+      evaluate: (s) => {
+        sets += s.length;
+        return Promise.resolve(s.map((v) => problem.calculate(v)));
+      },
     };
-    await refineParallel(problem, { maxIterations: 2, analyticDerivatives: true }, evaluator);
-    expect(calls).toBe(0);
+    return { problem, evaluator, sets: () => sets, calls: () => calls };
+  };
+
+  it("refineParallel keeps columns on the pool unless the driver opts in", async () => {
+    const c = counting();
+    await refineParallel(c.problem, { maxIterations: 2, analyticDerivatives: true }, c.evaluator);
+    expect(c.calls()).toBe(0);
+  });
+
+  it("refineParallel uses analytic columns when the driver opts in, and matches the serial analytic fit exactly", async () => {
+    const opts = { maxIterations: 6, analyticDerivatives: true } as const;
+    const c = counting();
+    const pooled = await refineParallel(c.problem, opts, c.evaluator, { analyticOnDriver: true });
+    expect(c.calls()).toBeGreaterThan(0);
+
+    // Same generator, same plan: the driver-side columns make the pooled fit
+    // bit-identical to the serial analytic one, not merely close.
+    const serial = refine(problemFor(ni, new Set(["delta2", "qdamp"])), opts);
+    expect(pooled.status).toBe(serial.status);
+    expect(pooled.parameters).toEqual(serial.parameters);
+    expect(pooled.agreement.rWeighted).toBe(serial.agreement.rWeighted);
+
+    // …and the analytic columns cost the pool no evaluations: with both free
+    // parameters analytic, the pool only ever sees single-set batches, which
+    // `refineParallel` runs in-process — so it is handed nothing at all.
+    const fd = counting();
+    await refineParallel(fd.problem, opts, fd.evaluator);
+    expect(c.sets()).toBe(0);
+    expect(fd.sets()).toBeGreaterThan(0);
   });
 
   it("FD and analytic refinements land in the same basin (Ni: scale+qdamp+δ2+B)", () => {

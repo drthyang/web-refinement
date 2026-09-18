@@ -1,805 +1,504 @@
 # PDF & mPDF Roadmap
 
-The plan for adding **pair distribution function (PDF)** and **magnetic PDF
-(mPDF)** fitting to MATERIA Workbench — "real-space Rietveld" — matching the
-capability of PDFgui / DiffPy-CMI (PDFfit2) and the `diffpy.mpdf` package, built
-from scratch on the existing pure-TypeScript core and optimized for the
-browser + agent goals.
+This page is the plan and design record for pair distribution function (PDF)
+and magnetic PDF (mPDF) fitting. The target is the capability of PDFgui /
+DiffPy-CMI (PDFfit2) and `diffpy.mpdf`, built on the pure-TypeScript core. What
+works and what is missing is in
+[LIMITATIONS.md](./LIMITATIONS.md#real-space-pdf-and-magnetic-pdf).
 
 Status legend: ✅ done · 🚧 in progress · ⬜ not started · 🔬 needs external validation
 
-> **Scientific grounding.** Every equation and parameter below was cross-checked
-> against primary sources (Farrow et al. 2007; Proffen & Billinge 1999; Juhás
-> et al. 2013 PDFgetX3; Frandsen, Yang & Billinge 2014 / Frandsen & Billinge
-> 2015 mPDF; Waasmaier & Kirfel 1995; Toby & Billinge 2004) and against the
-> actual reuse seams in `src/core`. The six highest-risk claims were
-> adversarially verified; the corrections are baked into the phasing and the
-> honesty statement (§8).
+Equations follow the primary sources in §9. Conventions are pinned in
+[`total_scattering_pdf_conventions_knowledge.md`](../knowledge/total_scattering_pdf_conventions_knowledge.md).
 
 ---
 
 ## 1. Vision
 
-PDF and mPDF are the natural next application of the project's founding
-principle — **one engine, many workflows**. A PDF refinement is a weighted
-non-linear least-squares fit of a periodic small-box structural model to an
-observed reduced PDF `G(r)`, exactly the problem the Levenberg–Marquardt engine
-already solves for Rietveld and single-crystal data. The observable changes from
-reciprocal space (`y(2θ)`, `I(hkl)`) to real space (`G(r)`), but the optimizer,
-the constrained-parameter machinery, the symmetry-adapted modes, the staged
-controller, the multi-start escape, the worker pool, and most of the UI do not.
+A PDF refinement is a least-squares fit of a periodic small-box model to an
+observed reduced PDF, G(r). The Levenberg–Marquardt (LM) engine solves the same
+problem for Bragg data, so PDF follows the project principle: one engine, many
+workflows (§2). The one large new subsystem is the real-space forward model,
+which turns a structure or a spin configuration into G_calc(r).
 
-What is genuinely new is a **real-space forward model**: a pair-summation
-calculator that turns a structure (and, for mPDF, a spin configuration) into
-`G_calc(r)`. That is the one large new subsystem; everything else is a
-parameterization, a table, or a thin surface on top of code that already exists.
+Correctness comes first. The f64 CPU calculator is the reference, and nothing
+counts as validated until a golden test or an external cross-check records it.
 
-MATERIA also has an asset the PDF world usually bolts on from external tools
-(BasIreps / SARAh / ISODISTORT / Bilbao): a working **magnetic
-space-group / irrep / k-search engine**. Its outputs (propagation vectors and
-symmetry-allowed basis vectors) map one-to-one onto `diffpy.mpdf`'s spin-model
-inputs — so MATERIA is unusually well-positioned to deliver a
-**symmetry-constrained local magnetic model** for mPDF, which is the user's
-feature (4) and a real differentiator.
-
-Two principles carry over unchanged:
-
-- **Correctness first, in TypeScript.** No new optimizer, no global-search
-  shortcut; the CPU f64 real-space calculator is the reference, and any WebGPU
-  pair-sum kernel is an opt-in accelerator validated against it. Nothing is
-  claimed "validated" until a golden dataset or an external `diffpy` cross-check
-  records it.
-- **One engine, many workflows.** `G(r)` fitting plugs into the existing
-  `RefinementProblem` seam; the whole refinement stack is reused verbatim.
-
-### The build sequence, in one line
-
-> **P0 data model + `.gr` import** → **P1 neutron PDF core (real-space
-> calculator + `buildPdfProblem`)** → **P2 X-ray PDF + Q-averaging/W-K tables**
-> → **P3 advanced PDF (Qmax termination, nanoparticle, partials, multi-phase,
-> multi-dataset)** → **P4 mPDF (Frandsen unnormalized, co-refined)** → **P5
-> symmetry-constrained local spin model** → **P6 agent tools + UI polish +
-> uncertainty quantification**, with the optional **PR data-reduction pipeline**
-> called out but deferred. Big-box RMC is **out of scope** — a different
-> paradigm, not on this roadmap.
+MATERIA's magnetic symmetry engine (k-search, magnetic subgroups, allowed-moment
+bases) produces exactly the spin-model inputs of `diffpy.mpdf`. A
+symmetry-constrained local magnetic model is therefore a natural differentiator
+(requirement 4 in §3).
 
 ---
 
-## 2. What is reusable today vs. what must be built
-
-Grounded in a direct read of `src/core`. The headline finding: the serial PDF
-fit needs **exactly one new science module** and **zero engine changes**.
-
-| Layer | Reuse verbatim | Extend | Build new |
-|---|---|---|---|
-| **Refinement engine** `refinement/engine.ts` | `RefinementProblem`, `refine`, `refineParallel`, `refineStaged`, `refineMultiStart`, covariance/esd, diagnostics — all domain-blind | add `pdfScale`+PDF kinds to `LINEAR_KINDS`/`ParameterKind` | — |
-| **Parameters** `refinement/types.ts` | `RefinementParameter`, `ParameterBinding`, `resolveTies` | new `ParameterKind` literals: `pdfScale`, `qdamp`, `qbroad`, `delta1`, `delta2`, `sratio`, `spdiameter`, `mpdfOrdScale`, `mpdfParaScale`, `corrLength` | — |
-| **Workflow builders** `workflow/powder.ts` | the builder *template* (`resolveTies → applyParameters → calculate closure`), `applyParameters`, `applyMagneticMoments`, `weightsFromSigma`, `fitRangeMask`, geometry-cache concept | `AppliedModel` + apply switch for PDF envelope params | `workflow/pdf.ts`, `workflow/mpdf.ts` |
-| **Real-space calculator** | — | — | **`core/pdf/` — pair enumerator + `G_calc(r)` (the core new subsystem)** |
-| **Scattering tables** `scattering/` | neutron `b` (92 el.), magnetic ⟨j0⟩/⟨j2⟩, `cellContents` composition, `NEUTRON_CROSS_SECTIONS.incoherent` | — | `<b>`,`<b²>`,`<f>`,`<f²>` sample-average helper; **Waasmaier–Kirfel** table (only for reduction/high-Q normalization) |
-| **Crystal / math** `crystal/`, `math/` | `fractionalToCartesian`, `metricTensor`, `expandStructureAtoms`, `expandMagneticSupercell`, `adp.ts`, `gaussLegendre` | — | rmax-bounded periodic-image **pair enumerator**; sine-FT / FFT bridge |
-| **Magnetic** `magnetic/` | `buildMagneticModel`, `allowedMomentDirections`, `isotropySubgroup`/`buildMomentField`, `applyMagneticMoments`, `canonicalizeMomentValues`, k-search / MSG candidates | export `buildMomentField` | `magnetic/mpdf.ts` spin-pair kernel + ⟨j0⟩ real-space envelope |
-| **UI** `app/`, `visualization/` | `ParameterPanel`, project I/O, CSV export, `StructureView` | `WorkbenchPlot` → signed-y variant (G(r) has negative lobes) | `PdfWorkbench.tsx`, `.gr` data card wiring |
-| **Data / parsers** `parsers/`, `diffraction/types.ts` | `ProjectFile`, `parseCif`/`parseMagneticCif`, `detectFormat` chain | `DiffractionDataset` union; `schemaVersion` bump | `PdfPattern` type; `parsers/pdfData.ts` (`.gr`/`.sq`/`.fq`) |
-| **MCP / agent** `mcp/` | `TOOL_REGISTRY`/`ToolDefinition` pattern, `createNodeEvaluatorPool`, `buildProblemForSpec` | `pdf`/`mpdf` `EvaluatorSpec` arm | ~9 new tools (§4) |
-| **Workers / GPU** `workers/` | `refineParallel` pool, the GPU kernel class + two-gate validation *pattern* | `EvaluatorSpec` variant | optional WebGPU pair-histogram kernel |
+## 2. What was reused, extended and built
 
 **The single reuse seam.** A PDF fit is a `RefinementProblem`:
 
 ```ts
 { parameters,
-  observations: Float64Array,   // G_obs(r) on the r-grid
-  weights:      Float64Array,   // uniform (see §3, correlated errors)
-  calculate(values): Float64Array }   // G_calc(r) on the same grid
+  observations: Float64Array,        // G_obs(r) on the r grid
+  weights:      Float64Array,        // uniform (§8)
+  calculate(values): Float64Array }  // G_calc(r) on the same grid
 ```
 
-`refine(problem, opts)` runs a working serial PDF fit with **no** change to the
-engine, staged controller, or multi-start — verified directly against
-`engine.ts:31` (the interface is genuinely reciprocal-space-blind).
+`refine`, `refineParallel`, `refineStaged` and `refineMultiStart` run PDF and
+mPDF fits with no PDF-specific change. The single-phase PDF problem also supplies
+analytic Jacobian columns and `gradChi2`; the mPDF problem supplies neither
+([REFINEMENT_ENGINE.md](./REFINEMENT_ENGINE.md)).
+
+| Layer | Reused | Extended | Built new |
+| --- | --- | --- | --- |
+| Engine | LM driver, staged controller, multi-start, covariance, sequential controller | linear kinds `pdfScale`, `mpdfOrdScale`, `mpdfParaScale`; an async sequential runner | samplers in `refinement/bayes/` |
+| Parameter kinds | parameters, bindings, ties | PDF: `pdfScale`, `qdamp`, `qbroad`, `delta1`, `delta2`, `spdiameter`, `sratio`, `rcut`. mPDF: `mpdfOrdScale`, `mpdfParaScale`, `mpdfPsigma`, `corrLength` | — |
+| Workflow | the problem-builder template; `buildStructureRefinement` | `applyParameters` routes the new kinds | `pdf.ts`, `mpdf.ts`, `pdfBoxcar.ts` |
+| Model and tables | neutron b, X-ray f(0) = Z, ⟨j0⟩, `expandStructureAtoms`, subgroup candidates, allowed moments | `expandSpinField` | `pdf/`, `totalscattering/`, `magnetic/mpdf.ts`, `math/fft.ts` |
+| Input and output | CIF and mCIF parsers, format detection, project file | a PDF branch in detection; a `pdf` workspace in schema v2 | `pdfData.ts`, `fgrData.ts` |
+| Workers and tools | evaluator pools, tool registry | `pdf` and `mpdf` evaluator specs | the PDF and mPDF tools (§4) |
+| UI | `ParameterPanel`, `StructureView`, the magnetic symmetry panel | a signed-y plot; a real-space fit backend | `PdfWorkbench.tsx`, Posterior and Boxcar panels |
+
+The pair enumerator is new. `bondLengths` in `crystal/geometry.ts` dedups
+near-equal bonds and tiles only ±1 cell, so it must not feed a pair sum.
 
 ---
 
 ## 3. Answers to the six requirements
 
-### (1) Synchrotron + neutron sources, and the scattering tables — *what's true*
+### (1) X-ray and neutron sources, and the scattering tables
 
-The Rietveld tables are **partly** reusable; the honest breakdown matters because
-it is easy to over- or under-scope:
+- **Neutron.** b does not depend on Q, as the real-space pair weight
+  b_i·b_j/⟨b⟩² requires, so the neutron table serves unchanged.
+- **X-ray model.** The pair sum uses the Q-independent weight Z_i·Z_j/⟨Z⟩², with
+  Z = f(0), as PDFfit2 does. The full f(Q) would double-count the form-factor
+  fall-off that the data carry, so X-ray modelling needs no new table.
+- **X-ray reduction.** Normalizing raw intensity out to a synchrotron Qmax of
+  25–35 Å⁻¹ needs the Waasmaier–Kirfel f(Q), valid to Q ≈ 75 Å⁻¹. Cromer–Mann
+  fits reach only Q ≈ 25 Å⁻¹. That table belongs to Track PR (§5).
+- **Later, if needed:** ionic form factors, anomalous f′ and f″, Compton tables,
+  and isotope-resolved b beyond deuterium.
 
-- **Neutron: reuse `neutron.ts` as-is.** The bound coherent scattering length `b`
-  is Q-independent, which is exactly correct for the real-space pair weight
-  `b_i b_j/⟨b⟩²`. `cellContents` gives the composition for `⟨b⟩`, `⟨b²⟩`.
-- **X-ray, the model: needs only `Z = f(0)`.** This is the crucial, non-obvious
-  point. PDFfit2/PDFgui use a **Q-independent** weight `f_i(0) f_j(0)/⟨f(0)⟩² =
-  Z_i Z_j/⟨Z⟩²` inside the real-space sum — folding the full `f(Q)` into the pair
-  sum **double-counts** the form-factor falloff (it is already in the data). `Z`
-  is trivially available. So *X-ray PDF modeling does not require a new table.*
-- **X-ray, data reduction/normalization: needs Waasmaier–Kirfel.** The
-  shipped Cromer–Mann 4-Gaussian `f(Q)` is fit only to `sinθ/λ ≈ 2 Å⁻¹`
-  (Q ≈ 25 Å⁻¹); synchrotron PDF routinely uses Qmax 25–35 Å⁻¹. Getting `S(Q)`
-  from raw intensity (the `⟨f²(Q)⟩`/`⟨f(Q)⟩²` normalization and Compton
-  subtraction) at those Q **does** need the **Waasmaier–Kirfel 5-Gaussian**
-  table (11 coeffs, valid to Q ≈ 75 Å⁻¹). Because we **defer data reduction**
-  (see §3.6), W-K is only needed when the optional reduction module (PR) is built
-  — *not* for the core fit.
-- **Optional later:** ionic X-ray form factors, anomalous dispersion `f'(E)`,
-  `f''(E)` (only near edges / resonant PDF), Compton tables, isotope-resolved `b`.
+### (2) One optimizer for every refinement
 
-Net: neutron PDF and X-ray PDF *fitting* are unblocked today; the one table to add
-(W-K) belongs to the deferred reduction track.
+The LM engine, staged controller and multi-start are data-agnostic. `pdfScale`
+is linear, so its Jacobian column is exact. Bounds, SVD truncation and the
+correlation diagnostics carry over. With correlated G(r) errors, though, esds
+and GoF are only relative measures (§8).
 
-### (2) One robust optimizer for all refinements — *yes, verbatim*
+### (3) Shared UI and reused engines
 
-Verified against the code: the LM engine, staged controller and multi-start are
-data-agnostic. PDF/mPDF reuse `refine`/`refineParallel`/`refineStaged`/
-`refineMultiStart` with no change. Register `pdfScale` as a linear kind for its
-exact one-evaluation Jacobian column. Bounds, SVD-truncation, correlation/ESD
-diagnostics all carry over — **with the interpretation caveat in §8** (G(r)
-errors are correlated; esd/GoF are not absolute quality measures for PDF).
+`ParameterPanel` shows PDF parameters through its category map, and
+`WorkbenchPlot` provides the draggable r window. Its signed-y mode keeps the
+negative lobes of G(r). `PdfWorkbench.tsx` follows the powder page's layout with
+its own session state.
 
-### (3) Shared UI and reused engines — *mostly reused*
+### (4) Magnetic symmetry constrains the local spin model
 
-`ParameterPanel` renders PDF parameters unchanged once the new `ParameterKind`s
-are registered in its `CATEGORY` map. `WorkbenchPlot`'s draggable fit-range
-handles give `rmin`/`rmax` windowing for free — but its y-scale hard-clamps to
-`[0, yTop]`, which would flatten G(r)'s negative lobes; factor out a **signed-y**
-variant. Project I/O, CSV export, CIF/mCIF load, `StructureView` all reuse. A new
-`PdfWorkbench.tsx` mirrors `PowderWorkbench.tsx` with its own session state (do
-not overload the powder session).
+- **Small-box, symmetry-constrained (this requirement).** `diffpy.mpdf` builds
+  spins from k and symmetry-allowed basis vectors, then refines their amplitudes.
+  MATERIA's subgroups and allowed-moment bases supply those inputs. The free
+  parameters are the allowed amplitudes, a correlation length and scales (P5).
+- **Big-box reverse Monte Carlo** (SPINVERT, RMCProfile). It moves thousands of
+  unconstrained spins, which suits frustrated and paramagnetic diffuse
+  scattering. It is out of scope (§5).
 
-### (4) Combine magnetic symmetry with mPDF to constrain the local model — *the differentiator, reframed honestly*
+The ordered structure that the Bragg engine refines is also a valid mPDF input.
+P4 fits it; P5 adds local, short-range freedom.
 
-There are two families of local magnetic models, and it matters which one this is:
+### (5) Browser- and agent-native
 
-- **Small-box, symmetry-constrained (this feature).** `diffpy.mpdf` builds the
-  spin configuration from a propagation vector `k` plus symmetry-allowed basis
-  vectors and refines the mode-mixing amplitudes. MATERIA's `buildMagneticModel`,
-  `allowedMomentDirections`, `isotropySubgroup`/`buildMomentField`, and k-search
-  already produce exactly those inputs. So the bridge is direct: **enumerate a
-  magnetic subgroup / irrep → read the symmetry-allowed moment basis → the only
-  free mPDF parameters are the irrep amplitudes** (+ correlation length, scales).
-  This constrains the local spin model to be a *symmetry-legal* distortion rather
-  than arbitrary — genuinely novel and well-supported by MATERIA's engine.
-- **Big-box RMC (SPINVERT / RMCProfile) is *symmetry-free*** — the opposite
-  approach, refining thousands of unconstrained spins by Metropolis moves,
-  useful for frustrated / spin-liquid / paramagnetic diffuse scattering. It is a
-  **different paradigm (not LM, no symmetry) and is out of scope for this
-  build** — kept here only so it is never conflated with the symmetry-constrained
-  path P5 delivers.
+The pair sum runs in f64 in a Web Worker, with the Jacobian on the evaluator pool
+(§6). Each capability is one agent tool over one pure core function, so the UI
+and an agent drive the same code. PDF-aware assessment and next-step suggestions
+are missing (P6).
 
-The ordered-state route also works: the k-vector magnetic structure the engine
-already refines *is* a valid mPDF input, so P4 can compute the mPDF of the
-average ordered structure before P5 adds local (short-range-order) freedom.
+### (6) What the feature list missed
 
-### (5) Browser + AI-agent native — *designed in from P1*
-
-- **Compute:** the real-space pair sum is the new hot loop. Ship a correct f64
-  CPU calculator in a Web Worker first; add an **opt-in WebGPU pair-histogram
-  kernel** later (thread = r-bin × model), cloned from `gpuStructureFactor.ts`
-  with its mandatory two-gate validation (WGSL stride == JS stride; f64 kernel
-  reproduces CPU G(r) to ≤1e-6). Pair-list caching keyed on geometry parameters,
-  scale multiplied last for bit-identity.
-- **Agent surface:** every capability is one `TOOL_REGISTRY` entry over one pure
-  core function (§4), so the same validated functions drive the UI and an agent.
-  Add PDF-aware diagnostics + next-step suggestions so an agent can run an
-  end-to-end study (load `.gr` → calibrate Qdamp on a standard → build model →
-  staged refine → co-refine mPDF → report).
-
-### (6) What was missed — *the scope the feature list didn't mention*
-
-1. **Data reduction is a whole separate discipline.** Turning raw `I(2θ/Q)` into
-   `G(r)` (background, absorption, Compton/Placzek, normalization, Fourier
-   transform) is what PDFgetX3/PDFgetN do — *not* what PDFgui/DiffPy do. Decision:
-   **consume already-reduced `G(r)` (`.gr` import); defer reduction to track PR.**
-   This makes the essential first deliverable a `.gr` parser, not a corrections
-   engine.
-2. **G(r) uncertainties are strongly correlated** (sine-FT of finite-Q data), so
-   `w=1/σ²` is not a true weight and reported esds/GoF are optimistic. Use
-   **uniform weights + Rw over G(r)**; treat esd/GoF as relative only; count
-   independent points on the **Nyquist grid Δr = π/Qmax**. (See §8 — riskiest
-   assumption.)
-3. **Qmax termination ripples** are a genuine sinc convolution `sin(Qmax·r)/r`,
-   distinct from the `Qdamp` Gaussian resolution envelope; model both, and extend
-   the calculation range by `6·(2π/Qmax)` before trimming so edge ripples are
-   correct.
-4. **Qdamp/Qbroad are instrument constants** calibrated from a standard (Ni / Si /
-   LaB₆), then **fixed** — not refined from scratch against an unknown structure.
-5. **Correlated-motion sharpening** has two mutually-exclusive models
-   (`delta1`/`delta2` vs `sratio`/`rcut`); refine one, never both; `delta1`↔`delta2`
-   are highly correlated (1/r vs 1/r²) — usually free just one.
-6. **Nanoparticle / finite-size** needs a shape characteristic function
-   (`spdiameter` sphere envelope) and, for true clusters, the **Debye** path
-   (the periodic real-space sum is wrong at large r for finite particles).
-7. **Partial / differential PDFs** (by element-pair) — cheap once the enumerator
-   exists, valuable for interpretation.
-8. **Multi-phase and multi-dataset co-refinement** (temperature series; joint
-   X-ray + neutron) — a natural, high-value extension of the residual-vector shape.
-9. **Incommensurate mPDF** (helices, SDW) needs the `fourierMoment.ts` complex-
-   coefficient route, not the commensurate supercell expander.
-10. **Uncertainty quantification** beyond esd (residual-based, resampling) is a
-    modern differentiator over PDFgui — delivered as Bayesian posterior
-    sampling (ensemble MCMC; see P6).
+| # | Scope | Decision | Status |
+| --- | --- | --- | --- |
+| 1 | Data reduction, the work of PDFgetX3 and PDFgetN | Consume reduced G(r); defer reduction to Track PR | ✅ import · ⬜ reduction |
+| 2 | Correlated G(r) errors | Uniform weights; relative esds; count points on the Nyquist grid Δr = π/Qmax | ✅ weights · ⬜ Nyquist |
+| 3 | Qmax termination ripples, distinct from Qdamp | Model both; extend the grid by 6·(2π/Qmax) before trimming | ✅ |
+| 4 | Qdamp and Qbroad are instrument constants | Calibrate on a standard (Ni, Si, LaB₆), then fix | ✅ |
+| 5 | δ1/δ2 and sratio/rcut model the same motion; δ1 and δ2 correlate strongly | Free one family, usually one δ | ✅ warns |
+| 6 | Finite particle size | Sphere envelope; a Debye sum for clusters, where the periodic sum fails at large r | ✅ sphere · ⬜ Debye |
+| 7 | Element-pair partial PDFs | Decompose the pair sum | ✅ |
+| 8 | Multi-phase and multi-dataset co-refinement | One concatenated residual | ✅ phases · 🚧 datasets, core only |
+| 9 | Incommensurate mPDF | The Fourier-coefficient route (`fourierMoment.ts`) | ⬜ |
+| 10 | Uncertainty beyond esds | Posterior sampling (P6) | ✅ |
 
 ---
 
-## 4. Target module layout
+## 4. Module layout
 
-New code lands as pure-core subsystems + thin surfaces, mirroring the existing
-tree. Nothing below imports React into `core`.
+Paths are under `src/`. Nothing in `src/core` imports React.
 
-```
-src/core/
-  pdf/
-    pairEnumerator.ts      NEW  all pairs r_ij within rmax over periodic images
-                                (generalizes crystal/geometry.bondLengths: emits
-                                the pair VECTOR, no dedup, weighted by species;
-                                neighbor-binned, cached)
-    peakWidth.ts           NEW  σ'_ij = n̂ᵀ(U_i+U_j)n̂ (bond-projected ADP, adp.ts)
-                                + correlated-motion sqrt(1 − δ1/r − δ2/r² + Qbroad²r²)
-    forwardModel.ts        NEW  G_calc(r): Σ pairs (w_i w_j/N)·Gaussian(r_ij,σ_ij)
-                                − 4πρ₀r, × exp(−(r·Qdamp)²/2) × f_sphere(r;d)
-    termination.ts         NEW  Qmax sinc convolution via FFT + range extension
-    partials.ts            NEW  element-pair (Faber–Ziman) decomposition
-  totalscattering/
-    weights.ts             NEW  ⟨b⟩,⟨b²⟩,⟨f⟩,⟨f²⟩,⟨Z⟩ composition averages (cellContents)
-    fourier.ts             NEW  sine transform S(Q)/F(Q) ↔ G(r) (gaussLegendre or FFT)
-    reduction.ts           NEW (track PR, deferred)  PDFgetX3/N ad-hoc pipeline
-  magnetic/
-    mpdf.ts                NEW  Frandsen spin-pair kernel (A_ij δ + B_ij baseline),
-                                ⟨j0⟩ real-space envelope, unnormalized d_mag(r)
-  scattering/
-    waasmaierKirfelData.ts NEW (track PR)  5-Gaussian f(Q) to Q≈75 (generated)
-  workflow/
-    pdf.ts                 NEW  buildPdfProblem + pdfCurves (template: powder.ts)
-    mpdf.ts                NEW  buildMpdfProblem: nuclear PDF + d_mag(r) in ONE
-                                residual, separable contributions (template:
-                                magneticPowder.ts)
-  refinement/types.ts      EDIT new ParameterKind literals + LINEAR_KINDS
-  diffraction/types.ts     EDIT PdfPattern{ id,name, points:{r,gObs,sigma?}[],
-                                rmin,rmax,rstep, qmax,qmin,qdamp,qbroad,
-                                scatteringType } ∈ DiffractionDataset
-src/parsers/pdfData.ts     NEW  .gr/.sq/.fq reader + header metadata; detectFormat branch
-src/app/PdfWorkbench.tsx   NEW  mirrors PowderWorkbench; own session state
-src/app/ui/WorkbenchPlot   EDIT factor out signed-y scale variant
-src/workers/protocol.ts    EDIT EvaluatorSpec: | {kind:'pdf',...} | {kind:'mpdf',...}
-src/workers/runPowder.ts   EDIT buildProblemForSpec: case 'pdf' / 'mpdf'
-src/mcp/registry.ts+tools  EDIT ~9 tools (below)
-```
+| Module | Role |
+| --- | --- |
+| `core/pdf/pairEnumerator.ts` | Atom pairs within rmax over periodic images, with bond vector and projected ADP |
+| `core/pdf/forwardModel.ts` | G_calc(r): pair sum, peak widths, −4πρ₀r baseline, Qdamp and sphere envelopes |
+| `core/pdf/termination.ts` | Qmax band limit by direct convolution with the sampled sinc kernel |
+| `core/pdf/partials.ts`, `core/pdf/gradients.ts` | Element-pair partials; G(r) with analytic ∂G/∂p in one pass |
+| `core/totalscattering/weights.ts`, `grErrors.ts` | ⟨b⟩, ⟨b²⟩ and ρ₀, with b = Z for X-rays; σ_G(r) from S(Q) errors, with no production caller |
+| `core/totalscattering/fourier.ts` | S(Q) or F(Q) → G(r) when a file loads |
+| `core/magnetic/mpdf.ts` | Frandsen spin-pair kernel and ⟨j0⟩ envelope |
+| `core/crystal/cellExpansion.ts` | `expandSpinField`, the magnetic box |
+| `core/math/fft.ts` | Deterministic FFT convolution |
+| `core/workflow/pdf.ts` | PDF specs and problems (single, multi-phase, multi-dataset), stage order, warnings |
+| `core/workflow/mpdf.ts` | Nuclear G(r) plus d_mag(r) in one residual |
+| `core/workflow/pdfBoxcar.ts` | The boxcar window plan |
+| `core/diffraction/types.ts` | `PdfPattern`, outside the `DiffractionDataset` union |
+| `core/pdf/pdffit2Golden.ts`, `core/magnetic/mpdfGolden.ts`, `core/magnetic/mnoGolden.ts` | Committed reference curves |
+| `parsers/pdfData.ts`, `parsers/fgrData.ts` | `.gr`, `.sq` and `.fq`; PDFgui `.fgr` fits |
+| `workers/protocol.ts`, `workers/runPowder.ts` | The `pdf` and `mpdf` evaluator specs |
+| `app/PdfWorkbench.tsx`, `app/ui/PosteriorPanel.tsx`, `app/ui/BoxcarPanel.tsx` | The PDF page and its views |
 
-**New MCP tools** (one registry entry ⇄ one pure core function):
-`load_gr_data`, `build_pdf_model`, `refine_pdf`, `set_pdf_range`,
-`calibrate_qdamp` (from a standard), `compute_partial_pdf`, `build_mpdf_model`,
-`refine_mpdf`, `propose_local_spin_model_from_symmetry` (= `allowed_moments` +
-`list_magnetic_subgroups`, judgment-free). Each mirrors `refine_powder`'s handler
-and adds a `CONTRACTS` entry (registry tests are strict).
+**Planned but not built:** `core/pdf/peakWidth.ts`, folded into the enumerator
+and forward model; `core/totalscattering/reduction.ts` and
+`core/scattering/waasmaierKirfelData.ts` (Track PR); a WebGPU pair-sum kernel
+(§6).
+
+**Agent tools** live in `mcp/registry.ts` and `mcp/tools.ts`;
+[AGENT_TOOLS.md](./AGENT_TOOLS.md) describes each one.
+
+| Planned | As built |
+| --- | --- |
+| `load_gr_data` | `parse_pdf_data`, which also reads `.fgr` |
+| `set_pdf_range` | Not built; `fitRange` is an argument of the refine, sample and calibrate tools |
+| `propose_local_spin_model_from_symmetry` | ⬜ Not built (P5). Agents chain `list_magnetic_subgroups`, `allowed_moments`, `build_magnetic_model` and `build_mpdf_model`. |
+| `build_pdf_model`, `refine_pdf`, `calibrate_qdamp`, `compute_partial_pdf`, `build_mpdf_model`, `refine_mpdf` | ✅ as planned |
+| — | Added: `compute_mpdf_components`, `refine_pdf_boxcar`, `sample_posterior`, `build_symmetry_modes`, `build_distortion_modes` |
 
 ---
 
 ## 5. Phased roadmap
 
-Each phase ends the project way: **passing tests + updated docs + a working local
-app + a validation gate**, no broken intermediate state.
+Each phase ends with passing tests, updated docs, a working local app and a
+validation gate.
 
-### P0 — Data model + `.gr` import ✅  *(small; unblocks everything)*
+| Phase | Status | Scope | Gate (test) |
+| --- | --- | --- | --- |
+| P0 | ✅ | Data model, reduced-PDF import | Parse and save round trip (`parsers/pdfData.test.ts`, `app/projectIo.test.ts`) |
+| P1 | ✅ | Neutron forward model, refinement | PDFgui and PDFfit2 (`core/pdf/pdf.test.ts`, `core/pdf/pdffit2Golden.test.ts`) |
+| P2 | ✅ | X-ray PDF | PDFfit2 (`core/pdf/pdffit2Golden.test.ts`) |
+| P3 | 🚧 | Termination, nanoparticles, partials, multi-phase, multi-dataset | PDFfit2 (`core/pdf/pdffit2Golden.test.ts`); low-Qmax ripple ⬜ 🔬 |
+| P4 | ✅ | mPDF co-refined with the nuclear PDF | diffpy.mpdf (`core/magnetic/mnoGolden.test.ts`, `core/workflow/mpdfTutorialData.test.ts`) |
+| P5 | 🚧 | Symmetry-constrained local spin model | Parameter count = irrep dimension ⬜ |
+| P6 | 🚧 | Agent tools, UI, uncertainty | Agent loops (`mcp/pdfAgentLoop.test.ts`, `mcp/mpdfAgentLoop.test.ts`) |
 
-> **Status (2026-07-16):** done. `PdfPattern` + `.gr/.sq/.fq` parser (PDFgetX3 +
-> Mantid dialects, validated on real NSLS-II 28-ID and POWGEN files), the
-> `detectFormat` pdf branch, the signed-y `WorkbenchPlot` mode (data-min floor +
-> zero line), and the `PdfWorkbench` shell. Remaining sliver: PDF session in the
-> project-JSON schema (`PROJECT_SCHEMA_VERSION` bump + round-trip gate).
-- **Goal:** ingest and display an observed `G(r)`.
-- **Deliverables:** `PdfPattern` type in `diffraction/types.ts` + `DiffractionDataset`
-  union; `parsers/pdfData.ts` reading two-column `.gr` (r, G) with the
-  PDFgui/PDFgetX3 header (composition, qmax, qmin, qdamp, rstep, rpoly);
-  `detectFormat` branch (`.gr` is already in the data-card accept list but has no
-  parser — a live foot-gun); signed-y `WorkbenchPlot` variant; `PdfWorkbench`
-  shell showing observed G(r); `PROJECT_SCHEMA_VERSION` 1→2 + no-op migration.
-- **Reuse:** project I/O, plot, CSV export, data-card.
-- **Gate:** round-trip a diffpy `.gr` (e.g. Ni) → JSON → back, byte-stable
-  metadata; observed curve renders with negative lobes intact.
+### P0 — Data model and reduced-PDF import ✅
 
-### P1 — Neutron PDF core forward model + refinement ✅ 🔬  *(large; the keystone)*
+**Done**
+- `PdfPattern`, and `.gr`, `.sq` and `.fq` files in the PDFgetX3 and Mantid
+  dialects, checked on real NSLS-II 28-ID and POWGEN files. S(Q) and F(Q) become
+  G(r) on load.
+- PDFgui `.fgr` fits. `parse_pdf_data` can also take a fit's difference curve,
+  the experimental mPDF of a nuclear fit.
+- Format detection, the signed-y plot, the PDF page, and a `pdf` workspace in
+  project files ([PROJECT_FORMAT.md](./PROJECT_FORMAT.md)).
 
-> **Status (2026-07-16):** done. `pairEnumerator` (periodic images + bond-projected
-> anisotropic ADP), `forwardModel` (Proffen–Billinge sum, δ1/δ2, Qdamp/Qbroad,
-> −4πρ₀r), `totalscattering/weights`, and the engine wiring: `workflow/pdf.ts`
-> (`buildPdfProblem` — uniform weights, fit-range mask, geometry-keyed pair-list
-> cache proven bit-identical; `buildPdfSpec` reusing the powder symmetry machinery;
-> `pdfCurves`; `PDF_STAGE_KINDS`), new `ParameterKind`s with `pdfScale` linear, the
-> `refinePdf` worker path, and a synthetic round-trip test recovering cell/scale/B
-> to Rw ≈ 0. G_calc golden vs PDFgui (POWGEN Fe0.1Co0.9Sn 1.7K) locked in at
-> corr 0.9998, κ ≈ 1.000. **Update 2026-07-17: the 🔬 refined-parameter gate is
-> closed** — a committed PDFfit2-generated fixture (see P2) pins perturbed-model
-> recovery of cell (<1 mÅ), scale, and per-element ADPs on CI. Minor note:
-> peak-width `σ′_ij` lives in the enumerator rather than a separate
-> `peakWidth.ts` (fold out only if a future phase needs it).
-- **Goal:** a working neutron PDF fit of a known crystal.
-- **Deliverables:** `pdf/pairEnumerator.ts` (rmax periodic-image pairs, neighbor-
-  binned, vector output — **not** `geometry.bondLengths`, which dedups and tiles
-  only ±1 cell); `pdf/peakWidth.ts`; `pdf/forwardModel.ts` (Proffen–Billinge
-  master sum + `−4πρ₀r` baseline + `Qdamp` envelope); `totalscattering/weights.ts`;
-  `workflow/pdf.ts` `buildPdfProblem` + `pdfCurves`; new `ParameterKind`s + apply
-  wiring; `pdfScale` in `LINEAR_KINDS`; staged order
-  `scale → (Qdamp/Qbroad fixed from standard) → cell → ADP → delta1 → positions →
-  occupancy`; uniform-weight Rw over G(r).
-- **Reuse:** LM engine, staged, multi-start, `applyParameters`, `expandStructureAtoms`,
-  `adp.ts`, `fractionalToCartesian`/`metricTensor`, neutron `b` table.
-- **Gate 🔬:** golden **crystalline Ni neutron PDF** — `G_calc(r)` reproduces
-  `diffpy`/PDFfit2 to a pinned tolerance; refined `a`, `Uiso`, `scale`, `delta1`
-  agree with a PDFgui reference within esd. Golden-value snapshot like the
-  GSAS-II gates.
+**Validation gate** ✅
+- Metadata and negative lobes survive parsing; page state survives save and
+  reopen.
 
-### P2 — X-ray PDF + Q-averaging ✅  *(small–medium)*
+### P1 — Neutron PDF forward model and refinement ✅
 
-> **Status (2026-07-17):** done. The `f(0)=Z` weight branch shipped with P0/P1;
-> the golden gates now run against a **local PDFfit2 1.6.0** (diffpy.pdffit2
-> wheel + Homebrew GSL) with a **committed** synthetic fixture
-> (`core/pdf/pdffit2Golden.ts`), so they run on CI: Ni X-ray corr 0.99988 /
-> κ 1.0001, MnO X-ray corr 0.99982 / κ 1.0000, plus a refined-parameter
-> recovery (cell to <1 mÅ) that also closes P1's 🔬 item. Documented provenance
-> caveat: PDFfit2's neutron b table (Mn −3.75018) vs our NIST Sears values
-> (Mn −3.73) gives a ~2.3 % amplitude offset on MnO-neutron cases (⟨b⟩ nearly
-> cancels), absorbed by the scale and gated explicitly in the test.
-- **Goal:** X-ray (synchrotron) PDF fitting.
-- **Deliverables:** X-ray branch of the pair weight using `Z = f(0)` (constant,
-  matching PDFfit2 — **not** `f(Q)`); `⟨Z⟩` normalization; `Qbroad`;
-  scattering-type dispatch on `PdfPattern.scatteringType`.
-- **Reuse:** all of P1; element `Z` from `elementData`.
-- **Gate 🔬:** golden **Ni or CeO₂ X-ray PDF** vs diffpy; document the `f=Z`
-  approximation and its accuracy vs a Q-dependent normalization.
+**Done**
+- `buildPdfProblem`: uniform weights, a fit window, and a pair-list cache keyed
+  on cell, positions and ADPs. A cached evaluation is bit-identical to a fresh
+  one.
+- `buildPdfSpec` reuses the powder page's symmetry-reduced parameters.
+- Staged order: scale → cell → ADPs → correlated motion → positions → occupancy.
+  Qdamp and Qbroad stay at their calibrated values.
 
-### P3 — Advanced PDF ✅  *(medium)*
+**Validation gate** ✅
+- G_calc(r) matches PDFgui on measured POWGEN data for Fe₀.₁Co₀.₉Sn at 1.7 K
+  (data-gated).
+- A perturbed model refines back to PDFfit2-generated data: cell within 2 mÅ,
+  plus scale and per-element ADPs. δ1 is not gated.
 
-> **Status (2026-07-17):** done (two small slivers below). Shipped and gated:
-> - `pdf/termination.ts` — Qmax sinc band-limit (direct sampled kernel — exact,
->   no FFT padding pitfalls; swap-in FFT later behind the same seam) with the
->   6·(2π/Qmax) grid extension and the odd-reflection term at r → 0; identity at
->   grid Nyquist by construction; auto-applied when the pattern carries `qmax`.
-> - `spdiameter` sphere envelope — external gate vs PDFfit2 (κ 1.0003).
-> - `pdf/partials.ts` — Faber–Ziman element-pair partials (Σ ≡ total to 1e-10)
->   with the plot-overlay toggle.
-> - **Multi-phase G(r)** — per-phase scale/cell/atoms/δ/Ø, shared Qdamp/Qbroad,
->   per-phase pair caches, per-phase overlay curves, Add-CIF/phase badges on the
->   PDF page; synthetic two-phase round trip to Rw ≈ 0 AND an external two-phase
->   gate vs PDFfit2 (corr 0.9998).
-> - **Multi-dataset co-refinement** (temperature series / joint X-ray+neutron):
->   one concatenated residual, shared structure + sample terms, per-dataset
->   scale/Qdamp/Qbroad, per-dataset fit ranges — core + tests (UI to follow with
->   the multi-dataset data card, P6).
-> - `sratio`/`rcut` kinds with the δ-family mutual-exclusion guard
->   (`correlatedMotionConflict`, surfaced as a warning in the workbench).
->
-> Remaining slivers: `calibrate_qdamp` convenience (fold into the P6 MCP tools —
-> freeing qdamp/qbroad on a standard already works by hand), `stepcut`, and the
-> multi-dataset UI.
-- **Goal:** publication-grade PDF: correct termination, finite size, partials,
-  multi-phase, multi-dataset.
-- **Deliverables:** `pdf/termination.ts` (Qmax sinc FFT + `6·(2π/Qmax)` range
-  extension); `spdiameter` sphere envelope + `stepcut`; `sratio`/`rcut` as the
-  alternative correlated-motion model (mutually exclusive with delta1/2 —
-  enforce); `pdf/partials.ts` differential PDFs; multi-phase
-  `G = Σ dscale·pscale·G_phase`; multi-dataset / temperature-series co-refinement
-  (one concatenated residual); `calibrate_qdamp` from a standard.
-- **Reuse:** multi-phase pattern from `workflow/multiPhase.ts`; `gaussLegendre`/FFT.
-- **Gate 🔬:** reproduce a diffpy nanoparticle (`spdiameter`) fit and a two-phase
-  fit; termination ripples match a low-Qmax reference (the PDFgetN Ni r≈3 Å
-  spurious-peak case).
+### P2 — X-ray PDF ✅
 
-### P4 — Magnetic PDF (mPDF) ✅  *(core + surface)*
+**Done**
+- The X-ray weight Z = f(0), with ⟨Z⟩ normalization and Qbroad.
 
-> **Status (2026-07-25): P4 is complete — the surface landed.** The mPDF core is
-> now reachable from the worker pool, the agent registry, and the UI:
->
-> - **Worker arm.** `{kind:"mpdf"}` joins the `EvaluatorSpec` union with a
->   `RefineMpdfRequest` alongside it, so the no-pool path stays off the main
->   thread and still streams per-cycle curves (the `pdf` shape, not the
->   `magneticPowder` one, which drops progress). `ComputeClient` gained
->   `refineMpdf` / `refineMpdfParallel` / `refineMpdfMultiStart` /
->   `sampleMpdfPosterior`. The moment-degeneracy multi-start (freeze the nuclear
->   scaffold → kicked moment-only restarts → one joint LM → ±m canonicalization)
->   is now **shared** by the powder and mPDF engines through
->   `magneticMultiStartForSpec` — the ±m and sublattice-partition flat
->   directions live in the magnetic *model*, not in the observable. Gate:
->   `workers/mpdfEvaluatorSpec.test.ts` pins pooled ≡ serial bit-identity,
->   including a **two-sublattice** case whose moment passes through zero.
-> - **Agent surface.** Three tools (36 total): `build_mpdf_model`,
->   `refine_mpdf`, `compute_mpdf_components` (whose `magneticFraction` tells an
->   agent whether there is enough magnetic signal to be worth fitting).
->   `mcp/mpdfAgentLoop.test.ts` is the registry-only gate: parse → spin model →
->   component check → co-refine recovers the truth moment, and an X-ray pattern
->   is refused a magnetic term loudly.
-> - **UI.** The PDF page's second target chip is live (neutron data only —
->   X-ray G(r) carries no magnetic signal, and the bundled demo is X-ray), and
->   step 1 mounts the shared `KSearchPanel` with a real-space `MagneticFit`
->   backend. The spin model flows through the `spec` memo, so moment rows,
->   the nuclear/magnetic overlay, the mCIF export and the posterior all follow.
->   The four mPDF rows get their **own** parameter group: `mpdfOrdScale` is
->   exactly degenerate with the moment magnitude, and sharing a group with the
->   moments would let one "all free" click fit a flat valley.
->
-> **Bug found and fixed en route (real, not cosmetic).** `buildSpinField`
-> dropped spins whose |m| fell below 1e-9, making the spin list a function of
-> the *moment values* while the spin-pair cache was keyed on geometry alone.
-> Reusing one problem across a moment crossing zero gave a magnetic curve 22 %
-> off in one direction and read out of bounds in the other; it also broke the
-> pooled ≡ serial contract (pool members prime their caches from different
-> value-sets) and poisoned the FD Jacobian of any moment mode seeded at zero —
-> which is the default seed. Whether an atom carries a moment is now decided by
-> symmetry alone. Four regression gates cover it, all verified to fail against
-> the pre-fix code.
->
-> **The MnO gate is CLOSED (2026-07-25).** §7 named "golden MnO neutron
-> PDF+mPDF (the Frandsen & Billinge 2015 reference case)" as the external
-> validation; `magnetic/mnoGolden.test.ts` now meets it. The structure is
-> MAGNDATA **1.31** (MnO, BNS C_c2/c, k = (½,½,½), atomic positions ICSD 9864)
-> as distributed with the Frandsen group's mPDF tutorial — 32 Mn in the 2×2×2
-> magnetic cell, type-II AFM, 16 up / 16 down, 5.66 µ_B. Against
-> `diffpy.mpdf`'s own `calculatemPDF`/`calculateDr` (a real compiled
-> `diffpy.srreal`, no stubs) in our documented conventions (sxyz = moments
-> m = g·S, gfactors = 1, K1 = (2/3)(γr₀/2)², normalized over the 32 central-cell
-> atoms of a 32 Å cluster so N matches our periodic box): **f(r) agrees to
-> 3.2e-13 of peak** — floating-point noise, three orders tighter than the
-> synthetic goldens — and D(r) to corr > 0.9999 / κ within 0.5 %, the residual
-> being our exact direct quadrature standing in for their FFT + interpolation
-> form-factor transform. The one point that differs is r = 0 exactly, where
-> f has a 1/r divergence and we substitute a small positive r; it is bounded,
-> not exempted.
->
-> **End-to-end workflow gates (data-gated, `workflow/mpdfTutorialData.test.ts`).**
-> Where the golden above gates the KERNEL, these gate the whole workflow against
-> real measured data and the tutorial's own refined answers:
-> **MnO** (tutorial 02) — the experimental mPDF is the residual of a converged
-> PDFgui structural fit; refining the two affine scales against it recovers
-> ordScale **1.6716 vs diffpy's 1.6685 (0.2 %)** at Rw 25.1 % / 93.7 % of the
-> residual explained (diffpy: 23.6 % / 94.4 %).
-> **MnTe** (tutorial 09) — a genuine nuclear + magnetic co-refinement of real
-> NOMAD 320 K data through `refine_mpdf`: converged at Rw 10.5 %, a = 4.1524 Å,
-> |m| = 0.55 µ_B with the magnetic term 1.6 % of the nuclear — physically right
-> for 13 K above T_N, where only short-range order survives. Note MATERIA
-> refuses the tutorial's unconstrained spin direction: at the 2a site of
-> P6₃/mmc the full grey group forbids every moment, so the test enumerates
-> magnetic subgroups and takes one that permits it (P6₃′/m′m′c).
-> **MnSb** (tutorial 07) — the ferromagnetic net-moment line, which is what
-> cancels the runaway B_ij baseline so f(r) oscillates about zero (mean 0.9 vs
-> rms 40, against an analytic line of 63 — the gate cannot pass with the line
-> omitted), plus the SRO exp(−r/ξ) envelope.
->
-> **A second trap that exercise surfaced (not an mPDF bug):** a CIF with NO
-> displacement-parameter column parses to `bIso = 0` on every site, giving
-> delta-sharp peaks ~50× the data; the scale collapses to ~5e-4 and the fit
-> "converges" at Rw ≈ 97 % with no warning. Seeding U = 0.006 Å² takes the same
-> fit to Rw ≈ 10 %. Flagged for a warning in the model builders.
->
-> **REAL BUG found by that exercise — the mCIF parser dropped every centering
-> operation.** magCIF defines a magnetic space group across TWO loops and the
-> group is their PRODUCT: `_space_group_symop_magn_operation.xyz` (coset
-> representatives) × `_space_group_symop_magn_centering.xyz` (centering
-> translations, including anti-translations with θ = −1, which is how a
-> black-and-white lattice is written). We read only the first loop. MnO lists 4
-> operations and 32 centerings, so its 32-Mn magnetic cell came out with **4 Mn
-> — one eighth of the structure — with no error raised anywhere**: wrong 3D
-> view, wrong mCIF round-trip, wrong |F_M|², wrong mPDF, for every
-> Bilbao/MAGNDATA file with a centered magnetic lattice. Fixed in
-> `parsers/cif.ts` (compose, dedupe with θ in the key); three regression gates,
-> each verified to fail against the pre-fix parser. Nothing else in the suite
-> moved — the composition is a no-op for files with no centering loop, which is
-> exactly why no existing test caught it.
->
-> **Known bug, found by the adversarial review of this milestone and since
-> FIXED (commit 9314152) — split-orbit moment anchors drift off refined
-> positions.** A magnetic
-> model's split-orbit entries carry the site position *frozen at build time*
-> (`momentModel.ts` `u.orbitPos`), while `expandMagneticBox` matches anchors
-> against the *refined* positions through `placingFor`/`coincide`, whose
-> tolerance is a hard 1e-3 fractional. Past that cliff nothing matches and the
-> whole split sublattice silently loses its moments. Measured on P2₁/c,
-> k = (0,0,⅓): at a 0.0011 fractional shift the 1×1×3 box drops 12 spins → 6 and
-> the magnetic component of G(r) falls 5× discontinuously, then goes flat in the
-> parameter. The engine's FD step (1e-5·|p|) never sees the cliff, but an LM
-> trial step crosses it easily — and `MPDF_STAGE_KINDS` refines moments
-> immediately before positions, so the guided sequence walks right into it. The
-> defect predates this milestone (it is in the shared magnetic-model anchoring,
-> so the powder path is exposed too); shipping the mPDF surface is what made it
-> reachable. Fixed by making moment PRESENCE independent of refined values: the
-> anchor is now an orbit INDEX re-derived from the site's current position, so a
-> refined site carries its split orbits with it.
->
-> **Fixed by the same review:** the form-factor envelope was mis-centered
-> whenever the r-step does not divide 5 Å (`nHalf = round(rMax/rStep)` gives a
-> true centre of 2·nHalf, while the caller re-derived `round(2·rMax/step)` —
-> 334 vs 333 at 0.03 Å), sliding the whole ordered mPDF term one r-bin against
-> the nuclear peaks. Every committed golden uses 0.01 Å, which divides evenly,
-> so none of them could see it. `formFactorEnvelope` now reports its own
-> `center`, with a step-sweep regression gate.
->
-> **Known cost.** One mPDF evaluation is much more expensive than one powder
-> profile (spin-pair re-sum + direct convolution against the form-factor
-> envelope over the extended grid). On a 10 000-point neutron `.gr` with a
-> 1.5–30 Å window and 9 free moment modes, an 8-restart moment search took
-> ~100 s. The restart Jacobians now run on the evaluator pool (one init reused
-> across starts) and the panel's exploratory fit uses 3 restarts, but the direct
-> `convolveFull` in `magnetic/mpdf.ts` is the real bottleneck — swapping it for
-> an FFT (as `diffpy.mpdf` does) behind the same seam is the next perf step, and
-> must keep the goldens and the bit-identity contract intact.
+**Validation gate**
+- ✅ PDFfit2 1.6.0 curves for Ni, MnO and rutile with anisotropic ADPs, from a
+  committed fixture
+  ([VALIDATION.md](./VALIDATION.md#fits-and-workflows-checked-against-external-tools)).
+- 🔬 The error of f = Z against a Q-dependent normalization is not measured.
 
-> **Status (2026-07-17):** the core is done and externally gated. Shipped:
-> `magnetic/mpdf.ts` (Frandsen A/B spin-pair kernel with the exact reference
-> histogram/broadening/normalization, ⟨j0⟩ cosine-transform envelope + self-
-> convolution, paramagnetic S′ term, net-moment line, SRO ξ envelope),
-> `expandSpinField` in `crystal/cellExpansion.ts` (the unified k = 0 / k ≠ 0
-> magnetic box), `workflow/mpdf.ts` (`buildMpdfSpec`/`buildMpdfProblem` — one
-> separable residual over the nuclear machinery with geometry/moment-keyed spin
-> caches, `mpdfComponents`, `MPDF_STAGE_KINDS`), and the four new kinds
-> (`mpdfOrdScale`/`mpdfParaScale` linear, `mpdfPsigma`, `corrLength`).
-> **Gate closed:** committed diffpy.mpdf fixtures (`magnetic/mpdfGolden.ts`) pin
-> f(r) for an AFM and a net-moment FM box to ≤1e-6·peak and D(r) to
-> corr > 0.9999 / κ within 0.5 % on CI, plus a synthetic co-refinement
-> round trip recovering a perturbed moment to 3 decimals. Remaining for the
-> milestone: the mPDF page/UI (the header's reserved "Magnetic PDF →" slot),
-> worker `EvaluatorSpec` arm, and MCP tools (fold into P6).
-- **Goal:** co-refine the magnetic PDF with the nuclear PDF (ordered structure).
-- **Deliverables:** box spin-field expander (unifies commensurate k=0 and k≠0 via
-  `displayMoment`, handling `expandMagneticSupercell`'s null-at-k=0);
-  spin-pair enumerator (pair vector + both Cartesian moments); `magnetic/mpdf.ts`
-  implementing the **unnormalized** Frandsen mPDF `d_mag(r)` = the two-term
-  `A_ij`(δ, transverse `⟨S_i^y S_j^y⟩`) + `B_ij`(continuous baseline
-  `r·(Σ_all − cumsum)`) histogram, the `⟨j0⟩` real-space envelope `S(r)`, and
-  independent `ordScale`/`paraScale`; the **linear net-moment term
-  `−(8π/3)r·ρ₀·m²` only for ferromagnets** (exactly zero for AFM — including it is
-  a bug); `workflow/mpdf.ts` adding `d_mag(r)/(N_a⟨b⟩²)` to the nuclear `G(r)` in
-  one separable residual; multi-start + `canonicalizeMomentValues` for the
-  moment-sign degeneracy.
-- **Reuse:** `buildMagneticModel`, `applyMagneticMoments`, magnetic ⟨j0⟩ table,
-  `magneticPowder.ts` separable-contribution pattern, the whole LM stack.
-- **Gate 🔬:** golden **MnO neutron PDF+mPDF** (the Frandsen & Billinge 2015
-  reference case); numeric cross-check of `d_mag(r)` against `diffpy.mpdf` for a
-  fixed spin config.
+### P3 — Advanced PDF 🚧
 
-### P5 — Symmetry-constrained local spin model ⬜  *(medium — the differentiator)*
-- **Goal:** feature (4): a local magnetic model whose freedom is exactly the
-  symmetry-allowed modes.
-- **Deliverables:** `propose_local_spin_model_from_symmetry` (enumerate maximal
-  magnetic subgroups → per-site allowed moment basis → seed irrep amplitudes),
-  wiring the existing k-search/MSG/irrep outputs into the P4 mPDF as its free
-  parameters; isotropic/anisotropic short-range-order correlation length
-  `exp(−r/ξ)`; export `buildMomentField` from `isotropy.ts`.
-- **Reuse:** `allowedMomentDirections`, `isotropySubgroup`, `magneticGroups`,
-  `subgroupLattice`.
-- **Gate:** on a known case, the proposed model's free-parameter count equals the
-  irrep dimension; refining ξ recovers a correlation length consistent with peak
-  fall-off; symmetry-illegal spin directions stay identically zero.
+**Done**
+- Qmax termination with grid extension and odd reflection near r = 0, applied
+  whenever the pattern carries Qmax.
+- The `spdiameter` sphere envelope, element-pair partials, and `sratio`/`rcut`
+  with a conflict warning.
+- Multi-phase G(r): per-phase scale, cell, atoms, δ and particle size, shared
+  Qdamp and Qbroad, and per-phase overlay curves.
+- Multi-dataset co-refinement in the core: one structure, with per-dataset
+  scale, Qdamp, Qbroad and fit window.
+- `calibrate_qdamp`, which frees only the scale, Qdamp and Qbroad on a standard.
 
-### P6 — Agent tools, UI polish, uncertainty quantification 🚧  *(medium)*
+**Next**
+1. `stepcut`, PDFfit2's step-function cutoff for nanoparticles.
+2. A multi-dataset surface (P6).
 
-> **Status (2026-07-17):** the nuclear agent slice is live. Five PDF tools on
-> the contract-tested registry (32 tools total, incl. `build_distortion_modes`
-> and `build_symmetry_modes` — modes from the structure's own space group, no
-> parent CIF): `parse_pdf_data`,
-> `build_pdf_model` (single + multi-phase, scale-seeded), `refine_pdf`
-> (flat/staged, fit range, node-pool parallel fast path, correlated-motion
-> conflict in `warnings`), `compute_partial_pdf` (element pairs / per-phase),
-> and `calibrate_qdamp` (standard → instrument constants). The P6 gate for the
-> nuclear track passes: an agent completes parse → build → staged refine →
-> partials → calibrate via the registry only (`pdfAgentLoop.test.ts`), and the
-> `{kind:"pdf"}` EvaluatorSpec arm gives pooled/parallel refinement in both the
-> browser workbench and the node MCP server, pooled ≡ serial bit-for-bit.
-> ~~Remaining for P6: mPDF tools (with P4)~~ — **the three mPDF tools shipped
-> with P4 (2026-07-25), 36 tools total.** Still open: extending
-> `sample_posterior` to accept a magnetic model
-> (`ComputeClient.sampleMpdfPosterior` already exists, and the PDF page's
-> Posterior tab already routes to it; the tool's NUTS arm must keep throwing,
-> because `buildMpdfProblem` returns a bare `RefinementProblem` with no
-> `gradChi2` — mPDF is ensemble-only until analytic mPDF derivatives exist),
-> PDF-aware `assess_refinement` bands,
-> next-step suggestions for PDF, multi-dataset UI.
->
-> **Update (2026-07-19):** the uncertainty-quantification item shipped, beyond
-> the planned resampling: **Bayesian posterior sampling**. An affine-invariant
-> ensemble MCMC sampler (Goodman & Weare stretch move, emcee-style) lives in
-> `core/refinement/bayes/` as a sans-io generator mirroring the LM engine's
-> `refineCore` — RNG only in the generator, so the serial and worker-pool
-> drivers are bit-identical and a run resumes from a serializable walker-state
-> token. The default noise model is **marginalized** — `logL = −(N/2)·ln χ²`
-> (unknown error scale integrated out under a Jeffreys prior) — exactly
-> because G(r) is fitted with deliberate unit weights (§8's correlated-error
-> caveat). Logit transforms handle [min, max] bounds with the log-Jacobian
-> measure term. Diagnostics: split-R̂ (Gelman–Rubin), ESS (Geyer
-> initial-monotone truncation), quantile credible intervals, the sample
-> correlation matrix, and `esdRatio` (posterior std / linearized LM esd) —
-> validated at **0.99–1.01** on the Ni PDFfit2 golden in the Gaussian limit.
-> Exposed as the `sample_posterior` MCP tool (33 tools total) with bounded
-> `nSteps` + resume-token continuation; agents run `refine_pdf` first and seed
-> walkers from the converged values. See VALIDATION.md and Fancher et al.
-> (2016) / McCluskey et al. (2023) in §9. **Since then:** a gradient-based
-> **NUTS** sampler (`sampler:"nuts"`, consuming §6's `gradChi2`; LM-esd-seeded
-> mass matrix, R̂ ≈ 1.001 on Ni in ~5× fewer evaluations) and the workbench
-> **Posterior view** (ensemble over the worker pool; marginals, credible
-> intervals, esdRatio, R̂/ESS, resume-token Continue).
->
-> **Update (2026-07-28): boxcar (sliding-window) refinement shipped** — the
-> r-resolved read of a structure, and the first UI consumer of the previously
-> dormant sequential-refinement engine. `core/workflow/pdfBoxcar.ts` owns only
-> the window plan (fixed width, fixed step, direction, and the deliberate
-> refusal to fit a narrowed trailing box — a shrunken box's parameters are not
-> comparable with the rest of the series); the fitting is
-> `refinement/sequential.refineSequentialAsync`, a new async twin of
-> `refineSequential` sharing its seeding/carry helpers, whose runner seam lets
-> `ComputeClient.refinePdfBoxcar` fan each box's Jacobian over the evaluator
-> pool. The pool is **re-initialized per box**: `fitRange` is baked into the
-> replica problem, so reusing one pool across windows would silently evaluate
-> the wrong window's Jacobian. Boxes seed from their predecessor, which makes
-> the series path-dependent — hence the per-box `restarts` option (randomized
-> perturbed starts around the seed, lowest χ² wins, per-box RNG seed so the
-> perturbation pattern cannot imprint its own r-dependence). The second, and
-> stronger, check on path dependence is the **both-directions** mode: the same
-> boxes scanned low→high AND high→low from the SAME starting model, the two
-> tracks overlaid on one pair of axes, and their separation reported in units
-> of the combined esd — where they agree the drift is in the data, where they
-> part the fit is following its seed. A pass records its fits in scan order, so
-> `boxcarStepIndex` maps a "down" pass back onto the ascending plan (getting
-> that backwards would plot an interrupted down pass at the wrong r). Boxes are
-> published as they complete, so the plot fills in during the scan rather than
-> appearing whole at the end. Surfaced as a **Boxcar** plot tab holding the
-> whole feature — the plan (width, step,
-> direction, restarts) sits with the run button and the plot it produces, since
-> those settings shape this view's result and nothing else, leaving the
-> refinement panel one job and one primary action — plus value ± esd vs box
-> center over an Rw context strip, a per-box table with "Adopt", and CSV
-> export; and the `refine_pdf_boxcar` agent tool (37 tools total). With a spin
-> model applied the boxes solve the mPDF problem, so a magnetic page boxcars
-> the same residual it refines.
->
-> **UI status (2026-07-17):** the PDF page is design-unified with the powder
-> page (same plot-card layout, toolbar, segmented Refinement | 3D Model view,
-> fit-window chip, Prefit/Refine actions, `wb-work2` grid) and ships as one of
-> the two start-page demos (GaTa₄Se₈ 299 K X-ray, Rw 8.1%). The header shows
-> the technique state as chip pairs (Powder | Single crystal · Rietveld | PDF ·
-> Nuclear | Magnetic) with a disabled **Magnetic PDF →** action reserving the
-> mPDF slot until P4.
-- **Goal:** the browser + agent experience is first-class.
-- **Deliverables:** the full MCP tool set (§4) with `CONTRACTS`; `pdf`/`mpdf`
-  `EvaluatorSpec` arms for pooled/parallel refine; PDF-aware `assess_refinement`
-  bands (**not** the Toby Rwp Bragg bands); next-step suggestions; residual-based
-  / resampling uncertainty estimates surfaced with the correlated-error caveat;
-  obs/calc/diff G(r) polish, partial-PDF overlays, r-range presets.
-- **Reuse:** `createNodeEvaluatorPool`, `TOOL_REGISTRY`, diagnostics layer.
-- **Gate:** an agent completes load → calibrate → build → staged refine →
-  co-refine mPDF → report on the Ni and MnO fixtures via MCP only; `registry.test.ts`
-  green.
+**Validation gate**
+- ✅ PDFfit2 nanoparticle and two-phase curves; partials sum exactly to the
+  total.
+- ⬜ 🔬 Ripples against a low-Qmax reference, such as PDFgetN's spurious Ni peak
+  near r ≈ 3 Å. All PDFfit2 fixtures use Qmax = 25 Å⁻¹.
 
-### Deferred / optional tracks (called out, not silently dropped)
-- **Track PR — data reduction** (`totalscattering/reduction.ts`): PDFgetX3/N
-  ad-hoc pipeline (raw I → S(Q) → F(Q) → G(r)), Waasmaier–Kirfel table, Compton,
-  Placzek. Large; only if users need to reduce raw data in-app. Until then, import
-  reduced `.gr`.
-- **Anomalous / resonant PDF** (`f'`,`f''` tables + complex `f`): needs a
-  `ScatteringTable` interface extension (the current interface returns one real
-  number). Only for near-edge experiments.
-- **Incommensurate mPDF** (helix/SDW) via `fourierMoment.ts`.
+### P4 — Magnetic PDF ✅
 
-### Explicitly out of scope
-- **Big-box magnetic reverse Monte Carlo (SPINVERT / RMCProfile-style).** A
-  fundamentally different paradigm — Metropolis moves on thousands of
-  unconstrained spins, no symmetry, no LM — and **not part of this roadmap**. The
-  local-magnetic capability here is the symmetry-constrained small-box model of P5.
+**Done**
+- `magnetic/mpdf.ts`: the Frandsen kernel with diffpy.mpdf's normalization, the
+  ⟨j0⟩ envelope, the paramagnetic term, the net-moment line of a ferromagnet,
+  and an exp(−r/ξ) envelope.
+- `buildMpdfProblem`: nuclear G(r) plus d_mag(r) in one residual. Moments stage
+  just before positions.
+- A moment multi-start shared with magnetic powder: freeze the nuclear model,
+  kick the moments, fit jointly, canonicalize ±m.
+- Tools `build_mpdf_model`, `refine_mpdf` and `compute_mpdf_components`. The last
+  reports whether the magnetic signal is worth fitting.
+- A Magnetic step on the PDF page for single-phase neutron data. Overlays, mCIF
+  export and the Posterior view follow the spin model.
+
+**Next**
+1. A separate Qdamp for the magnetic term. Both terms share one, and a free ξ
+   absorbs part of the mismatch.
+
+**Validation gate** ✅
+- MnO from MAGNDATA 1.31, the Frandsen & Billinge 2015 case: f(r) and D(r) for
+  its fixed spins match diffpy.mpdf. Synthetic AFM, FM, 120° and canted boxes
+  match too, all from committed fixtures.
+- diffpy.mpdf tutorial data (data-gated): the MnO ordered scale matches diffpy's,
+  MnTe co-refines through `refine_mpdf`, and MnSb checks the net-moment line and ξ.
+- Pooled evaluation equals serial bit for bit, even when a moment crosses zero.
+
+### P5 — Symmetry-constrained local spin model 🚧
+
+The goal is requirement (4): a local magnetic model whose freedom is exactly the
+symmetry-allowed modes.
+
+**Done**
+- The PDF page's Magnetic step mounts the magnetic symmetry panel with a
+  real-space backend. It fits and ranks subgroup candidates against G(r).
+- The free moment parameters are the allowed modes of the chosen subgroup,
+  picked directly or as the isotropy subgroup of chosen irreps.
+- An isotropic correlation length ξ.
+
+**Next**
+1. `propose_local_spin_model_from_symmetry`: one tool that enumerates maximal
+   subgroups, reads the allowed bases and seeds amplitudes.
+2. Moment modes projected onto one irrep, so the parameter count equals its
+   dimension.
+3. An anisotropic correlation length.
+
+**Validation gate**
+- ⬜ On a known case, the free-parameter count equals the irrep dimension.
+- ✅ Finite-ξ curves match diffpy.mpdf. A refined ξ matches an external
+  diffpy.mpdf fit of one measured dataset (data-gated).
+- ✅ Forbidden moment directions stay zero, by construction.
+
+### P6 — Agent tools, UI and uncertainty 🚧
+
+**Done**
+- Agent tools for nuclear and magnetic studies, with warnings for inputs that make
+  a fit meaningless, such as a missing ADP or X-ray data given a spin model.
+- Pooled refinement in the browser and the node agent server, bit-identical to
+  serial.
+- Posterior sampling: the ensemble sampler in the Posterior view and
+  `sample_posterior`, which also offers NUTS for single-phase PDF
+  ([REFINEMENT_ENGINE.md](./REFINEMENT_ENGINE.md)).
+- Boxcar refinement through `refine_pdf_boxcar` and the Boxcar view. Each box
+  seeds from the last, with optional restarts. The view can scan both ways to
+  expose path dependence, and it fits mPDF boxes when a spin model is applied.
+- The PDF page is one of the bundled demos: GaTa₄Se₈ X-ray G(r) at 299 K.
+
+**Next**
+1. Magnetic models in `sample_posterior` and `refine_pdf_boxcar`. The page samples
+   mPDF with the ensemble sampler only; the mPDF problem has no gradient for NUTS.
+2. PDF-aware `assess_refinement` bands and PDF next-step suggestions. The
+   assessment knows only powder and single-crystal modes.
+3. A multi-dataset surface: evaluator spec, agent tool and UI. The core builder
+   has no caller outside tests.
+4. Esds and GoF from independent points on the Nyquist grid (§8).
+5. r-range presets.
+
+**Validation gate**
+- ✅ Through the tools alone, an agent completes a nuclear study and an mPDF
+  study.
+- ⬜ The planned gate ends with a report on the Ni and MnO fixtures. No agent tool
+  writes a report.
+
+### Symmetry-mode / subgroup track (documented elsewhere)
+
+The PDF page's AMPLIMODES/ISODISTORT-style mode-amplitude refinement, its Γ
+isotropy-subgroup activation and the translationengleiche subgroup lattice
+shipped outside this roadmap's P0–P6 arc; they are summarised in
+[ROADMAP.md](./ROADMAP.md) §2. The next phase — klassengleiche subgroups,
+supercell realisation, zone-boundary modes, and the amplitude-vs-r payoff
+through the boxcar sweep — is planned in
+[PLAN_SUBGROUPS_AND_INCOMMENSURATE.md](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md)
+(Track A).
+
+### Deferred tracks
+
+- **Track PR — data reduction** ⬜. `totalscattering/reduction.ts` would take raw
+  I → S(Q) → F(Q) → G(r) as PDFgetX3 and PDFgetN do, with the Waasmaier–Kirfel
+  table and Compton and Placzek corrections. It is large; build it only if users
+  need in-app reduction.
+- **Anomalous and resonant PDF** ⬜. It needs f′ and f″ tables and a complex f.
+  `ScatteringTable` returns one real number, so its interface must grow.
+- **Incommensurate mPDF** ⬜. Helices and spin-density waves need the
+  `fourierMoment.ts` route.
+
+### Out of scope
+
+- **Big-box magnetic reverse Monte Carlo** (SPINVERT, RMCProfile): Metropolis
+  moves on unconstrained spins, with no symmetry and no LM. The local model here
+  is P5's symmetry-constrained small box.
 
 ---
 
 ## 6. Performance plan
 
-The pair sum is `O(N_cell · N_images)` per phase and cubic in `rmax`. Strategy,
-following the existing acceleration ladder:
+The pair sum costs O(N_cell · N_images) per phase and grows as rmax³.
 
-1. **Correct f64 CPU in a Web Worker** (default, reference). Neighbor-bin the
-   periodic images; cache the pair-list `[r_ij, amplitude, projected ADP]` keyed
-   on geometry-bound parameter values; recompute only σ_ij / envelopes when only
-   `Qdamp`/`delta`/`scale` move; multiply scale last for bit-identity — the
-   `createPeakBuilder` cache pattern, adapted (cache key is `rmax` + geometry
-   params, **not** the d-window).
-2. **`refineParallel` pool** for the Jacobian, unchanged, once the `EvaluatorSpec`
-   arm exists.
-3. **Opt-in WebGPU pair-histogram kernel** (f32, approximate) cloned from
-   `gpuStructureFactor.ts`, thread = r-bin × model, with the mandatory two gates:
-   `wgslFieldCount == STRIDE` and an f64-kernel-vs-CPU-G(r) precision harness
-   (≤1e-6). Note a real-space accumulation of many small Gaussians can be *more*
-   f32-sensitive than the reflection sum — validate carefully.
-4. **Analytic gradients (F1.1 real-space — shipped).** A fused single-pass
-   pair loop (`pdf/gradients.ts`) returns G(r) **and** every requested analytic
-   ∂G/∂p column in one traversal — the value curve is bit-identical to
-   `computeGofR`, pinned by test. Covered kinds: `qdamp`, `qbroad`,
-   `delta1`/`delta2`, `spdiameter` (> 0), `occupancy`, `bIso`, `uAniso`, and
-   symmetry-mode `positionShift` — orbit-image derivatives transform correctly
-   via per-atom op provenance (d pos/dv = M·R·axis, U → R·U·Rᵀ). `cell`,
-   `sratio`/`rcut`, tie-referenced parameters, and multi-phase/multi-dataset
-   problems fall back to FD (null column). `buildPdfProblem` feeds these to the
-   LM engine as `analyticColumns` (restraints supported, unlike the powder
-   template) and also exposes a complete scalar `gradChi2` (analytic columns +
-   central-FD fill-in) — the contract a future NUTS sampler consumes. Measured
-   **2.3× faster** LM refinement on the Ni golden, same basin.
+| Rung | Status | Notes |
+| --- | --- | --- |
+| 1. f64 CPU in a Web Worker | ✅ caching · ⬜ binning | The reference path. The pair list is cached on cell, positions and ADPs, so other steps skip enumeration. Neighbour binning of the images is not built. |
+| 2. Evaluator pool for the Jacobian | ✅ | `pdf` and `mpdf` specs. Multi-start, staged and boxcar runs each reuse one pool. |
+| 3. Opt-in WebGPU pair-sum kernel | ⬜ | f32, gated like the structure-factor kernels: WGSL field count equals the JS stride, and an f64 twin matches CPU G(r) to 1e-6. Many small Gaussians may be more f32-sensitive than a reflection sum. |
+| 4. Analytic gradients | ✅ PDF · ⬜ mPDF | Cell, sratio/rcut, ties and multi-phase or multi-dataset problems fall back to finite differences ([REFINEMENT_ENGINE.md](./REFINEMENT_ENGINE.md)). Every mPDF column is a finite difference. |
+
+For mPDF, a moment-only step recomputes only d_mag(r); the spin pairs, the
+form-factor envelope and the nuclear curve are cached. Each convolution picks
+the direct sum or an FFT, whichever is cheaper. An mPDF evaluation still costs
+far more than a powder profile, so the Magnetic step's exploratory fit runs 3
+restarts.
 
 ---
 
 ## 7. Validation strategy
 
-Adopt the project's golden-value + external-cross-check convention:
+The PDF track uses golden values plus external cross-checks. Committed fixtures
+run on CI; tests that read the git-ignored `data/` folder skip without it.
+Results are in
+[VALIDATION.md](./VALIDATION.md#fits-and-workflows-checked-against-external-tools).
 
-- **Standards:** Ni, Si, or LaB₆ for `Qdamp`/`Qbroad` calibration.
-- **Nuclear golden:** crystalline **Ni** (neutron *and* X-ray) `G_calc(r)` and a
-  full refinement vs a `diffpy`/PDFgui reference; CeO₂ or a diffpy test dataset as
-  a second.
-- **mPDF golden:** **MnO** (Frandsen & Billinge 2015) joint nuclear+magnetic PDF;
-  plus a fixed-spin numeric cross-check of `d_mag(r)` against `diffpy.mpdf`.
-- **Cross-checks:** partial-PDF weights sum to 1 (Faber–Ziman); termination
-  ripple reproduces a known low-Qmax artifact; `⟨b⟩` sign handling for
-  negative-`b` elements (Mn, H, Ti).
-- **FD oracles need filtering, not the analytic columns:** the ±5σ Gaussian
-  evaluation window is quantized on the r-grid, so a finite-difference *oracle*
-  picks up spurious 1/h spikes when a pair crosses a window edge — and the Qmax
-  band-limit **delocalizes** those spikes across the whole grid. The gate tests
-  (`pdfAnalyticJacobian.test.ts`) therefore apply a **Richardson h-vs-h/2
-  consistency filter** (compare only grid points where the FD estimate is
-  h-stable) and run the tight tolerances with termination off. Recorded here so
-  the lesson is not re-learned: when an analytic-vs-FD gate fails, suspect the
-  oracle's discretization before the derivative.
-- Fixtures live under the git-ignored `data/` folder via `testSupport`, skipping
-  gracefully when absent, exactly like the GSAS-II suites.
+| Check | Reference | Status |
+| --- | --- | --- |
+| Qdamp and Qbroad calibration on a standard (Ni, Si, LaB₆) | measured Ni X-ray standard | ✅ |
+| Nuclear golden: Ni and MnO, neutron and X-ray | PDFfit2 1.6.0; PDFgui on measured data | ✅ |
+| mPDF golden: MnO (Frandsen & Billinge 2015), plus a fixed-spin numeric cross-check of d_mag(r) against diffpy.mpdf | diffpy.mpdf and its tutorial data | ✅ |
+| Partials sum to the total (Faber–Ziman) | exact identity | ✅ |
+| ⟨b⟩ sign for negative-b elements (Mn, H, Ti) | Mn only | 🚧 |
+| Termination ripple at low Qmax | PDFgetN Ni near r ≈ 3 Å | ⬜ 🔬 |
+
+PDFfit2's neutron b for Mn is −3.75018 fm, against the Sears value of −3.73 fm
+used here. Because ⟨b⟩ nearly cancels in MnO, that is about a 2 % amplitude
+offset, which the scale absorbs and the test allows.
+
+### Lessons from the gates
+
+Each rule came from a failed or missing gate, and each still guides new work.
+
+- **Moment presence is a symmetry fact.** Whether an atom carries a moment
+  depends on the magnetic group, never on its current size. Otherwise
+  geometry-keyed caches index a spin list that changes as a moment crosses zero.
+- **A magCIF group is operations × centerings.** Compose both loops and dedupe
+  with θ in the key. Reading only the operation loop silently drops most of a
+  centred magnetic cell.
+- **Split-orbit anchors follow the refined position.** Store an orbit index and
+  re-derive the position from the site. A position frozen at build time loses
+  sublattices once the site moves past the match tolerance.
+- **A kernel reports its own centre.** `formFactorEnvelope` returns the index of
+  r = 0. Re-deriving it is off by one bin when the step does not divide the
+  range, which goldens at 0.01 Å cannot see.
+- **A missing ADP is a defect, not a default.** A CIF without an ADP column gives
+  B = 0, delta-sharp peaks and a meaningless fit. The model builders and the PDF
+  page warn rather than invent a value.
+- **Keep the ordered mPDF scale out of the moment group.** `mpdfOrdScale` is
+  exactly degenerate with the moment size, so one "free all" click would fit a
+  flat valley.
+- **Kick moments seeded at zero.** The magnetic signal is quadratic in the
+  moments, so m = 0 is a stationary point that plain LM cannot leave.
+- **Keep termination a direct sum.** FFT convolution error scales with the whole
+  array, which the sinc's alternating tail makes large and finite differences
+  amplify. An FFT is safe on a small added term or a smooth single-signed kernel.
+- **Finite-difference oracles need a Richardson filter.** The ±5σ Gaussian
+  window is quantized on the r grid, so FD spikes where a pair crosses a window
+  edge, and termination spreads the spikes. Compare only points where FD(h) and
+  FD(h/2) agree, with termination off for tight tolerances. When a gate fails,
+  suspect the oracle first.
+- **Re-initialize evaluator replicas when the fit window changes.** The window is
+  part of the replica's problem, so a reused pool would evaluate the wrong
+  boxcar window.
+- **Seed each box's restarts separately.** A shared seed repeats one perturbation
+  pattern in every box, which can imprint its own r-dependence.
 
 ---
 
 ## 8. Scientific caveats / honesty statement
 
-In the spirit of `LIMITATIONS.md` — the deliberate, still-standing constraints:
-
-- **Correlated G(r) uncertainties (the riskiest reuse assumption).** `G(r)` from a
-  finite-Q sine transform has strongly correlated point errors, so `w=1/σ²` is not
-  a true statistical weight. Reported esds come out **optimistically small** and
-  the normal-probability diagnostics are non-linear even for a perfect fit —
-  PDFgui itself warns its uncertainties are unreliable (Toby & Billinge, *Acta
-  Cryst.* A60, 315). MATERIA must fit with **uniform weights**, report **Rw over
-  G(r)** (not the Bragg Rwp), count independent points on the **Nyquist grid
-  Δr = π/Qmax**, and label esd/GoF as *relative* indicators only. The LM
-  *minimization* is unaffected; only the *interpretation* of the covariance is.
-  The same caveat governs the **Bayesian likelihood**: every shipped noise
-  model treats G(r) points as independent, so the posterior is an
-  *approximation*, not a rigorous likelihood. The rigorous ladder, in order:
-  (1) independent Gaussian residuals ✅ → (2) fitted/marginalized overall
-  noise scale ✅ (the default) → (3) a simple correlated-residual model ⬜ →
-  (4) covariance propagated from the F(Q) reduction stage ⬜ (the full fix).
-- **`σ=√yObs` fallback is invalid for G(r)** (the shared observation contract
-  defaults to it and skips `yObs≤0`). PDF needs its own weight path.
-- **X-ray model weight is `f(0)=Z`, Q-independent** — matching PDFfit2. This is an
-  approximation vs a full Q-dependent normalization; documented, not hidden.
-- **Data reduction is out of scope initially** — MATERIA consumes reduced `G(r)`,
-  like PDFgui/DiffPy. Reduction quality (background, absorption, Compton/Placzek,
-  Qmax choice) is the user's / upstream tool's responsibility until track PR.
-- **Absolute mPDF moment magnitude** inherits the convention-dependent factor
-  `momentModel.ts` already flags as not yet cross-checked against GSAS-II; and
-  `crystalComponentsToCartesian` uses a normalized-direct-axis simplification for
-  oblique cells (see `LIMITATIONS.md`) that a non-orthogonal magnetic cell
-  inherits.
-- **Commensurate, single-k mPDF first.** Incommensurate spin fields require the
-  `fourierMoment.ts` route (deferred).
-- **Local optimizer.** LM is local; PDF/mPDF assume a reasonable starting model.
-  Multi-start mitigates moment-sign and shape/scale minima but is not global
+- **Correlated G(r) errors.** A finite-Q sine transform correlates G(r) point
+  errors, so 1/σ² is not a true weight (Toby & Billinge 2004; PDFgui warns the
+  same). The fit uses uniform weights and reports Rw over G(r), not the Bragg
+  Rwp. Esds are optimistic, and the normal-probability plot bends even for a
+  perfect fit. Only the meaning of the covariance suffers, not the minimization.
+- **Independent points.** Esds count every r-grid point, and reduced grids are
+  usually finer than the Nyquist spacing Δr = π/Qmax, so esds shrink further.
+  Counting points on the Nyquist grid is not implemented; treat esd and GoF as
+  relative.
+- **Bayesian likelihood.** Every noise model treats G(r) points as independent,
+  so a posterior is an approximation. The rigorous ladder, in order:
+  1. independent Gaussian residuals ✅
+  2. a fitted or marginalized noise scale, the default ✅
+  3. a simple correlated-residual model ⬜
+  4. a covariance propagated from the F(Q) reduction, the full fix ⬜
+- **No √yObs weights.** The shared observation path defaults to σ = √yObs and
+  skips yObs ≤ 0, and neither suits G(r). The PDF problem uses uniform weights
+  and keeps negative points.
+- **X-ray weight.** The weight f(0) = Z is independent of Q, as in PDFfit2. It
+  approximates a Q-dependent normalization, by an amount not measured.
+- **Reduced data only.** MATERIA fits reduced G(r), as PDFgui and DiffPy do.
+  Background, absorption, Compton and Placzek corrections and the Qmax choice
+  belong to the upstream tool until Track PR.
+- **Absolute mPDF moment size.** `mpdfOrdScale` is exactly degenerate with the
+  moment size, so free one, never both. The kernel follows diffpy.mpdf's
+  convention: m = g·S, with g-factors of 1.
+- **Commensurate, single-k, single-phase mPDF.** The spin field is an explicit
+  magnetic box, so k must be 0 or commensurate. Incommensurate fields need the
+  `fourierMoment.ts` route (§5). Such a k — including one whose denominator
+  exceeds 12, which `classifyPropagation` also calls incommensurate — is now
+  refused before the problem is built (`unsupportedMpdfK`), instead of silently
+  collapsing the box to one parent cell and returning a wrong magnetic G(r).
+- **Local optimizer.** LM needs a reasonable starting model. Multi-start
+  mitigates moment-sign and shape-versus-scale minima, but it is not a global
   search.
-- **GPU pair-sum, if built, is opt-in f32 and approximate** — the f64 CPU path is
-  the default and the reference.
+- **GPU.** A pair-sum kernel, if built, would be an f32 accelerator. The f64 CPU
+  path stays the reference.
 
 ---
 
 ## 9. References
 
-Farrow et al., *J. Phys.: Condens. Matter* **19** (2007) 335219 (PDFfit2/PDFgui) ·
-Proffen & Billinge, *J. Appl. Cryst.* **32** (1999) 572 (PDFFIT) ·
-Juhás et al., *J. Appl. Cryst.* **46** (2013) 560 (PDFgetX3) ·
-Juhás et al., *Acta Cryst.* **A71** (2015) 562 (DiffPy-CMI / SrFit) ·
-Frandsen, Yang & Billinge, *Acta Cryst.* **A70** (2014) 3 (mPDF theory) ·
-Frandsen & Billinge, *Acta Cryst.* **A71** (2015) 325 (mPDF fitting, MnO) ·
-Paddison, Stewart & Goodwin, *J. Phys.: Condens. Matter* **25** (2013) 454220
-(SPINVERT) · Waasmaier & Kirfel, *Acta Cryst.* **A51** (1995) 416 (5-Gaussian
-f(Q)) · Toby & Billinge, *Acta Cryst.* **A60** (2004) 315 (PDF uncertainties) ·
-Egami & Billinge, *Underneath the Bragg Peaks*, 2nd ed. (2012) ·
-Goodman & Weare, *Commun. Appl. Math. Comput. Sci.* **5** (2010) 65
-(affine-invariant ensemble MCMC) · Fancher et al., *Sci. Rep.* **6** (2016)
-31625 (Bayesian MCMC full-profile refinement) · McCluskey et al., *J. Appl.
-Cryst.* **56** (2023) 12 (reporting Bayesian analysis of scattering data).
+DOI-linked entries are in [REFERENCES.md](./REFERENCES.md), section "Real-space
+total scattering — PDF & mPDF".
+
+- Farrow et al., *J. Phys.: Condens. Matter* 19 (2007) 335219 — PDFfit2 and PDFgui
+- Proffen & Billinge, *J. Appl. Cryst.* 32 (1999) 572 — PDFFIT
+- Juhás et al., *J. Appl. Cryst.* 46 (2013) 560 — PDFgetX3
+- Juhás et al., *Acta Cryst.* A71 (2015) 562 — DiffPy-CMI and SrFit
+- Frandsen, Yang & Billinge, *Acta Cryst.* A70 (2014) 3 — mPDF theory
+- Frandsen & Billinge, *Acta Cryst.* A71 (2015) 325 — mPDF fitting, MnO
+- Paddison, Stewart & Goodwin, *J. Phys.: Condens. Matter* 25 (2013) 454220 — SPINVERT
+- Waasmaier & Kirfel, *Acta Cryst.* A51 (1995) 416 — 5-Gaussian f(Q)
+- Toby & Billinge, *Acta Cryst.* A60 (2004) 315 — PDF uncertainties
+- Egami & Billinge, *Underneath the Bragg Peaks*, 2nd ed. (2012)
+- Goodman & Weare, *Commun. Appl. Math. Comput. Sci.* 5 (2010) 65 — affine-invariant ensemble MCMC
+- Fancher et al., *Sci. Rep.* 6 (2016) 31625 — Bayesian MCMC full-profile refinement
+- McCluskey et al., *J. Appl. Cryst.* 56 (2023) 12 — reporting Bayesian analysis of scattering data

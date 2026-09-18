@@ -27,7 +27,7 @@ import type {
 import type { MagneticModel } from "@/core/magnetic/types";
 import { leBailCellPrefit, type LeBailPrefitResult } from "@/core/workflow/leBailPrefit";
 import type { RefinementResult, RefinementOptions, AgreementFactors, RefinementParameter } from "@/core/refinement/types";
-import { refine, refineParallel, type BatchEvaluator, type RefinementProblem } from "@/core/refinement/engine";
+import { refine, refineParallel, type BatchEvaluator, type ParallelDriverCapabilities, type RefinementProblem } from "@/core/refinement/engine";
 import { buildSingleCrystalRefinementProblem } from "@/core/workflow/singleCrystalRefinement";
 import { buildMagneticSingleCrystalProblem, applyMagneticMoments } from "@/core/workflow/magnetic";
 import { runPowderRefinement, runPdfRefinement, runMpdfRefinement, buildProblemForSpec, type PowderProgress } from "@/workers/runPowder";
@@ -68,6 +68,25 @@ function spawnWorker(): Worker {
  *  (same browser), used to decide whether to try the GPU |F|² evaluator. */
 function hasWebGpu(): boolean {
   return typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu;
+}
+
+/**
+ * Whether the PARALLEL driver may compute this spec's analytic Jacobian columns
+ * on the driver thread — which in the browser is the UI thread. True for the
+ * real-space PDF problem only: its analytic layer is a FUSED pass (one pair-loop
+ * traversal yields G(r) and every requested ∂G/∂p), so the driver pays about one
+ * extra `calculate` per iteration — the same order as the baseline/trial
+ * evaluations it already runs there — and the pool is spared TWO evaluations per
+ * analytic column. The powder template computes a full pattern synthesis per
+ * column, which would drag exactly the work the pool exists for back onto the
+ * main thread, so powder (and every other spec) keeps its columns on the pool.
+ */
+function analyticDriverPolicy(
+  spec: EvaluatorSpec,
+  options: Partial<RefinementOptions>,
+): { opts: Partial<RefinementOptions>; driver: ParallelDriverCapabilities } {
+  if (spec.kind !== "pdf") return { opts: options, driver: {} };
+  return { opts: { analyticDerivatives: true, ...options }, driver: { analyticOnDriver: true } };
 }
 
 /** Write a refinement result's converged values + esds back onto a copy of the
@@ -503,9 +522,10 @@ export class ComputeClient {
         ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
             onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
         : undefined;
+      const policy = analyticDriverPolicy(spec, { ...options, ...(onIteration ? { onIteration } : {}) });
       const runOnce = async (start: readonly RefinementParameter[]): Promise<{ parameters: RefinementParameter[]; final: RefinementResult }> => {
         const problem = buildProblemForSpec({ ...spec, parameters: [...start] });
-        const result = await refineParallel(problem, { ...options, ...(onIteration ? { onIteration } : {}) }, pool);
+        const result = await refineParallel(problem, policy.opts, pool, policy.driver);
         return { parameters: applyResultToParams(start, result), final: result };
       };
       return await refineMultiStart(spec.parameters, runOnce, multiStart);
@@ -609,11 +629,13 @@ export class ComputeClient {
       return await refineSequentialAsync(req.parameters, datasets, seqOptions, async (problem, options, _dataset, index) => {
         const w = windows[index]!;
         await pool.init({ ...base, fitRange: { min: w.min, max: w.max } });
+        const policy = analyticDriverPolicy(base, options);
         return solveBox(problem, w, async (params) =>
           refineParallel(
             buildProblemForSpec({ ...base, parameters: [...params], fitRange: { min: w.min, max: w.max } }),
-            options,
+            policy.opts,
             pool,
+            policy.driver,
           ),
         );
       });
@@ -751,13 +773,13 @@ export class ComputeClient {
         ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
             onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
         : undefined;
-      const opts = { ...options, ...(onIteration ? { onIteration } : {}) };
+      const policy = analyticDriverPolicy(spec, { ...options, ...(onIteration ? { onIteration } : {}) });
       const out = await refineStagedAsync(
         spec.parameters,
         (params) => buildProblemForSpec({ ...spec, parameters: [...params] }),
         stagesFromKindGroups(staged),
-        opts,
-        (problem, o) => refineParallel(problem, o, pool),
+        policy.opts,
+        (problem, o) => refineParallel(problem, o, pool, policy.driver),
       );
       if (!out.final) throw new Error("staged refinement unlocked no parameters");
       return out.final;
@@ -835,6 +857,13 @@ export class ComputeClient {
     const frozenNuclear = params.map((p) =>
       !isMoment(p) && !p.fixed && !p.expression ? { ...p, fixed: true } : { ...p },
     );
+    // With no free moment parameter there is no moment subspace to search: the
+    // magnetic model is then a FIXED contribution to the calculated pattern (the
+    // "Show on refinement pattern" preview, which applies a model without its
+    // moment rows). Restarts over an empty free set would re-solve the identical
+    // problem `restarts` times, so skip straight to the joint solve — and report
+    // restartsRun 0, so the caller does not claim a search that never ran.
+    const searchable = params.some((p) => isMoment(p) && !p.fixed && !p.expression);
 
     // Each restart is a moment-only solve. The moment subspace is a handful of
     // columns, so on a CHEAP observable (a powder profile) an in-thread solve
@@ -865,7 +894,9 @@ export class ComputeClient {
         this.activePool = pool;
         await pool.init(specWith(frozenNuclear));
       }
-      const ms = pool
+      const ms = !searchable
+        ? { parameters: frozenNuclear, restartsRun: 0, bestStartIndex: 0, improved: false, costByStart: [] }
+        : pool
         ? await refineMultiStart(frozenNuclear, async (start) => {
             const result = await refineParallel(buildProblemForSpec(specWith(start)), options, pool);
             return { parameters: applyResultToParams(start, result), final: result };
@@ -936,7 +967,7 @@ export class ComputeClient {
       try {
         engaged = await gpuEval.init(spec);
       } catch {
-        engaged = false;
+        // No adapter, a failed worker load, a rejected device: stay on the CPU pool.
       }
       if (engaged) {
         this.activeGpu = gpuEval;
@@ -954,7 +985,8 @@ export class ComputeClient {
     this.activePool = pool;
     try {
       await pool.init(spec);
-      return await refineParallel(buildProblemForSpec(spec), opts, pool);
+      const policy = analyticDriverPolicy(spec, opts);
+      return await refineParallel(buildProblemForSpec(spec), policy.opts, pool, policy.driver);
     } finally {
       pool.dispose();
       if (this.activePool === pool) this.activePool = null;
@@ -976,6 +1008,49 @@ export class ComputeClient {
     if (this.poolSize() < 2) return this.refineSingleCrystal(req);
     const spec: EvaluatorSpec = { kind: "singleCrystal", structure: req.structure, dataset: req.dataset, parameters: req.parameters, bindings: req.bindings };
     return this.runParallel(spec, req.options ?? {}, req.dataset.reflections.length);
+  }
+
+  /**
+   * Multi-start single-crystal F² refinement (escape local minima): one
+   * baseline refine plus `multiStart.restarts` perturbed restarts, keeping the
+   * lowest-χ² result — the single-crystal twin of `refinePowderMultiStart`
+   * (same generic core; one evaluator pool shared across every start). An F²
+   * surface traps LM readily: a positional mode driven onto its ±bound, or an
+   * atom settled into a neighbour's basin, converges cleanly to a wrong answer
+   * with a plausible wR2. Pass `multiStart.minKick` so a mode sitting at 0
+   * still gets a physically sized kick (see MultiStartOptions).
+   */
+  async refineSingleCrystalMultiStart(
+    req: Omit<RefineSingleCrystalRequest, "requestId" | "type">,
+    multiStart: MultiStartOptions = {},
+  ): Promise<MultiStartResult> {
+    const spec: Extract<EvaluatorSpec, { kind: "singleCrystal" }> = {
+      kind: "singleCrystal", structure: req.structure, dataset: req.dataset, parameters: req.parameters, bindings: req.bindings,
+    };
+    const options = req.options ?? {};
+
+    if (this.poolSize() < 2) {
+      // No pool: run each start in-thread through the serial engine.
+      const runOnce = (start: readonly RefinementParameter[]): { parameters: RefinementParameter[]; final: RefinementResult } => {
+        const result = refine(buildProblemForSpec({ ...spec, parameters: [...start] }), options);
+        return { parameters: applyResultToParams(start, result), final: result };
+      };
+      return refineMultiStart(spec.parameters, runOnce, multiStart);
+    }
+
+    const pool = new EvaluatorPool(this.poolSize());
+    this.activePool = pool;
+    try {
+      await pool.init(spec);
+      const runOnce = async (start: readonly RefinementParameter[]): Promise<{ parameters: RefinementParameter[]; final: RefinementResult }> => {
+        const result = await refineParallel(buildProblemForSpec({ ...spec, parameters: [...start] }), options, pool);
+        return { parameters: applyResultToParams(start, result), final: result };
+      };
+      return await refineMultiStart(spec.parameters, runOnce, multiStart);
+    } finally {
+      pool.dispose();
+      if (this.activePool === pool) this.activePool = null;
+    }
   }
 
   refineMagnetic(req: Omit<RefineMagneticRequest, "requestId" | "type">): Promise<RefinementResult> {

@@ -28,7 +28,10 @@ import { orthogonalizationMatrix } from "@/core/crystal/unitCell";
 import { inverse, transpose } from "@/core/math/mat3";
 import { normalize } from "@/core/math/vec3";
 import type { Mat3, Vec3 } from "@/core/math/types";
-import { expandMagneticSupercell, momentAnchorPosition } from "@/core/crystal/cellExpansion";
+import { expandMagneticSupercell, momentAnchorPosition, type SupercellAtom } from "@/core/crystal/cellExpansion";
+import { magneticCellGroup, type MagneticCellGroup } from "@/core/magnetic/supercellGroup";
+import { identifyMagneticGroupAnySetting } from "@/core/magnetic/bnsOg";
+import { classifyPropagation, describePropagation } from "@/core/magnetic/propagation";
 
 const EIGHT_PI2 = 8 * Math.PI * Math.PI;
 
@@ -62,7 +65,7 @@ export interface CifExportOptions {
 }
 
 /** Per-field standard uncertainties recovered from the refined parameters. */
-interface EsdMap {
+export interface EsdMap {
   readonly cell: Partial<Record<keyof UnitCell, number>>;
   readonly bIso: Map<string, number>;
   readonly occ: Map<string, number>;
@@ -78,7 +81,7 @@ interface EsdMap {
  * approximation). Anisotropic-U component esds are not propagated (emitted
  * without su).
  */
-function buildEsdMap(params: readonly RefinementParameter[], bindings: readonly ParameterBinding[]): EsdMap {
+export function buildEsdMap(params: readonly RefinementParameter[], bindings: readonly ParameterBinding[]): EsdMap {
   const byId = new Map(params.map((p) => [p.id, p]));
   const cell: Partial<Record<keyof UnitCell, number>> = {};
   const bIso = new Map<string, number>();
@@ -127,7 +130,7 @@ export function formatWithEsd(value: number, esd: number | undefined, decimals: 
 const sanitizeBlock = (name: string): string => name.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "structure";
 
 /** Cell volume V = abc·√(1 − Σcos² + 2∏cos) (Å³). */
-function cellVolume(cell: UnitCell): number {
+export function cellVolume(cell: UnitCell): number {
   const rad = (a: number): number => Math.cos((a * Math.PI) / 180);
   const ca = rad(cell.alpha);
   const cb = rad(cell.beta);
@@ -276,7 +279,7 @@ function momentLoop(structure: StructureModel, magnetic: MagneticModel): string 
     const c = momentCrystalComponents(structure.cell, m);
     return [m.siteLabel, c[0].toFixed(4), c[1].toFixed(4), c[2].toFixed(4)];
   });
-  return loop(
+  const main = loop(
     [
       "_atom_site_moment.label",
       "_atom_site_moment.crystalaxis_x",
@@ -285,6 +288,26 @@ function momentLoop(structure: StructureModel, magnetic: MagneticModel): string 
     ],
     rows,
   );
+  // Two-arm k (no finite supercell written, or an incommensurate k): the
+  // moment loop above holds the COSINE amplitude of the modulation
+  // m(n) = Mcos·cos(2πk·n) + Msin·sin(2πk·n); the sine amplitudes have no
+  // standard tag outside the (3+1)D magnetic-superspace dictionary, so they
+  // are recorded as comments a reader can act on rather than silently lost.
+  const sinRows = magnetic.moments
+    .filter((m) => m.sinComponents && m.sinComponents.some((c) => Math.abs(c) > 1e-9))
+    .map((m) => {
+      const s = m.frame === "cartesian"
+        ? cartesianToCrystalComponents(structure.cell, m.sinComponents!)
+        : m.sinComponents!;
+      return `#   ${m.siteLabel}  ${s[0].toFixed(4)}  ${s[1].toFixed(4)}  ${s[2].toFixed(4)}`;
+    });
+  if (sinRows.length === 0) return main;
+  return [
+    main,
+    "# Fourier sine (quadrature) amplitudes, crystal axes (µ_B), of the two-arm",
+    "# modulation m(n) = Mcos·cos(2πk·n) + Msin·sin(2πk·n); Mcos is the loop above.",
+    ...sinRows,
+  ].join("\n");
 }
 
 /** Magnetic (BNS) symmetry-operation loop, when the space group carries them. */
@@ -348,8 +371,6 @@ function withOrbitSites(
   };
 }
 
-const IDENTITY_MAT: Mat3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-
 /** Format a value in [0,1) as a compact fraction ("0", "1/2", "1/3", …). */
 function fraction(v: number): string {
   if (Math.abs(v - Math.round(v)) < 1e-6) return String(Math.round(v));
@@ -389,14 +410,51 @@ function supercellProvenance(structure: StructureModel, k: Vec3, n: readonly [nu
 }
 
 /**
+ * Magnetic symmetry of the magnetic cell in the two magCIF loops: the coset
+ * representatives, then the centering translations of the cell with anti-
+ * translations marked −1 (identity first). The group is named when its
+ * operations match a tabulated type I/III group in some setting; a black-and-
+ * white lattice (type IV) is not in this app's table, so its name is left out
+ * and the operations — which are complete — speak for themselves.
+ */
+function magneticCellSymmetryBlock(group: MagneticCellGroup, n: readonly [number, number, number]): string {
+  const head: string[] = [];
+  const id = identifyMagneticGroupAnySetting(group.operations);
+  if (id) {
+    head.push(`_space_group_magn.name_bns  "${id.identity.bnsSymbol}"`);
+    head.push(`_space_group_magn.number_bns  ${id.identity.bnsNumber}`);
+    if (!id.direct) head.push(`# standard BNS setting reached by the transformation ${id.transformation}`);
+  } else {
+    const anti = group.centerings.filter((c) => (c.timeReversal ?? 1) === -1).length;
+    head.push(
+      `# Magnetic space group of the ${childTransform(n)} magnetic cell: ${group.representatives.length} coset representatives ×`,
+      `# ${group.centerings.length} centering translations (${anti} anti-translation${anti === 1 ? "" : "s"}, i.e. time-reversed: a black-and-white`,
+      `# lattice, BNS type IV). Its BNS symbol is not tabulated in this app; the operations below are complete.`,
+    );
+  }
+  const fmt = (o: SymmetryOperation): string => `"${o.xyz},${(o.timeReversal ?? 1) === -1 ? "-1" : "+1"}"`;
+  const opLoop = loop(
+    ["_space_group_symop_magn_operation.id", "_space_group_symop_magn_operation.xyz"],
+    group.representatives.map((o, i) => [`${i + 1}`, fmt(o)]),
+  );
+  const centLoop = loop(
+    ["_space_group_symop_magn_centering.id", "_space_group_symop_magn_centering.xyz"],
+    group.centerings.map((o, i) => [`${i + 1}`, fmt(o)]),
+  );
+  return [...head, opLoop, centLoop].join("\n");
+}
+
+/**
  * mCIF for a commensurate k ≠ 0 magnetic structure, written in its magnetic
- * supercell (the smallest cell in which k is a reciprocal-lattice point). The
- * atoms and moments are expanded explicitly and the moment field is static
- * (k = 0 in the supercell), so external readers (VESTA, Bilbao, GSAS-II) and the
- * app's 3D viewer render the identical structure — the enlarged cell and the
- * per-atom moment directions match what the user sees on screen. The magnetic
- * symmetry is written as P1 (all atoms explicit); the parent group + k are kept
- * as provenance. See {@link magneticStructureToMcif}.
+ * supercell (the smallest cell in which k is a reciprocal-lattice point) AND in
+ * that cell's magnetic space group: the atoms and moments are expanded through
+ * the viewer's own expansion, the Shubnikov group of the expanded arrangement is
+ * recovered from it ({@link magneticCellGroup} — parent operations in the
+ * supercell basis, parent translations inside the cell as centering or anti-
+ * translations, each kept only if it maps every atom and moment onto itself),
+ * and only the asymmetric unit is written. External readers (VESTA, Bilbao,
+ * GSAS-II) and the app's own parser rebuild the identical structure from the
+ * operations. The parent group + k are kept as provenance.
  */
 function mcifSupercell(
   structure: StructureModel,
@@ -407,21 +465,33 @@ function mcifSupercell(
   opts: CifExportOptions,
 ): string {
   const noEsd = buildEsdMap([], []); // esds are on the parent params — not the derived supercell
+  const group = magneticCellGroup(structure, sup);
+  // Labels: an orbit that is the only one from its parent site keeps the site's
+  // label; a parent orbit the magnetic group splits gets _1, _2, … (the
+  // GSAS-II convention for orbit-split magnetic sites).
+  const byParent = new Map<string, SupercellAtom[]>();
+  for (const a of group.asymmetricUnit) {
+    const key = a.parentLabel ?? a.site.label;
+    const list = byParent.get(key);
+    if (list) list.push(a);
+    else byParent.set(key, [a]);
+  }
+  const labelOf = new Map<SupercellAtom, string>();
+  for (const [parent, list] of byParent) list.forEach((a, i) => labelOf.set(a, list.length === 1 ? parent : `${parent}_${i + 1}`));
   const supStructure: StructureModel = {
     ...structure,
     cell: sup.cell,
-    sites: sup.atoms.map((a) => a.site),
-    spaceGroup: { number: 1, operations: [{ rotation: IDENTITY_MAT, translation: [0, 0, 0], xyz: "x,y,z" }] },
+    sites: group.asymmetricUnit.map((a) => ({ ...a.site, label: labelOf.get(a)! })),
+    spaceGroup: { operations: group.operations },
   };
-  const identityMagn: SymmetryOperation = { rotation: IDENTITY_MAT, translation: [0, 0, 0], xyz: "x,y,z", timeReversal: 1 };
   const supMagnetic: MagneticModel = {
     ...magnetic,
     propagation: [[0, 0, 0]],
-    operations: [identityMagn],
-    moments: sup.atoms
+    operations: group.operations,
+    moments: group.asymmetricUnit
       .filter((a) => a.moment)
       .map((a) => ({
-        siteLabel: a.site.label,
+        siteLabel: labelOf.get(a)!,
         frame: "crystallographic" as const,
         components: a.moment!,
         ...(a.formFactorId ? { formFactorId: a.formFactorId } : {}),
@@ -433,7 +503,7 @@ function mcifSupercell(
     `_pd_phase_name  '${structure.name}'`,
     supercellProvenance(structure, k, sup.n),
     cellBlock(sup.cell, noEsd),
-    magneticSymopBlock(supStructure, supMagnetic, opts.magneticLabel),
+    magneticCellSymmetryBlock(group, sup.n),
     refinementBlock(opts.refinement),
     atomSiteBlocks(supStructure, noEsd),
     momentLoop(supStructure, supMagnetic),
@@ -447,10 +517,12 @@ function mcifSupercell(
  * loop (crystallographic frame, μ_B).
  *
  * For a commensurate propagation vector k ≠ 0 the structure is written in its
- * magnetic supercell (e.g. 1×1×2 for k = (0,0,½)) with atoms and moments
- * expanded explicitly — so the exported cell and moment directions match the
- * app's 3D view instead of an unmodulated 1×1×1 parent cell. For k = 0 the
- * parent cell is written directly, with the propagation vector as a comment.
+ * magnetic supercell (e.g. 1×1×2 for k = (0,0,½)) in the magnetic space group
+ * of that cell — coset representatives + centering/anti-translations and the
+ * asymmetric unit only — so the exported cell, symmetry and moment directions
+ * match the app's 3D view instead of an unmodulated 1×1×1 parent cell or a P1
+ * atom list. For k = 0 the parent cell is written directly in the chosen
+ * magnetic subgroup.
  */
 export function magneticStructureToMcif(
   structure: StructureModel,
@@ -465,9 +537,14 @@ export function magneticStructureToMcif(
   if (sup) return mcifSupercell(structure, magnetic, sup, k, block, opts);
 
   const aug = withOrbitSites(structure, magnetic);
+  const cls = classifyPropagation(k);
   const parts = [
     HEADER,
-    `# propagation vector k = (${k[0]}, ${k[1]}, ${k[2]})`,
+    `# propagation vector k = (${k[0]}, ${k[1]}, ${k[2]}) — ${describePropagation(cls)}`,
+    ...(cls.kind === "incommensurate"
+      ? ["# Incommensurate k: no finite magnetic supercell exists, so the parent cell is written with",
+         "# the Fourier modulation amplitudes; a (3+1)D magnetic-superspace description is not emitted."]
+      : []),
     `data_${block}`,
     `_pd_phase_name  '${structure.name}'`,
     cellBlock(structure.cell, esd),

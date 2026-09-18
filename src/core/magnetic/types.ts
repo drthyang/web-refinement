@@ -32,6 +32,23 @@ export interface MagneticMoment {
    */
   readonly components: Vec3;
   /**
+   * Sine (quadrature) modulation amplitude for a propagation vector whose ±k
+   * arms are distinct (see `core/magnetic/propagation.ts`). With it the
+   * real-space moment of this atom in the cell with integer translation n is
+   *
+   *   m(n) = components·cos(2π k·n) + sinComponents·sin(2π k·n),
+   *
+   * so `components` is the cosine amplitude, both in µ_B in `frame`. A sine
+   * amplitude ⊥ the cosine one with equal magnitude is a circular helix; a
+   * parallel one is a phase shift of a sinusoid (unobservable overall — the
+   * global modulation phase is a gauge — but physical relative to other
+   * atoms); the general case is an elliptical modulation. The Fourier
+   * coefficient entering the satellite structure factor is
+   * S = ½·(components + i·sinComponents). Absent ⇒ zero. Meaningless (and
+   * ignored) for a self-conjugate k (k = 0, ½-type), where sin(2π k·n) ≡ 0.
+   */
+  readonly sinComponents?: Vec3;
+  /**
    * Optional magnetic form-factor identifier (e.g. "Fe3" for the ⟨j0⟩ analytic
    * approximation). When absent it is resolved from element + oxidation state.
    */

@@ -16,7 +16,8 @@ import type { PowderParseOptions } from "@/parsers/powderData";
 import { powderParameters, singleCrystalParameters } from "@/examples/synthetic";
 import { powderCurves } from "@/core/workflow/powder";
 import { singleCrystalComparison } from "@/core/workflow/singleCrystal";
-import { parseHkl } from "@/parsers/hkl";
+import { parseHklRows } from "@/parsers/hkl";
+import { isCifReflectionLoop, parseFcf, parseShelxHkl, type ShelxHklParse } from "@/parsers/shelxHkl";
 import { parseReflectionList } from "@/parsers/reflectionList";
 import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
 import { dSpacing } from "@/core/crystal/unitCell";
@@ -105,12 +106,26 @@ export interface LoadedReflections {
   readonly kept: number;
   /** Reflections dropped (belong to another phase, e.g. an impurity). */
   readonly dropped: number;
-  readonly format: "gsas" | "shelx" | "fullprof";
+  /** `0 0 0` forward-beam rows skipped (nuclear role only; the all-zero SHELX terminator is not counted). */
+  readonly forwardBeamSkipped: number;
+  readonly format: "gsas" | "shelx" | "fcf" | "fullprof" | "list";
+}
+
+export interface LoadReflectionOptions {
+  /** Which file this is. The nuclear set (default) drops a `0 0 0` forward-beam
+   *  row; the companion magnetic set keeps it — there it is the satellite at k. */
+  readonly role?: "nuclear" | "magnetic";
 }
 
 /** True when the text looks like a GSAS-II reflection list (has Fo**2 / header). */
 export function isGsasReflectionList(text: string): boolean {
   return /Reflection List|Fo\*\*2|Fc\*\*2/i.test(text);
+}
+
+/** Lower-case final extension of a filename ("" when it has none). */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
 }
 
 /**
@@ -120,20 +135,33 @@ export function isGsasReflectionList(text: string): boolean {
  * the file's d-spacing **in this structure's cell** — dropping impurity-phase
  * reflections the loaded model cannot describe. A plain `h k l Iobs [σ]` list is
  * taken as-is (no d column to filter on).
+ *
+ * Format routing is deliberate, not one permissive whitespace splitter: a SHELX
+ * `.hkl` is FIXED-COLUMN (`3I4,2F8.2,I4`, so an intensity ≥ 10000.00 butts
+ * against `l` and whitespace-splitting silently reads σ as the intensity) and a
+ * `.fcf` is a CIF loop whose column ORDER is declared in its header (LIST 4
+ * writes F²calc before F²meas, so taking columns 4–6 positionally reads the
+ * calculated intensity as observed). Each goes to its own reader; the generic
+ * splitter keeps the plain `h k l I σ` lists and hand-edited files.
  */
 export function loadReflectionDataset(
   text: string,
   structure: StructureModel,
   datasetId: string,
   name: string,
+  opts: LoadReflectionOptions = {},
 ): LoadedReflections {
+  // A `0 0 0` row is the forward beam in a nuclear file (dropped) but the
+  // satellite at k itself in a fundamental-indexed magnetic file (kept).
+  const skipForwardBeam = opts.role !== "magnetic";
   if (looksLikeFullProfInt(text)) {
-    const parsed = parseFullProfInt(text);
+    const parsed = parseFullProfInt(text, { skipForwardBeam });
     const wavelength = parsed.wavelength ?? 1.0;
     return {
       dataset: { id: datasetId, name, radiation: { kind: "neutron", wavelength }, reflections: parsed.reflections },
       kept: parsed.reflections.length,
-      dropped: parsed.skipped,
+      dropped: parsed.skipped - parsed.forwardBeamSkipped,
+      forwardBeamSkipped: parsed.forwardBeamSkipped,
       format: "fullprof",
     };
   }
@@ -153,16 +181,50 @@ export function loadReflectionDataset(
       dataset: { id: datasetId, name, radiation: { kind: "neutron-tof" }, reflections },
       kept: reflections.length,
       dropped,
+      forwardBeamSkipped: 0,
       format: "gsas",
     };
   }
-  const reflections = parseHkl(text);
+  // `.fcf` is recognized by content (the CIF reflection loop) so a renamed
+  // export still reads correctly; `.hkl` has no content signature that
+  // distinguishes it from a plain list, so it goes by extension.
+  const shelx: { parse: ShelxHklParse; format: "shelx" | "fcf" } | null =
+    isCifReflectionLoop(text) ? { parse: parseFcf(text, { skipForwardBeam }), format: "fcf" }
+    : extensionOf(name) === "hkl" ? { parse: parseShelxHkl(text, { skipForwardBeam }), format: "shelx" }
+    : null;
+  if (shelx) {
+    const reflections: SingleCrystalReflection[] = shelx.parse.reflections.map((r) => ({
+      h: r.h, k: r.k, l: r.l, iObs: r.intensity, sigma: r.sigma,
+    }));
+    return {
+      dataset: { id: datasetId, name, radiation: { kind: "neutron" as const, wavelength: 1.54 }, reflections },
+      kept: reflections.length,
+      dropped: shelx.parse.skipped,
+      forwardBeamSkipped: shelx.parse.forwardBeamSkipped,
+      format: shelx.format,
+    };
+  }
+  const { reflections, forwardBeamSkipped } = parseHklRows(text, { skipForwardBeam });
   return {
     dataset: { id: datasetId, name, radiation: { kind: "neutron" as const, wavelength: 1.54 }, reflections },
     kept: reflections.length,
     dropped: 0,
-    format: "shelx",
+    forwardBeamSkipped,
+    format: "list",
   };
+}
+
+/**
+ * Status-message suffix naming what a reflection load left out, e.g.
+ * " (1 dropped, 1 forward-beam 0 0 0 row skipped)" — "" when nothing was.
+ */
+export function describeDrops(loaded: LoadedReflections): string {
+  const parts: string[] = [];
+  if (loaded.dropped > 0) parts.push(`${loaded.dropped} dropped`);
+  if (loaded.forwardBeamSkipped > 0) {
+    parts.push(`${loaded.forwardBeamSkipped} forward-beam 0 0 0 row${loaded.forwardBeamSkipped === 1 ? "" : "s"} skipped`);
+  }
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 
 /**

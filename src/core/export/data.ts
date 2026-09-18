@@ -5,7 +5,7 @@
  */
 
 import type { PowderPattern, SingleCrystalDataset, Radiation } from "@/core/diffraction/types";
-import { writeFullProfInt } from "@/parsers/fullprofInt";
+import { writeFullProfInt } from "@/core/export/fullprofInt";
 
 /** Wavelength for a radiation, or 0 for TOF (which has none). */
 export function radiationWavelength(radiation: Radiation): number {

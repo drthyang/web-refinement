@@ -10,6 +10,7 @@
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import type { NormalProbabilityPlot } from "@/core/refinement/diagnostics";
 import { MAGNETIC_COLOR, PHASE_COLORS } from "@/visualization/reflectionTicks";
+import { clientToSvgUser, nearestPointIndex } from "@/visualization/hitTest";
 import { color as theme, mono as themeMono, fz } from "@/app/theme";
 
 /** A selection shared with the pattern plot: which reflection is spotlighted. */
@@ -30,6 +31,8 @@ function pointColor(row: ReflectionObsCalc, multiPhase: boolean): string {
 // SVG user-space size; the rendered box is fluid (viewBox + width:100%).
 const SIZE = 300;
 const PAD = 42;
+/** How far (user units) a click may land from a dot and still select it. */
+const HIT_RADIUS = 7;
 /** Responsive square: fills its column up to a comfortable cap, keeps aspect. */
 const svgStyle: React.CSSProperties = { width: "100%", height: "auto", maxWidth: 360, display: "block" };
 
@@ -93,6 +96,18 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate }: {
   const sy = (v: number): number => SIZE - PAD - (v / max) * (SIZE - 2 * PAD);
   const selRow = sel >= 0 ? rows[sel] : undefined;
   const selPt = sel >= 0 ? pts[sel] : undefined;
+  // Click → the NEAREST dot within HIT_RADIUS, over the whole plot. Per-point
+  // invisible halos were the previous target, and in a dense scatter (800+
+  // reflections) the topmost halo under the pointer belongs to a neighbour
+  // drawn later, not to the dot under the cursor — so the wrong reflection
+  // was selected. One handler on the svg, no halos: the intended dot wins
+  // whatever the draw order, and the DOM is one node per point lighter.
+  const plotPts = pts.map((p) => ({ x: sx(p.fc), y: sy(p.fo) }));
+  const onPlotClick = (e: React.MouseEvent<SVGSVGElement>): void => {
+    const at = clientToSvgUser(e.currentTarget, e.clientX, e.clientY, { width: SIZE, height: SIZE });
+    const i = nearestPointIndex(plotPts, at.x, at.y, HIT_RADIUS);
+    if (i >= 0) select(i);
+  };
   const magCount = rows.reduce((n, r) => n + (r.kind === "magnetic" ? 1 : 0), 0);
   // Multi-phase once any reflection carries a non-primary phase index.
   const multiPhase = rows.some((r) => (r.phaseIndex ?? 0) > 0);
@@ -114,17 +129,13 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate }: {
   if (magCount > 0) legend.push({ label: "magnetic", color: MAGNETIC_COLOR });
   return (
     <figure style={{ margin: 0 }}>
-      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} style={svgStyle} role="img" aria-label="F observed vs F calculated">
+      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} style={{ ...svgStyle, cursor: onHighlight ? "pointer" : undefined }} role="img" aria-label="F observed vs F calculated" onClick={onPlotClick}>
         {axisLine(PAD, SIZE - PAD, SIZE - PAD, SIZE - PAD)}
         {axisLine(PAD, PAD, PAD, SIZE - PAD)}
         {/* F_obs = F_calc reference line. */}
         <line x1={sx(0)} y1={sy(0)} x2={sx(max)} y2={sy(max)} stroke={theme.primary} strokeWidth={1.25} strokeDasharray="5 4" />
-        {pts.map((p, i) => (
-          <g key={i} onClick={() => select(i)} style={{ cursor: "pointer" }}>
-            {/* transparent halo = comfortable click target for a 2.6 px dot */}
-            <circle cx={sx(p.fc)} cy={sy(p.fo)} r={7} fill="transparent" />
-            <circle cx={sx(p.fc)} cy={sy(p.fo)} r={2.6} fill={pointColor(rows[i]!, multiPhase)} fillOpacity={0.55} />
-          </g>
+        {plotPts.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={2.6} fill={pointColor(rows[i]!, multiPhase)} fillOpacity={0.55} pointerEvents="none" />
         ))}
         {/* Per-series legend (phases + magnetic), stacked in the sparse top-left. */}
         {legend.length > 1 && (
@@ -170,7 +181,7 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate }: {
           return (
             <g>
               {ring}
-              <g style={{ cursor: "pointer" }} onClick={() => onLocate(selRow)}>
+              <g style={{ cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); onLocate(selRow); }}>
                 <title>View this reflection's peak in the observed pattern</title>
                 <rect x={chipX} y={chipY} width={chipW} height={chipH} rx={6} fill={theme.raised} stroke={theme.primaryTintBorder} strokeWidth={1} />
                 <text x={chipX + padX} y={midY + 4} fontSize={11.5} fontFamily={themeMono} fill={theme.ink}>{label}</text>

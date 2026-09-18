@@ -274,6 +274,14 @@ export function placePeaks(
   const useStephens = isCW && applied.stephensStrain !== undefined;
   const useUniaxial = isCW && applied.uniaxialSize !== undefined;
   const useUniaxialStrain = isCW && applied.uniaxialStrain !== undefined && applied.lorentzian !== undefined;
+  // A Lorentzian component is part of the MODEL whenever TCH or an anisotropic
+  // size/strain term is configured — even at peaks where it evaluates to zero
+  // (X refined to its 0 bound, or cos²ψ nulling the uniaxial term). Gating the
+  // TCH combination on the value instead made the peak shape discontinuous
+  // there: Γ_L → 0 flipped a peak from the TCH η → 0 (pure Gaussian) to the
+  // global fallback η = 0.5 (half Lorentzian), and the optimizer walked into a
+  // false basin (GaNb4Se8 benchmark: wR 23% → 53%).
+  const useLorentzModel = useTch || useUniaxial || useUniaxialStrain;
   const invariants = useStephens ? strainInvariantsFor(applied) : null;
 
   const peaks: ProfilePeak[] = [];
@@ -309,7 +317,7 @@ export function placePeaks(
     }
     let fwhm: number;
     let eta: number | undefined;
-    if (gammaL > 0) {
+    if (useLorentzModel || gammaL > 0) {
       const tch = tchPseudoVoigt(gaussianFwhm, gammaL);
       fwhm = Math.max(tch.fwhm, 1e-4);
       eta = tch.eta;

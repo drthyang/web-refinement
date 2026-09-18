@@ -51,6 +51,8 @@ export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
     return buildMagneticPowderProblem(spec.structure, spec.magnetic, spec.pattern, spec.parameters, spec.bindings, {
       shape: spec.shape,
       ...(spec.eta !== undefined ? { eta: spec.eta } : {}),
+      ...(spec.lorentz !== undefined ? { lorentz: spec.lorentz } : {}),
+      ...(spec.backgroundType !== undefined ? { backgroundType: spec.backgroundType } : {}),
     }, spec.fitRange, spec.extraPhases ?? []);
   }
   const profile: PowderProfile = {
@@ -61,6 +63,16 @@ export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
   };
   return buildPowderProblem(spec.structure, spec.pattern, spec.parameters, spec.bindings, profile, spec.restraints ?? [], spec.fitRange);
 }
+
+/**
+ * The serial driver's Jacobian policy. `refine` runs off the UI thread wherever
+ * these runners do — a Web Worker in the browser, in-process in node/MCP and in
+ * the no-Worker fallback — so it may use the problem's closed-form columns: they
+ * are exact (no finite-difference truncation) and replace TWO evaluations per
+ * column with one derivative pass. A request that sets `analyticDerivatives`
+ * itself still wins, so a caller can pin the plain finite-difference Jacobian.
+ */
+const SERIAL_DEFAULTS: Partial<RefinementOptions> = { analyticDerivatives: true };
 
 /** Per-cycle progress: the calculated pattern (data points only) + weighted R. */
 export type PowderProgress = (yCalc: number[], rWeighted: number) => void;
@@ -85,7 +97,7 @@ export function runPowderRefinement(req: RefinePowderRequest, onProgress?: Powde
     ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
         onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
     : undefined;
-  const options: Partial<RefinementOptions> = { ...(req.options ?? {}), ...(onIteration ? { onIteration } : {}) };
+  const options: Partial<RefinementOptions> = { ...SERIAL_DEFAULTS, ...(req.options ?? {}), ...(onIteration ? { onIteration } : {}) };
 
   if (req.staged && req.staged.length > 0) {
     const out = refineStaged(req.parameters, build, stagesFromKindGroups(req.staged), options);
@@ -130,7 +142,7 @@ function runFromBuilder(
     ? (yCalc: Float64Array, agreement: AgreementFactors): void =>
         onProgress(Array.from(yCalc.subarray(0, patternLen)), agreement.rWeighted ?? 0)
     : undefined;
-  const options: Partial<RefinementOptions> = { ...(req.options ?? {}), ...(onIteration ? { onIteration } : {}) };
+  const options: Partial<RefinementOptions> = { ...SERIAL_DEFAULTS, ...(req.options ?? {}), ...(onIteration ? { onIteration } : {}) };
 
   if (req.staged && req.staged.length > 0) {
     const out = refineStaged(req.parameters, build, stagesFromKindGroups(req.staged), options);
