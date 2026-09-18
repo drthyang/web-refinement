@@ -3,7 +3,7 @@
  * parameter groups (caret + free-count + per-group "all" checkbox), rows with a
  * numeric input / esd / free-fixed-calib status pill and a blue left accent when
  * free. Reset lives in the panel header; the action bar pairs the primary Refine
- * with its alternative routes (multi-start, guided/staged) and the
+ * with its multi-start alternative (Prefit / Escape min) and the
  * magnetic-analysis handoff, over a result banner and a collapsible
  * refinement-history table. Driven by the real refinement params.
  */
@@ -109,13 +109,6 @@ interface Props {
    * real-space G(r) doesn't have) must supply its own accurate description.
    */
   readonly prefitTitle?: string;
-  /**
-   * Guided (staged) refine — free the structural rows and refine them in the
-   * expert order (scale → background → cell → profile → ADPs → positions →
-   * microstructure → corrections) instead of all at once. Offered beside
-   * Refine; engines without a staged plan leave it out.
-   */
-  readonly onGuided?: () => void;
   /** Abort a running refinement; a Cancel button appears while `busy`. */
   readonly onCancel?: () => void;
   readonly onReset: () => void;
@@ -150,7 +143,7 @@ interface Props {
   readonly frameworkControls?: ReactNode;
 }
 
-export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, thoroughMode = "prefit", prefitTitle, onGuided, onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls, groupInfo, frameworkControls }: Props): JSX.Element {
+export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, thoroughMode = "prefit", prefitTitle, onCancel, onReset, onMagnetic, busy, result, disabled, title, extraActions, groupControls, groupInfo, frameworkControls }: Props): JSX.Element {
   const groups = useMemo(() => {
     const byGroup = new Map<string, RefinementParameter[]>();
     for (const p of params) {
@@ -212,16 +205,6 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
         >
           {busy ? <span className="wb-shimmer-text">Refining…</span> : "Refine"}
         </button>
-        {onGuided && (
-          <button
-            style={{ ...secondaryButton, flex: "0 0 auto", padding: "10px 13px", fontSize: 13, fontWeight: 600, ...(busy || disabled ? disabledStyle : {}) }}
-            disabled={busy || disabled}
-            onClick={onGuided}
-            title="Guided refinement: free the structural parameters and refine them in stages — scale, background, cell, profile, ADPs, positions, then microstructure and corrections — instead of releasing everything at once. Occupancies stay fixed; free those yourself."
-          >
-            Guided ⇢
-          </button>
-        )}
         {busy && onCancel && (
           <button style={cancelButton} onClick={onCancel} title="Abort the running refinement">
             Cancel

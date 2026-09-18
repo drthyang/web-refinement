@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { exampleStructure } from "@/examples/mn3ga";
 import { buildSyntheticPowder } from "@/examples/synthetic";
-import { buildPowderSpec, guidedPowderParams } from "@/app/powderSpec";
+import { buildPowderSpec } from "@/app/powderSpec";
 import { runPowderRefinement } from "@/workers/runPowder";
 import { DEFAULT_STAGE_KINDS } from "@/core/workflow/structureRefinement";
 
@@ -29,7 +29,7 @@ describe("buildPowderSpec", () => {
     expect(spec.params.filter((p) => p.kind === "peakWidth").every((p) => p.fixed)).toBe(true);
   });
 
-  it("holds instrument / profile parameters fixed on load, but Guided refines them", () => {
+  it("holds instrument / profile parameters fixed on load", () => {
     const inst: InstrumentParameters = { kind: "constantWavelength", wavelength: 0.1665, u: -46, v: 0, w: 1.2, zero: 0 };
     const spec = buildPowderSpec(structure, pattern, inst);
     const profileKinds = new Set(["profileV", "profileW", "profileX", "profileY", "zeroShift"]);
@@ -37,9 +37,6 @@ describe("buildPowderSpec", () => {
     expect(profile.length).toBeGreaterThan(0);
     // Fixed on load — the default "Refine" leaves the instrument alone.
     expect(profile.every((p) => p.fixed)).toBe(true);
-    // Guided re-frees them (except profU / tofCalibration) for the profile stage.
-    const guided = guidedPowderParams(spec.params);
-    expect(guided.filter((p) => profileKinds.has(p.kind)).every((p) => !p.fixed)).toBe(true);
   });
 
   it("uses the instrument Caglioti profile when the .instprm carries U,V,W", () => {
@@ -62,8 +59,9 @@ describe("buildPowderSpec", () => {
     const py = spec.params.find((p) => p.kind === "profileY");
     expect(px?.label).toBe("size (Lorentzian X)");
     expect(py?.label).toBe("mustrain (Lorentzian Y)");
-    // Present and refinable (guided frees them in the profile stage).
-    expect(guidedPowderParams(spec.params).find((p) => p.kind === "profileY")!.fixed).toBe(false);
+    // Plain refinable rows (no expression), held fixed on load like the rest of the profile.
+    expect(py!.expression).toBeUndefined();
+    expect(py!.fixed).toBe(true);
   });
 
   it("emits Stephens anisotropic-microstrain S-parameters only when microstrain is on, fixed on load", () => {
@@ -75,8 +73,6 @@ describe("buildPowderSpec", () => {
     const strain = on.params.filter((p) => p.kind === "stephensStrain");
     expect(strain.length).toBeGreaterThan(0); // ≥1 symmetry-allowed quartic invariant
     expect(strain.every((p) => p.fixed && p.value === 0)).toBe(true); // seeded at zero, fixed on load
-    // Guided unlocks them (a microstructure stage after the isotropic profile).
-    expect(guidedPowderParams(on.params).filter((p) => p.kind === "stephensStrain").every((p) => !p.fixed)).toBe(true);
   });
 
   it("lets the caller choose the number of Chebyshev background coefficients", () => {
@@ -86,34 +82,23 @@ describe("buildPowderSpec", () => {
     expect(bkg.map((p) => p.id)).toEqual(["bkg0", "bkg1", "bkg2", "bkg3", "bkg4", "bkg5", "bkg6", "bkg7"]);
   });
 
-  it("shows occupancy rows but keeps them fixed — on load and through Guided", () => {
+  it("shows occupancy rows but keeps them fixed on load", () => {
     const spec = buildPowderSpec(structure, pattern, { kind: "constantWavelength", wavelength: 1.54 });
     const occ = spec.params.filter((p) => p.kind === "occupancy");
     // One occupancy row per site, seeded from the model and fixed on load.
     expect(occ.map((p) => p.id).sort()).toEqual(["occ_Ga1", "occ_Mn1"]);
     expect(occ.every((p) => p.fixed)).toBe(true);
-    // Guided unlocks other structural rows but must NOT free occupancy.
-    const guided = guidedPowderParams(spec.params);
-    expect(guided.filter((p) => p.kind === "occupancy").every((p) => p.fixed)).toBe(true);
-    expect(guided.filter((p) => p.kind === "bIso").every((p) => !p.fixed)).toBe(true);
-  });
-
-  it("unlocks UI-fixed structural rows for Guided while preserving intentionally fixed profile terms", () => {
-    const inst: InstrumentParameters = { kind: "constantWavelength", wavelength: 0.1665, u: -46, v: 0, w: 1.2, zero: 0 };
-    const spec = buildPowderSpec(structure, pattern, inst);
-    const guided = guidedPowderParams(spec.params);
-    expect(spec.params.filter((p) => p.kind === "bIso").every((p) => p.fixed)).toBe(true);
-    expect(guided.filter((p) => p.kind === "bIso").every((p) => !p.fixed)).toBe(true);
-    expect(guided.find((p) => p.id === "profU")!.fixed).toBe(true);
   });
 });
 
-describe("staged powder refinement through the worker runner", () => {
+describe("staged powder refinement through the worker runner (the MCP `staged` path)", () => {
   it("converges on the synthetic example via the serializable stage plan", () => {
     const spec = buildPowderSpec(structure, pattern, { kind: "constantWavelength", wavelength: 1.54 });
+    // The stage plan unlocks kind-groups in order; send every row but occupancy as unlockable.
+    const unlockable = spec.params.map((p) => (p.kind === "occupancy" ? p : { ...p, fixed: false }));
     const result = runPowderRefinement({
       type: "refinePowder", requestId: 1, structure, pattern,
-      parameters: guidedPowderParams(spec.params), bindings: spec.bindings, shape: spec.profile.shape,
+      parameters: unlockable, bindings: spec.bindings, shape: spec.profile.shape,
       staged: DEFAULT_STAGE_KINDS, options: { maxIterations: 15 },
     });
     expect(["converged", "stalled"]).toContain(result.status);

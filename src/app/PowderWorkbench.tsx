@@ -31,9 +31,9 @@ import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
 import { extractSizeStrain } from "@/core/diffraction/microstructure";
-import { guidedPowderParams, type SiteTies, type MustrainModel } from "@/app/powderSpec";
+import type { SiteTies, MustrainModel } from "@/app/powderSpec";
 import { multiPhaseCurves } from "@/core/workflow/multiPhase";
-import { DEFAULT_STAGE_KINDS, siteGroups } from "@/core/workflow/structureRefinement";
+import { siteGroups } from "@/core/workflow/structureRefinement";
 import { powderPatternCsv } from "@/core/export/exporters";
 import { powderWorkspaceFrom, type PowderViewState } from "@/app/projectIo";
 import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from "@/core/export/cif";
@@ -581,7 +581,7 @@ export function PowderWorkbench({
    * Set the sample microstrain (Mustrain) model: isotropic (Lorentzian Y only),
    * uniaxial (equatorial/axial Y about the c-axis), or generalized (Stephens
    * S-parameters). Rebuilds the spec — the new rows seed at the current isotropic
-   * strain and are fixed on load (free the Microstructure group or run guided).
+   * strain and are fixed on load (free the Microstructure group to refine them).
    */
   function setMustrain(model: MustrainModel): void {
     setSession((s) => {
@@ -602,8 +602,8 @@ export function PowderWorkbench({
     setMessage(model === "isotropic"
       ? "Microstrain: isotropic (Lorentzian Y). Refine the profile to fit; the microstrain readout shows its value."
       : model === "uniaxial"
-        ? "Microstrain: uniaxial — equatorial/axial Y about the c-axis added, seeded from the isotropic value. Free the Microstructure rows or run guided."
-        : "Microstrain: generalized (Stephens) — one S-parameter per symmetry-allowed quartic invariant, seeded at zero. Free the Microstructure rows or run guided.");
+        ? "Microstrain: uniaxial — equatorial/axial Y about the c-axis added, seeded from the isotropic value. Free the Microstructure rows to refine them."
+        : "Microstrain: generalized (Stephens) — one S-parameter per symmetry-allowed quartic invariant, seeded at zero. Free the Microstructure rows to refine them.");
   }
 
   /**
@@ -644,7 +644,7 @@ export function PowderWorkbench({
     });
     setPowderResult(null);
     setMessage(on
-      ? "Switched to anisotropic ADPs — each site's U tensor (symmetry-allowed modes) seeded from its B_iso. Free the ADP rows or run guided to refine them."
+      ? "Switched to anisotropic ADPs — each site's U tensor (symmetry-allowed modes) seeded from its B_iso. Free the ADP rows to refine them."
       : "Switched to isotropic ADPs (B_iso).");
   }
 
@@ -658,19 +658,8 @@ export function PowderWorkbench({
     setMessage("Parameters reset to initial values.");
   }
 
-  /**
-   * Reflect a guided run in the parameter table. Guided unlocks a SPECIFIC set of
-   * kinds (`guidedPowderParams`) — occupancies deliberately not among them — so
-   * the table must show exactly those rows as free. Marking every row free would
-   * both misreport what was refined and silently hand the next plain Refine a
-   * freed occupancy the user never chose.
-   */
-  function guidedFixedFlags(sent: readonly RefinementParameter[]): Map<string, boolean> {
-    return new Map(sent.map((p) => [p.id, p.expression ? true : p.fixed ?? false]));
-  }
-
   /** Flat co-refinement of the currently-freed parameters. */
-  async function runPowder(guided = false): Promise<void> {
+  async function runPowder(): Promise<void> {
     setBusy(true);
     try {
       // Magnetic-aware branch: an applied magnetic model joins the calculated
@@ -681,28 +670,22 @@ export function PowderWorkbench({
       // set moves — either way the fit is scored against what the plot shows.
       if (magneticApplied) {
         await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
-        const magParams = guided ? guidedPowderParams(powderParams) : powderParams;
-        const guidedFixed = guided ? guidedFixedFlags(magParams) : null;
         const coRefined = momentRowsFree();
         const result = await client.refineMagneticPowderParallel({
-          structure, magnetic: session.magnetic!, pattern, parameters: [...magParams], bindings: [...pBindings],
+          structure, magnetic: session.magnetic!, pattern, parameters: [...powderParams], bindings: [...pBindings],
           ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
           ...profileReq(),
           ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
-        }, { maxIterations: guided ? 15 : 20 });
+        }, { maxIterations: 20 });
         const refinedMag = applyMagneticMoments(session.magnetic!, pBindings, result.parameters);
         setSession((s) => ({
           ...s,
           magnetic: refinedMag,
-          powderParams: s.powderParams.map((p) => ({
-            ...p,
-            value: result.parameters[p.id] ?? p.value,
-            ...(guidedFixed?.has(p.id) ? { fixed: guidedFixed.get(p.id)! } : {}),
-          })),
+          powderParams: s.powderParams.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value })),
         }));
         setPowderResult(result);
         setMessage(
-          `${coRefined ? "Nuclear + magnetic" : "Nuclear (magnetic model held)"} ${guided ? "guided " : ""}refinement ${result.status}: ` +
+          `${coRefined ? "Nuclear + magnetic" : "Nuclear (magnetic model held)"} refinement ${result.status}: ` +
           `wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`,
         );
         return;
@@ -712,31 +695,23 @@ export function PowderWorkbench({
       // and falls back to the CPU pool otherwise, so requesting it here is safe.
       // `useGpu` is the header chip's preference: off means this fit never asks
       // for the kernel and stays on the exact f64 CPU path.
-      const gpuActive = useGpu && !guided && session.extraPhases.length === 0 && !session.magnetic
+      const gpuActive = useGpu && session.extraPhases.length === 0 && !session.magnetic
         && typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu;
       // Parallel-Jacobian path for the flat single-phase case; the client
-      // falls back to the single-worker path for staged/multi-phase requests.
-      const sentParams = guided ? guidedPowderParams(powderParams) : powderParams;
-      const guidedFixed = guided ? guidedFixedFlags(sentParams) : null;
+      // falls back to the single-worker path for multi-phase requests.
       const result = await client.refinePowderParallel({
-        structure, pattern, parameters: sentParams, bindings: pBindings, ...profileReq(),
+        structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(),
         ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
-        ...(guided ? { staged: DEFAULT_STAGE_KINDS } : {}),
         ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
-        options: { maxIterations: guided ? 15 : 20 },
+        options: { maxIterations: 20 },
         useGpu,
       }, onPowderProgress);
       setSession((s) => ({
         ...s,
-        // Guided refinement frees parameters internally; reflect exactly those.
-        powderParams: s.powderParams.map((p) => ({
-          ...p,
-          value: result.parameters[p.id] ?? p.value,
-          ...(guidedFixed?.has(p.id) ? { fixed: guidedFixed.get(p.id)! } : {}),
-        })),
+        powderParams: s.powderParams.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value })),
       }));
       setPowderResult(result);
-      setMessage(`Powder ${guided ? "guided " : ""}refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%${gpuActive ? " · GPU |F|²" : ""}.`);
+      setMessage(`Powder refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%${gpuActive ? " · GPU |F|²" : ""}.`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setMessage(msg === CANCELLED ? "Refinement cancelled." : `Powder refinement failed: ${msg}`);
@@ -1521,8 +1496,7 @@ export function PowderWorkbench({
                 params={powderParams}
                 esd={powderResult?.esd}
                 onChange={patchPowder}
-                onRefine={() => runPowder(false)}
-                {...(tofViewOnly ? {} : { onGuided: () => runPowder(true) })}
+                onRefine={() => runPowder()}
                 onThorough={() => runThorough()}
                 thoroughMode={powderResult ? "escape" as const : "prefit" as const}
                 onCancel={cancelPowder}
@@ -1564,7 +1538,7 @@ export function PowderWorkbench({
                         value={session.mustrain ?? "isotropic"}
                         onChange={(e) => setMustrain(e.target.value as MustrainModel)}
                         style={bgSelect}
-                        title="Isotropic uses the Lorentzian Y (always present); uniaxial and generalized add anisotropic microstrain rows — free them or run guided after the isotropic profile converges."
+                        title="Isotropic uses the Lorentzian Y (always present); uniaxial and generalized add anisotropic microstrain rows — free them after the isotropic profile converges."
                       >
                         <option value="isotropic">isotropic</option>
                         {session.pattern.xUnit === "twoTheta" && <option value="uniaxial">uniaxial</option>}

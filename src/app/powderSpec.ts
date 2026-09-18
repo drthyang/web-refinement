@@ -5,8 +5,8 @@
  * cell, instrument profile, per-site ADP, symmetry-adapted atomic positions) and
  * seeds the scale from the observed data. Structural parameters (positions, ADP,
  * occupancy, corrections) start *fixed* so the first click of "Refine" does a
- * safe scale/background/cell/profile fit; the user frees them per row or runs the
- * guided (staged) sequence, which unlocks them in the expert order.
+ * safe scale/background/cell/profile fit; the user frees them per row or per
+ * group, in the order they choose.
  */
 
 import type { StructureModel } from "@/core/crystal/types";
@@ -20,7 +20,7 @@ import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import { CORRECTION_KINDS } from "@/core/diffraction/corrections";
 import { optimalScale } from "@/app/loadData";
 
-/** Structural kinds held fixed on first load; freed via the table or guided. */
+/** Structural kinds held fixed on first load; freed via the table. */
 const STRUCTURAL_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "positionShift", "bIso", "uAniso", "occupancy", "poRatio",
   // Sample-geometry + intensity corrections (registry) are held fixed on load too.
@@ -31,8 +31,7 @@ const STRUCTURAL_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
  * Instrument / profile kinds (peak shape, width, zero, TOF calibration + shape).
  * These are held fixed on first load too, so the default "Refine" does *not*
  * touch instrument parameters — a plain scale/background/cell fit. The user frees
- * them per row, or runs the guided sequence, which refines the profile in its
- * expert-order stage.
+ * them per row.
  */
 const INSTRUMENT_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY",
@@ -41,9 +40,9 @@ const INSTRUMENT_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
 
 /**
  * Anisotropic-microstructure kinds (Stephens strain S-parameters, uniaxial size).
- * Emitted only when the user enables microstrain; seeded at zero anisotropy, held
- * fixed on load, and freed by the guided sequence — a strong-correlation stage
- * that should only run after the isotropic profile + structure have converged.
+ * Emitted only when the user enables microstrain; seeded at zero anisotropy and
+ * held fixed on load — strongly correlated, so free them only after the
+ * isotropic profile + structure have converged.
  */
 const MICROSTRUCTURE_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   "stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainIso",
@@ -53,26 +52,6 @@ const MICROSTRUCTURE_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>(
 const FIXED_ON_LOAD_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
   ...STRUCTURAL_KINDS,
   ...INSTRUMENT_KINDS,
-  ...MICROSTRUCTURE_KINDS,
-]);
-
-/**
- * Kinds the guided (staged) sequence is allowed to unlock. It re-frees the
- * structural kinds (except occupancy) and the profile kinds — but keeps
- * `profileU` fixed (the Gaussian U correlates strongly with sample broadening;
- * refined only when explicitly requested) and `tofCalibration` fixed (difC/difA
- * stay at the instrument calibration). This reproduces the previous free set
- * exactly, now that everything starts fixed on load.
- *
- * Occupancies are *shown* (fixed on load) but never freed automatically — not on
- * first load and not by the guided sequence. They correlate strongly with scale
- * and ADP, and a meaningful refinement usually needs a chemically-motivated
- * occupancy-sum restraint the app cannot infer, so the user frees them per row
- * (and adds restraints) deliberately.
- */
-const GUIDED_UNLOCK_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>([
-  ...[...STRUCTURAL_KINDS].filter((k) => k !== "occupancy"),
-  ...[...INSTRUMENT_KINDS].filter((k) => k !== "profileU" && k !== "tofCalibration"),
   ...MICROSTRUCTURE_KINDS,
 ]);
 
@@ -238,7 +217,7 @@ export function buildPowderSpec(
 
   // Stephens (1999) anisotropic microstrain: one S-parameter per symmetry-allowed
   // quartic invariant, adding hkl-dependent Gaussian broadening. 2θ CW only, and
-  // fixed on load (freed via the Microstructure group / guided sequence).
+  // fixed on load (freed via the Microstructure group).
   // Mustrain model: isotropic (Lorentzian Y, always present) | uniaxial (Y⊥/Y∥
   // about the c-axis) | generalized (Stephens). Anisotropic models need a
   // Lorentzian (caglioti) profile to attach to.
@@ -248,15 +227,4 @@ export function buildPowderSpec(
   const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, ...microOpt, refineOccupancy: true, ...tieOpts });
   const params = applySeeds(spec.params, seeds).map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
   return { params, bindings: spec.bindings, profile };
-}
-
-/**
- * Guided refinement uses the staged plan to unlock structural rows in the
- * expert order. UI-fixed structural rows must therefore be sent as unlockable,
- * while intentionally fixed profile terms (notably profU when refineU=false)
- * remain fixed. Occupancies are deliberately excluded (see GUIDED_UNLOCK_KINDS):
- * they stay fixed unless the user frees a row by hand.
- */
-export function guidedPowderParams(params: readonly RefinementParameter[]): RefinementParameter[] {
-  return params.map((p) => (GUIDED_UNLOCK_KINDS.has(p.kind) ? { ...p, fixed: false } : { ...p }));
 }

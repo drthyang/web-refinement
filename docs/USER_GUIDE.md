@@ -111,13 +111,6 @@ and the cell are free, so the first **Refine** is safe.
 3. [Judge the fit](#8-judge-a-fit) before you free more. Free occupancies only
    for a reason: they correlate with the scale and the ADPs.
 
-**Guided ⇢** walks that sequence for you: it frees the structural parameters and
-refines them in stages — scale, background, cell, profile, ADPs, positions, then
-microstructure and corrections — instead of releasing everything at once. It
-leaves occupancies fixed, for the reason in step 3, and afterwards the panel
-shows exactly the rows it freed. Use it on a structure you trust and refine by
-hand when you want to judge each group as it opens.
-
 In the parameter panel, click a row to switch it between **● free** and
 **○ fixed**. Type a value and press Enter to set it. Tick **all** to free a
 whole group. A **= tied** row follows another parameter, and a **calib** row

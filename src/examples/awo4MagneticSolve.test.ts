@@ -3,7 +3,9 @@ import { parseCif } from "@/parsers/cif";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 import { parseGsasHistogramPattern } from "@/parsers/gsasHistogram";
 import { dFromTof } from "@/core/diffraction/instrument";
-import { buildPowderSpec, guidedPowderParams } from "@/app/powderSpec";
+import { buildPowderSpec } from "@/app/powderSpec";
+import { CORRECTION_KINDS } from "@/core/diffraction/corrections";
+import type { ParameterKind } from "@/core/refinement/types";
 import { buildPowderProblem, powderCurves } from "@/core/workflow/powder";
 import { refineStaged } from "@/core/refinement/staged";
 import { refine } from "@/core/refinement/engine";
@@ -61,11 +63,18 @@ describe.skipIf(!has)("AWO₄ magnetic demo — solve the 6 K magnetic structure
     const dArr = pattern.points.map((p) => dFromTof(instrument, p.x));
     console.log(`[awo4] ${pattern.points.length} pts · TOF ${pattern.points[0]!.x.toFixed(0)}–${pattern.points[pattern.points.length - 1]!.x.toFixed(0)} µs · d ${Math.min(...dArr).toFixed(3)}–${Math.max(...dArr).toFixed(3)} Å`);
 
-    // 1. Nuclear staged refinement (the page's "Guided" button).
+    // 1. Nuclear staged refinement. The stage plan unlocks kind-groups in
+    // order; every structural / profile / microstructure row is sent as
+    // unlockable except occupancy, the Gaussian U and the TOF calibration.
     const spec = buildPowderSpec(structure, pattern, instrument, true, 6, { positions: true, adp: true });
+    const unlock = new Set<ParameterKind>([
+      "positionShift", "bIso", "uAniso", "poRatio", ...CORRECTION_KINDS,
+      "peakWidth", "profileV", "profileW", "profileX", "profileY", "asymSL", "asymHL", "zeroShift", "tofProfile",
+      "stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainIso",
+    ]);
     const t0 = Date.now();
     const staged = refineStaged(
-      guidedPowderParams(spec.params),
+      spec.params.map((p) => (unlock.has(p.kind) ? { ...p, fixed: false } : p)),
       (params) => buildPowderProblem(structure, pattern, params, spec.bindings, spec.profile),
       stagesFromKindGroups(DEFAULT_STAGE_KINDS),
       { maxIterations: 12 },
