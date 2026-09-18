@@ -44,6 +44,7 @@ import type { RefinementProblem } from "@/core/refinement/engine";
 import { dSpacing } from "@/core/crystal/unitCell";
 import { magneticTable } from "@/core/scattering/magnetic";
 import { MAGNETIC_PREFACTOR } from "@/core/magnetic/structureFactor";
+import { isSelfConjugate } from "@/core/magnetic/propagation";
 import { crystalComponentsToCartesian, perpendicularMoment, qCartesian } from "@/core/magnetic/moment";
 
 const TWO_PI = 2 * Math.PI;
@@ -77,8 +78,7 @@ export interface FourierStructureFactor {
  * counting both would report twice the physical moment.
  */
 export function armMultiplicity(k: Vec3): 1 | 2 {
-  const selfConjugate = k.every((v) => Math.abs(2 * v - Math.round(2 * v)) < 1e-9);
-  return selfConjugate ? 1 : 2;
+  return isSelfConjugate(k) ? 1 : 2;
 }
 
 /**

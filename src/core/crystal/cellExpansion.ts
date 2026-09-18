@@ -25,6 +25,7 @@
 import type { AtomSite, StructureModel, SymmetryOperation, UnitCell } from "@/core/crystal/types";
 import type { Mat3, Vec3 } from "@/core/math/types";
 import { momentBindingKey, type MagneticModel } from "@/core/magnetic/types";
+import { componentDenominator } from "@/core/magnetic/propagation";
 import { fractionalToCartesian } from "@/core/crystal/unitCell";
 import { applyOperation } from "@/core/crystal/symmetry";
 import { determinant } from "@/core/math/mat3";
@@ -160,11 +161,7 @@ export function displayMoment(
  * approximation of the modulated one.
  */
 export function magneticSupercell(k: Vec3): [number, number, number] {
-  const denom = (v: number): number => {
-    if (Math.abs(v) < 1e-6) return 1;
-    for (let n = 1; n <= 12; n++) if (Math.abs(v * n - Math.round(v * n)) < 1e-4) return n;
-    return 1;
-  };
+  const denom = (v: number): number => componentDenominator(v) ?? 1;
   return [denom(k[0]!), denom(k[1]!), denom(k[2]!)];
 }
 

@@ -29,7 +29,7 @@ import type { AtomSite, StructureModel } from "@/core/crystal/types";
 import type { RefinementParameter, ParameterBinding } from "@/core/refinement/types";
 import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import { parseSymmetryOperation, equivalentPositions } from "@/core/crystal/symmetry";
-import { componentDenominator, kDenominators } from "@/core/magnetic/commensurate";
+import { componentDenominator, kDenominators } from "@/core/magnetic/propagation";
 import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
 import type { Vec3 } from "@/core/math/types";
 
@@ -45,16 +45,17 @@ export interface MagneticSupercell {
  * Resolve the magnetic supercell of a commensurate, axis-diagonal propagation
  * vector. Throws when a component is not commensurate within `maxDenominator`.
  *
- * The commensurability decision itself lives in `magnetic/commensurate.ts` — one
+ * The commensurability decision itself lives in `magnetic/propagation.ts` — one
  * resolver shared with every other supercell consumer, so the 3D view, mCIF
  * export, and this transform can never disagree about whether a given k has a
  * finite cell. Throwing (rather than approximating) is this path's own policy:
  * a supercell `.int` transform has no meaningful incommensurate answer.
  */
 export function magneticSupercell(k: Vec3, maxDenominator = 12, tol = 1e-4): MagneticSupercell {
-  const resolved = kDenominators(k, maxDenominator, tol);
+  const options = { maxDenominator, tolerance: tol };
+  const resolved = kDenominators(k, options);
   if (!resolved) {
-    const bad = k.find((c) => componentDenominator(c, maxDenominator, tol) === 0);
+    const bad = k.find((c) => componentDenominator(c, options) === null);
     throw new Error(`magneticSupercell: k component ${bad} is not commensurate with a denominator ≤ ${maxDenominator}`);
   }
   return { multiplicity: resolved.denominators, kInteger: resolved.kInteger };

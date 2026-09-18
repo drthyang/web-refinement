@@ -28,6 +28,9 @@
  * useful for display, mCIF export, and the supercell-merge single-crystal
  * path — but the structure factor and the parameterization above do not care.
  * An irrational k simply has no supercell; everything else is identical.
+ * `componentDenominator` / `kDenominators` below are the one place that
+ * decision is made — the `.int` supercell transform, the 3D view / mCIF box
+ * and `classifyPropagation` all resolve k through them, so they cannot disagree.
  *
  * Conventions match FullProf (Rodríguez-Carvajal, *Physica B* **192** (1993)
  * 55): m_lj = Σ_k S_kj·exp(−2πi k·R_l) with S_{−k} = S_k*, and the satellite
@@ -71,12 +74,86 @@ export interface ClassifyOptions {
   readonly tolerance?: number;
 }
 
-function denominatorOf(v: number, maxDen: number, tol: number): number | null {
+/**
+ * Smallest denominator n ∈ [1, maxDenominator] with n·v within `tolerance` of
+ * an integer — the supercell multiplier along one axis — or null when the
+ * component is incommensurate within the search. Integers (0 included) give 1.
+ */
+export function componentDenominator(v: number, options: ClassifyOptions = {}): number | null {
+  const maxDen = options.maxDenominator ?? 12;
+  const tol = options.tolerance ?? 1e-4;
   if (Math.abs(v) < tol) return 1;
   for (let n = 1; n <= maxDen; n++) {
     if (Math.abs(v * n - Math.round(v * n)) < tol) return n;
   }
   return null;
+}
+
+/** Finite magnetic supercell of a commensurate k. */
+export interface KSupercell {
+  /** Per-axis multiplier Nᵢ: the supercell is (N₁a, N₂b, N₃c). */
+  readonly denominators: readonly [number, number, number];
+  /** k in the supercell: the integer reciprocal-lattice vector Kᵢ = Nᵢ·kᵢ. */
+  readonly kInteger: readonly [number, number, number];
+  /** Cells in the supercell, N₁·N₂·N₃. */
+  readonly cellCount: number;
+}
+
+/**
+ * The magnetic supercell of `k`, or null when any component is
+ * incommensurate — callers state what they do about that null instead of
+ * approximating it away.
+ */
+export function kDenominators(k: Vec3, options: ClassifyOptions = {}): KSupercell | null {
+  const denominators: number[] = [];
+  for (const c of k) {
+    const n = componentDenominator(c, options);
+    if (n === null) return null;
+    denominators.push(n);
+  }
+  const [n1, n2, n3] = denominators as [number, number, number];
+  return {
+    denominators: [n1, n2, n3],
+    kInteger: [Math.round(n1 * k[0]), Math.round(n2 * k[1]), Math.round(n3 * k[2])],
+    cellCount: n1 * n2 * n3,
+  };
+}
+
+const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+const lcm = (a: number, b: number): number => (a * b) / gcd(a, b);
+
+/**
+ * Joint supercell of several arms (multi-k): the componentwise LCM of their
+ * denominators, the smallest cell in which every arm's modulation repeats.
+ * `kInteger` is the FIRST arm's integer vector in that cell. Null when any arm
+ * is incommensurate, when `ks` is empty, or when the joint cell exceeds
+ * `maxCells` — arms can be individually commensurate yet jointly enormous
+ * (⅕ and ⅐ on one axis need 35 cells), and a caller asking for a drawable
+ * box needs that refusal rather than a runaway expansion.
+ */
+export function jointDenominators(
+  ks: readonly Vec3[],
+  options: ClassifyOptions & { readonly maxCells?: number } = {},
+): KSupercell | null {
+  if (ks.length === 0) return null;
+  const denominators: [number, number, number] = [1, 1, 1];
+  for (const k of ks) {
+    const res = kDenominators(k, options);
+    if (!res) return null;
+    for (let i = 0; i < 3; i++) denominators[i] = lcm(denominators[i]!, res.denominators[i]!);
+  }
+  const cellCount = denominators[0] * denominators[1] * denominators[2];
+  if (cellCount > (options.maxCells ?? 4096)) return null;
+  const first = ks[0]!;
+  return {
+    denominators,
+    kInteger: [
+      Math.round(denominators[0] * first[0]),
+      Math.round(denominators[1] * first[1]),
+      Math.round(denominators[2] * first[2]),
+    ],
+    cellCount,
+  };
 }
 
 /** True when every component of 2k is an integer (within `tol`), i.e. −k ≡ k. */
@@ -95,13 +172,10 @@ export function fourierArmFactor(k: Vec3, tol = 1e-6): 0.5 | 1 {
 
 /** Classify a propagation vector (see the module doc). */
 export function classifyPropagation(k: Vec3, options: ClassifyOptions = {}): PropagationClass {
-  const maxDen = options.maxDenominator ?? 12;
   const tol = options.tolerance ?? 1e-4;
   const isZero = k.every((c) => Math.abs(c) < tol);
   const selfConjugate = isSelfConjugate(k, tol);
-  const dens = k.map((c) => denominatorOf(c, maxDen, tol));
-  const supercell: readonly [number, number, number] | null =
-    dens.every((d): d is number => d !== null) ? [dens[0]!, dens[1]!, dens[2]!] : null;
+  const supercell = kDenominators(k, options)?.denominators ?? null;
   return {
     kind: isZero ? "zero" : supercell ? "commensurate" : "incommensurate",
     selfConjugate,

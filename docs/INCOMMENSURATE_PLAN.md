@@ -226,13 +226,13 @@ the engine happily fits it. Therefore:
   `mpdf.ts:330` and `App.tsx:151` all build models by object spread. Add `withoutFourier(m)` and a
   test that no derived model carries a `fourier` whose k disagrees with its `propagation`.
 
-**Commensurability is already shipped.** `core/magnetic/commensurate.ts` exists with
-`kDenominators` / `isCommensurate` / `componentDenominator` / `allCommensurate` /
-`jointDenominators` (the last handles the multi-k joint cell via componentwise LCM with a
-`maxCells` refusal — use it for §2.2's joint supercell). `magneticSupercell.ts` and
-`cellExpansion.ts` already route through it. Note it unified the *decision* only: the
-`cellExpansion` display policy still returns (1,1,1) for incommensurate k, deliberately, until
-Phase F.
+**Commensurability is already shipped.** `core/magnetic/propagation.ts` holds
+`classifyPropagation` (zero / commensurate / incommensurate, self-conjugacy, arm factor) plus
+`componentDenominator` / `kDenominators` / `jointDenominators` (the last handles the multi-k
+joint cell via componentwise LCM with a `maxCells` refusal — use it for §2.2's joint
+supercell). `magneticSupercell.ts` and `cellExpansion.ts` already route through it. Note it
+unified the *decision* only: the `cellExpansion` display policy still returns 1 along an
+incommensurate axis, deliberately, until Phase F.
 
 ## 4. Parameters and bindings
 
@@ -337,7 +337,7 @@ this unusable in practice):
 
 ## 7. UI, I/O, 3D
 
-- Commensurate/incommensurate indicator from `isCommensurate`; modulation type expressed as *mode
+- Commensurate/incommensurate indicator from `classifyPropagation(k).kind`; modulation type expressed as *mode
   content* (a helix is two quadrature modes tied to equal amplitude), not a separate model.
 - Complex mode rows per arm × sublattice, with the derived amplitude/phase shown read-only.
 - k refine checkboxes; multi-k arms with populations; per-arm satellite ticks.
@@ -349,7 +349,7 @@ this unusable in practice):
 - **mCIF**: parse/write `_cell_wave_vector_*` and `_atom_site_moment_Fourier*`. `cif.ts:410`
   hardcodes `propagation: [[0,0,0]]`, so every parsed magnetic model claims k = 0 regardless of
   file content — a straight bug fixed here. Supercell export **refuses** incommensurate k with an
-  explanation. Move these refusals to Phase A/B (they need only `isCommensurate`): today an
+  explanation. Move these refusals to Phase A/B (they need only `classifyPropagation`): today an
   incommensurate k silently writes the *parent* cell with unmodulated moments and a comment.
 - **3D**: `displayMoment`'s phase argument is `2πk·(latt + n)`, but with `S_image` carrying
   `e^{+2πik·L}` the correct argument is `2πk·(n − L)`. The two agree only when 2k·L ∈ ℤ — always
