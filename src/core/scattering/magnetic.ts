@@ -1,7 +1,7 @@
 /**
  * Magnetic neutron form factor.
  *
- * Spin-only (⟨j0⟩) and dipole (⟨j0⟩ + (1 − 2/g)·⟨j2⟩) approximations with
+ * Spin-only (⟨j0⟩) and dipole (⟨j0⟩ + (2/g − 1)·⟨j2⟩) approximations with
  *   ⟨j0⟩(s) = A·e^{−a·s²} + B·e^{−b·s²} + C·e^{−c·s²} + D,   s = sinθ/λ (Å⁻¹),
  * normalized to 1 at s = 0. Coefficients come from the generated
  * {@link J0_COEFFS}/{@link J2_COEFFS} tables (International Tables Vol. C §4.4.5,
@@ -37,14 +37,16 @@ export function magneticFormFactorJ2(ionId: string, s: number): number {
 }
 
 /**
- * Dipole-approximation magnetic form factor f(s) = ⟨j0⟩ + (1 − 2/g)·⟨j2⟩ for a
- * moment with Landé factor g. Reduces to the spin-only ⟨j0⟩ when g = 2 or when
- * the ion has no tabulated ⟨j2⟩.
+ * Dipole-approximation magnetic form factor f(s) = ⟨j0⟩ + (2/g − 1)·⟨j2⟩ for a
+ * moment with Landé factor g (Lovesey 1984, eq. 11.110). The spin part of the
+ * moment carries ⟨j0⟩ and the orbital part ⟨j0⟩ + ⟨j2⟩, so the ⟨j2⟩ weight is
+ * the orbital fraction μ_L/μ = (2 − g)/g. Reduces to the spin-only ⟨j0⟩ when
+ * g = 2 or when the ion has no tabulated ⟨j2⟩.
  */
 export function magneticFormFactorDipole(ionId: string, s: number, g: number): number {
   const j0 = magneticFormFactorJ0(ionId, s);
   const j2 = magneticFormFactorJ2(ionId, s);
-  return Number.isNaN(j2) ? j0 : j0 + (1 - 2 / g) * j2;
+  return Number.isNaN(j2) ? j0 : j0 + (2 / g - 1) * j2;
 }
 
 export const magneticTable: MagneticFormFactorTable = {

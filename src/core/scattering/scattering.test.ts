@@ -133,13 +133,22 @@ describe("magnetic form factor — dipole approximation", () => {
       expect(magneticFormFactorDipole("Fe3", s, 2)).toBeCloseTo(magneticFormFactorJ0("Fe3", s), 10);
     }
   });
-  it("adds the (1 − 2/g)·⟨j2⟩ term for g ≠ 2 when ⟨j2⟩ is tabulated", () => {
+  it("adds the (2/g − 1)·⟨j2⟩ term for g ≠ 2 when ⟨j2⟩ is tabulated", () => {
     const s = 0.4;
     const g = 1.8;
-    const expected = magneticFormFactorJ0("Fe3", s) + (1 - 2 / g) * magneticFormFactorJ2("Fe3", s);
+    const expected = magneticFormFactorJ0("Fe3", s) + (2 / g - 1) * magneticFormFactorJ2("Fe3", s);
     expect(magneticFormFactorDipole("Fe3", s, g)).toBeCloseTo(expected, 10);
     // …and the orbital term actually changes the value.
     expect(magneticFormFactorDipole("Fe3", s, g)).not.toBeCloseTo(magneticFormFactorJ0("Fe3", s), 6);
+  });
+  it("pins Tb³⁺ (g = 3/2) to the Lovesey eq. 11.110 / Mantid sign", () => {
+    // The ⟨j2⟩ weight is the orbital fraction (2 − g)/g = +1/3, so for g < 2 the
+    // orbital term raises f above ⟨j0⟩. The opposite sign gives 0.383 here.
+    const g = 1.5;
+    const s = 5 / (4 * Math.PI); // Q = 5 Å⁻¹, s = Q/4π
+    expect(magneticFormFactorDipole("Tb3", 0, g)).toBeCloseTo(1, 3);
+    expect(Math.abs(magneticFormFactorDipole("Tb3", s, g) - 0.499)).toBeLessThanOrEqual(0.002);
+    expect(magneticFormFactorDipole("Tb3", s, g)).toBeGreaterThan(magneticFormFactorJ0("Tb3", s));
   });
   it("falls back to ⟨j0⟩ when the ion has no tabulated ⟨j2⟩ (any g)", () => {
     expect(magneticFormFactorDipole("Pr3", 0.4, 1.8)).toBeCloseTo(magneticFormFactorJ0("Pr3", 0.4), 10);

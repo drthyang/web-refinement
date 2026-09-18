@@ -25,7 +25,7 @@ export interface ScatteringTable {
  * The spin-only approximation uses ⟨j0⟩(s) alone (normalized to 1 at s = 0). The
  * full **dipole approximation** — needed when the moment has an orbital part
  * (Landé g ≠ 2), i.e. most magnetic refinements beyond the simplest cases —
- * adds a ⟨j2⟩ term:  f(s) ≈ ⟨j0⟩(s) + (1 − 2/g)·⟨j2⟩(s).
+ * adds a ⟨j2⟩ term:  f(s) ≈ ⟨j0⟩(s) + (2/g − 1)·⟨j2⟩(s).
  * ⟨j2⟩ carries an s² prefactor, so it vanishes at s = 0 and both give f(0) = 1.
  */
 export interface MagneticFormFactorTable {
@@ -33,7 +33,7 @@ export interface MagneticFormFactorTable {
   j0(ionId: string, s: number): number;
   /** ⟨j2⟩(s) when tabulated for the ion; used by the dipole approximation. */
   j2?(ionId: string, s: number): number;
-  /** Dipole form factor ⟨j0⟩ + (1 − 2/g)⟨j2⟩; falls back to ⟨j0⟩ (spin-only)
+  /** Dipole form factor ⟨j0⟩ + (2/g − 1)⟨j2⟩; falls back to ⟨j0⟩ (spin-only)
    *  when ⟨j2⟩ is not tabulated for the ion. */
   dipole?(ionId: string, s: number, g: number): number;
   /** True if the ion has a tabulated ⟨j0⟩. */

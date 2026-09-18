@@ -75,7 +75,7 @@ HEADER = '''/**
  * Form (s = sinθ/λ = 1/(2d), Å⁻¹):
  *   ⟨j0⟩(s) = A·e^{−a·s²} + B·e^{−b·s²} + C·e^{−c·s²} + D            → 1 at s=0
  *   ⟨j2⟩(s) = (A·e^{−a·s²} + B·e^{−b·s²} + C·e^{−c·s²} + D)·s²       → 0 at s=0
- * The dipole approximation is  f(s) = ⟨j0⟩ + (1 − 2/g)·⟨j2⟩.
+ * The dipole approximation is  f(s) = ⟨j0⟩ + (2/g − 1)·⟨j2⟩.
  *
  * Keys are element-symbol + integer charge, e.g. "Mn2", "Fe3", "Cr3", "Ce3".
  * Regenerate with scripts/gen_magnetic_ff.py.
