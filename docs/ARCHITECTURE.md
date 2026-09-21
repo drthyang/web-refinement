@@ -245,6 +245,24 @@ actually used the kernel ("· GPU |F|²").
 pools already cover its niche. A second implementation of the same physics in
 another language is exactly the maintenance drift this architecture avoids.
 
+## Commands
+
+```bash
+npm install            # install dependencies
+npm run dev            # local dev server
+npm run build          # type-check (tsc -b) and build the static site
+npm run lint           # ESLint (flat config, typescript-eslint + react-hooks)
+npm run test           # the Vitest suite
+npm run test:ganb4se8  # real-data powder regression (needs data/GaNb4Se8_XRD/)
+npm run gen:tooldoc    # regenerate the tool tables in AGENT_TOOLS.md
+npm run screenshots    # regenerate docs/screenshots/ from the running app
+```
+
+Run `npm run test:ganb4se8` after any refinement-engine change. It needs the
+local `data/GaNb4Se8_XRD/` files (`data/GaNb4Se8_XRD_28ID/` is accepted too) and
+fails when they are missing. This dataset is the primary real-data check: it
+exposes powder-refinement failure modes that synthetic examples miss.
+
 ## Implementation rules (enforced)
 
 - Strict TypeScript (`strict: true`), type-checked in CI by `npm run build`.

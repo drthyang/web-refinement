@@ -5,280 +5,79 @@
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-3c8c3c)](LICENSE)
 [![Runs in the browser](https://img.shields.io/badge/runs-in%20your%20browser-6b6b6b)](https://drthyang.github.io/web-refinement/)
 
-**MATERIA — an AI-native foundation for materials science.** Crystal and magnetic
-structure refinement that runs entirely in your browser, and is built from the
-core up to be driven by LLM agents as well as by people. This is its web
-workbench; the same pure core is exposed to agents as tools (see
-[docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md)).
+**Crystal and magnetic structure refinement that runs entirely in your browser,
+built to be driven by people and by AI agents.**
 
-**▶ Try it in your browser: [drthyang.github.io/web-refinement](https://drthyang.github.io/web-refinement/)** — a
-fully static GitHub Pages app; nothing to install, and your data never leaves
-your machine. Two bundled demos open converged from the start page: a
-two-phase **Mn₃Ga neutron TOF Rietveld** fit at 600 K (wR 3.9%) and a
-**GaTa₄Se₈ X-ray PDF** fit of the local structure, where the average-structure
-model is deliberately left to disagree with the data at short range. (A third,
-magnetic demo — the AWO₄ k = (½ 0 0) structure — appears only in a local dev
-build with the git-ignored data folder present; its data are unpublished.)
+**▶ Try it: [drthyang.github.io/web-refinement](https://drthyang.github.io/web-refinement/)** —
+nothing to install, and your data never leaves your machine. Two demos open
+already converged: a two-phase Mn₃Ga neutron TOF Rietveld fit and a GaTa₄Se₈
+X-ray PDF fit.
 
 <p align="center">
-  <img src="docs/screenshots/desktop.png" alt="Two-phase Mn₃Ga + MnO Rietveld refinement of POWGEN time-of-flight data, converged at wR 3.86%: observed/calculated/difference curves, per-phase Bragg ticks, and the symmetry-allowed parameter table with esds" width="100%" />
+  <img src="docs/screenshots/desktop.png" alt="Two-phase Mn₃Ga + MnO Rietveld refinement of POWGEN time-of-flight data: observed/calculated/difference curves, per-phase Bragg ticks, and the symmetry-allowed parameter table with esds" width="100%" />
 </p>
-<p align="center"><sub>
-A converged two-phase TOF Rietveld fit (Mn₃Ga + MnO impurity, POWGEN) in the
-workbench. The screenshot is generated from the live app by
-<code>scripts/device-screenshots.mjs</code>.
-</sub></p>
 
-## The vision: refinement an agent can reason about
+## Goals
 
-Structure refinement is not a black-box optimization — it is an expert loop.
-Never refine everything at once; watch parameter correlations; free only
-symmetry-allowed parameters; judge the residuals, not just wR. Learning that
-judgment is the hardest part of the field, and it is exactly the kind of
-reasoning a language model can drive.
+- **Refinement an agent can reason about.** Refinement is an expert loop, not a
+  black box: free only symmetry-allowed parameters, watch correlations, judge the
+  residuals. Every scientific function lives in a pure TypeScript core, so the
+  same engine backs the UI buttons and the MCP agent tools. It returns what an
+  agent needs to think with — correlations, near-null directions, at-bound
+  flags — not just a scalar wR. See [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md).
+- **One workflow, nothing to install.** Powder and single crystal, X-ray and
+  neutron (constant-wavelength and time-of-flight), nuclear and magnetic,
+  reciprocal and real space: one engine, one UI, on any OS with a browser. It
+  reads the files you already have and complements GSAS-II, Jana2020 and
+  FullProf rather than replacing them. See [docs/COMPARISON.md](docs/COMPARISON.md).
+- **Transparent by design.** Fit quality is judged with F_obs vs F_calc and
+  normal-probability plots, not wR alone. Every result is cross-checked against
+  established tools where possible, and the code is readable, tested TypeScript.
+  See [docs/VALIDATION.md](docs/VALIDATION.md).
 
-This workbench is designed for that from the ground up. Every scientific
-capability lives in a pure, side-effect-free TypeScript core (`src/core/**`):
-deterministic functions over plain, serializable data. The same functions that
-back the UI buttons can therefore be exposed as **agent tools** (via MCP or
-the Claude Agent SDK), and the expert procedures that compose them become
-**skills** — one validated engine, whether you click the button or the agent
-calls the tool. The engine already returns what an agent needs to think with —
-parameter correlations, SVD near-null directions, at-bound flags — **not just
-a scalar wR** — so an agent can run the same loop an expert runs by hand:
+## Features
 
-```
-observe → decide → act → check
-```
-
-This agent layer is a **work in progress**: it ships incrementally as each
-scientific milestone lands — never a wholesale "agent mode" bolted on at the
-end. See
-[docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) for the tool/skill catalog and the
-LLM-guided refinement design, and [docs/ROADMAP.md](docs/ROADMAP.md) for the
-build sequence.
-
-## The second goal: lowering the barrier to entry
-
-Starting a Rietveld or single-crystal refinement today means choosing among
-several mature packages — GSAS-II, Jana2020, FullProf, TOPAS, SHELX, Olex2 —
-several of which handle both powder and single-crystal data. Each choice pulls
-in its own ecosystem: its own data formats, its own instrument-parameter files,
-its own split between single-crystal and powder workflows, and its own formalism
-for magnetic structures (magnetic space groups in one, irreducible
-representations in another). Some closed-source options are effectively
-Windows-only, which puts them out of reach on Unix/Linux systems. None of this
-is any package's fault — each grew deep to serve its facility and its
-community, and they remain the tools of record that this project validates
-against. But the combined effect is a steep on-ramp: a beginner faces many
-consequential choices before ever seeing a first fit.
-
-This project aims to lower that barrier:
-
-- **Nothing to install.** A static web app that runs on any OS with a modern
-  browser — Linux included. Live at
-  [drthyang.github.io/web-refinement](https://drthyang.github.io/web-refinement/),
-  or self-host the built `dist/`; the core workflow has no backend, so your data
-  stays on your machine.
-- **One workflow instead of four ecosystems.** Single-crystal and powder,
-  X-ray and neutron (constant-wavelength and time-of-flight), nuclear and
-  magnetic — one shared refinement engine, one UI.
-- **Reads what you already have.** CIF/mCIF, hkl and FullProf `.int`
-  reflection lists, plain-column / GSAS `.gsa`·FXYE / ILL powder data, and
-  instrument files from GSAS-II (`.instprm`), classic GSAS (`.prm` INS/ICONS),
-  and FullProf (`.irf` — CW Caglioti and TOF, plus the D2B/3T2/G4.2 `INSTRM=6`
-  variant) — with format
-  auto-detection: the Data card shows the unit and range it settled on, the
-  `parse_powder_data` agent tool reports *how* each decision was made, and the
-  instrument card names the beamline · facility when the file identifies one.
-- **Transparent by design.** A guided step-by-step procedure that starts from
-  a small, safe set of choices; fit quality judged with F_obs vs F_calc and
-  normal-probability plots, not wR alone. Every scientific function is pure,
-  tested TypeScript you can read.
-- **A bridge between magnetic formalisms.** A magnetic-space-group
-  (Shubnikov/BNS) workflow today, with representation analysis being built
-  alongside it — so both descriptions of the same physics live in one tool.
-
-This is a complement to the established packages, not a replacement — see
-[docs/COMPARISON.md](docs/COMPARISON.md) for an honest capability matrix.
-
-> This package is an early browser-native refinement workbench for transparent
-> model building, simulation, and basic constrained refinement. Results intended
-> for publication must be validated against established tools and expert
-> crystallographic judgment.
+| Track | What you get | Read more |
+| --- | --- | --- |
+| **Powder Rietveld** | CW and TOF, multi-phase, background, peak shape, microstructure; GSAS-II, GSAS and FullProf instrument files; one-click FullProf / GSAS-II cross-check bundle | [User guide](docs/USER_GUIDE.md) |
+| **Magnetic structures** | Detect magnetic peaks → k-vector search → magnetic subgroups with BNS/OG labels → moment refinement; k = 0, commensurate and incommensurate single-k; mCIF export | [Magnetic symmetry](docs/MAGNETIC_SYMMETRY.md) |
+| **Single crystal** | F² refinement from hkl, SHELX HKL and FullProf `.int` lists, with absorption correction | [Single crystal](docs/SINGLE_CRYSTAL.md) |
+| **PDF and mPDF** | Neutron and X-ray G(r), multi-phase and multi-dataset, boxcar scans across r, symmetry-mode distortions, magnetic PDF; validated against PDFfit2 and diffpy.mpdf | [PDF roadmap](docs/PDF_MPDF_ROADMAP.md) |
+| **Uncertainty** | Levenberg–Marquardt esds plus Bayesian posterior sampling (ensemble MCMC and NUTS) with convergence diagnostics | [Refinement engine](docs/REFINEMENT_ENGINE.md) |
+| **Agent tools** | An MCP server over the same core: parse → build → refine → assess → suggest → interpret | [Agent tools](docs/AGENT_TOOLS.md) |
+| **Files** | Reads CIF/mCIF, hkl, `.int`, GSAS/FXYE/ILL/plain powder data, `.gr`/`.sq`/`.fq`; writes CIF/mCIF with esds, an HTML report, and a reopenable project file | [Project format](docs/PROJECT_FORMAT.md) |
 
 ## Status
 
-**Public beta.** A working app — atomic/nuclear refinement (single-crystal +
-powder) plus a single-k magnetic workflow — and a first agent-tool
-layer over the same core. The scientific core, Levenberg–Marquardt refinement
-engine, symmetry-adapted constrained parameters, CIF parsing, a 3D
-structure/moment viewer, plots, and Web Worker compute are implemented and
-tested (**1,300+ passing tests**). Crystallographic and scattering foundations are
-validated against bundled GSAS-II refinements (see
-[docs/VALIDATION.md](docs/VALIDATION.md)).
-As with any beta, results intended for publication must be validated against
-established tools ([docs/LIMITATIONS.md](docs/LIMITATIONS.md)).
+**Public beta.** Results intended for publication must be validated against
+established tools and expert judgment; what is supported, approximate, or
+missing is listed in [docs/LIMITATIONS.md](docs/LIMITATIONS.md). Next up: the
+star of k and multi-k structures, full representation analysis, and a
+symmetry-constrained local-spin model for mPDF. The build order is in
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
-**Agent tools (milestone 1):** an MCP server exposes the pure core to LLM agents
-— parse → build → refine → **assess** (expert judgment: verdict, dangerous
-correlations, at-bound/unphysical parameters, unexplained residual peaks) →
-**suggest next steps** → **interpret** (materials reading). The judgment lives in
-tested pure core (`src/core/diagnostics/`), so an agent reasons about a
-refinement rather than just running it. See
-[docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md).
-
-The magnetic workflow runs end to end: **auto-detect magnetic peaks → k-vector
-search → little-group magnetic subgroups → editable moment preview → moment
-refinement** (k = 0, commensurate *and* incommensurate k ≠ 0 — sinusoidal,
-helical and cycloidal modulations through cosine + sine Fourier amplitudes,
-gated by a brute-force real-space supercell oracle — CW and TOF, on one shared
-scale). Occupancy-
-disorder sites refine with tied position/ADP, a Σ(occupancy) restraint (optionally
-= 1), and an optional shared moment. Fit quality is judged with **F_obs vs F_calc
-and normal-probability plots**, not just wR. Candidate magnetic groups carry
-their standard **BNS/OG labels** (bundled ISO-MAG table), and refined structures
-export as CIF/mCIF with esds (k ≠ 0 writes the magnetic supercell in its own
-magnetic space group — coset representatives, centering and anti-translations,
-asymmetric unit — never a P1 atom list). The star of
-k / multi-k and full representation analysis are the next milestones; see
-[docs/ROADMAP.md](docs/ROADMAP.md) and
-[docs/LIMITATIONS.md](docs/LIMITATIONS.md).
-
-**Real-space PDF (pair distribution function).** A local-structure track now
-runs on the same engine — "real-space Rietveld": nuclear **neutron and X-ray
-G(r) fitting** (Proffen–Billinge forward model, δ1/δ2 and sratio/rcut correlated
-motion, Qdamp/Qbroad envelopes, Qmax termination ripples, `spdiameter`
-nanoparticle envelope, Faber–Ziman element-pair partials), **multi-phase** and
-**multi-dataset** (temperature-series / joint X-ray+neutron) co-refinement, and
-`.gr`/`.sq`/`.fq` import (PDFgetX3 + Mantid dialects). It is cross-checked
-against a **local PDFfit2 1.6.0** with committed CI golden fixtures — Ni and MnO
-X-ray G(r) to corr ≈ 0.9998 and refined cell recovery < 1 mÅ — plus a PDFgui
-`G_calc` golden.
-
-A **boxcar scan** answers the question a single whole-range fit averages away —
-*does the structure change with length scale?* Fix a box width, slide it across
-r, refine inside each position (each box seeded from the previous one), and read
-every parameter against the box center: a track that drifts means the local
-structure differs from the average one, a flat track means one model describes
-every length scale. It reports each box's Rw and esd alongside the value, so a
-drift can be told from a badly-fitted box, and offers two independent checks
-that a drift is real rather than inherited — randomized restarts per box, and a
-**both-directions** mode that scans low→high *and* high→low r from the same
-starting model, overlays the two tracks, and states how far apart they land in
-units of their combined esd. The plot fills in box by box as the scan runs. In
-the app it is a tab of its own — the plan, the run, the plot, the per-box table
-with "Adopt", and CSV export in one place; for agents it is `refine_pdf_boxcar`.
-
-The PDF track also carries a **symmetry-mode distortion workflow**
-(AMPLIMODES/ISODISTORT-style): refine symmetry-adapted mode **amplitudes**
-instead of raw coordinates — enumerated from the structure's own space group or
-decomposed against a parent CIF — activate a symmetry-breaking Γ mode from the
-**isotropy-subgroup tree**, or pick a target subgroup from the full
-**translationengleiche (Bärnighausen) subgroup lattice**; clicking a mode draws
-its eigenvector on the 3D model. The nuclear track (P0–P3) and its agent slice
-are done, and **magnetic PDF (mPDF)** — validated against diffpy.mpdf — is
-live on the PDF page for neutron data; the symmetry-constrained local-spin
-model is the next milestone. Full plan in
-[docs/PDF_MPDF_ROADMAP.md](docs/PDF_MPDF_ROADMAP.md).
-
-**Bayesian uncertainty (new — prototype).** The engine can now *sample the
-posterior*, not just linearize it: an affine-invariant ensemble MCMC sampler
-(Goodman–Weare stretch move) runs behind the same pure-core seam as the
-least-squares driver, with a noise model suited to PDF unit weights, split-R̂ /
-ESS convergence diagnostics, and credible intervals. On the Ni PDF golden the
-posterior widths match the linearized LM esds to 1% (esdRatio 0.99–1.01) —
-uncertainty an agent can reason about, not just a scalar esd. It rides on the
-first **analytic PDF gradients** (a fused ∂G/∂p pass, bit-identical G(r),
-measured 2.3× faster LM refinement on the same golden), which also power a
-**gradient-based NUTS sampler** (mass matrix seeded from the LM esds — R̂ ≈
-1.001 in ~5× fewer evaluations). Surfaced two ways: the `sample_posterior`
-agent tool (ensemble or NUTS, resume-token continuation) and a **Posterior
-view** in the PDF workbench (marginals, credible intervals, esd ratio, R̂/ESS).
-Approach after Fancher et al. (2016, *Sci. Rep.* **6**, 31625); reporting per
-McCluskey et al. (2023, *J. Appl. Cryst.* **56**, 12) — see
-[docs/REFERENCES.md](docs/REFERENCES.md).
-
-The MCP tool surface has grown to **37 contract-tested tools** spanning the
-powder, single-crystal, and PDF tracks (the PDF tools: `parse_pdf_data`,
-`build_pdf_model`, `refine_pdf`, `refine_pdf_boxcar`, `compute_partial_pdf`,
-`calibrate_qdamp`, `sample_posterior`, plus
-`build_distortion_modes` / `build_symmetry_modes` for mode-amplitude fits).
-
-## Commands
+## Develop
 
 ```bash
-npm install     # install dependencies
-npm run dev     # start the local dev server
-npm run build   # type-check and build the static site
-npm run lint    # ESLint (flat config, typescript-eslint + react-hooks)
-npm run test    # run the test suite (Vitest)
-npm run test:ganb4se8  # required real-data powder regression
+npm install
+npm run dev
+npm run test
 ```
 
-Use `npm run test:ganb4se8` for refinement-engine changes. It requires the local
-`data/GaNb4Se8_XRD/` files (`data/GaNb4Se8_XRD_28ID/` is accepted as well) and
-fails if they are missing; this dataset is the primary real-data check because it
-exposes the current build's powder-refinement failure modes much better than
-synthetic examples.
-
-## Scope
-
-Single-crystal and powder workflows sharing one refinement engine, for both
-nuclear and magnetic structures:
-
-- Load CIF structures, hkl reflection tables, powder patterns, and reduced
-  pair distribution functions (`.gr`/`.sq`/`.fq`).
-- Compute nuclear and magnetic structure factors and intensities.
-- Fit reduced pair distribution functions `G(r)` (neutron / X-ray) in real space
-  — "real-space Rietveld," single- and multi-phase, with element-pair partials.
-- Refine scale, coordinates, occupancies, displacement, lattice, background
-  (Chebyshev / Fourier / lin+log interpolation), peak width, microstructure
-  (crystallite size & microstrain, isotropic / uniaxial / generalized Mustrain),
-  and magnetic moments — with fixed/free states, bounds, and constraints.
-- Compare observed vs calculated, track refinement history, and export the
-  refinement — a one-click FullProf / GSAS-II cross-check bundle (control file
-  + data + instrument, with your original instrument and data files included
-  verbatim).
-- Write a **report** (Export ▾ → Report) for any technique: one self-contained
-  HTML page with the headline agreement factors, the fit figure, the refined
-  atomic structure with standard uncertainties, the magnetic structure (k,
-  magnetic space group, moments, projected figure) when there is one, every
-  parameter, and the refinement's diagnostics and conventions.
-- Save the whole session as a project file (`.materia.json`) and reopen it
-  later to continue — powder, single-crystal, and PDF sessions each in their
-  own validated block, so a file can never be read as the wrong technique.
-
-## Architecture in one paragraph
-
-A static web app (React + TypeScript + Vite) with strict layering and
-one-directional dependencies. `src/core/**` is **pure TypeScript** — no React,
-DOM, or workers — so every scientific function is pure and independently
-testable. UI components handle presentation only; long calculations run in Web
-Workers, and WebGPU kernels add f32 acceleration where the browser supports
-them, validated against the f64 CPU path and switched off from the header's GPU
-chip (WebAssembly is skipped). Full detail in
+Build, lint, the real-data regression, and the layering rules are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Documentation
 
-The full index, grouped by what you want to do, is [docs/README.md](docs/README.md).
-The most-used pages:
-
-- [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — how to run a refinement in the app, task by task
-- [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — what is supported, what is approximate, what is not there yet
-- [docs/COMPARISON.md](docs/COMPARISON.md) — features vs GSAS-II / Jana2020 / FullProf
-- [docs/VALIDATION.md](docs/VALIDATION.md) — what is tested, and against which external tools
-- [docs/ROADMAP.md](docs/ROADMAP.md) — **the single authoritative roadmap** (vision, foundations, milestones, agent layer)
-- [docs/AGENT_TOOLS.md](docs/AGENT_TOOLS.md) — agent tools, skills, and the LLM-guided refinement plan
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layers, source tree, conventions
-- [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md) — the project file format (save / reopen a session)
-- [docs/REFERENCES.md](docs/REFERENCES.md) — bibliography: papers, data sources, and GSAS-II (validation reference)
+The full index, grouped by what you want to do, is
+[docs/README.md](docs/README.md). Start with the
+[user guide](docs/USER_GUIDE.md), and read the
+[limitations](docs/LIMITATIONS.md) before you rely on a result.
 
 ## License
 
-[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only).
-
-This is a web application: if you run a modified version on a network server, you must make the complete corresponding source code available to its users (AGPL §13).
+[GNU Affero General Public License v3.0](LICENSE). If you run a modified
+version on a network server, you must make its source available to its users
+(AGPL §13).
 
 *This project is personal work, developed and maintained in my personal capacity.*
