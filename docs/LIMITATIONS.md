@@ -126,14 +126,17 @@ approximate, however plausible its output looks.
   from a CIF. Systematic absences are generated from the operations.
 - Magnetic subgroup candidates carry standard BNS/OG labels from a bundled
   ISO-MAG table (types I and III). A setting search also names candidates
-  written in other settings: axis permutations, origin shifts, and orthohexagonal
-  C-centred cells ([MAGNETIC_SYMMETRY.md](./MAGNETIC_SYMMETRY.md)).
+  written in other settings: axis permutations, origin shifts, orthohexagonal
+  C-centred cells, the tetragonal-I, hexagonal-R, monoclinic-C and triclinic
+  cells of an F cubic parent, and the hexagonal cell of a rhombohedral-axes or
+  primitive cubic parent ([MAGNETIC_SYMMETRY.md](./MAGNETIC_SYMMETRY.md)).
 - Representation analysis: irreps at k = 0 for every parent group, and at any k
   when the little group is abelian.
 
 **Not yet**
-- BNS/OG labels for type-II and type-IV (anti-translation) groups, and for
-  rhombohedral↔hexagonal and monoclinic cell-choice settings.
+- BNS/OG labels for type-II and type-IV (anti-translation) groups, for
+  monoclinic cell choices 2 and 3, for the reverse rhombohedral setting, and
+  for sub-cells of I- or C-centred parents.
 - Projective small representations, needed for non-abelian little groups at
   k ≠ 0.
 - Wyckoff letters beyond a curated set of groups. Multiplicities and site
