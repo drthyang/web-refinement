@@ -22,6 +22,7 @@ import { searchPropagationVector, satelliteMatchDeltas, kLabel, type KCandidate 
 import { classifyPropagation, describePropagation } from "@/core/magnetic/propagation";
 import type { AnnotatedExtraPeak } from "@/core/magnetic/extraPeaks";
 import { littleGroup } from "@/core/magnetic/magneticGroups";
+import { centringTranslations } from "@/core/crystal/symmetry";
 import { magneticOperationSignature as magOpsSignature } from "@/core/magnetic/operationSignature";
 import {
   magneticSubgroupLattice,
@@ -330,7 +331,10 @@ export function KSearchPanel({
   const [k, setAppliedK] = useState<Vec3>([0, 0, 0]);
   // Arms / commensurability of the applied k: decides whether the moment
   // parameters are real amplitudes or cosine + sine (quadrature) pairs.
-  const kClass = useMemo(() => classifyPropagation(k), [k]);
+  const kClass = useMemo(
+    () => classifyPropagation(k, { centrings: centringTranslations(structure.spaceGroup.operations) }),
+    [k, structure],
+  );
   const draftK: Vec3 = [parseKComponent(kText[0]), parseKComponent(kText[1]), parseKComponent(kText[2])];
   const draftPending = draftK.some((v, i) => Math.abs(v - k[i]!) > 1e-12);
 

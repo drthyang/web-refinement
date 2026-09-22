@@ -37,6 +37,7 @@ import { allowedMomentDirections, allowedFourierModes, quadratureOf, type Fourie
 import { magneticOrbitRepresentatives } from "@/core/crystal/cellExpansion";
 import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
 import { classifyPropagation, type PropagationClass } from "@/core/magnetic/propagation";
+import { centringTranslations } from "@/core/crystal/symmetry";
 
 export interface MagneticModelBuild {
   readonly magnetic: MagneticModel;
@@ -253,7 +254,9 @@ export function buildMagneticModel(
   const magnitudeTies: MagnitudeTie[] = [];
   // Two distinct arms ±k ⇒ complex coefficients: every mode gets a cosine and
   // a sine (quadrature) amplitude; one quadrature amplitude is the phase gauge.
-  const propagation = classifyPropagation(k);
+  // "Distinct" is judged against the parent's true reciprocal lattice: in a
+  // C-centred cell k = (½,0,0) has two arms (2k = (1,0,0) is not a C node).
+  const propagation = classifyPropagation(k, { centrings: centringTranslations(structure.spaceGroup.operations) });
   const fourier = propagation.twoArms;
   let phaseGauge: { parameterId: string } | undefined;
 

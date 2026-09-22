@@ -25,7 +25,7 @@
 
 import type { SymmetryOperation } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
-import { composeOperations, operationKey } from "@/core/crystal/symmetry";
+import { centringTranslations, composeOperations, isReciprocalLatticeVector, operationKey } from "@/core/crystal/symmetry";
 import {
   formatMagneticSymbol,
   identifyMagneticGroup,
@@ -223,20 +223,25 @@ export function transformK(op: SymmetryOperation, k: Vec3): Vec3 {
   ];
 }
 
-/** True if Rᵀ·k ≡ k modulo a reciprocal-lattice (integer) vector. */
-function leavesKInvariant(op: SymmetryOperation, k: Vec3, tol: number): boolean {
+/** True if Rᵀ·k ≡ k modulo a vector of the parent's reciprocal lattice Λ*. */
+function leavesKInvariant(op: SymmetryOperation, k: Vec3, centrings: readonly Vec3[], tol: number): boolean {
   const kp = transformK(op, k);
-  for (let i = 0; i < 3; i++) {
-    const diff = kp[i]! - k[i]!;
-    if (Math.abs(diff - Math.round(diff)) > tol) return false;
-  }
-  return true;
+  return isReciprocalLatticeVector([kp[0]! - k[0]!, kp[1]! - k[1]!, kp[2]! - k[2]!], centrings, tol);
 }
 
 /**
  * The little group (group of the wavevector) G_k: the operations of the parent
  * group whose rotation leaves k invariant modulo a reciprocal-lattice vector,
- * Rᵀ·k ≡ k (mod 1). For k = 0 this is the whole parent group.
+ * Rᵀ·k ≡ k (mod Λ*). For k = 0 this is the whole parent group.
+ *
+ * Λ* is the reciprocal lattice of the parent's **true** lattice, read off the
+ * centring translations in the operation list: for a centred cell it is a
+ * sublattice of ℤ³ (F: h,k,l all even or all odd; I: h+k+l even; C: h+k even;
+ * obverse R: −h+k+l ≡ 0 mod 3). Testing "mod ℤ³" instead would admit
+ * operations that carry k to another arm of its star — for MnO (Fm-3m,
+ * k = (½,½,½), the L point) the 4-fold axes map k to (½,−½,½) ≡ k + (0,−1,0),
+ * a ℤ³ vector but not an F reciprocal-lattice vector, and the little group
+ * would wrongly be all of m-3m instead of -3m.
  *
  * Reference: Bradley & Cracknell, *The Mathematical Theory of Symmetry in
  * Solids* (1972), §3.7 (the group of the wavevector).
@@ -246,7 +251,8 @@ export function littleGroup(
   k: Vec3,
   tol = 1e-4,
 ): SymmetryOperation[] {
-  return parentOps.filter((op) => leavesKInvariant(op, k, tol));
+  const centrings = centringTranslations(parentOps);
+  return parentOps.filter((op) => leavesKInvariant(op, k, centrings, tol));
 }
 
 /**

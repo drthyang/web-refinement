@@ -132,6 +132,9 @@ approximate, however plausible its output looks.
   primitive cubic parent ([MAGNETIC_SYMMETRY.md](./MAGNETIC_SYMMETRY.md)).
 - Representation analysis: irreps at k = 0 for every parent group, and at any k
   when the little group is abelian.
+- The little group of k, the one-arm/two-arm classification and the k-phase of
+  every lattice translation use the parent's own lattice, centring translations
+  included ([MAGNETIC_SYMMETRY.md](./MAGNETIC_SYMMETRY.md)).
 
 **Not yet**
 - BNS/OG labels for type-II and type-IV (anti-translation) groups, for
@@ -232,20 +235,31 @@ approximate, however plausible its output looks.
 - Symmetry tools: a search for k from magnetic-peak positions; the little group
   of k and its magnetic subgroups; independent sublattices where the little
   group splits an orbit; tied moments for ions sharing a site.
+- Centred parent cells (A, B, C, I, F, hexagonal R) with k ≠ 0. A centring
+  translation carries its phase e^{2πi k·t}: with phase −1 it is an
+  anti-translation of the parent cell (MnO's type-II order from Fm-3m with
+  k = ½½½), and with a complex phase k has two arms with cosine and sine
+  amplitudes (k = (½,0,0) in a C cell). Single-arm satellites H ± k need H in
+  the centred cell's reciprocal lattice.
 - mCIF (BNS) import and export. Moment components are given along the
   normalized crystal axes.
 - Checks: the cosine/sine formalism reproduces a brute-force sum over the
-  magnetic supercell; a simple antiferromagnet at k = (0, 0, ½) is recovered end
-  to end; at k = 0 the moment sizes match GSAS-II; and |F_M|² matches GSAS-II
-  reflection by reflection on the Mn₃Ga 350 K data.
+  magnetic supercell, for primitive and for C-, I- and F-centred parents; a
+  simple antiferromagnet at k = (0, 0, ½) is recovered end to end; MnO
+  (Fm-3m, k = ½½½) gives the -3m little group, m(r) = m₀·(−1)^{x+y+z} and
+  F-centred satellites; at k = 0 the moment sizes match GSAS-II; and |F_M|²
+  matches GSAS-II reflection by reflection on the Mn₃Ga 350 K data.
 
 **Approximate**
 - The magnetic form factor is spin-only ⟨j0⟩ everywhere: structure factors,
   the GPU kernel and magnetic PDF. The dipole correction with ⟨j2⟩, needed when
   the orbital moment matters (g ≠ 2), is not applied yet.
-- Satellite multiplicities are exact Laue-family sizes, which assumes equal
-  populations of the domains. Each family's |F_M|² is evaluated at one
-  representative reflection, not averaged over the family.
+- Satellite multiplicities count the members of a Laue family that are ±k
+  satellites in the parent's reciprocal lattice. Summed over the family, the
+  single-arm |F_M|² is the powder intensity for any population of the domains
+  of the star of k; the other members belong to other arms and are listed with
+  no weight. Each family's |F_M|² is evaluated at one of its arm members, not
+  averaged over the family.
 - The k-search ranks candidates by peak positions, not intensities, and it
   proposes commensurate k only (denominators 2, 3, 4 and 6). Type an
   incommensurate k in by hand.

@@ -41,12 +41,26 @@
  *    representative's, so every member of each parent family is expanded
  *    before ±k is added. For a Laue-invariant k the representative alone
  *    already spans its families and the cheaper path is taken.
+ *  - `multiplicity` counts the members of a family that are ±k satellites in
+ *    the parent's TRUE reciprocal lattice (H = Q ∓ k ∈ Λ*), and the
+ *    representative is one of them. The other members are satellites of other
+ *    arms of the star of k — in a centred cell that includes the
+ *    centring-extinct copies, e.g. (³⁄₂,½,½) for k = (½,½,½) in an F cell — and
+ *    a single-arm structure has |F_M|² = 0 there. Summing every member's
+ *    |F_M|² is the powder intensity for ANY domain population of the star
+ *    (each domain's structure factor is the representative's structure factor
+ *    rotated, and the family is closed under those rotations), so it is the
+ *    arm members that carry it. A family with no arm member is still listed,
+ *    with multiplicity 0, so position ticks show every place the star can
+ *    scatter. For a Laue-invariant k in a primitive cell every member is an
+ *    arm member and this is the family size.
  */
 
 import type { UnitCell, SpaceGroup } from "@/core/crystal/types";
 import type { Mat3, Vec3 } from "@/core/math/types";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { dSpacing } from "@/core/crystal/unitCell";
+import { centringTranslations, isReciprocalLatticeVector } from "@/core/crystal/symmetry";
 
 export interface SatellitePosition {
   readonly h: number;
@@ -92,14 +106,18 @@ const idxKey = (v: Vec3): string => v.map((x) => (Math.abs(x) < 1e-9 ? 0 : x).to
  * rotations plus Friedel. Returns the member keys (size = multiplicity) and a
  * canonical family key (the lexicographically greatest member string).
  */
-function laueFamily(rots: readonly Mat3[], h: Vec3): { members: Set<string>; key: string } {
-  const members = new Set<string>();
+function laueFamily(rots: readonly Mat3[], h: Vec3): { members: Vec3[]; key: string } {
+  const members: Vec3[] = [];
+  const seen = new Set<string>();
   let key = "";
   for (const R of rots) {
     const t = transformIndex(R, h);
     for (const m of [t, [-t[0], -t[1], -t[2]] as Vec3]) {
-      const s = idxKey([m[0] === 0 ? 0 : m[0], m[1] === 0 ? 0 : m[1], m[2] === 0 ? 0 : m[2]]);
-      members.add(s);
+      const v: Vec3 = [m[0] === 0 ? 0 : m[0], m[1] === 0 ? 0 : m[1], m[2] === 0 ? 0 : m[2]];
+      const s = idxKey(v);
+      if (seen.has(s)) continue;
+      seen.add(s);
+      members.push(v);
       if (s > key) key = s;
     }
   }
@@ -141,16 +159,35 @@ export function magneticSatellites(
   }
 
   const rots = pointGroupRotations(spaceGroup);
-  const seenFamilies = new Set<string>();
+  const centrings = centringTranslations(spaceGroup.operations);
+  /** A ±k satellite of THIS arm: Q ∓ k lies in the parent's reciprocal lattice. */
+  const isArmMember = (q: Vec3): boolean =>
+    isReciprocalLatticeVector([q[0] - k[0]!, q[1] - k[1]!, q[2] - k[2]!], centrings) ||
+    isReciprocalLatticeVector([q[0] + k[0]!, q[1] + k[1]!, q[2] + k[2]!], centrings);
+  /** Family key → index in `out`, or −1 for a family outside the d-window. */
+  const familyIndex = new Map<string, number>();
+  const repIsArm: boolean[] = [];
   const push = (h: number, kk: number, l: number): void => {
     const idx: Vec3 = [h, kk, l];
     const fam = laueFamily(rots, idx);
-    if (seenFamilies.has(fam.key)) return;
-    seenFamilies.add(fam.key);
-    const d = dSpacing(cell, h, kk, l);
-    if (Number.isFinite(d) && d > 0 && d >= dMin && d <= dMax) {
-      out.push({ h, k: kk, l, d, multiplicity: fam.members.size });
+    const known = familyIndex.get(fam.key);
+    if (known !== undefined) {
+      // Listed already: if its representative was a centring-extinct member,
+      // promote this arm member so |F_M|² is evaluated where it is nonzero.
+      if (known >= 0 && !repIsArm[known] && isArmMember(idx)) {
+        out[known] = { ...out[known]!, h, k: kk, l };
+        repIsArm[known] = true;
+      }
+      return;
     }
+    const d = dSpacing(cell, h, kk, l);
+    if (!(Number.isFinite(d) && d > 0 && d >= dMin && d <= dMax)) {
+      familyIndex.set(fam.key, -1);
+      return;
+    }
+    familyIndex.set(fam.key, out.length);
+    repIsArm.push(isArmMember(idx));
+    out.push({ h, k: kk, l, d, multiplicity: fam.members.filter(isArmMember).length });
   };
 
   // The pure G = (000) satellites at ±k (one family when the arms are

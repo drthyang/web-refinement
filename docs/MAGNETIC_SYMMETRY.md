@@ -18,7 +18,7 @@ the magnetic page.
 
 | Term | Meaning |
 | --- | --- |
-| Little group G_k | The operations of the parent group G with Rᵀ·k ≡ k modulo a reciprocal-lattice vector. Their distinct rotations form the co-group Ḡ_k. |
+| Little group G_k | The operations of the parent group G with Rᵀ·k ≡ k modulo a vector of the parent's reciprocal lattice. For a centred cell that lattice is a sublattice of the integer vectors, so MnO (Fm-3m, k = ½½½) has G_k = -3m, not m-3m. Their distinct rotations form the co-group Ḡ_k. |
 | Grey group G_k·1′ | G_k with and without time reversal 1′: the paramagnetic symmetry. |
 | Types I–IV | I: no time reversal. II: grey. III: time reversal on half the operations. IV: has an anti-translation, a lattice translation with time reversal. |
 | Isotropy subgroup | The operations, with or without time reversal, that leave an order parameter unchanged. |
@@ -34,6 +34,20 @@ enumeration keeps the parent lattice, each candidate is a pair (H, θ):
 - H is a subgroup of G_k with every lattice and centring translation.
 - θ: H → {±1} is a homomorphism that marks time reversal. The trivial θ gives
   type I, and any other θ gives type III.
+
+**Centred parents.** A lattice translation t multiplies a site's Fourier
+coefficient by e^{−2πi k·t}, and a centring translation is a lattice
+translation. Every consumer of the k-phase (allowed moments, cell expansion,
+the structure factor, Route B) takes the returning translation relative to the
+representative of the operation's rotation class and removes the centring part
+([`centringOffsets`](../src/core/crystal/symmetry.ts)). For MnO, e^{2πi k·t} = −1
+on each F centring: the centrings are anti-translations of the parent cell,
+Mn(0,½,½) is antiparallel to Mn(0,0,0), and a single-arm satellite H + k needs H
+in the F reciprocal lattice, so (³⁄₂,½,½) belongs to another arm of the star.
+Route B counts one atom per primitive cell for the same reason. Whether k has
+one arm or two is decided on that lattice too: k = (½,0,0) is self-conjugate in
+a primitive cell and a two-arm k in a C-centred one
+([`propagation.ts`](../src/core/magnetic/propagation.ts)).
 
 Its index in the grey group is 2·|Ḡ_k| / |H̄|, where H̄ is the co-group of H. The
 largest candidates have index 2.
@@ -51,6 +65,10 @@ count.
   domains ([`subgroupLattice.test.ts`](../src/core/magnetic/subgroupLattice.test.ts)).
 - At k = 0, P2₁/m gives four index-2 candidates, including the Mn₃Ga ground
   state P2₁′/m′ ([`magneticGroups.test.ts`](../src/core/magnetic/magneticGroups.test.ts)).
+- MnO (Fm-3m, k = ½½½): G_k has 12 rotations, the -3m′ decoration allows only
+  m ∥ [111], m ∥ [001] lives in 2′/m′, the 2×2×2 expansion obeys
+  m(r) = m₀·(−1)^{x+y+z}, and the k-formalism |F_M|² matches the brute-force
+  supercell sum ([`centredLattice.test.ts`](../src/core/magnetic/centredLattice.test.ts)).
 
 **Not yet**
 - Type-IV candidates, planned with the star of k. They turn some lattice
@@ -61,8 +79,11 @@ count.
 
 An operation g sends an axial moment m to θ_g·det(R_g)·R_g·m. A site's allowed
 moments solve e^{2πi k·L}·θ_g·det(R_g)·R_g·m = m for each g that maps the site
-onto itself up to a lattice translation L. The null space gives the refinable
-modes ([`allowedMoments.ts`](../src/core/magnetic/allowedMoments.ts)).
+onto itself up to a lattice translation L. L is a vector of the parent's true
+lattice, so an image on the site's own centred copy counts, and the centring
+part of g is removed from L because its phase belongs to the lattice. The null
+space gives the refinable modes
+([`allowedMoments.ts`](../src/core/magnetic/allowedMoments.ts)).
 
 For distinct ±k arms, the condition applies to the Fourier coefficient
 S = ½(M^cos + i·M^sin). A mode with a nonzero sine part is then a helical or
@@ -303,8 +324,11 @@ it names the parent-cell group.
 For AWO₄ (P2/c, k = (½, 0, 0)), the group has 4 coset representatives, 2 centring
 translations and a 9-site asymmetric unit. The file re-expands through the app's
 parser to the arrangement on screen
-([`supercellGroup.test.ts`](../src/core/magnetic/supercellGroup.test.ts)). Reading
-it in VESTA, Bilbao or GSAS-II is not yet tested.
+([`supercellGroup.test.ts`](../src/core/magnetic/supercellGroup.test.ts)). For
+MnO the 2×2×2 cell has 32 centring translations, 16 of them anti-translations,
+with 12 representatives for m ∥ [111] and 4 for m ∥ [001]
+([`centredLattice.test.ts`](../src/core/magnetic/centredLattice.test.ts)). Reading
+these files in VESTA, Bilbao or GSAS-II is not yet tested.
 
 ## Open work (in order)
 
@@ -313,7 +337,9 @@ it in VESTA, Bilbao or GSAS-II is not yet tested.
 2. **Projective small representations** for non-abelian little co-groups at a
    zone-boundary k ≠ 0 (Bradley & Cracknell 1972, Ch. 3–4).
 3. **Type-IV groups.** Anti-translation candidates with the star of k and its
-   domains (phase B3 of
+   domains. A centring translation whose phase e^{2πi k·t} is −1 is already an
+   anti-translation of the parent cell; enlarging a primitive cell is not
+   (phase B3 of
    [PLAN_SUBGROUPS_AND_INCOMMENSURATE.md](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md)),
    and type-II and type-IV rows in the label table.
 4. **Conjugate-pair irreps.** Their combinations and type-IV isotropy groups, and

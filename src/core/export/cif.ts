@@ -32,6 +32,7 @@ import { expandMagneticSupercell, momentAnchorPosition, type SupercellAtom } fro
 import { magneticCellGroup, type MagneticCellGroup } from "@/core/magnetic/supercellGroup";
 import { identifyMagneticGroupAnySetting } from "@/core/magnetic/bnsOg";
 import { classifyPropagation, describePropagation } from "@/core/magnetic/propagation";
+import { centringTranslations } from "@/core/crystal/symmetry";
 
 const EIGHT_PI2 = 8 * Math.PI * Math.PI;
 
@@ -537,7 +538,7 @@ export function magneticStructureToMcif(
   if (sup) return mcifSupercell(structure, magnetic, sup, k, block, opts);
 
   const aug = withOrbitSites(structure, magnetic);
-  const cls = classifyPropagation(k);
+  const cls = classifyPropagation(k, { centrings: centringTranslations(structure.spaceGroup.operations) });
   const parts = [
     HEADER,
     `# propagation vector k = (${k[0]}, ${k[1]}, ${k[2]}) — ${describePropagation(cls)}`,

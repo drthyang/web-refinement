@@ -6,8 +6,10 @@
  *
  *  1. **Is k = 0?** The magnetic cell is the nuclear cell and magnetic
  *     intensity sits on the nuclear reflections.
- *  2. **Is k self-conjugate (−k ≡ k modulo a reciprocal-lattice vector, i.e.
- *     every component of 2k is an integer: k = 0, (½,0,0), (½,½,½), …)?** Then
+ *  2. **Is k self-conjugate (−k ≡ k modulo a reciprocal-lattice vector of the
+ *     PARENT lattice, i.e. 2k ∈ Λ*: k = 0, (½,0,0), (½,½,½), … in a primitive
+ *     cell — but in a centred cell Λ* is a sublattice of ℤ³, so k = (½,0,0) is
+ *     a two-arm k in a C lattice and (0,0,½) in an I lattice)?** Then
  *     the +k and −k arms are the SAME reflection set, the Fourier coefficient
  *     S_j of every atom must be real, the real-space moment is
  *     m_j(n) = M_j·cos(2π k·n) = ±M_j with **S_j = M_j** (one arm), and the
@@ -38,6 +40,7 @@
  */
 
 import type { Vec3 } from "@/core/math/types";
+import { isReciprocalLatticeVector } from "@/core/crystal/symmetry";
 
 export type PropagationKind = "zero" | "commensurate" | "incommensurate";
 
@@ -72,6 +75,12 @@ export interface ClassifyOptions {
   readonly maxDenominator?: number;
   /** Tolerance on |n·kᵢ − round(n·kᵢ)| (default 1e-4). */
   readonly tolerance?: number;
+  /**
+   * Centring translations of the parent lattice (`centringTranslations`). The
+   * reciprocal lattice of a centred cell is a sublattice of ℤ³, so −k ≡ k
+   * needs 2k in THAT lattice. Empty (a primitive lattice) by default.
+   */
+  readonly centrings?: readonly Vec3[];
 }
 
 /**
@@ -156,9 +165,13 @@ export function jointDenominators(
   };
 }
 
-/** True when every component of 2k is an integer (within `tol`), i.e. −k ≡ k. */
-export function isSelfConjugate(k: Vec3, tol = 1e-6): boolean {
-  return k.every((c) => Math.abs(2 * c - Math.round(2 * c)) < tol);
+/**
+ * True when −k ≡ k modulo the reciprocal lattice of the parent: 2k is an
+ * integer vector AND, for a centred cell, lies in its reciprocal sublattice
+ * (2k·t ∈ ℤ for every centring translation t).
+ */
+export function isSelfConjugate(k: Vec3, centrings: readonly Vec3[] = [], tol = 1e-6): boolean {
+  return isReciprocalLatticeVector([2 * k[0]!, 2 * k[1]!, 2 * k[2]!], centrings, tol);
 }
 
 /**
@@ -166,15 +179,15 @@ export function isSelfConjugate(k: Vec3, tol = 1e-6): boolean {
  * coefficient of the +k satellite: ½ when ±k are distinct arms, 1 when k is
  * self-conjugate (k = 0 included).
  */
-export function fourierArmFactor(k: Vec3, tol = 1e-6): 0.5 | 1 {
-  return isSelfConjugate(k, tol) ? 1 : 0.5;
+export function fourierArmFactor(k: Vec3, centrings: readonly Vec3[] = [], tol = 1e-6): 0.5 | 1 {
+  return isSelfConjugate(k, centrings, tol) ? 1 : 0.5;
 }
 
 /** Classify a propagation vector (see the module doc). */
 export function classifyPropagation(k: Vec3, options: ClassifyOptions = {}): PropagationClass {
   const tol = options.tolerance ?? 1e-4;
   const isZero = k.every((c) => Math.abs(c) < tol);
-  const selfConjugate = isSelfConjugate(k, tol);
+  const selfConjugate = isSelfConjugate(k, options.centrings ?? [], tol);
   const supercell = kDenominators(k, options)?.denominators ?? null;
   return {
     kind: isZero ? "zero" : supercell ? "commensurate" : "incommensurate",

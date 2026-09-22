@@ -26,7 +26,7 @@ import type { Complex, Mat3, Vec3 } from "@/core/math/types";
 import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
 import type { MagneticCandidate } from "@/core/magnetic/magneticGroups";
 import { mulMat, determinant, IDENTITY3 } from "@/core/math/mat3";
-import { applyOperation } from "@/core/crystal/symmetry";
+import { applyOperation, centringOffsets, centringTranslations, isLatticeVector, snapLatticeVector } from "@/core/crystal/symmetry";
 import { magneticRepresentationCharacter, irrepMultiplicity } from "@/core/magnetic/magneticRepresentation";
 import { pointGroupIrreps } from "@/core/magnetic/pointGroupIrreps";
 
@@ -301,13 +301,20 @@ export function projectIrrepModes(
     [{ re: 0, im: 0 }, { re: 0, im: 0 }, { re: 0, im: 0 }],
   ].map((row) => row.map((c) => ({ ...c })));
 
+  const centrings = centringTranslations(littleGroupOps);
+  const offsets = centringOffsets(littleGroupOps);
   littleGroupOps.forEach((op, gi) => {
     const image = applyOperation(op, site.position);
-    const L: Vec3 = [image[0] - site.position[0], image[1] - site.position[1], image[2] - site.position[2]];
-    const isInt = L.every((v) => Math.abs(v - Math.round(v)) < 1e-3);
-    if (!isInt) return; // op does not fix the reference site → no contribution
+    const d: Vec3 = [image[0] - site.position[0], image[1] - site.position[1], image[2] - site.position[2]];
+    // The op must fix the reference site modulo the TRUE lattice (centrings
+    // included); the k-phase uses the lattice vector back to the image of the
+    // op's rotation-class representative (see `centringOffsets`).
+    if (!isLatticeVector(d, centrings)) return; // op does not fix the reference site → no contribution
+    const c = offsets[gi]!;
+    const Ls = snapLatticeVector(d);
+    const L: Vec3 = [Ls[0] - c[0]!, Ls[1] - c[1]!, Ls[2] - c[2]!];
     const chi = irrep.characters[gi] ?? { re: 1, im: 0 };
-    const phase = 2 * Math.PI * (k[0] * Math.round(L[0]) + k[1] * Math.round(L[1]) + k[2] * Math.round(L[2]));
+    const phase = 2 * Math.PI * (k[0] * L[0] + k[1] * L[1] + k[2] * L[2]);
     // weight w = conj(χ)·e^{iφ}
     const cphi = Math.cos(phase), sphi = Math.sin(phase);
     const wRe = chi.re * cphi + chi.im * sphi;

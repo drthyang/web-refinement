@@ -233,3 +233,150 @@ export function isReflectionAbsent(
   }
   return false;
 }
+
+// ---------------------------------------------------------------------------
+// Centred lattices
+//
+// A conventional centred cell (A, B, C, I, F, or R in the hexagonal setting)
+// lists its centring translations as identity-rotation operations, so the
+// operation list is G modulo the INTEGER translations ℤ³, not modulo the true
+// lattice Λ = ℤ³ + {centrings}. Everything that depends on the lattice — the
+// reciprocal lattice Λ* (a sublattice of ℤ³), the phase e^{2πi k·t} a lattice
+// translation t carries in a k ≠ 0 magnetic structure, and "the same site
+// modulo a lattice translation" — must use Λ, not ℤ³. These helpers are the one
+// place that knowledge lives.
+// ---------------------------------------------------------------------------
+
+const CENTRING_TOL = 1e-6;
+
+/** Snap to the 1/12 grid every crystallographic translation lives on (0, ¼, ⅓, ½, ⅔, ¾ …). */
+function snap12(v: number): number {
+  const r = Math.round(v * 12) / 12;
+  return Math.abs(v - r) < 1e-3 ? (r === 0 ? 0 : r) : v;
+}
+
+function snapWrap(v: number): number {
+  const w = snap12(v - Math.floor(v));
+  return w > 1 - CENTRING_TOL || w < CENTRING_TOL ? 0 : w;
+}
+
+/**
+ * A lattice vector with its components snapped to the 1/12 grid: a returning
+ * translation computed as a difference of refined coordinates (0.6667 − 0.3333)
+ * must enter a k-phase as exactly ⅓, not 0.3334, or cos/sin of the phase
+ * leave 1e-4 residues where the constraint machinery expects exact zeros.
+ */
+export function snapLatticeVector(d: Vec3): Vec3 {
+  return [snap12(d[0]!), snap12(d[1]!), snap12(d[2]!)];
+}
+
+function isIdentityRotation(R: Mat3): boolean {
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (R[i]![j] !== (i === j ? 1 : 0)) return false;
+  return true;
+}
+
+const centringCache = new WeakMap<readonly SymmetryOperation[], Vec3[]>();
+
+/**
+ * Centring translations of a complete operation list: the non-zero
+ * translations (mod 1) of its identity-rotation operations — (0,½,½), (½,0,½),
+ * (½,½,0) for F; (½,½,½) for I; (½,½,0) for C; (⅔,⅓,⅓), (⅓,⅔,⅔) for an
+ * obverse R in the hexagonal setting. Empty for a primitive lattice, and for a
+ * list holding only coset representatives.
+ *
+ * Only UNPRIMED translations count: a primed identity-rotation operation is an
+ * anti-translation of a black-and-white (type-IV) magnetic group, a genuine
+ * group element with θ = −1 and not a translation of the magnetic lattice —
+ * it stays a stabilizer element in the moment constraints and gets no lattice
+ * phase.
+ */
+export function centringTranslations(ops: readonly SymmetryOperation[]): Vec3[] {
+  const cached = centringCache.get(ops);
+  if (cached) return cached;
+  const out: Vec3[] = [];
+  for (const op of ops) {
+    if (!isIdentityRotation(op.rotation) || (op.timeReversal ?? 1) !== 1) continue;
+    const t: Vec3 = [snapWrap(op.translation[0]!), snapWrap(op.translation[1]!), snapWrap(op.translation[2]!)];
+    if (t[0] === 0 && t[1] === 0 && t[2] === 0) continue;
+    if (!out.some((u) => almostEqualFractional(u, t))) out.push(t);
+  }
+  centringCache.set(ops, out);
+  return out;
+}
+
+/**
+ * True when the direct-space vector `d` is a lattice translation of the
+ * (possibly centred) lattice: an integer vector, or an integer vector plus a
+ * centring translation.
+ */
+export function isLatticeVector(d: Vec3, centrings: readonly Vec3[], tol = 1e-3): boolean {
+  const f = wrapFractional(d);
+  if (almostEqualFractional(f, [0, 0, 0], tol)) return true;
+  return centrings.some((t) => almostEqualFractional(f, t, tol));
+}
+
+/**
+ * True when the reciprocal-space vector `v` (conventional reciprocal units)
+ * belongs to the reciprocal lattice Λ* of the centred cell: integer components
+ * with v·t an integer for every centring translation t — F: h, k, l all even
+ * or all odd; I: h+k+l even; C: h+k even; obverse R: −h+k+l ≡ 0 (mod 3). For a
+ * primitive lattice this is just "integer".
+ */
+export function isReciprocalLatticeVector(v: Vec3, centrings: readonly Vec3[], tol = 1e-6): boolean {
+  for (let i = 0; i < 3; i++) if (Math.abs(v[i]! - Math.round(v[i]!)) > tol) return false;
+  for (const t of centrings) {
+    const p = v[0]! * t[0]! + v[1]! * t[1]! + v[2]! * t[2]!;
+    if (Math.abs(p - Math.round(p)) > tol) return false;
+  }
+  return true;
+}
+
+const offsetCache = new WeakMap<readonly SymmetryOperation[], Vec3[]>();
+
+/** Lexicographic order of two wrapped translations, with a tolerance. */
+function translationBefore(a: Vec3, b: Vec3): boolean {
+  for (let i = 0; i < 3; i++) {
+    const d = a[i]! - b[i]!;
+    if (Math.abs(d) > CENTRING_TOL) return d < 0;
+  }
+  return false;
+}
+
+/**
+ * The centring offset c(g) of every operation of the list: the centring
+ * translation by which g differs from the **representative** of its rotation
+ * class, g = {I|c(g)}·rep (mod ℤ³). The representative is the class member
+ * with the lexicographically smallest wrapped translation — the (0,0,0)+ block
+ * operation of an ITA-ordered list — so the choice does not depend on list
+ * order and agrees between a parent list, its little group, and a magnetic
+ * candidate built from it. Zero for every operation of a primitive group.
+ * Classes are keyed by rotation AND θ, so two members of a class differ by an
+ * unprimed translation (g·rep⁻¹ has θ = +1): an anti-translation of a
+ * black-and-white group never becomes an offset.
+ *
+ * Why this matters: in a k ≠ 0 structure a lattice translation t multiplies a
+ * site's Fourier coefficient by e^{−2πi k·t}. The integer part of a
+ * translation is handled through the returning lattice translation of an
+ * image; the centring part is only visible as this offset, so every consumer
+ * of the k-phase (allowed moments, cell expansion, the structure factor, the
+ * representation analysis) subtracts c(g) from the returning translation.
+ */
+export function centringOffsets(ops: readonly SymmetryOperation[]): Vec3[] {
+  const cached = offsetCache.get(ops);
+  if (cached) return cached;
+  const wrapped = ops.map((op) => [snapWrap(op.translation[0]!), snapWrap(op.translation[1]!), snapWrap(op.translation[2]!)] as Vec3);
+  const classKey = (op: SymmetryOperation): string =>
+    `${op.rotation.map((row) => row.map((v) => Math.round(v)).join(",")).join(";")}|${op.timeReversal ?? 1}`;
+  const rep = new Map<string, Vec3>();
+  ops.forEach((op, i) => {
+    const key = classKey(op);
+    const cur = rep.get(key);
+    if (!cur || translationBefore(wrapped[i]!, cur)) rep.set(key, wrapped[i]!);
+  });
+  const out = ops.map((op, i) => {
+    const r = rep.get(classKey(op))!;
+    return [snapWrap(wrapped[i]![0] - r[0]), snapWrap(wrapped[i]![1] - r[1]), snapWrap(wrapped[i]![2] - r[2])] as Vec3;
+  });
+  offsetCache.set(ops, out);
+  return out;
+}

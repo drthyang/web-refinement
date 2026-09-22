@@ -18,7 +18,7 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import type { MagneticFormFactorTable } from "@/core/scattering/types";
 import { add, expι, scale as cscale, ZERO } from "@/core/math/complex";
 import { dSpacing } from "@/core/crystal/unitCell";
-import { applyOperation } from "@/core/crystal/symmetry";
+import { applyOperation, centringOffsets, centringTranslations, isReciprocalLatticeVector } from "@/core/crystal/symmetry";
 import { momentAnchorPosition } from "@/core/crystal/cellExpansion";
 import { magneticTable } from "@/core/scattering/magnetic";
 import { crystalComponentsToCartesian, perpendicularMoment, qCartesian } from "@/core/magnetic/moment";
@@ -41,14 +41,22 @@ function rotateAxial(r: readonly (readonly number[])[], axial: number, comps: Ve
  * Which arm of the star {+k, −k} a (generally fractional) index belongs to:
  * +1 when h − k is a reciprocal-lattice vector (a +k satellite H + k), −1 when
  * h + k is (a −k satellite H − k), 0 when neither (a nuclear index, a higher
- * harmonic, or a foreign k). A self-conjugate k satisfies both; it returns +1
- * there (the coefficient is real anyway).
+ * harmonic, a foreign k — or, in a centred cell, a satellite of another arm of
+ * the star: (³⁄₂,½,½) − (½,½,½) = (1,0,0) is not an F reciprocal-lattice
+ * vector). `centrings` are the parent's centring translations; without them
+ * the test is against ℤ³ (a primitive cell). A self-conjugate k satisfies
+ * both; it returns +1 there (the coefficient is real anyway).
  */
-export function satelliteArm(h: number, k: number, l: number, kVec: Vec3, tol = 1e-6): 1 | -1 | 0 {
-  const isLattice = (a: number, b: number, c: number): boolean =>
-    Math.abs(a - Math.round(a)) < tol && Math.abs(b - Math.round(b)) < tol && Math.abs(c - Math.round(c)) < tol;
-  if (isLattice(h - kVec[0], k - kVec[1], l - kVec[2])) return 1;
-  if (isLattice(h + kVec[0], k + kVec[1], l + kVec[2])) return -1;
+export function satelliteArm(
+  h: number,
+  k: number,
+  l: number,
+  kVec: Vec3,
+  tol = 1e-6,
+  centrings: readonly Vec3[] = [],
+): 1 | -1 | 0 {
+  if (isReciprocalLatticeVector([h - kVec[0], k - kVec[1], l - kVec[2]], centrings, tol)) return 1;
+  if (isReciprocalLatticeVector([h + kVec[0], k + kVec[1], l + kVec[2]], centrings, tol)) return -1;
   return 0;
 }
 
@@ -138,7 +146,10 @@ export interface ExpandedMagneticAtom {
 export function expandMagneticAtoms(structure: StructureModel, magnetic: MagneticModel): ExpandedMagneticAtom[] {
   const ops = magnetic.operations ?? structure.spaceGroup.operations;
   const dedup = magnetic.operations !== undefined;
-  const arm = fourierArmFactor(magnetic.propagation[0] ?? [0, 0, 0]);
+  const kVec = magnetic.propagation[0] ?? [0, 0, 0];
+  const centrings = centringTranslations(structure.spaceGroup.operations);
+  const offsets = centringOffsets(ops);
+  const arm = fourierArmFactor(kVec, centrings);
   const out: ExpandedMagneticAtom[] = [];
   for (const moment of magnetic.moments) {
     const site = structure.sites.find((st) => st.label === moment.siteLabel);
@@ -152,7 +163,8 @@ export function expandMagneticAtoms(structure: StructureModel, magnetic: Magneti
     const adpAtRep: DisplacementParameters = site.adp.kind === "anisotropic"
       ? { kind: "anisotropic", uAniso: rotateUAniso(site.adp.uAniso, opToPosition(structure, site.position, basePos).rotation) }
       : site.adp;
-    for (const op of ops) {
+    for (let gi = 0; gi < ops.length; gi++) {
+      const op = ops[gi]!;
       const p = applyOperation(op, basePos);
       if (seen) {
         const wrapped: Vec3 = [((p[0] % 1) + 1) % 1, ((p[1] % 1) + 1) % 1, ((p[2] % 1) + 1) % 1];
@@ -171,12 +183,27 @@ export function expandMagneticAtoms(structure: StructureModel, magnetic: Magneti
       const axial = determinant(r) * (op.timeReversal ?? 1);
       const rotatedComps = rotateAxial(r, axial, moment.components);
       const cosCart = moment.frame === "cartesian" ? rotatedComps : crystalComponentsToCartesian(structure.cell, rotatedComps);
-      const momentCart: Vec3 = arm === 1 ? cosCart : [cosCart[0] * arm, cosCart[1] * arm, cosCart[2] * arm];
+      let momentCart: Vec3 = arm === 1 ? cosCart : [cosCart[0] * arm, cosCart[1] * arm, cosCart[2] * arm];
       let sinMomentCart: Vec3 | undefined;
       if (sinComps) {
         const rotatedSin = rotateAxial(r, axial, sinComps);
         const sc = moment.frame === "cartesian" ? rotatedSin : crystalComponentsToCartesian(structure.cell, rotatedSin);
         sinMomentCart = [sc[0] * arm, sc[1] * arm, sc[2] * arm];
+      }
+      // The operation's centring part c is a lattice translation and multiplies
+      // the image's coefficient by e^{−2πi k·c} (mirrors magneticStructureFactor;
+      // ±1 for a self-conjugate k, a rotation of the (Re, Im) pair otherwise).
+      const c = offsets[gi]!;
+      const phi = -TWO_PI * (kVec[0]! * c[0]! + kVec[1]! * c[1]! + kVec[2]! * c[2]!);
+      if (c[0] !== 0 || c[1] !== 0 || c[2] !== 0) {
+        const cp = Math.cos(phi);
+        const sp = Math.abs(Math.sin(phi)) < 1e-12 ? 0 : Math.sin(phi);
+        const a = momentCart;
+        const b: Vec3 = sinMomentCart ?? [0, 0, 0];
+        momentCart = [a[0] * cp - b[0] * sp, a[1] * cp - b[1] * sp, a[2] * cp - b[2] * sp];
+        sinMomentCart = sinMomentCart || sp !== 0
+          ? [a[0] * sp + b[0] * cp, a[1] * sp + b[1] * cp, a[2] * sp + b[2] * cp]
+          : undefined;
       }
       const adp: DisplacementParameters = adpAtRep.kind === "anisotropic"
         ? { kind: "anisotropic", uAniso: rotateUAniso(adpAtRep.uAniso, r) }
@@ -228,7 +255,9 @@ export function magneticStructureFactor(
   // the coefficients of orbit images (S_j' = θ·det R·R·S_j·e^{2πi k·n_g}) is
   // carried by the UNWRAPPED image position below: e^{2πi (H+k)·(r + n_g)}.
   const kVec = magnetic.propagation[0] ?? [0, 0, 0];
-  const arm = fourierArmFactor(kVec);
+  const centrings = centringTranslations(structure.spaceGroup.operations);
+  const offsets = centringOffsets(ops);
+  const arm = fourierArmFactor(kVec, centrings);
   // Which arm is this index? The −k satellite (H − k) scatters with the
   // CONJUGATE coefficient S* = ½(M^cos − i·M^sin): the lattice phases of the
   // orbit images conjugate on their own through the index (e^{2πi(H−k)·n_g}),
@@ -240,7 +269,7 @@ export function magneticStructureFactor(
   // single-crystal dataset. The index tolerance is loose (1e-3) because
   // satellite indices in reflection files are written with few decimals.
   const isK0 = kVec[0] === 0 && kVec[1] === 0 && kVec[2] === 0;
-  const armSign = isK0 ? 1 : satelliteArm(h, k, l, kVec, 1e-3);
+  const armSign = isK0 ? 1 : satelliteArm(h, k, l, kVec, 1e-3, centrings);
   if (armSign === 0) return { vector: [ZERO, ZERO, ZERO], squared: 0 };
   const conjugate = arm === 0.5 && armSign === -1;
 
@@ -272,7 +301,8 @@ export function magneticStructureFactor(
       ? rotateUAniso(site.adp.uAniso, opToPosition(structure, site.position, basePos).rotation)
       : null;
 
-    for (const op of ops) {
+    for (let gi = 0; gi < ops.length; gi++) {
+      const op = ops[gi]!;
       const p = applyOperation(op, basePos);
       if (seen) {
         // One atom per unique position in the cell (no special-position
@@ -305,7 +335,14 @@ export function magneticStructureFactor(
           : crystalComponentsToCartesian(structure.cell, rotatedComps);
       const mPerp = perpendicularMoment(mCart, q);
 
-      const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
+      // The operation's centring part c is a lattice translation of the
+      // parent: the image's coefficient carries e^{−2πi k_arm·c} (k_arm = ±k
+      // for the ±k satellite), so the centring copies of an F/I/C/R cell add
+      // up to the nuclear-like factor Σ e^{2πi H·c} and a single-arm satellite
+      // H + k needs H in the centred cell's reciprocal lattice — (½,½,½) but
+      // not (³⁄₂,½,½) for MnO. Zero for a primitive parent.
+      const c = offsets[gi]!;
+      const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2] - armSign * (kVec[0]! * c[0]! + kVec[1]! * c[1]! + kVec[2]! * c[2]!));
       const ph = expι(phase);
       const dw = isoDw ?? anisotropicDebyeWaller(structure.cell, rotateUAniso(anisoU!, r), h, k, l);
       const w = MAGNETIC_PREFACTOR * site.occupancy * fMag * dw * arm;
