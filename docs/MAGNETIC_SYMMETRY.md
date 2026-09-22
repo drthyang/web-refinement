@@ -146,15 +146,32 @@ its primed operations, because a wrong symbol is worse than none.
   trigonal groups, origin choice 2.
 
 **Setting search.** Subgroups often come in non-standard settings, such as a
-2-fold axis along a or an off-origin inversion centre. The search applies ITA
-basis changes, R′ = P⁻¹RP and t′ = P⁻¹(Rp + t − p) (ITA Vol. A §1.5), and still
-requires an exact match. It tries the 24 proper signed axis permutations, alone
-and composed with three orthohexagonal C-centred cells (det P = 2), each with
-¼-grid origin shifts. The label then reports the transformation used.
+2-fold axis along a, an off-origin inversion centre, or a tetragonal subgroup
+still written in its cubic parent's F cell. The search applies ITA basis
+changes, R′ = P⁻¹RP and t′ = P⁻¹(Rp + t − p) (ITA Vol. A §1.5), and still
+requires an exact match. It tries three families of cells, each with ¼-grid
+origin shifts, and the label then reports the transformation used:
 
-The C-centred cells name orthorhombic and monoclinic subgroups of hexagonal
-parents, such as Cmcm and C2/m under P6₃/mmc. The lattice, the isotropy result
-and the mCIF writer all use the search.
+- The 24 proper signed axis permutations (det P = 1).
+- Three orthohexagonal C-centred cells (det P = 2) composed with the
+  permutations. These name orthorhombic and monoclinic subgroups of hexagonal
+  parents, such as Cmcm and C2/m under P6₃/mmc.
+- The other cells of a cubic lattice, in every orientation its point group
+  allows. For a face-centred parent: the body-centred tetragonal cell
+  ((a−b)/2, (a+b)/2, c), the obverse hexagonal cell of the rhombohedral
+  sublattice ((−a+b)/2, (−b+c)/2, a+b+c), two C-centred monoclinic cells with
+  the unique axis along a cube edge or a face diagonal, and the primitive
+  rhombohedral cell (det P = ½, ¾, ½, ½ and ¼). For a primitive parent, or a
+  parent given in rhombohedral axes: the obverse hexagonal cell
+  (a−b, b−c, a+b+c) (det P = 3). These name the subgroups of Fm-3m that
+  FindSpinGroup calls I4/mm′m′, R-3m′, Im′m′m and C2′/m′.
+
+A cell with fractional basis vectors is used only when each of them is a
+translation of the group, read off its operation list, so the transformed
+translation group is exactly P⁻¹ of the old one. Before any origin shift is
+tried, the transformed rotation set must match some tabulated group; this
+keeps the search fast for candidates no setting can name. The lattice, the
+isotropy result and the mCIF writer all use the search.
 
 **Supported**
 - All 904 groups re-identify from their own operations. The four P2₁/c
@@ -162,12 +179,22 @@ and the mCIF writer all use the search.
   tabulated groups ([`bnsOg.test.ts`](../src/core/magnetic/bnsOg.test.ts)).
 - The search recovers an a-unique P2/m and an off-origin P-1, with primes kept.
   Under P6₃/mmc it names Cmcm and C2/m (Nos. 63 and 12) and type-III
-  orthorhombic groups ([`bnsOgSetting.test.ts`](../src/core/magnetic/bnsOgSetting.test.ts)).
+  orthorhombic groups; its 56 setting-search labels are pinned by a snapshot
+  ([`bnsOgSetting.test.ts`](../src/core/magnetic/bnsOgSetting.test.ts)).
+- Under Fm-3m with k = 0 (MnO, Mn at 0,0,0) every subgroup candidate is named.
+  A moment along [001], [111] or [110], or in a mirror plane, gives I4/mm′m′
+  (BNS 139.537), R-3m′ (166.101), Im′m′m (71.536) and C2′/m′ (12.62), as
+  FindSpinGroup does; the triclinic subgroups give P-1 and P1.
+- A 3-fold group in rhombohedral axes, such as the -3m′ subgroup of Pm-3m,
+  is named in hexagonal axes: R-3m′ in the cell (a−b, b−c, a+b+c).
 
 **Not yet**
 - Type-II and type-IV groups. Widening the generator's `MAGTYPES` filter is not
   enough, because its checks and the table's row type assume types I and III.
-- Rhombohedral↔hexagonal settings (det P = 3) and monoclinic cell choices 2 and 3.
+- Monoclinic cell choices 2 and 3, the reverse rhombohedral setting, and
+  sub-cells of I- or C-centred parents (for example the primitive cell of a
+  C-centred monoclinic parent, or the F cell of an I tetragonal one). Such
+  candidates keep their primed-operation labels.
 
 ## Route B — representation analysis
 
