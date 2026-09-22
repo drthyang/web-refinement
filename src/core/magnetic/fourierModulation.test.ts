@@ -392,15 +392,40 @@ describe("satellite enumeration — exact Laue families, every position once", (
     expect(pure[0]!.multiplicity).toBe(2);
   });
 
-  it("k off the Laue-invariant lines (tetragonal, k = (⅓,0,0)): the star's other arms are counted at their own d", () => {
+  /** Distinct ±k nodes G ± k (integer G) in the window — the single arm's own satellites. */
+  function countArmNodes(cell: typeof ortho, k: Vec3, dMin: number, dMax: number): number {
+    const seen = new Set<string>();
+    const key = (v: Vec3): string => v.map((x) => (Math.abs(x) < 1e-9 ? 0 : x).toFixed(6)).join(",");
+    for (let h = -8; h <= 8; h++) for (let kk = -8; kk <= 8; kk++) for (let l = -8; l <= 8; l++) {
+      for (const sgn of [1, -1]) {
+        const s: Vec3 = [h + sgn * k[0], kk + sgn * k[1], l + sgn * k[2]];
+        const d = dSpacing(cell, s[0], s[1], s[2]);
+        if (Number.isFinite(d) && d >= dMin && d <= dMax) seen.add(key(s));
+      }
+    }
+    return seen.size;
+  }
+
+  it("k off the Laue-invariant lines (tetragonal, k = (⅓,0,0)): the star's other arms are listed at their own d but carry no weight", () => {
     const k: Vec3 = [1 / 3, 0, 0];
     const sats = magneticSatellites(tetra, p4, k, 1.3, 20);
-    const total = sats.reduce((acc, s) => acc + s.multiplicity, 0);
-    expect(total).toBe(countPositions(tetra, p4, k, 1.3, 20));
-    // (⅓, 1, 0) — the satellite of parent (0,1,0) — lies at a different d
-    // than (1⅓, 0, 0) and must be present.
-    const dA = dSpacing(tetra, 1 / 3, 1, 0);
+    // Every position of the Laue closure is listed (position ticks show where
+    // the whole star scatters) …
+    expect(sats.length).toBeGreaterThan(0);
+    const dA = dSpacing(tetra, 1 / 3, 1, 0); // (0,1,0) + k: a different d than (1⅓,0,0)
     expect(sats.some((s) => Math.abs(s.d - dA) < 1e-9)).toBe(true);
+    // … but the weight is the single arm's own nodes: a family's members on
+    // the other arm pair (0,±⅓,0)+G belong to the other domain, whose
+    // intensity the family sum already holds, so counting them at the
+    // representative's |F_M|² would double every family (two arm pairs).
+    const total = sats.reduce((acc, s) => acc + s.multiplicity, 0);
+    expect(total).toBe(countArmNodes(tetra, k, 1.3, 20));
+    expect(total * 2).toBe(countPositions(tetra, p4, k, 1.3, 20));
+    // The (⅓,1,0) family (Laue group 4/m) has 4 members, 2 of them ±k
+    // satellites, and its representative is one of those two.
+    const fam = sats.find((s) => Math.abs(s.d - dA) < 1e-9)!;
+    expect(fam.multiplicity).toBe(2);
+    expect(Math.abs(Math.abs(fam.h) - 1 / 3)).toBeLessThan(1e-9);
   });
 
   it("k = 0 keeps the nuclear list and its multiplicities", () => {

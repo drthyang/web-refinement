@@ -48,7 +48,7 @@
 
 import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
-import { applyOperation } from "@/core/crystal/symmetry";
+import { applyOperation, centringOffsets } from "@/core/crystal/symmetry";
 import { determinant } from "@/core/math/mat3";
 import { rotationKey } from "./magneticGroups";
 import { projectIrrepModes, type Irrep } from "./irreps";
@@ -110,7 +110,7 @@ function samePos(a: Vec3, b: Vec3): boolean {
   });
 }
 
-/** e^{2πi k·L} for integer L, required real: +1 / −1, or null when complex. */
+/** e^{2πi k·L} for a lattice vector L (centring part allowed), required real: +1 / −1, or null when complex. */
 function realPhase(k: Vec3, L: Vec3): 1 | -1 | null {
   const t = k[0]! * L[0]! + k[1]! * L[1]! + k[2]! * L[2]!;
   const half = Math.round(2 * t);
@@ -151,6 +151,8 @@ function buildMomentField(
   // Accumulate per-atom moments across sites and irreps.
   const acc = new Map<string, { pos: Vec3; m: [number, number, number] }>();
   let anyMode = false;
+  // Centring part of each op: a lattice translation with its own k-phase.
+  const offsets = centringOffsets(lgOps);
 
   for (const label of siteLabels) {
     const site = structure.sites.find((s) => s.label === label);
@@ -184,10 +186,11 @@ function buildMomentField(
         if (placed.has(key)) continue;
         placed.add(key);
         const wrapped: Vec3 = [mod1(image[0]!), mod1(image[1]!), mod1(image[2]!)];
+        const c = offsets[gi]!;
         const L: Vec3 = [
-          Math.round(image[0]! - wrapped[0]!),
-          Math.round(image[1]! - wrapped[1]!),
-          Math.round(image[2]! - wrapped[2]!),
+          Math.round(image[0]! - wrapped[0]!) - c[0]!,
+          Math.round(image[1]! - wrapped[1]!) - c[1]!,
+          Math.round(image[2]! - wrapped[2]!) - c[2]!,
         ];
         const s = realPhase(k, L);
         if (s === null) return { failure: "complex-phase" };
@@ -223,8 +226,11 @@ function stabilizer(
 ): SymmetryOperation[] | { failure: IsotropyFailure } {
   const stab: SymmetryOperation[] = [];
   const thetaByRotation = new Map<string, 1 | -1>();
+  const offsets = centringOffsets(lgOps);
 
-  for (const op of lgOps) {
+  for (let gi = 0; gi < lgOps.length; gi++) {
+    const op = lgOps[gi]!;
+    const c = offsets[gi]!;
     for (const theta of [1, -1] as const) {
       let ok = true;
       for (const atom of atoms) {
@@ -232,9 +238,9 @@ function stabilizer(
         const target = atoms.find((a) => samePos(a.pos, image));
         if (!target) { ok = false; break; }
         const L: Vec3 = [
-          Math.round(image[0]! - target.pos[0]!),
-          Math.round(image[1]! - target.pos[1]!),
-          Math.round(image[2]! - target.pos[2]!),
+          Math.round(image[0]! - target.pos[0]!) - c[0]!,
+          Math.round(image[1]! - target.pos[1]!) - c[1]!,
+          Math.round(image[2]! - target.pos[2]!) - c[2]!,
         ];
         const s = realPhase(k, L);
         if (s === null) return { failure: "complex-phase" };

@@ -292,15 +292,25 @@ describe("allowedMomentDirections — k·L phase in the stabilizer constraint", 
 
 describe("orbit counting — 0/1 fractional wrap robustness", () => {
   it("atoms reached at ~0.9999 and at ~0.0000 are not double-counted", () => {
+    // P-1 with a CIF-rounded coordinate: the atom at z = 0.99997 and its
+    // inversion image at −0.99997 → 0.00003 sit on either side of the 0/1
+    // wrap and are one atom (periodic distance 6e-5). Dimension 3, not 6.
+    const s = structure(ops("x,y,z", "-x,-y,-z"), [[0, 0, 0.99997]]);
+    expect(magneticRepresentationDimension(s, ["M1"])).toBe(3);
+  });
+
+  it("a ⅓-translation in the operation list is a lattice centring: one atom per primitive cell", () => {
     // Order-6 group: ⅓-translations along z × inversion, with a CIF-rounded
-    // coordinate 0.6667 (≈ ⅔). One op reaches the z≈0 atom at 0.6667+⅓ =
-    // 0.00003…, another at −0.6667+⅔ = 0.99996… — the same atom on either
-    // side of the 0/1 wrap. True orbit: {0, ⅓, ⅔} → dimension 9.
+    // coordinate 0.6667 (≈ ⅔). One op reaches the z≈0 copy at 0.6667+⅓ =
+    // 0.00003…, another at −0.6667+⅔ = 0.99996… — the same copy on either
+    // side of the wrap — and the copies at 0, ⅓, ⅔ differ by the centring
+    // translation, so Γ_mag counts them once: dimension 3. (Counting the
+    // conventional cell's three copies, 9, would add the k = (0,0,⅓) arms.)
     const g = ops(
       "x,y,z", "x,y,z+1/3", "x,y,z+2/3",
       "-x,-y,-z", "-x,-y,-z+1/3", "-x,-y,-z+2/3",
     );
     const s = structure(g, [[0, 0, 0.6667]]);
-    expect(magneticRepresentationDimension(s, ["M1"])).toBe(9);
+    expect(magneticRepresentationDimension(s, ["M1"])).toBe(3);
   });
 });

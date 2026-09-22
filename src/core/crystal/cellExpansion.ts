@@ -17,6 +17,15 @@
  * group — define θ and the arrow; atoms of the nuclear orbit not reachable by
  * a magnetic operation carry no moment (other k-arm/domain).
  *
+ * Centred parent lattices: L is a vector of the TRUE lattice Λ. An operation
+ * that differs from its rotation-class representative by a centring
+ * translation c places the representative's image translated by c, and a
+ * lattice translation — integer or centring — carries the phase e^{2πi k·t}.
+ * So L = (integer part of the image) − c(g) (`centringOffsets`), which is what
+ * makes Mn(0,½,½) antiparallel to Mn(0,0,0) for MnO's k = (½,½,½) instead of
+ * a parallel copy (a superposition of several arms of the star, not a
+ * single-k structure). Gate: `centredLattice.test.ts`.
+ *
  * This lives in `core` (no three.js / React) so both the 3D viewer and the
  * mCIF exporter share ONE expansion — the exported magnetic supercell is then
  * the identical physical field the viewer draws, not a re-derivation.
@@ -27,7 +36,7 @@ import type { Mat3, Vec3 } from "@/core/math/types";
 import { momentBindingKey, type MagneticModel } from "@/core/magnetic/types";
 import { componentDenominator } from "@/core/magnetic/propagation";
 import { fractionalToCartesian } from "@/core/crystal/unitCell";
-import { applyOperation } from "@/core/crystal/symmetry";
+import { applyOperation, centringOffsets } from "@/core/crystal/symmetry";
 import { determinant } from "@/core/math/mat3";
 
 /** The operation that carries the site's moment onto this atom. */
@@ -35,7 +44,12 @@ export interface MomentPlacing {
   readonly rot: Mat3;
   /** Time-reversal sign θ of the placing operation (+1 for nuclear ops). */
   readonly theta: 1 | -1;
-  /** Returning lattice translation L (image = wrapped position + L). */
+  /**
+   * Returning lattice translation L: image of the placing operation's
+   * rotation-class representative = wrapped position + L. Integer for a
+   * primitive lattice; for a centred one it may carry a centring part
+   * (image of THIS operation = wrapped + L + c(g)). Its k-phase is e^{2πi k·L}.
+   */
   readonly latt: Vec3;
   /** Key of the moment entry this atom's arrow derives from (defaults to the
    *  site label; split orbits carry a `#n` suffix — see momentBindingKey). */
@@ -356,11 +370,21 @@ export function placingFor(
   frac: Vec3,
   momentKey: string,
 ): MomentPlacing | undefined {
-  for (const op of list) {
+  const offsets = centringOffsets(list);
+  for (let gi = 0; gi < list.length; gi++) {
+    const op = list[gi]!;
     const raw = applyOperation(op, anchorPos);
     const w: Vec3 = [wrap01(raw[0]), wrap01(raw[1]), wrap01(raw[2])];
     if (!coincide(w, frac)) continue;
-    const latt: Vec3 = [Math.round(raw[0] - w[0]!), Math.round(raw[1] - w[1]!), Math.round(raw[2] - w[2]!)];
+    // The centring part of the operation is a lattice translation and carries
+    // its own k-phase: subtract it so L is the Λ-vector back to the image of
+    // the rotation-class representative (see the module doc).
+    const c = offsets[gi]!;
+    const latt: Vec3 = [
+      Math.round(raw[0] - w[0]!) - c[0]!,
+      Math.round(raw[1] - w[1]!) - c[1]!,
+      Math.round(raw[2] - w[2]!) - c[2]!,
+    ];
     return { rot: op.rotation, theta: (op.timeReversal ?? 1) as 1 | -1, latt, momentKey };
   }
   return undefined;

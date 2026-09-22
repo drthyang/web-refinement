@@ -6,6 +6,15 @@
  * fixes the site, e^{2πi k·L_g} · θ_g · det(R_g) · R_g · m = m, where L_g is the
  * lattice translation returning the site image to the site (the k-phase couples
  * the moment to the propagation vector; for k = 0 or L = 0 the phase is 1).
+ *
+ * "Fixes the site" and "lattice translation" refer to the parent's TRUE lattice
+ * Λ, centring translations included: an operation whose image is the site's
+ * own centred copy (r + (0,½,½) in an F cell, say) is a stabilizer element, and
+ * L_g is the Λ-vector from the site to the image of the operation's rotation-
+ * class representative (`centringOffsets`), so a centring translation carries
+ * its phase e^{2πi k·t} exactly like an integer one. For MnO (k = ½½½) that
+ * phase is −1: the centring is an anti-translation of the parent cell, and a
+ * centred copy reached by an unprimed operation must carry the opposite moment.
  * Stacking these gives a linear system whose null space is the space of allowed
  * moments. Its dimension is the number of free moment parameters — the "proper
  * constraints" for refinement. A complex phase (k·L not a multiple of ½)
@@ -16,19 +25,27 @@
 import type { Mat3, Vec3 } from "@/core/math/types";
 import type { SymmetryOperation } from "@/core/crystal/types";
 import { determinant } from "@/core/math/mat3";
-import { applyOperation } from "@/core/crystal/symmetry";
+import { applyOperation, centringOffsets, centringTranslations, isLatticeVector, snapLatticeVector } from "@/core/crystal/symmetry";
 
-/** Returning lattice translation L when `op` fixes `pos` mod lattice, else null. */
-function returningTranslation(op: SymmetryOperation, pos: Vec3, tol = 1e-3): Vec3 | null {
+/**
+ * Returning lattice translation L when `op` fixes `pos` modulo the (possibly
+ * centred) lattice, else null: the Λ-vector from `pos` to the image of the
+ * operation's rotation-class representative, image − pos − c(op). It is an
+ * integer vector for a primitive lattice and may carry a centring part
+ * (half-integers, thirds) for a centred one.
+ */
+function returningTranslation(
+  op: SymmetryOperation,
+  pos: Vec3,
+  centrings: readonly Vec3[],
+  offset: Vec3,
+  tol = 1e-3,
+): Vec3 | null {
   const p = applyOperation(op, pos);
-  const L: [number, number, number] = [0, 0, 0];
-  for (let i = 0; i < 3; i++) {
-    const raw = p[i]! - pos[i]!;
-    const n = Math.round(raw);
-    if (Math.abs(raw - n) > tol) return null;
-    L[i] = n;
-  }
-  return L;
+  const d: Vec3 = [p[0]! - pos[0]!, p[1]! - pos[1]!, p[2]! - pos[2]!];
+  if (!isLatticeVector(d, centrings, tol)) return null;
+  const L = snapLatticeVector(d);
+  return [L[0]! - offset[0]!, L[1]! - offset[1]!, L[2]! - offset[2]!];
 }
 
 /**
@@ -95,8 +112,11 @@ export function allowedMomentDirections(
   k: Vec3 = [0, 0, 0],
 ): AllowedMoments {
   const rows: number[][] = [];
-  for (const op of operations) {
-    const L = returningTranslation(op, position);
+  const centrings = centringTranslations(operations);
+  const offsets = centringOffsets(operations);
+  for (let gi = 0; gi < operations.length; gi++) {
+    const op = operations[gi]!;
+    const L = returningTranslation(op, position, centrings, offsets[gi]!);
     if (!L) continue;
     const R: Mat3 = op.rotation;
     const factor = determinant(R) * (op.timeReversal ?? 1);
@@ -194,8 +214,11 @@ export function allowedFourierModes(
   tol = 1e-6,
 ): AllowedFourierModes {
   const rows: number[][] = [];
-  for (const op of operations) {
-    const L = returningTranslation(op, position);
+  const centrings = centringTranslations(operations);
+  const offsets = centringOffsets(operations);
+  for (let gi = 0; gi < operations.length; gi++) {
+    const op = operations[gi]!;
+    const L = returningTranslation(op, position, centrings, offsets[gi]!);
     if (!L) continue;
     const R: Mat3 = op.rotation;
     const factor = determinant(R) * (op.timeReversal ?? 1);

@@ -77,8 +77,8 @@ export interface FourierStructureFactor {
  * type). There the two arms coincide, reality forces S itself to be real, and
  * counting both would report twice the physical moment.
  */
-export function armMultiplicity(k: Vec3): 1 | 2 {
-  return isSelfConjugate(k) ? 1 : 2;
+export function armMultiplicity(k: Vec3, centrings: readonly Vec3[] = []): 1 | 2 {
+  return isSelfConjugate(k, centrings) ? 1 : 2;
 }
 
 /**
@@ -90,11 +90,11 @@ export function armMultiplicity(k: Vec3): 1 | 2 {
  * moment at k = ½ (see docs/INCOMMENSURATE_PLAN.md §2): a self-conjugate k has
  * one arm, so m(n) = S·cos φ with S real.
  */
-export function momentInCell(sReal: Vec3, sImag: Vec3, k: Vec3, n: Vec3): Vec3 {
+export function momentInCell(sReal: Vec3, sImag: Vec3, k: Vec3, n: Vec3, centrings: readonly Vec3[] = []): Vec3 {
   const phi = TWO_PI * (k[0] * n[0] + k[1] * n[1] + k[2] * n[2]);
   const c = Math.cos(phi);
   const s = Math.sin(phi);
-  const a = armMultiplicity(k);
+  const a = armMultiplicity(k, centrings);
   return [
     a * (sReal[0] * c + sImag[0] * s),
     a * (sReal[1] * c + sImag[1] * s),
