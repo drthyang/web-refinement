@@ -26,7 +26,7 @@ type UAniso6 = readonly [number, number, number, number, number, number];
 
 const TWO_PI = 2 * Math.PI;
 
-export function scatteringTableFor(radiation: Radiation): ScatteringTable {
+function scatteringTableFor(radiation: Radiation): ScatteringTable {
   return radiation.kind === "xray" ? xrayTable : neutronTable;
 }
 

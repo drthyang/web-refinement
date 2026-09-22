@@ -47,7 +47,7 @@ export function reportFileName(structure: StructureModel): string {
 }
 
 /** Parameters with the last result's esds merged in (the CIF export's `withEsd`). */
-export function withEsds(params: readonly RefinementParameter[], result: RefinementResult | null | undefined): RefinementParameter[] {
+function withEsds(params: readonly RefinementParameter[], result: RefinementResult | null | undefined): RefinementParameter[] {
   // A tied row (e.g. "= hypot(…)") reports what its tie evaluates to.
   let resolved: Record<string, number> | null = null;
   if (params.some((p) => p.expression)) {

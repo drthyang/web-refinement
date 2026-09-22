@@ -113,16 +113,6 @@ export const card: CSSProperties = {
   background: color.surface,
 };
 
-export const ghostButton: CSSProperties = {
-  border: `1px solid ${color.control}`,
-  background: color.surface,
-  borderRadius: radius.small,
-  padding: "2px 10px",
-  fontSize: fz.micro,
-  color: color.ink,
-  cursor: "pointer",
-};
-
 export const secondaryButton: CSSProperties = {
   border: `1px solid ${color.control}`,
   background: color.surface,

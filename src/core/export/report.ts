@@ -37,7 +37,7 @@ import {
 
 export type ReportTechnique = "powder" | "singleCrystal" | "pdf";
 
-export const TECHNIQUE_TITLE: Record<ReportTechnique, string> = {
+const TECHNIQUE_TITLE: Record<ReportTechnique, string> = {
   powder: "Rietveld refinement",
   singleCrystal: "Single-crystal refinement",
   pdf: "PDF refinement",

@@ -13,7 +13,7 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
 import { generateReflections } from "@/core/diffraction/reflections";
 import { magneticComparison } from "@/core/workflow/magnetic";
 
-export const MN3GA_MAGNETIC_MCIF = `data_Mn3Ga_monoclinic_merged
+const MN3GA_MAGNETIC_MCIF = `data_Mn3Ga_monoclinic_merged
 _pd_phase_name  Mn3Ga_monoclinic_merged
 _cell_length_a  5.420057
 _cell_length_b  4.33961

@@ -22,7 +22,7 @@ import {
 
 /** Arrow / atom colour cycles (sublattices; elements), light-theme values. */
 export const SUBLATTICE_COLORS = ["#cf3b52", "#4b5fc4", "#0e8074", "#b06f1f", "#8a4bc4", "#3f7fb2"];
-export const ELEMENT_COLORS = ["#9d7bc9", "#c9938c", "#7ba3c9", "#8fbc8f", "#c9b07b", "#b98fb9"];
+const ELEMENT_COLORS = ["#9d7bc9", "#c9938c", "#7ba3c9", "#8fbc8f", "#c9b07b", "#b98fb9"];
 
 const px = (v: number): string => (Object.is(v, -0) ? "0" : v.toFixed(1));
 

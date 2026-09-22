@@ -48,6 +48,11 @@ export default tseslint.config(
     ignores: [
       "dist/**",
       "node_modules/**",
+      // Agent sessions check out git worktrees under .claude/worktrees/ — each a
+      // full second copy of the repo that is not this tree's source.
+      ".claude/**",
+      // Local, git-ignored datasets (some unpublished) with their own scripts.
+      "data/**",
       // Reference material, not source: the vendored design handoff, the design
       // notes, and the knowledge base.
       "design/**",
@@ -58,6 +63,11 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    // Pin the project root: with a worktree nested under .claude/, the parser
+    // otherwise sees two candidate tsconfig roots and fails on every file.
+    languageOptions: { parserOptions: { tsconfigRootDir: import.meta.dirname } },
+  },
   {
     files: ["src/**/*.{ts,tsx}", "scripts/**/*.mjs"],
     languageOptions: { globals: { ...globals.browser, ...globals.node } },

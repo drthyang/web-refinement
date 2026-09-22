@@ -171,6 +171,3 @@ export function makeExamplePdfProject(): ProjectFile {
 export function makeExampleProjects(): readonly ProjectFile[] {
   return [makeExamplePowderProject(), makeExampleSingleCrystalProject(), makeExamplePdfProject()];
 }
-
-/** The historical name (the powder example), kept for the docs' reference. */
-export const makeExampleProject = makeExamplePowderProject;

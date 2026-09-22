@@ -82,7 +82,7 @@ function numericRows(text: string, max = 200): number[][] {
 }
 
 /** A GSAS-II CSV pattern export — a definitively recognizable TOF histogram. */
-export function isGsasCsvPattern(text: string): boolean {
+function isGsasCsvPattern(text: string): boolean {
   const head = text.slice(0, 400).toLowerCase();
   return /(^|\n)\s*"?limits"?\s*,/.test(head) || (/(^|,)\s*"?obs"?\s*,/.test(head) && head.includes("calc"));
 }

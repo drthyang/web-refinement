@@ -614,7 +614,7 @@ const PDF_PER_DATASET_KINDS: ReadonlySet<ParameterKind> = new Set<ParameterKind>
 
 /** The bindings acting on one dataset: everything except the other datasets'
  *  scale/envelope bindings. */
-export function pdfDatasetBindingsFor(bindings: readonly ParameterBinding[], datasetId: string): ParameterBinding[] {
+function pdfDatasetBindingsFor(bindings: readonly ParameterBinding[], datasetId: string): ParameterBinding[] {
   return bindings.filter((b) => !PDF_PER_DATASET_KINDS.has(b.kind) || b.targetId === datasetId);
 }
 

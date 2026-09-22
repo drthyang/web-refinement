@@ -106,10 +106,13 @@ informational only: G(r) points are correlated, so PDF fits use uniform
 weights (see [LIMITATIONS.md](./LIMITATIONS.md)).
 
 ### Calculated side
-`CalculatedReflection` keeps **nuclear and magnetic contributions separate**
-(`fNuclearSq`, `fMagneticSq`) alongside `dSpacing`, `|Q|`, `multiplicity`, and
-the applied `lorentzPolarization`. Separation is a hard requirement from the
-brief: nuclear and magnetic components must always be independently reportable.
+Nuclear and magnetic contributions stay **separate** all the way out. The
+powder engine returns them as two peak lists
+([`magneticPowder.ts`](../src/core/workflow/magneticPowder.ts)), and every
+F_obs/F_calc component is tagged `nuclear` or `magnetic`
+([`obsCalc.ts`](../src/core/workflow/obsCalc.ts)). Separation is a hard
+requirement from the brief: nuclear and magnetic components must always be
+independently reportable.
 
 ### Shared observation contract
 Both datasets expose observations with optional `sigma`. The engine derives

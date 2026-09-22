@@ -692,6 +692,6 @@ export function stagesFromKindGroups(groups: readonly StageKinds[]): RefinementS
   return groups.map((g) => ({ name: g.name, select: byKind(...g.kinds) }));
 }
 
-export function defaultStages(): RefinementStage[] {
+function defaultStages(): RefinementStage[] {
   return stagesFromKindGroups(DEFAULT_STAGE_KINDS);
 }

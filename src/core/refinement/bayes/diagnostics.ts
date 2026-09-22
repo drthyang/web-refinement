@@ -50,7 +50,7 @@ export interface PosteriorSummary {
 }
 
 /** Split-R̂ for one parameter given per-walker chains [nWalkers][n]. */
-export function splitRHat(chains: readonly (readonly number[])[]): number {
+function splitRHat(chains: readonly (readonly number[])[]): number {
   // Split each walker-chain in half → 2m chains of length n/2.
   const halves: number[][] = [];
   for (const c of chains) {
@@ -80,7 +80,7 @@ export function splitRHat(chains: readonly (readonly number[])[]): number {
  * Geyer initial-monotone truncation of the paired sums Γ_k = ρ_{2k} + ρ_{2k+1}.
  * ESS = m·n / (1 + 2·Σρ_t).
  */
-export function effectiveSampleSize(chains: readonly (readonly number[])[]): number {
+function effectiveSampleSize(chains: readonly (readonly number[])[]): number {
   const m = chains.length;
   const n = chains[0]?.length ?? 0;
   if (m === 0 || n < 4) return 0;

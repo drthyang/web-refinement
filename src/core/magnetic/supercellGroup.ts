@@ -68,7 +68,7 @@ function coincide(a: Vec3, b: Vec3): boolean {
 }
 
 /** The viewer's axial moment transform: θ · det(R) · R · m (crystal-axis components). */
-export function transformMoment(R: Mat3, theta: number, m: Vec3): Vec3 {
+function transformMoment(R: Mat3, theta: number, m: Vec3): Vec3 {
   const w = theta * determinant(R);
   return [
     w * (R[0]![0]! * m[0]! + R[0]![1]! * m[1]! + R[0]![2]! * m[2]!),

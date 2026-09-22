@@ -444,7 +444,6 @@ hardware ([VALIDATION.md](./VALIDATION.md#gpu-acceleration-precision)).
 
 | Kernel | Status |
 | --- | --- |
-| Profile synthesis ([`gpuSynthesizer.ts`](../src/workers/gpuSynthesizer.ts)) | ✅ Validated; no refinement uses it |
 | Nuclear structure factor ([`gpuStructureFactor.ts`](../src/workers/gpuStructureFactor.ts)) | ✅ In the refinement pool for flat single-phase powder fits, with CPU fallback |
 | Magnetic structure factor ([`gpuMagneticStructureFactor.ts`](../src/workers/gpuMagneticStructureFactor.ts)) | 🚧 Validated; next, wire it into magnetic co-refinement |
 

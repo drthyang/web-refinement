@@ -18,7 +18,6 @@
  * nothing; a build sublattice missing from the target is fitted to zero.
  */
 
-import type { ParameterBinding } from "@/core/refinement/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import { momentBindingKey } from "@/core/magnetic/types";
 import type { MagneticModelBuild } from "@/core/magnetic/momentModel";
@@ -119,9 +118,4 @@ function leastSquares(rows: readonly { a: number[]; b: number }[], n: number): n
     }
   }
   return Array.from({ length: n }, (_, i) => (Math.abs(N[i]![i]!) < 1e-300 ? 0 : N[i]![n]! / N[i]![i]!));
-}
-
-/** Bindings of a build restricted to its moment modes (what the fit reads). */
-export function momentModeBindings(bindings: readonly ParameterBinding[]): ParameterBinding[] {
-  return bindings.filter((b) => b.kind === "momentMode");
 }

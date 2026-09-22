@@ -1,11 +1,9 @@
 /**
- * Export helpers: calculated reflection tables and powder patterns as CSV, and
- * projects as JSON. Pure string producers — file saving is a UI concern.
+ * Export helpers: powder patterns as CSV. Pure string producers — file saving
+ * is a UI concern. (Project files are written by `core/project/io`.)
  */
 
 import type { PowderCurves } from "@/core/workflow/powder";
-import type { ProjectFile } from "@/core/project/types";
-import { serializeProject } from "@/core/project/io";
 
 
 export function powderPatternCsv(curves: PowderCurves): string {
@@ -17,8 +15,4 @@ export function powderPatternCsv(curves: PowderCurves): string {
     return `${x},${o},${c.toFixed(4)},${d.toFixed(4)}`;
   });
   return [header, ...lines].join("\n");
-}
-
-export function projectJson(project: ProjectFile): string {
-  return serializeProject(project);
 }

@@ -1,8 +1,8 @@
 /**
  * WebGPU nuclear structure-factor kernel — the geometry-heavy accelerator.
  *
- * Where the profile-synthesis kernel (gpuSynthesizer.ts) spreads peaks, THIS
- * kernel computes the quantity that actually dominates a geometry-heavy Jacobian:
+ * Profile synthesis (spreading peaks) is cheap on the CPU; THIS kernel computes
+ * the quantity that actually dominates a geometry-heavy Jacobian:
  *
  *   |F_N(hkl)|²  for a BATCH of models × a shared reflection list.
  *

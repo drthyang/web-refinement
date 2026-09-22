@@ -5,7 +5,7 @@
  * elements fall back to grey / 1.0 Å.
  */
 
-export const ELEMENT_COLORS: Readonly<Record<string, string>> = {
+const ELEMENT_COLORS: Readonly<Record<string, string>> = {
   H: "#ffffff", D: "#e0e0ff", He: "#d9ffff", Li: "#cc80ff", Be: "#c2ff00", B: "#ffb5b5",
   C: "#444444", N: "#3050f8", O: "#ff3030", F: "#90e050", Ne: "#b3e3f5", Na: "#ab5cf2",
   Mg: "#8aff00", Al: "#bfa6a6", Si: "#f0c8a0", P: "#ff8000", S: "#ffff30", Cl: "#1ff01f",
@@ -25,7 +25,7 @@ export const ELEMENT_COLORS: Readonly<Record<string, string>> = {
   Cm: "#785ce3", Bk: "#8a4fe3", Cf: "#a136d4", Es: "#b31fd4",
 };
 
-export const COVALENT_RADII: Readonly<Record<string, number>> = {
+const COVALENT_RADII: Readonly<Record<string, number>> = {
   H: 0.31, D: 0.31, He: 0.28, Li: 1.28, Be: 0.96, B: 0.84, C: 0.76, N: 0.71, O: 0.66, F: 0.57,
   Ne: 0.58, Na: 1.66, Mg: 1.41, Al: 1.21, Si: 1.11, P: 1.07, S: 1.05, Cl: 1.02, Ar: 1.06,
   K: 2.03, Ca: 1.76, Sc: 1.70, Ti: 1.60, V: 1.53, Cr: 1.39, Mn: 1.39, Fe: 1.32, Co: 1.26,
@@ -40,7 +40,7 @@ export const COVALENT_RADII: Readonly<Record<string, number>> = {
 };
 
 /** Normalize a site element string (e.g. "Mn2+", "O2-") to a plain symbol "Mn"/"O". */
-export function baseElement(element: string): string {
+function baseElement(element: string): string {
   const m = element.match(/^[A-Za-z]+/);
   if (!m) return element;
   const s = m[0];

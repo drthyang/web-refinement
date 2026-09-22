@@ -18,7 +18,7 @@ import { ProjectFileError, isRecord, validateProjectFile } from "@/core/project/
 
 export { ProjectFileError };
 
-export const PROJECT_FILE_EXTENSION = ".materia.json";
+const PROJECT_FILE_EXTENSION = ".materia.json";
 
 export function serializeProject(file: ProjectFile): string {
   return `${stringifyProject(file)}\n`;

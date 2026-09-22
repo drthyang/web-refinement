@@ -31,7 +31,7 @@ export interface FacilityInstrument {
 
 /** Extend freely — one row per beamline. Ordered longest-alias-first isn't
  *  required; the recognizer prefers the most specific match. */
-export const INSTRUMENTS: readonly FacilityInstrument[] = [
+const INSTRUMENTS: readonly FacilityInstrument[] = [
   // ── United States ──────────────────────────────────────────────────────────
   { name: "POWGEN", facility: "SNS", lab: "ORNL", country: "USA", probe: "neutron", mode: "tof", aliases: ["POWGEN", "PG3"] },
   { name: "NOMAD", facility: "SNS", lab: "ORNL", country: "USA", probe: "neutron", mode: "tof", aliases: ["NOMAD", "NOM"] },

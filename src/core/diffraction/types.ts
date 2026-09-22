@@ -136,27 +136,3 @@ export interface PdfPattern {
 /** Any diffraction dataset the engine can refine against. */
 export type DiffractionDataset = SingleCrystalDataset | PowderPattern;
 
-/**
- * A calculated reflection: the output of structure-factor calculation, carrying
- * both nuclear and (optionally) magnetic contributions kept separately so they
- * can be reported and plotted independently.
- */
-export interface CalculatedReflection {
-  readonly h: number;
-  readonly k: number;
-  readonly l: number;
-  /** |Q| in Å⁻¹ (= 2π/d), cached for form-factor and profile evaluation. */
-  readonly qMagnitude: number;
-  /** d-spacing in Å. */
-  readonly dSpacing: number;
-  /** Reflection multiplicity for powder (equivalent hkl under Laue symmetry). */
-  readonly multiplicity: number;
-  /** Lorentz–polarization correction applied to |F|² → I. */
-  readonly lorentzPolarization: number;
-  /** Nuclear structure-factor modulus squared, |F_N|². */
-  readonly fNuclearSq: number;
-  /** Magnetic structure-factor modulus squared, |F_M⊥|². Zero when non-magnetic. */
-  readonly fMagneticSq: number;
-  /** Total calculated intensity (scaled), for comparison against observed. */
-  readonly iCalc: number;
-}

@@ -31,7 +31,7 @@ export function parseCifNumber(raw: string): number {
  * These appear legitimately, e.g. `_atom_site_U_iso_or_equiv = ?` on a purely
  * anisotropic site (its U_iso is undefined; the real ADP is in the aniso loop).
  */
-export function parseCifNumberOr(raw: string | undefined, fallback: number): number {
+function parseCifNumberOr(raw: string | undefined, fallback: number): number {
   if (raw === undefined) return fallback;
   const t = raw.trim();
   if (t === "" || t === "?" || t === ".") return fallback;

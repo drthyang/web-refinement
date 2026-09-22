@@ -239,10 +239,8 @@ enforce the precision contract before a refinement trusts a GPU value:
    reproduce the CPU structure factor to a relative `< 1e-9`. Together these
    catch marshaling and stride drift without hardware.
 2. **Hardware (browser).** The real kernel runs against the CPU f64 truth. The
-   structure-factor rows below come from `window.__gpuValidate`, a dev-build
-   harness; the profile-synthesis row comes from the synthesizer's own
-   `gpuValidation`. Maximum relative deviation, measured on an Apple GPU
-   (metal-3):
+   rows below come from `window.__gpuValidate`, a dev-build harness. Maximum
+   relative deviation, measured on an Apple GPU (metal-3):
 
 | Kernel | Case | Max rel. deviation |
 | --- | --- | --- |
@@ -251,7 +249,6 @@ enforce the precision contract before a refinement trusts a GPU value:
 | Nuclear \|F_N\|² | Mn₃Ga neutron, anisotropic ADP | 5.0e-7 |
 | Nuclear \|F_N\|² | 8-model perturbed batch | 4.7e-7 |
 | Magnetic \|F_M\|² | Mn₃Ga AFM k=(½,0,0), 175 satellites | 4.5e-7 |
-| Profile synthesis | 20k pts × 5.5k pseudo-Voigt peaks | 1.1e-5 of pattern max |
 
 All are far below counting statistics and esd scales (≥ 1e-3 relative). End to
 end, a GPU-accelerated powder refinement converges to the *same minimum* as the

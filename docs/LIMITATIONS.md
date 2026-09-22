@@ -103,8 +103,8 @@ approximate, however plausible its output looks.
 ## GPU acceleration
 
 **Supported**
-- WebGPU kernels for the nuclear structure-factor sum, the magnetic
-  structure-factor sum and profile synthesis.
+- WebGPU kernels for the nuclear and the magnetic structure-factor sums.
+  Profile synthesis runs on the CPU.
 - The powder page uses the nuclear kernel automatically when the browser
   supports WebGPU, for single-phase fits without a magnetic model. Otherwise the
   fit runs on the CPU.
