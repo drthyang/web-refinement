@@ -181,7 +181,7 @@ export function siteMultiplicity(
 }
 
 /** Whether `op` maps `pos` onto itself modulo a lattice translation. */
-export function fixesSite(op: SymmetryOperation, pos: Vec3, tol = 1e-3): boolean {
+function fixesSite(op: SymmetryOperation, pos: Vec3, tol = 1e-3): boolean {
   const p = wrapFractional(applyOperation(op, pos));
   const q = wrapFractional(pos);
   for (let i = 0; i < 3; i++) {

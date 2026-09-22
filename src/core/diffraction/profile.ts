@@ -22,7 +22,7 @@ export function gaussian(x: number, center: number, fwhm: number): number {
   return sigmaFactor * Math.exp(-4 * LN2 * t * t);
 }
 
-export function lorentzian(x: number, center: number, fwhm: number): number {
+function lorentzian(x: number, center: number, fwhm: number): number {
   const hwhm = fwhm / 2;
   return (hwhm / Math.PI) / ((x - center) * (x - center) + hwhm * hwhm);
 }

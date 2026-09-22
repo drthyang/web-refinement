@@ -81,7 +81,7 @@ export function orbitAtoms(structure: StructureModel, siteLabels: readonly strin
 }
 
 /** χ_disp(g) per operation (real at Γ; kept as {re, im} for the shared formula). */
-export function displacementRepresentationCharacter(
+function displacementRepresentationCharacter(
   structure: StructureModel,
   siteLabels: readonly string[],
   ops: readonly SymmetryOperation[],

@@ -121,7 +121,7 @@ function checkSymmetryOperation(v: unknown, path: string): void {
   }
 }
 
-export function checkStructure(v: unknown, path: string): void {
+function checkStructure(v: unknown, path: string): void {
   const s = rec(v, path);
   str(s.id, `${path}.id`);
   str(s.name, `${path}.name`);

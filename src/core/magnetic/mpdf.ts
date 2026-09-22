@@ -40,7 +40,7 @@ import { convolveFullFft, nextPowerOfTwo } from "@/core/math/fft";
 import { magneticFormFactorJ0 } from "@/core/scattering/magnetic";
 
 /** (γ·r₀/2)² — γ = 1.913, r₀ = 0.281794·10⁻¹² cm — in 10⁻²⁴ cm² (barn). */
-export const MPDF_PREFACTOR = (1.913 * 0.281794 / 2) ** 2;
+const MPDF_PREFACTOR = (1.913 * 0.281794 / 2) ** 2;
 
 /** 1 barn = 100 fm², for mixing d(r) with fm-based ⟨b⟩² normalizations. */
 export const BARN_TO_FM2 = 100;

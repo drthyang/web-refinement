@@ -222,7 +222,6 @@ reference ([VALIDATION.md](./VALIDATION.md#gpu-acceleration-precision)).
 
 | Kernel (`src/workers/`) | Computes | Speed-up | Max deviation vs CPU | Used in refinement |
 | --- | --- | --- | --- | --- |
-| `gpuSynthesizer.ts` | batched Gaussian / pseudo-Voigt profile synthesis | 17× | 1.1e-5 of the pattern maximum | no |
 | `gpuStructureFactor.ts` | nuclear \|F_N\|² over a batch of models × shared reflections; neutron or X-ray, isotropic or anisotropic Debye–Waller | 13.6× on 1439 reflections × 24 models | ≤ 5e-7 | single-phase nuclear powder |
 | `gpuMagneticStructureFactor.ts` | magnetic \|F_M\|²: the complex-vector structure factor with the M⊥ projection and the ⟨j0⟩ form factor | — | 4.5e-7 on the Mn₃Ga AFM (175 satellites) | no |
 

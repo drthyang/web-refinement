@@ -17,8 +17,8 @@ import { buildSyntheticPowder } from "@/examples/synthetic";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 
 export const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", wavelength: 1.54 };
-export const DEFAULT_BACKGROUND_TERMS = 4;
-export const DEFAULT_TIES: SiteTies = { positions: true, adp: true };
+const DEFAULT_BACKGROUND_TERMS = 4;
+const DEFAULT_TIES: SiteTies = { positions: true, adp: true };
 export const SYNTHETIC_SOURCE = "synthetic (self-consistent demo)";
 /** Provenance marker for a clean, data-less workbench — the app's first-run
  *  state, before the demo or a user's own files are loaded. */

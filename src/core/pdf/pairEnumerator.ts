@@ -72,7 +72,7 @@ export function cartesianAdpTensor(cell: UnitCell, adp: DisplacementParameters):
 }
 
 /** Mean-square displacement along Cartesian unit vector n̂: n̂ᵀ U n̂. */
-export function msdAlong(uCart: Mat3, nHat: Vec3): number {
+function msdAlong(uCart: Mat3, nHat: Vec3): number {
   return dotv(nHat, mulVec(uCart, nHat));
 }
 

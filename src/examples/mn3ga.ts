@@ -6,9 +6,8 @@
 
 import { parseCif } from "@/parsers/cif";
 import type { StructureModel } from "@/core/crystal/types";
-import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 
-export const MN3GA_CIF = `data_Mn3Ga
+const MN3GA_CIF = `data_Mn3Ga
 _pd_phase_name  Mn3Ga
 _cell_length_a  5.42215
 _cell_length_b  5.42215
@@ -62,26 +61,6 @@ Ga1    Ga   0.33330     0.66670     0.75000     1.005(8)   Uiso 0.0093     2
 
 export function exampleStructure(): StructureModel {
   return parseCif(MN3GA_CIF, "mn3ga");
-}
-
-/** Bindings for a scale + peak-width powder refinement of the example. */
-export function examplePowderBindings(datasetId: string): ParameterBinding[] {
-  return [
-    { parameterId: "scale", kind: "scale", targetId: datasetId },
-    { parameterId: "width", kind: "peakWidth", targetId: datasetId },
-    { parameterId: "cell_a", kind: "cellLength", targetId: "mn3ga", targetKey: "a" },
-    { parameterId: "cell_c", kind: "cellLength", targetId: "mn3ga", targetKey: "c" },
-  ];
-}
-
-export function examplePowderParameters(): RefinementParameter[] {
-  const structure = exampleStructure();
-  return [
-    { id: "scale", label: "scale", kind: "scale", value: 80, initialValue: 80, min: 0, fixed: false },
-    { id: "width", label: "peak FWHM (°2θ)", kind: "peakWidth", value: 0.5, initialValue: 0.5, min: 0.05, fixed: true },
-    { id: "cell_a", label: "a (Å)", kind: "cellLength", value: structure.cell.a, initialValue: structure.cell.a, fixed: true },
-    { id: "cell_c", label: "c (Å)", kind: "cellLength", value: structure.cell.c, initialValue: structure.cell.c, fixed: true },
-  ];
 }
 
 

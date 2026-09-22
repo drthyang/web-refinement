@@ -26,7 +26,7 @@ const FP_UVW_DEG2_TO_CENTIDEG2 = 1e4;
 const GSAS_SIG2_TO_FWHM2 = 8 * Math.log(2); // σ² → FWHM² (≈ 5.545)
 
 /** True for a FullProf `.irf` resolution file (keyword-led lines, not key:value). */
-export function looksLikeFullProfIrf(text: string): boolean {
+function looksLikeFullProfIrf(text: string): boolean {
   return /^\s*(JOBT|PROF|WAVE|THRG|GEOM|TOFRG|D2TOF|NPROF)\b/im.test(text);
 }
 
@@ -51,7 +51,7 @@ function irfKeyword(text: string, key: string): number[] | null {
  * (D2TOF: Dtt1 Dtt2 Dtt_1overD Zero) become a TOF calibration. The numerical
  * per-d profile table (NPROF 9) is not consumed — only the calibration is.
  */
-export function parseFullProfIrf(text: string): InstrumentParameters {
+function parseFullProfIrf(text: string): InstrumentParameters {
   const d2tof = irfKeyword(text, "D2TOF");
   if (d2tof && d2tof.length >= 1) {
     const [dtt1, dtt2, dtt1overD, zero] = d2tof;
@@ -94,7 +94,7 @@ export function parseFullProfIrf(text: string): InstrumentParameters {
  * "export → GSAS instrument". Distinct from the GSAS-II `.instprm` `key:value`
  * format, which has no `INS` prefix and no `ICONS` record.
  */
-export function looksLikeGsasPrm(text: string): boolean {
+function looksLikeGsasPrm(text: string): boolean {
   return /^INS\b/m.test(text) && /\bICONS\b/.test(text);
 }
 
@@ -106,7 +106,7 @@ export function looksLikeGsasPrm(text: string): boolean {
  * centidegrees² (this app's convention, so no scaling) — seed the Caglioti U,V,W.
  * GSAS's CW zero is in centidegrees; this app's CW zero is in degrees (÷100).
  */
-export function parseGsasPrm(text: string): InstrumentParameters {
+function parseGsasPrm(text: string): InstrumentParameters {
   const lines = text.split(/\r?\n/);
   // Text after a named field on its `INS …` record (fixed columns, so slice by
   // the keyword rather than tokenising the bank/flag columns before it).

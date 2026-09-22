@@ -240,9 +240,6 @@ export interface PdfWorkspace {
 
 export type Workspace = PowderWorkspace | SingleCrystalWorkspace | PdfWorkspace;
 
-/** The workspace type for a technique tag. */
-export type WorkspaceOf<T extends Technique> = Extract<Workspace, { technique: T }>;
-
 /** UI hints. Optional and ignorable — nothing scientific lives here. */
 export interface ProjectView {
   /** Active page: 0 = nuclear refinement, 1 = magnetic analysis. */
