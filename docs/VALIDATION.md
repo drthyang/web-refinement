@@ -163,6 +163,7 @@ folder.
 | diffpy.mpdf tutorials | MnO and MnTe measured neutron PDFs | refined ordered scale (MnO); nuclear + magnetic co-refinement (MnTe) | MnO ordered scale 1.6716 vs diffpy's 1.6685 | `core/workflow/mpdfTutorialData.test.ts` · *data* |
 | WinGX | Eu₃In₂Te₄ rod crystal, neutron λ = 1.0 Å | per-reflection absorption transmission factor | Pearson r ≈ 0.99 with a fitted μ (gate > 0.95) | `core/absorption/eu324Absorption.test.ts` · *data* |
 | FullProf files | Eu₃In₂Te₄ HB-3A `_nuc` / `_mag` → `_ALL_magcell.int` | the merged magnetic-supercell reflection list | identical on every (h, k, l, I, σ) | `core/magnetic/magneticSupercell.test.ts` · *data* |
+| FullProf | DyMn₆Ge₆ 11 K, PSI DMC neutron (λ = 1.7037 Å), incommensurate conical spiral | refined k = (0, 0, γ) from starts at 0.155 and 0.175, FullProf's cell/profile/background held | γ = 0.16478(67) and 0.16486(67) vs FullProf's 0.16509(43) (gate: within 2σ of FullProf); the cone's k = 0 component is not modelled, so wR 19.9% vs FullProf's 11.3% | `core/workflow/dymn6ge6K.test.ts` · *data* |
 
 ## Bayesian posterior sampling
 

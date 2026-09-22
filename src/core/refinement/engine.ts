@@ -123,8 +123,11 @@ function clamp(value: number, p: RefinementParameter): number {
  * not blocked.
  */
 const MAX_REL_SHIFT = 5;
-function limitShift(delta: number, value: number): number {
-  const cap = MAX_REL_SHIFT * Math.abs(value);
+function limitShift(delta: number, value: number, maxShift?: number): number {
+  let cap = MAX_REL_SHIFT * Math.abs(value);
+  // An explicit absolute cap (RefinementParameter.maxShift) applies on top,
+  // including at value ≈ 0 where the relative cap is off.
+  if (maxShift !== undefined) cap = cap > 0 ? Math.min(cap, maxShift) : maxShift;
   return cap > 0 && Math.abs(delta) > cap ? Math.sign(delta) * cap : delta;
 }
 
@@ -567,7 +570,7 @@ function* refineCore(
         if (id !== undefined) solveDropped.add(id);
       }
 
-      const delta = y.map((yj, j) => limitShift(yj / sc[j]!, freeValues[j]!));
+      const delta = y.map((yj, j) => limitShift(yj / sc[j]!, freeValues[j]!, freeParams[j]!.maxShift));
       if (delta.some((d) => !Number.isFinite(d))) {
         lambda *= 10;
         maxLambda = Math.max(maxLambda, lambda);

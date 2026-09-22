@@ -55,6 +55,7 @@ import { magneticSubgroupLattice, latticeRepresentatives } from "@/core/magnetic
 import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { describePropagation } from "@/core/magnetic/propagation";
+import { propagationKParameters } from "@/core/magnetic/refinableK";
 import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
 import { rankNextParameterGroups } from "@/core/workflow/nextParameters";
 import { buildPowderProblem } from "@/core/workflow/powder";
@@ -529,11 +530,16 @@ export function build_magnetic_model(args: {
   k?: Vec3;
   moment?: number;
   tieSameSite?: boolean;
+  /** Also emit refinable propagation-vector rows (free components freed). */
+  refineK?: boolean;
 }): {
   magnetic: MagneticModel;
   parameters: RefinementParameter[];
   bindings: ParameterBinding[];
   activeSites: string[];
+  /** With `refineK`: the k rows added (free and tied), and why k — or a
+   *  direction of it — is held fixed. */
+  kRefinement?: { parameterIds: string[]; freeParameterIds: string[]; notes: string[] };
   /** k classification: "zero" | "commensurate" | "incommensurate", arms, supercell. */
   propagation: { kind: string; selfConjugate: boolean; twoArms: boolean; supercell: [number, number, number] | null; description: string };
   /** True when k has two distinct arms and the parameters are cosine + sine
@@ -553,11 +559,20 @@ export function build_magnetic_model(args: {
     },
   );
   const cls = build.propagation;
+  const kRows = args.refineK ? propagationKParameters(args.structure, build.magnetic) : null;
+  const kParams = (kRows?.params ?? []).map((p) => ({ ...p, fixed: !!p.expression }));
   return {
     magnetic: build.magnetic,
-    parameters: build.params,
-    bindings: build.bindings,
+    parameters: [...build.params, ...kParams],
+    bindings: [...build.bindings, ...(kRows?.bindings ?? [])],
     activeSites: build.activeSites,
+    ...(kRows ? {
+      kRefinement: {
+        parameterIds: kParams.map((p) => p.id),
+        freeParameterIds: kParams.filter((p) => !p.fixed).map((p) => p.id),
+        notes: kRows.notes,
+      },
+    } : {}),
     propagation: {
       kind: cls.kind,
       selfConjugate: cls.selfConjugate,
@@ -618,8 +633,8 @@ export async function refine_magnetic_powder(args: {
   };
   try {
     if (args.staged ?? true) {
-      // Stage 1: scale + background only; hold moments, profile, microstructure.
-      const HOLD = new Set(["momentMode", "momentX", "momentY", "momentZ", "tofProfile", "mustrainIso", "peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY"]);
+      // Stage 1: scale + background only; hold moments, k, profile, microstructure.
+      const HOLD = new Set(["momentMode", "momentX", "momentY", "momentZ", "propagationK", "tofProfile", "mustrainIso", "peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY"]);
       const pass1 = params.map((p) => (HOLD.has(p.kind) ? { ...p, fixed: true } : { ...p }));
       const r1 = await solve(pass1, { maxIterations: Math.min(maxIterations, 20) });
       params = params.map((p) => ({ ...p, value: r1.parameters[p.id] ?? p.value }));

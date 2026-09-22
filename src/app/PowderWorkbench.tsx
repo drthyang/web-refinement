@@ -39,7 +39,7 @@ import { powderWorkspaceFrom, type PowderViewState } from "@/app/projectIo";
 import { structureToCif, magneticStructureToMcif, type CifRefinementMeta } from "@/core/export/cif";
 import { reportHtml } from "@/core/export/report";
 import { powderReportInput, reportFileName, type MagneticExploration } from "@/app/reportInputs";
-import { isMomentParameterKind } from "@/core/refinement/types";
+import { isMagneticModelParameterKind, isMomentParameterKind } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
 import { CANCELLED } from "@/workers/computeClient";
 import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
@@ -294,8 +294,8 @@ export function PowderWorkbench({
     (magnetic: MagneticModel): number[] =>
       magneticComponentCurve(
         structure, magnetic, pattern,
-        powderParams.filter((p) => !isMomentParameterKind(p.kind)),
-        pBindings.filter((b) => !isMomentParameterKind(b.kind)),
+        powderParams.filter((p) => !isMagneticModelParameterKind(p.kind)),
+        pBindings.filter((b) => !isMagneticModelParameterKind(b.kind)),
         magneticProfile, phaseList,
       ),
     [structure, pattern, powderParams, pBindings, magneticProfile, phaseList],
@@ -497,12 +497,15 @@ export function PowderWorkbench({
     setSession((s) => ({
       ...s,
       magnetic,
-      powderParams: [...s.powderParams.filter((p) => !isMomentParameterKind(p.kind)), ...momentParams.map((p) => ({ ...p, fixed: !!p.expression }))],
-      powderBindings: [...s.powderBindings.filter((b) => !isMomentParameterKind(b.kind)), ...momentBindings],
+      powderParams: [...s.powderParams.filter((p) => !isMagneticModelParameterKind(p.kind)), ...momentParams.map((p) => ({ ...p, fixed: !!p.expression }))],
+      powderBindings: [...s.powderBindings.filter((b) => !isMagneticModelParameterKind(b.kind)), ...momentBindings],
     }));
     setPowderResult(null);
     onStep(0);
-    setMessage(`Magnetic model passed to the refinement page — ${momentParams.length} moment parameter${momentParams.length === 1 ? "" : "s"} added (Magnetic group). Click Refine to fit nuclear + magnetic together.`);
+    const nMoment = momentParams.filter((p) => isMomentParameterKind(p.kind)).length;
+    const nK = momentParams.filter((p) => p.kind === "propagationK" && !p.expression).length;
+    const kNote = nK > 0 ? ` and ${nK} k component${nK === 1 ? "" : "s"} (Propagation vector group)` : "";
+    setMessage(`Magnetic model passed to the refinement page — ${nMoment} moment parameter${nMoment === 1 ? "" : "s"} added (Magnetic group)${kNote}. Click Refine to fit nuclear + magnetic together.`);
   }
 
   const profileReq = (): { shape: PeakShape; eta?: number; lorentz?: boolean; backgroundType?: BackgroundType } => ({
@@ -964,11 +967,11 @@ export function PowderWorkbench({
   const powderMagneticFit = useMemo<MagneticFit>(() => ({
     agreementLabel: "wR",
     refine: async (magnetic, momentParams, momentBindings) => {
-      const nuclearFixed = powderParams.filter((p) => !isMomentParameterKind(p.kind)).map((p) => ({ ...p, fixed: true }));
+      const nuclearFixed = powderParams.filter((p) => !isMagneticModelParameterKind(p.kind)).map((p) => ({ ...p, fixed: true }));
       const result = await client.refineMagneticPowderParallel({
         structure, magnetic, pattern,
         parameters: [...nuclearFixed, ...momentParams.map((p) => ({ ...p, fixed: !!p.expression }))],
-        bindings: [...pBindings.filter((b) => !isMomentParameterKind(b.kind)), ...momentBindings],
+        bindings: [...pBindings.filter((b) => !isMagneticModelParameterKind(b.kind)), ...momentBindings],
         ...(phaseList.length > 0 ? { extraPhases: phaseList } : {}),
         ...magneticProfile,
         ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
@@ -991,8 +994,8 @@ export function PowderWorkbench({
       return {
         ...rest,
         ...(mag ? { magnetic: mag } : {}),
-        powderParams: s.powderParams.filter((p) => !isMomentParameterKind(p.kind)),
-        powderBindings: s.powderBindings.filter((b) => !isMomentParameterKind(b.kind)),
+        powderParams: s.powderParams.filter((p) => !isMagneticModelParameterKind(p.kind)),
+        powderBindings: s.powderBindings.filter((b) => !isMagneticModelParameterKind(b.kind)),
       };
     });
     setPowderResult(null);

@@ -52,13 +52,15 @@ interface Peaks {
 const MAGNETIC_GEOMETRY_KINDS = new Set<ParameterKind>([
   "cellLength", "cellAngle", "positionShift", "uAniso", "bIso", "occupancy", "poRatio",
   "momentMode", "momentX", "momentY", "momentZ",
+  // k moves every satellite: re-enumerate positions and |F_M⊥|².
+  "propagationK",
 ]);
 
 /** Binding kinds that drive the magnetic component. They always belong to the
  *  magnetic (primary) phase but target the derived `<structure.id>-mag` model
  *  id, so routing by `targetId` alone would drop them. */
 const MAGNETIC_BINDING_KINDS = new Set<ParameterKind>([
-  "momentMode", "momentX", "momentY", "momentZ", "magneticScale",
+  "momentMode", "momentX", "momentY", "momentZ", "magneticScale", "propagationK",
 ]);
 
 /**

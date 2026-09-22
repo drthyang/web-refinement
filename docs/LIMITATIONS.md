@@ -29,7 +29,7 @@ approximate, however plausible its output looks.
 | --- | --- | --- |
 | [Powder](#powder-diffraction) | X-ray and neutron; constant wavelength and TOF; multi-phase; Le Bail | Spherical-harmonic texture; Kα₂ doublets; Ikeda–Carpenter TOF peak shape |
 | [Single crystal](#single-crystal) | F² refinement with merging and extinction; magnetic supercell merge | Reliable `.hkl`/`.fcf` loading; twinning; absorption-correction UI |
-| [Magnetic](#magnetic-structures) | One propagation vector (k = 0, commensurate or incommensurate); subgroup candidates with BNS/OG labels | Multi-k and the star of k; harmonics and superspace; refining k |
+| [Magnetic](#magnetic-structures) | One propagation vector (k = 0, commensurate or incommensurate); subgroup candidates with BNS/OG labels | Multi-k and the star of k; harmonics and superspace; refining a self-conjugate k, or k on single-crystal data |
 | [PDF and mPDF](#real-space-pdf-and-magnetic-pdf) | Neutron and X-ray G(r); multi-phase; magnetic PDF; Γ symmetry modes | Zone-boundary modes; a correlated-error likelihood; data reduction |
 | [Uncertainty](#uncertainty-and-posterior-sampling) | Least-squares esds and correlations; posterior sampling (prototype) | Correlated residuals; comparing models |
 | [Files](#input-and-output) | CIF, mCIF, project files, report, FullProf and GSAS-II cross-check bundle | Single-crystal and multi-phase `.pcr`; geometry tables in the report |
@@ -241,6 +241,11 @@ approximate, however plausible its output looks.
   k = ½½½), and with a complex phase k has two arms with cosine and sine
   amplitudes (k = (½,0,0) in a C cell). Single-arm satellites H ± k need H in
   the centred cell's reciprocal lattice.
+- Refining k on powder data (two-arm k only): the components the little group
+  of k leaves free become parameters, a component on the same symmetry line
+  follows as a tie, and the step is capped at 0.005 r.l.u. per cycle. Checked
+  against FullProf on DyMn₆Ge₆ (γ = 0.1648(7) vs 0.16509(43)). Single-crystal
+  and magnetic-PDF refinements keep k fixed.
 - mCIF (BNS) import and export. Moment components are given along the
   normalized crystal axes.
 - Checks: the cosine/sine formalism reproduces a brute-force sum over the

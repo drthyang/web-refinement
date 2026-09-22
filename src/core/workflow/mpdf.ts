@@ -225,6 +225,11 @@ export function buildMpdfProblem(
   if (magneticActive) {
     const unsupported = unsupportedMpdfModel(magnetic);
     if (unsupported) throw new Error(unsupported);
+    // A moving k changes the spin box itself (and an off-rational value has no
+    // box at all): the magnetic PDF keeps k fixed.
+    if (parameters.some((p) => p.kind === "propagationK" && !p.fixed)) {
+      throw new Error("The magnetic PDF keeps k fixed — refine k against Bragg satellites on the powder page.");
+    }
   }
   const momentIds = [...new Set(bindings.filter((b) => MOMENT_KINDS.has(b.kind)).map((b) => b.parameterId))];
   const step = modelGrid.length > 1 ? modelGrid[1]! - modelGrid[0]! : 0.01;

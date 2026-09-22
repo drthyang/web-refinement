@@ -36,6 +36,7 @@ import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
 import { formatMagneticSymbol } from "@/core/magnetic/bnsOg";
 import { describeMomentMode } from "@/core/magnetic/momentModel";
 import { buildMagneticModel, type MagneticModelBuild } from "@/core/magnetic/momentModel";
+import { propagationKParameters } from "@/core/magnetic/refinableK";
 import { fitAmplitudesToMoments } from "@/core/magnetic/amplitudeFit";
 import { momentCartesian } from "@/core/magnetic/moment";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
@@ -426,6 +427,9 @@ export function KSearchPanel({
   // directions) with per-sublattice antiparallel flips. Scope: within each
   // element, or across all selected sites (the high-entropy case).
   const [tieMagnitudes, setTieMagnitudes] = useState(false);
+  // Add the propagation-vector rows (symmetry-allowed components only) to the
+  // Continue handoff, so the refinement page fits k with the moments.
+  const [refineK, setRefineK] = useState(false);
   const [tieScope, setTieScope] = useState<"element" | "all">("element");
   const [flippedUnits, setFlippedUnits] = useState<ReadonlySet<string>>(new Set());
 
@@ -485,6 +489,10 @@ export function KSearchPanel({
     [structure, k, selected, tieMoments, tieMagnitudes, tieScope, flippedUnits],
   );
   const magBuild = useMemo(() => (chosenOps ? buildFor(chosenOps) : null), [chosenOps, buildFor]);
+  // Which k components this model lets move (little-group directions, basis
+  // guards) — empty with the reason when k cannot be refined.
+  const kRows = useMemo(() => (magBuild ? propagationKParameters(structure, magBuild.magnetic) : null), [structure, magBuild]);
+  const canRefineK = !!kRows && kRows.params.length > 0;
   // The amplitudes with the |M| ties resolved: a derived amplitude
   // ("= ±hypot(…)") follows its reference wherever the amplitudes are applied
   // — preview, 3D arrows, handoff, report. Every parameter gets a value
@@ -1858,13 +1866,28 @@ export function KSearchPanel({
                     Show on refinement pattern
                   </button>
                 )}
+                {onContinue && canRefineK && (
+                  <label
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, color: theme.secondary, cursor: "pointer" }}
+                    title={`Continue also adds k${kRows!.params.filter((p) => !p.expression).map((p) => p.id.slice(-1)).join(", k")} as refinable rows (Propagation vector group) — only the components the little group of k leaves free${kRows!.params.some((p) => p.expression) ? "; a component on the same symmetry line follows as a tie" : ""}. The fit moves k in steps of at most 0.005 r.l.u. per cycle.`}
+                  >
+                    <input type="checkbox" checked={refineK} onChange={(e) => setRefineK(e.target.checked)} />
+                    Refine k
+                  </label>
+                )}
+                {onContinue && !canRefineK && kRows && kRows.notes.length > 0 && (
+                  <span style={{ fontSize: 12, color: theme.secondary }} title={kRows.notes.join("; ")}>k held fixed</span>
+                )}
                 {onContinue && (
                   <button
                     style={{ ...btn, marginTop: 0, ...(kUnsupported ? { opacity: 0.5 } : {}) }}
                     onClick={() => onContinue(
                       applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps),
-                      magBuild.params.map((p) => ({ ...p, value: resolvedAmps[p.id] ?? p.value, initialValue: resolvedAmps[p.id] ?? p.value })),
-                      magBuild.bindings,
+                      [
+                        ...magBuild.params.map((p) => ({ ...p, value: resolvedAmps[p.id] ?? p.value, initialValue: resolvedAmps[p.id] ?? p.value })),
+                        ...(refineK && canRefineK ? kRows!.params : []),
+                      ],
+                      [...magBuild.bindings, ...(refineK && canRefineK ? kRows!.bindings : [])],
                     )}
                     disabled={!!kUnsupported}
                     {...(kUnsupported ? { title: kUnsupported } : {})}
