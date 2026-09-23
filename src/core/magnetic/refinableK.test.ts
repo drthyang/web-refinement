@@ -4,7 +4,10 @@ import type { PowderPattern } from "@/core/diffraction/types";
 import type { Vec3 } from "@/core/math/types";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
-import { allowedKShiftDirections, propagationKParameters, K_MAX_SHIFT } from "@/core/magnetic/refinableK";
+import { allowedKShiftDirections, componentBounds, propagationKParameters, K_MAX_SHIFT } from "@/core/magnetic/refinableK";
+import { buildSpaceGroup } from "@/core/crystal/spaceGroups";
+import { littleGroup } from "@/core/magnetic/magneticGroups";
+import { parseTie } from "@/core/refinement/constraints";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import { buildMagneticPowderProblem, magneticPowderComponents } from "@/core/workflow/magneticPowder";
 import { buildMagneticSingleCrystalProblem } from "@/core/workflow/magnetic";
@@ -100,6 +103,53 @@ describe("propagationKParameters", () => {
     expect(applied.propagation[0]![0]).toBeCloseTo(0.21, 12);
     expect(applied.propagation[0]![1]).toBeCloseTo(0.21, 12);
     expect(applied.propagation[0]![2]).toBe(0);
+  });
+});
+
+describe("ties and bounds off the canonical zone (review regressions)", () => {
+  // A k written with negative components puts whole-number constants in the
+  // ties ("= prop_k1-1"), which the tie grammar used to read as a reference to
+  // a parameter named "prop_k1-1" — every evaluation then threw.
+  const cases: { sg: number; k: Vec3; move: string; to: number }[] = [
+    { sg: 221, k: [0.3, -0.7, 0.1], move: "prop_k1", to: 0.31 }, // Pm-3m (α, α−1, γ) plane
+    { sg: 191, k: [-0.2, -0.4, 0.1], move: "prop_k2", to: -0.41 }, // P6/mmm mirror plane
+  ];
+  for (const c of cases) {
+    it(`space group ${c.sg}, k = (${c.k.join(", ")}): every tie parses and follows its free component`, () => {
+      const sg = buildSpaceGroup(c.sg);
+      const structure: StructureModel = {
+        id: "g", name: "g", cell: c.sg === 191
+          ? { a: 5, b: 5, c: 8, alpha: 90, beta: 90, gamma: 120 }
+          : { a: 5, b: 5, c: 5, alpha: 90, beta: 90, gamma: 90 },
+        spaceGroup: sg,
+        sites: [{ label: "Fe1", element: "Fe", oxidationState: 3, position: [0.11, 0.23, 0.37], occupancy: 1, adp: iso }],
+      };
+      const build = buildMagneticModel(structure, c.k, ["Fe1"], littleGroup(sg.operations, c.k), { moment: 2 });
+      const r = propagationKParameters(structure, build.magnetic);
+      const tied = r.params.filter((p) => p.expression);
+      expect(tied.length).toBeGreaterThan(0);
+      for (const p of tied) expect(parseTie(p.expression!)).toMatchObject({ kind: "linear", refId: expect.stringMatching(/^prop_k[123]$/) });
+      // Unmoved: the ties reproduce k₀ exactly.
+      const values = Object.fromEntries(r.params.map((p) => [p.id, p.value]));
+      const k0 = applyMagneticMoments(build.magnetic, r.bindings, resolveTies(r.params, values)).propagation[0]!;
+      for (let i = 0; i < 3; i++) expect(k0[i]).toBeCloseTo(c.k[i]!, 10);
+      // Moved: k stays on the symmetry element (the moved k keeps the same little group).
+      const moved = applyMagneticMoments(build.magnetic, r.bindings, resolveTies(r.params, { ...values, [c.move]: c.to })).propagation[0]!;
+      expect(littleGroup(sg.operations, moved)).toHaveLength(littleGroup(sg.operations, c.k).length);
+      for (const p of r.params) expect(p.min === undefined || (p.min < p.value && p.value < p.max!)).toBe(true);
+    });
+  }
+
+  it("bounds always contain the starting value, even within the margin of a half-integer", () => {
+    for (const v of [0.4995, 0.0004, -0.0004, 0.5, 0, 0.25, -0.3, 0.7, 1.2]) {
+      const { min, max } = componentBounds(v);
+      expect(min).toBeLessThan(v);
+      expect(max).toBeGreaterThan(v);
+    }
+    expect(componentBounds(0.25)).toEqual({ min: 0.001, max: 0.499 });
+    const neg = componentBounds(-0.3);
+    expect(neg.min).toBeCloseTo(-0.499, 12);
+    expect(neg.max).toBeCloseTo(-0.001, 12);
   });
 });
 

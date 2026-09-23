@@ -234,7 +234,9 @@ Implemented conventions (single k, first harmonic only):
   global sign (time reversal) are invisible to unpolarized data
 - gate: k-formalism ≡ brute-force real-space sum over the magnetic supercell, both arms, both θ
   (src/core/magnetic/fourierModulation.test.ts); helix recovery through the powder workflow
-- still missing: harmonics (3k, 5k), (3+1)D superspace symmetry, refining k, multi-k
+- refining k: done for powder (src/core/magnetic/refinableK.ts) — two-arm k only, along the
+  little-group-free directions; single-crystal and mPDF keep k fixed
+- still missing: harmonics (3k, 5k), (3+1)D superspace symmetry, multi-k
 ```
 
 ## 13. Limits of magnetic refinement — what neutrons cannot tell you

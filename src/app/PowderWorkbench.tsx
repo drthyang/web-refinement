@@ -28,6 +28,7 @@ import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import { magneticComponentCurve } from "@/core/workflow/magneticPowder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
+import { resolveTies } from "@/core/refinement/constraints";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
 import { extractSizeStrain } from "@/core/diffraction/microstructure";
@@ -236,6 +237,22 @@ export function PowderWorkbench({
   // applies a model but no rows) the moments are held and the nuclear set refines
   // against nuclear + magnetic.
   const magneticApplied = !!session.magnetic && session.magnetic.moments.length > 0;
+  // The applied magnetic model at the CURRENT row values — moments and k. The
+  // session model changes only after a refinement, so a Reset or a typed value
+  // would otherwise leave the satellite ticks, 3D arrows and mCIF at the last
+  // refined k while the calculated curve already moved. Re-applying onto the
+  // refined model is idempotent (moment modes and k rows are absolute).
+  const liveMagnetic = useMemo(() => {
+    const mag = session.magnetic;
+    if (!mag) return null;
+    const values: Record<string, number> = {};
+    for (const p of powderParams) values[p.id] = p.value;
+    try {
+      return applyMagneticMoments(mag, pBindings, resolveTies(powderParams, values));
+    } catch {
+      return mag; // an unresolvable tie is reported by the refinement itself
+    }
+  }, [session.magnetic, powderParams, pBindings]);
   /** Moment rows are present, i.e. the moments themselves are being refined. */
   const momentRowsFree = (): boolean => powderParams.some((p) => isMomentParameterKind(p.kind));
 
@@ -408,11 +425,11 @@ export function PowderWorkbench({
     session.extraPhases.forEach((ph, i) => {
       phases.push(nuclearPhaseTicks(refinedPhases[i + 1] ?? ph, dMin, dMax, toX, { id: ph.id, label: ph.name || `phase ${i + 2}`, color: PHASE_COLORS[(i + 1) % PHASE_COLORS.length]! }));
     });
-    if (session.magnetic) {
-      phases.push(magneticPhaseTicks(base, session.magnetic, dMin, dMax, toX, { id: "magnetic", label: "magnetic", color: MAGNETIC_COLOR }));
+    if (liveMagnetic) {
+      phases.push(magneticPhaseTicks(base, liveMagnetic, dMin, dMax, toX, { id: "magnetic", label: "magnetic", color: MAGNETIC_COLOR }));
     }
     return phases;
-  }, [refinedPhases, structure, session.extraPhases, session.magnetic, patternExtent, pattern.xUnit, effectiveUnit, axisCtx]);
+  }, [refinedPhases, structure, session.extraPhases, liveMagnetic, patternExtent, pattern.xUnit, effectiveUnit, axisCtx]);
 
   // Manually added residual peaks (clicked on the magnetic page's pattern):
   // stored as d-spacings; height/significance are sampled from the residual at
@@ -478,8 +495,8 @@ export function PowderWorkbench({
 
   // Refined moment entries (per site / split orbit) for the 3D structure view.
   const sessionMoments = useMemo(
-    () => (session.magnetic ? momentEntriesFrom(session.magnetic) : undefined),
-    [session.magnetic],
+    () => (liveMagnetic ? momentEntriesFrom(liveMagnetic) : undefined),
+    [liveMagnetic],
   );
 
   function patchPowder(id: string, patch: Partial<RefinementParameter>): void {
@@ -1051,7 +1068,7 @@ export function PowderWorkbench({
     // unfiltered set would attach another phase's esds to this one's sites.
     const bindings = session.extraPhases.length > 0 ? pBindings.filter((b) => b.targetId === target.id) : pBindings;
     const opts = { params: withEsd, bindings, ...(refinement ? { refinement } : {}) };
-    const mag = session.magnetic;
+    const mag = liveMagnetic;
     if (withMoments && mag && mag.moments.length > 0) {
       downloadText(`${target.id}.mcif`, magneticStructureToMcif(target, mag, opts), "chemical/x-cif");
     } else {
@@ -1402,7 +1419,7 @@ export function PowderWorkbench({
                         key={viewStructure.id}
                         structure={viewStructure}
                         {...(isPrimary && sessionMoments ? { moments: sessionMoments } : {})}
-                        {...(isPrimary && session.magnetic?.propagation[0] ? { propagation: session.magnetic.propagation[0] } : {})}
+                        {...(isPrimary && liveMagnetic?.propagation[0] ? { propagation: liveMagnetic.propagation[0] } : {})}
                         {...(isPrimary && session.magnetic?.operations ? { magneticOperations: session.magnetic.operations } : {})}
                         exports={[viewerCifExport(viewStructure, isPrimary)]}
                       />
@@ -1596,6 +1613,7 @@ export function PowderWorkbench({
               preselect={session.magnetic ?? null}
               onApply={applyMagneticPreview}
               onContinue={continueRefinementWithMagnetic}
+              allowRefineK
               onReportModel={publishExploration}
             />
           </div>

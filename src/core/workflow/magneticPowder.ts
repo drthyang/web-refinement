@@ -56,6 +56,22 @@ const MAGNETIC_GEOMETRY_KINDS = new Set<ParameterKind>([
   "propagationK",
 ]);
 
+/** Kinds held in the first stage of a staged magnetic powder fit. */
+const MAGNETIC_STAGE1_HOLD = new Set<ParameterKind>([
+  "momentMode", "momentX", "momentY", "momentZ", "propagationK",
+  "tofProfile", "mustrainIso", "peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY",
+]);
+
+/**
+ * Stage 1 of a staged magnetic powder fit: scale + background only — the
+ * moments, k, profile and microstructure are held. k in particular must not
+ * move against a poor moment/scale start: it would chase intensity, not peak
+ * positions.
+ */
+export function magneticStage1Parameters(params: readonly RefinementParameter[]): RefinementParameter[] {
+  return params.map((p) => (MAGNETIC_STAGE1_HOLD.has(p.kind) ? { ...p, fixed: true } : { ...p }));
+}
+
 /** Binding kinds that drive the magnetic component. They always belong to the
  *  magnetic (primary) phase but target the derived `<structure.id>-mag` model
  *  id, so routing by `targetId` alone would drop them. */

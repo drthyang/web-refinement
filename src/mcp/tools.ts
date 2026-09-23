@@ -40,7 +40,6 @@ import {
   zeroAdpWarning,
   PDF_STAGE_KINDS,
 } from "@/core/workflow/pdf";
-import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
 import { buildMpdfSpec, mpdfComponents, unsupportedMpdfModel, MPDF_STAGE_KINDS } from "@/core/workflow/mpdf";
 import { computeAgreementFactors, excludedPointMask, weightsFromSigma } from "@/core/refinement/factors";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
@@ -56,7 +55,7 @@ import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
 import { buildMagneticModel } from "@/core/magnetic/momentModel";
 import { describePropagation } from "@/core/magnetic/propagation";
 import { propagationKParameters } from "@/core/magnetic/refinableK";
-import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
+import { buildMagneticPowderProblem, magneticPowderComponents, magneticStage1Parameters } from "@/core/workflow/magneticPowder";
 import { rankNextParameterGroups } from "@/core/workflow/nextParameters";
 import { buildPowderProblem } from "@/core/workflow/powder";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
@@ -633,9 +632,7 @@ export async function refine_magnetic_powder(args: {
   };
   try {
     if (args.staged ?? true) {
-      // Stage 1: scale + background only; hold moments, k, profile, microstructure.
-      const HOLD = new Set(["momentMode", "momentX", "momentY", "momentZ", "propagationK", "tofProfile", "mustrainIso", "peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY"]);
-      const pass1 = params.map((p) => (HOLD.has(p.kind) ? { ...p, fixed: true } : { ...p }));
+      const pass1 = magneticStage1Parameters(params);
       const r1 = await solve(pass1, { maxIterations: Math.min(maxIterations, 20) });
       params = params.map((p) => ({ ...p, value: r1.parameters[p.id] ?? p.value }));
     }

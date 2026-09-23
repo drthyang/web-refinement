@@ -105,23 +105,31 @@ function basisStable(structure: StructureModel, magnetic: MagneticModel, k: Vec3
   return true;
 }
 
-/** Bounds keeping a free component strictly between the half-integers around it. */
-function componentBounds(v: number): { min: number; max: number } {
+/** Bounds keeping a free component strictly between the half-integers around
+ *  it — and always strictly around its own value. */
+export function componentBounds(v: number): { min: number; max: number } {
   const margin = 1e-3;
-  const lo = Math.floor(2 * v + 1e-9) / 2;
-  if (Math.abs(2 * v - Math.round(2 * v)) < 1e-9) {
-    // Sitting on a half-integer along a direction symmetry leaves free: nothing
-    // is special here, so allow half a zone either way.
+  // On (or within the margin of) a half-integer along a direction symmetry
+  // leaves free: the interval between half-integers would exclude v itself,
+  // so allow half a zone either way instead.
+  if (Math.abs(v - Math.round(2 * v) / 2) < 2 * margin) {
     return { min: v - 0.5 + margin, max: v + 0.5 - margin };
   }
+  const lo = Math.floor(2 * v) / 2;
   return { min: lo + margin, max: lo + 0.5 - margin };
 }
 
-/** A tie constant written in the fixed-point form `parseTie` accepts. */
+/**
+ * |x| in the fixed-point form `parseTie` accepts, ALWAYS with a decimal point:
+ * the tie grammar's id pattern admits '-' and digits, so "= prop_k1-1" would
+ * read as a reference to a parameter named "prop_k1-1". "1.0" cannot be an id.
+ */
 function fixed(x: number): string {
-  const s = Math.abs(x).toFixed(10).replace(/0+$/, "").replace(/\.$/, "");
-  return s === "" ? "0" : s;
+  return Math.abs(x).toFixed(10).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, ".0");
 }
+
+/** Below this a tie factor/constant is written as absent (fixed() would print "0.0"). */
+const TIE_EPS = 5e-11;
 
 export interface PropagationKParameters {
   /** k component rows: free components (held fixed until the user frees them)
@@ -190,8 +198,8 @@ export function propagationKParameters(structure: StructureModel, magnetic: Magn
     const { col, f } = drivers[0]!;
     const c = k[i]! - f * k[col]!;
     const ref = propagationParameterId(col);
-    const factor = Math.abs(f - 1) < 1e-12 ? "" : `${f < 0 ? "-" : ""}${fixed(f)}*`;
-    const constant = Math.abs(c) < 1e-12 ? "" : `${c < 0 ? "-" : "+"}${fixed(c)}`;
+    const factor = Math.abs(f - 1) < TIE_EPS ? "" : `${f < 0 ? "-" : ""}${fixed(f)}*`;
+    const constant = Math.abs(c) < TIE_EPS ? "" : `${c < 0 ? "-" : "+"}${fixed(c)}`;
     const v = k[i]!;
     params.push({
       id: propagationParameterId(i), label: `k${i + 1} (r.l.u.) = ${factor.replace("*", "·")}k${col + 1}${constant}`,

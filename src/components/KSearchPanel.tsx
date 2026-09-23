@@ -15,7 +15,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import type { StructureModel, SymmetryOperation } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
 import type { PowderPattern } from "@/core/diffraction/types";
-import { isMomentParameterKind, type ParameterBinding, type RefinementParameter } from "@/core/refinement/types";
+import { isMagneticModelParameterKind, type ParameterBinding, type RefinementParameter } from "@/core/refinement/types";
 import { resolveTies } from "@/core/refinement/constraints";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { searchPropagationVector, satelliteMatchDeltas, kLabel, type KCandidate } from "@/core/magnetic/kSearch";
@@ -201,6 +201,7 @@ export function KSearchPanel({
   magneticFit,
   onApply,
   onContinue,
+  allowRefineK = false,
   baselineAgreement = null,
   preselect = null, onReportModel,
 }: {
@@ -253,6 +254,10 @@ export function KSearchPanel({
   onApply?: (magnetic: MagneticModel | null) => void;
   /** Hand the magnetic model + moment params/bindings to the refinement page. */
   onContinue?: (magnetic: MagneticModel, params: readonly RefinementParameter[], bindings: readonly ParameterBinding[]) => void;
+  /** Offer "Refine k" on Continue. Only a host whose refinement can MOVE k
+   *  sets it (powder): single-crystal satellite indices come from the file and
+   *  the mPDF spin box is built at a fixed k, so both keep k fixed. */
+  allowRefineK?: boolean;
   /** The nuclear-only agreement (fraction) the candidate fits are compared against. */
   baselineAgreement?: number | null;
   /**
@@ -492,7 +497,7 @@ export function KSearchPanel({
   // Which k components this model lets move (little-group directions, basis
   // guards) — empty with the reason when k cannot be refined.
   const kRows = useMemo(() => (magBuild ? propagationKParameters(structure, magBuild.magnetic) : null), [structure, magBuild]);
-  const canRefineK = !!kRows && kRows.params.length > 0;
+  const canRefineK = allowRefineK && !!kRows && kRows.params.length > 0;
   // The amplitudes with the |M| ties resolved: a derived amplitude
   // ("= ±hypot(…)") follows its reference wherever the amplitudes are applied
   // — preview, 3D arrows, handoff, report. Every parameter gets a value
@@ -783,8 +788,8 @@ export function KSearchPanel({
       if (magneticFit) return magneticFit.refine(build.magnetic, moments, build.bindings);
       if (!(pattern && nuclearParams && nuclearBindings && profile)) throw new Error("no data to fit the moments against");
       await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
-      const nuclearFixed = nuclearParams.filter((p) => !isMomentParameterKind(p.kind)).map((p) => ({ ...p, fixed: true }));
-      const bindings = [...nuclearBindings.filter((b) => !isMomentParameterKind(b.kind)), ...build.bindings];
+      const nuclearFixed = nuclearParams.filter((p) => !isMagneticModelParameterKind(p.kind)).map((p) => ({ ...p, fixed: true }));
+      const bindings = [...nuclearBindings.filter((b) => !isMagneticModelParameterKind(b.kind)), ...build.bindings];
       const problem = buildMagneticPowderProblem(fitStructure ?? structure, build.magnetic, pattern, [...nuclearFixed, ...moments], bindings, {
         shape: profile.shape,
         ...(profile.eta !== undefined ? { eta: profile.eta } : {}),
@@ -1875,7 +1880,7 @@ export function KSearchPanel({
                     Refine k
                   </label>
                 )}
-                {onContinue && !canRefineK && kRows && kRows.notes.length > 0 && (
+                {onContinue && allowRefineK && !canRefineK && kRows && kRows.notes.length > 0 && (
                   <span style={{ fontSize: 12, color: theme.secondary }} title={kRows.notes.join("; ")}>k held fixed</span>
                 )}
                 {onContinue && (

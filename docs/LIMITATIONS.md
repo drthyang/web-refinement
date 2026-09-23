@@ -276,7 +276,8 @@ approximate, however plausible its output looks.
 **Not yet**
 - Multi-k structures, and the star of k with its domains.
 - Harmonics (3k, 5k — squared-up modulations) and (3+1)D superspace symmetry.
-- Refining k itself.
+- Refining k on single-crystal or magnetic-PDF data, or a self-conjugate k
+  (k = 0 or ½-type), which would change the modulation from one arm to two.
 - Cosine/sine modes taken directly from an irrep; today they come from the
   magnetic subgroup.
 - A size tie across different mode geometries when +k and −k are distinct. The

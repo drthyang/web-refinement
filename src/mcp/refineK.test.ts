@@ -3,7 +3,7 @@ import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
-import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
+import { magneticPowderComponents, magneticStage1Parameters } from "@/core/workflow/magneticPowder";
 import * as tools from "@/mcp/tools";
 
 /** Refinable k through the agent layer (Track B1 step 6). */
@@ -35,7 +35,17 @@ describe("build_magnetic_model with refineK", () => {
 });
 
 describe("refine_magnetic_powder moves k", () => {
-  it("recovers k₃ from a 0.02 r.l.u. offset (staged: k held in stage 1)", async () => {
+  it("stage 1 holds the free k rows (and the moments), frees nothing new", () => {
+    const b = tools.build_magnetic_model({ structure, ionLabels: ["Fe1"], k: [0, 0, 0.2317], moment: 2, refineK: true });
+    const scale: RefinementParameter = { id: "scale", label: "s", kind: "scale", value: 1, initialValue: 1, fixed: false };
+    const params = [scale, ...b.parameters.map((p) => ({ ...p, fixed: false }))];
+    const stage1 = magneticStage1Parameters(params);
+    expect(stage1.filter((p) => p.kind === "propagationK").every((p) => p.fixed)).toBe(true);
+    expect(stage1.filter((p) => p.kind === "momentMode").every((p) => p.fixed)).toBe(true);
+    expect(stage1.find((p) => p.id === "scale")!.fixed).toBe(false);
+  });
+
+  it("recovers k₃ from a 0.02 r.l.u. offset through the staged tool", async () => {
     const truth = tools.build_magnetic_model({ structure, ionLabels: ["Fe1"], k: [0, 0, 0.2317], moment: 2, refineK: true });
     const nuc: RefinementParameter[] = [
       { id: "scale", label: "s", kind: "scale", value: 20, initialValue: 20, fixed: false, min: 0 },
