@@ -12,8 +12,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { TOOL_REGISTRY } from "@/mcp/registry";
 import { maybeRunAsEvaluator } from "@/mcp/nodeEvaluator";
+import { APP_VERSION } from "@/app/constants";
 
-const server = new McpServer({ name: "materia", version: "0.1.0" });
+const server = new McpServer({ name: "materia", version: APP_VERSION });
 
 /**
  * Wrap a pure handler: run it, return pretty JSON as text + structuredContent.
