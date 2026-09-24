@@ -4,12 +4,13 @@
  * refine → **assess** → **suggest** → **interpret**.
  *
  * Every handler is a pure function (JSON args → JSON result) with no MCP
- * dependency, so they are unit-testable directly; `server.ts` only adds the
- * stdio transport and schemas. The domain models are methods-free data (the same
- * constraint the Web Worker protocol enforces), so they cross the tool boundary
- * unchanged. Statelessness is deliberate: an agent threads the structure /
- * pattern / result through calls, so every agent-driven run is reproducible by
- * replaying the same tool calls (see docs/AGENT_TOOLS.md).
+ * dependency, so they are unit-testable directly; `host.ts` adds the transport
+ * (schemas, server-side refs, `path`, `free`). The domain models are
+ * methods-free data (the same constraint the Web Worker protocol enforces), so
+ * they cross the tool boundary unchanged. Statelessness is deliberate: an agent
+ * threads the structure / pattern / result through calls (as refs the server
+ * resolves), so every agent-driven run is reproducible by replaying the same
+ * resolved tool calls (see docs/AGENT_TOOLS.md).
  */
 
 import type { StructureModel } from "@/core/crystal/types";
@@ -172,7 +173,9 @@ export function build_refinement(args: {
  * The numerical optimization is the deterministic Levenberg–Marquardt engine —
  * the agent chooses *what* to free, never the values. Returns the full result
  * (refined values, esds, agreement, and the SVD/correlation/at-bound
- * diagnostics) plus the observation count and residual for `assess_refinement`.
+ * diagnostics) plus the observation count and residual for `assess_refinement`,
+ * and `parameters` — the input set carrying the refined values, ready to feed
+ * the next refinement block or `assess_refinement` unchanged.
  */
 export async function refine_powder(args: {
   structure: StructureModel;
@@ -185,7 +188,7 @@ export async function refine_powder(args: {
   staged?: boolean;
   fitRange?: { min: number; max: number };
   maxIterations?: number;
-}): Promise<{ result: RefinementResult; observationCount: number; residual: { d: number[]; yObs: number[]; yCalc: number[] }; parallel: { workers: number } | null }> {
+}): Promise<{ result: RefinementResult; parameters: RefinementParameter[]; observationCount: number; residual: { d: number[]; yObs: number[]; yCalc: number[] }; parallel: { workers: number } | null }> {
   const shape: PeakShape = args.profile.shape;
   const options = { maxIterations: args.maxIterations ?? 20 };
 
@@ -245,7 +248,7 @@ export async function refine_powder(args: {
   const d = args.pattern.xUnit === "dSpacing" ? [...curves.x] : convertAxisArray(curves.x, args.pattern.xUnit, "dSpacing", ctx);
   const excluded = excludedPointMask(curves.yObs);
   const observationCount = excluded.reduce((n, ex) => n + (ex ? 0 : 1), 0);
-  return { result, observationCount, residual: { d, yObs: [...curves.yObs], yCalc: [...curves.yCalc] }, parallel };
+  return { result, parameters: refined, observationCount, residual: { d, yObs: [...curves.yObs], yCalc: [...curves.yCalc] }, parallel };
 }
 
 /**
@@ -589,6 +592,7 @@ export async function refine_magnetic_powder(args: {
   maxIterations?: number;
 }): Promise<{
   result: RefinementResult;
+  parameters: RefinementParameter[];
   magnetic: MagneticModel;
   observationCount: number;
   components: { x: number[]; yObs: number[]; yNuclear: number[]; yMagnetic: number[]; yCalc: number[] };
@@ -632,6 +636,7 @@ export async function refine_magnetic_powder(args: {
     const excluded = excludedPointMask(c.yObs);
     return {
       result,
+      parameters: refined,
       magnetic: refinedMagnetic,
       observationCount: excluded.reduce((n, ex) => n + (ex ? 0 : 1), 0),
       components: { x: c.x, yObs: c.yObs, yNuclear: c.yNuclear, yMagnetic: c.yMagnetic, yCalc: c.yCalc },
@@ -1007,6 +1012,7 @@ export async function refine_pdf(args: {
   maxIterations?: number;
 }): Promise<{
   result: RefinementResult;
+  parameters: RefinementParameter[];
   observationCount: number;
   residual: { r: number[]; gObs: number[]; gCalc: number[] };
   warnings: string[];
@@ -1081,6 +1087,7 @@ export async function refine_pdf(args: {
   const noAdp = zeroAdpWarning([args.structure, ...(args.extraPhases ?? [])]);
   return {
     result,
+    parameters: refined,
     observationCount,
     residual: { r: [...curves.x], gObs: [...curves.yObs], gCalc: [...curves.yCalc] },
     warnings: [...(conflict ? [conflict] : []), ...(noAdp ? [noAdp] : [])],
@@ -1358,6 +1365,7 @@ export async function refine_mpdf(args: {
   maxIterations?: number;
 }): Promise<{
   result: RefinementResult;
+  parameters: RefinementParameter[];
   magnetic: MagneticModel;
   observationCount: number;
   components: { r: number[]; gObs: number[]; gNuclear: number[]; gMagnetic: number[]; gCalc: number[] };
@@ -1429,6 +1437,7 @@ export async function refine_mpdf(args: {
   if (empty) warnings.push(empty);
   return {
     result,
+    parameters: refined,
     magnetic: refinedMagnetic,
     observationCount: c.x.filter(inRange).length,
     components: { r: [...c.x], gObs: [...c.yObs], gNuclear: [...c.yNuclear], gMagnetic: [...c.yMagnetic], gCalc: [...c.yCalc] },

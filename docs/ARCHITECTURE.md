@@ -63,7 +63,8 @@ testable, which keeps validation tractable. It also keeps every consumer surface
 thin, so adding a surface never adds science:
 
 - **Web app:** React state over core functions.
-- **MCP server:** a registry of the same functions behind a stdio transport
+- **MCP server:** a registry of the same functions behind a stdio transport.
+  The transport keeps bulky data server-side and passes refs
   ([AGENT_TOOLS.md](./AGENT_TOOLS.md)).
 - **Workers:** the same functions, off the UI thread.
 
@@ -91,7 +92,8 @@ src/
     project/         project file: types, readable serializer, validation, migration
   parsers/           CIF/mCIF, hkl, powder formats, instrument files, PDF data
   mcp/               agent tool layer: tools.ts (pure handlers),
-                     registry.ts (single source of truth), server.ts (stdio),
+                     registry.ts (single source of truth), host.ts + refs.ts
+                     (refs, path, free, read_ref), server.ts (stdio),
                      nodeEvaluator.ts (worker_threads pool)
   workers/           compute worker, typed protocol and client, WebGPU kernels
   visualization/     plot helpers: scales, axis units, reflection ticks, hit testing
