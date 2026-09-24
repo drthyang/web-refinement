@@ -11,23 +11,57 @@ end ([ROADMAP.md §5](./ROADMAP.md)).
 
 ## Run the MCP server
 
-The server speaks MCP over stdio ([`src/mcp/`](../src/mcp)). Build the bundle,
-which inlines the core, then start it:
+The server speaks MCP over stdio ([`src/mcp/`](../src/mcp)). One command
+bundles the core and starts it, so a client always runs the current source:
 
 ```bash
-npm run build:mcp          # writes dist/mcp-server.mjs
-node dist/mcp-server.mjs   # speaks MCP over stdio
+npm run mcp                # = node scripts/build-mcp.mjs --serve
 ```
 
-To register it with an MCP client such as Claude Desktop or Claude Code:
+**Claude Code** picks the server up from the repository's
+[`.mcp.json`](../.mcp.json) and asks once before starting it. Run
+`npm install` first.
+
+**Claude Desktop** and other clients need the absolute path. They often launch
+servers in `/` or the home folder, so name the data folder too:
 
 ```json
 {
   "mcpServers": {
-    "materia": { "command": "node", "args": ["/abs/path/dist/mcp-server.mjs"] }
+    "materia": {
+      "command": "node",
+      "args": ["/abs/path/web-refinement/scripts/build-mcp.mjs", "--serve"],
+      "env": { "MATERIA_ROOTS": "/abs/path/web-refinement" }
+    }
   }
 }
 ```
+
+### How data travels
+
+The tools pass whole domain objects. A parsed powder pattern is about 200 k
+characters of JSON, and every refinement needs it back. A model cannot carry
+that, so the transport ([`host.ts`](../src/mcp/host.ts),
+[`refs.ts`](../src/mcp/refs.ts)) adds four things. The handlers never see them.
+
+- **Refs.** The server stores every tool output. The response is a compact view:
+  bulky parts come back as `{"ref": "#3/pattern", …summary}`. Any argument may
+  be such a ref, and the server substitutes the stored value. Each object result
+  also carries `"ref": "#n"` for the whole output.
+- **`path`.** The parse tools read a file on the server instead of taking its
+  text. Paths are confined to the data folders: `MATERIA_ROOTS` (a path list),
+  else the working directory. File reading stays off when that is `/` or the
+  home folder.
+- **`free`.** Refining tools take parameter ids or globs, such as
+  `["scale", "bkg*", "cell_*"]`. Exactly those refine; every other parameter is
+  held fixed. A pattern that matches nothing is an error that lists the ids.
+- **`read_ref`.** It shows the value behind a ref, with `start`/`end` windows for
+  long arrays.
+
+Refining tools return `parameters` with the refined values, so one call's
+output feeds the next without copying numbers. A test drives a whole powder
+loop through a real MCP client and holds every message under a size budget
+([`host.test.ts`](../src/mcp/host.test.ts)).
 
 ## Tools
 
@@ -127,7 +161,7 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 
 **`build_refinement`** — Build the SYMMETRY-ALLOWED parameter set, bindings, and profile for a structure + pattern. Only symmetry-allowed parameters are created, so an agent cannot free a forbidden one. Feed `parameters`/`bindings`/`profile` to refine_powder.
 
-**`refine_powder`** — Run the deterministic Levenberg–Marquardt refinement of the FREED parameters (fix a parameter by setting its `fixed:true`). Returns refined values, esds, agreement (wR/GoF), the SVD/correlation/at-bound diagnostics, the observation count, and the residual — everything assess_refinement needs. The agent decides what to free; it never sets values.
+**`refine_powder`** — Run the deterministic Levenberg–Marquardt refinement of the FREED parameters (fix a parameter by setting its `fixed:true`). Returns refined values, esds, agreement (wR/GoF), the SVD/correlation/at-bound diagnostics, the observation count, and the residual — everything assess_refinement needs — plus `parameters`: the input set carrying the refined values, ready for the next block. The agent decides what to free; it never sets values.
 
 **`assess_refinement`** — The judgment tool. Turn a refinement result into a structured expert read: a trust VERDICT (Toby GoF bands) plus ranked FINDINGS — dangerous correlations (with the physical reason), at-bound/unphysical parameters, ill-conditioning, over/under-parameterization, and UNEXPLAINED RESIDUAL PEAKS (the missing-phase / magnetic-order signal). Pass the refine_powder outputs straight in.
 
@@ -157,7 +191,7 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 
 **`rank_next_parameters`** — The next-step diagnostic: rank the currently-FIXED parameter groups by the χ² improvement freeing them is expected to buy (Gauss–Newton estimate from probed Jacobian columns at the current values). Read `predictedWr` vs `wrNow` for absolute progress — on a converged model every group promises nothing. A LOCAL probe: align the pattern first; badly displaced peaks under-credit the cell/zero groups.
 
-**`refine_magnetic_powder`** — Co-refine nuclear + magnetic against a powder pattern. Staged by default: scale + background converge with moments and profile held, then everything requested is freed — a flat co-refinement from a poor moment start can collapse the scale against exploding moments. Combine the nuclear parameters/bindings from build_refinement with the moment set from build_magnetic_model. Returns the result, the refined magnetic model, and separated nuclear/magnetic component curves.
+**`refine_magnetic_powder`** — Co-refine nuclear + magnetic against a powder pattern. Staged by default: scale + background converge with moments and profile held, then everything requested is freed — a flat co-refinement from a poor moment start can collapse the scale against exploding moments. Combine the nuclear parameters/bindings from build_refinement with the moment set from build_magnetic_model. Returns the result, the refined `parameters` (ready for the next call), the refined magnetic model, and separated nuclear/magnetic component curves.
 
 **`parse_single_crystal_data`** — Parse single-crystal integrated intensities — a FullProf .int, a SHELX HKLF 4 .hkl, a .fcf CIF reflection loop, or a plain h k l I σ list — into a SingleCrystalDataset. ALWAYS pass `name`: .int and .fcf are detected from the text, but HKLF 4 is fixed-column and looks exactly like a free-format list, so only the .hkl filename selects the column-exact reader (whitespace-splitting an HKLF 4 row reads σ as the intensity once F² ≥ 10000.00 fills its field). `format` reports which reader ran. Parse the nuclear and magnetic files, then merge_magnetic_supercell into one dataset for the magnetic refinement. A 0 0 0 row (the forward beam, not a Bragg reflection) is skipped by default — pass skipForwardBeam:false for a fundamental-indexed MAGNETIC file, where 0 0 0 is the satellite at k itself.
 
@@ -173,13 +207,13 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 
 **`build_pdf_model`** — Build the SYMMETRY-ALLOWED PDF parameter set for a structure (plus optional extra phases) against an observed G(r): the PDF scale (seeded to the least-squares optimum), the Qdamp/Qbroad instrument envelope (seeded from the header, fixed), correlated-motion δ1/δ2 and sratio/rcut, the particle-diameter envelope, and the symmetry-reduced cell/positions/ADPs/occupancies. Feed `parameters`/`bindings`/`restraints` to refine_pdf. CHECK `warnings`: it names any site with no displacement parameter (B_iso = 0, e.g. a CIF with no U_iso/B_iso column) — that gives delta-sharp G(r) peaks and a collapsed scale, so the fit converges on a meaningless model. Set a B_iso before refining.
 
-**`refine_pdf`** — Run the deterministic least-squares PDF refinement of the FREED parameters against an observed G(r) — real-space Rietveld with uniform weights (G(r) errors are correlated; Rw is a relative indicator). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → positions); single- or multi-phase; restrict with `fitRange` (low r below r_poly is reduction artifact). Returns refined values, esds, agreement, diagnostics, the r-space residual, and — in `warnings` — any correlated-motion model conflict or missing-ADP defect that makes the reported convergence meaningless.
+**`refine_pdf`** — Run the deterministic least-squares PDF refinement of the FREED parameters against an observed G(r) — real-space Rietveld with uniform weights (G(r) errors are correlated; Rw is a relative indicator). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → positions); single- or multi-phase; restrict with `fitRange` (low r below r_poly is reduction artifact). Returns refined values, esds, agreement, diagnostics, the refined `parameters` (ready for the next call), the r-space residual, and — in `warnings` — any correlated-motion model conflict or missing-ADP defect that makes the reported convergence meaningless.
 
 **`refine_pdf_boxcar`** — Run a BOXCAR (sliding-window) PDF refinement: refit the freed parameters inside a fixed-width r-window slid across the data, each box seeded from the previous one, and report how every parameter drifts with the box center. This is the r-resolved read of a structure — a value that changes with the box center means the LOCAL structure (low r) differs from the AVERAGE one (high r), which a single whole-range fit averages away. Every box has exactly `width`; a trailing span too short for a full box is not fitted (reported in `warnings`). Each box is seeded from the previous one, which makes the series PATH-DEPENDENT — set `restarts` to re-search each box from randomly perturbed starts and keep the best, so a drift is not one box's local minimum inherited by the rest. Read a value only where its box fitted well (`boxes[].rWeighted`, `boxes[].status`) and where the esd is small compared with the drift — narrow boxes hold few points, so esds grow as the box shrinks. Hold Qdamp/Qbroad fixed: they are instrument constants, not functions of r.
 
 **`build_mpdf_model`** — Build the magnetic-PDF (mPDF) parameter set: the nuclear PDF rows (scale seeded from the nuclear curve) plus the four mPDF rows — ordered scale, paramagnetic scale, magnetic peak σ, and the short-range-order correlation length ξ — and the symmetry-allowed moment modes from build_magnetic_model. The mPDF rows start FIXED because `mpdfOrdScale` is degenerate with the moment magnitude; free the moments OR the ordered scale, not both. Feed `parameters`/`bindings`/`magnetic` to refine_mpdf. COMMENSURATE k ONLY (every component a rational with denominator ≤ 12): an incommensurate k has no periodic spin box and is REJECTED, not approximated. CHECK `warnings`: non-neutron data, an empty spin field, and any site with no displacement parameter (B_iso = 0) all make the result meaningless.
 
-**`refine_mpdf`** — Co-refine the nuclear G(r) and the magnetic d_mag(r) against one observed NEUTRON PDF — the real-space counterpart of refine_magnetic_powder (Frandsen & Billinge 2015 unnormalized mPDF, added into the same residual). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → moments → positions); restrict with `fitRange`. Returns refined values, esds, agreement, diagnostics, the refined magnetic model, and separated nuclear/magnetic component curves. COMMENSURATE k ONLY — an incommensurate k is rejected (refine it against Bragg satellites with refine_magnetic_powder instead). X-ray patterns get no magnetic term (reported in `warnings`).
+**`refine_mpdf`** — Co-refine the nuclear G(r) and the magnetic d_mag(r) against one observed NEUTRON PDF — the real-space counterpart of refine_magnetic_powder (Frandsen & Billinge 2015 unnormalized mPDF, added into the same residual). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → moments → positions); restrict with `fitRange`. Returns refined values, esds, agreement, diagnostics, the refined `parameters` (ready for the next call), the refined magnetic model, and separated nuclear/magnetic component curves. COMMENSURATE k ONLY — an incommensurate k is rejected (refine it against Bragg satellites with refine_magnetic_powder instead). X-ray patterns get no magnetic term (reported in `warnings`).
 
 **`compute_mpdf_components`** — Split the calculated G(r) into its nuclear and magnetic parts at the CURRENT parameter values, without refining. Use it to check whether a candidate spin model produces enough magnetic signal to fit. `magneticFraction` is the RATIO peak|magnetic| / peak|nuclear| — 0.01 is 1%, and below about that the moments are effectively unconstrained by the data (a strongly magnetic neutron PDF runs 0.1–1). Always read it with `nuclearPeak`/`magneticPeak`: the ratio is reported as 0 when the nuclear peak is zero, which means a degenerate nuclear model, not weak magnetism.
 

@@ -3,7 +3,7 @@
  *
  * Every tool is one entry: name + title + agent-facing description + input
  * schema + pure handler. Everything else derives from this array —
- * `server.ts` registers it in a loop (transport only), `registry.test.ts`
+ * `host.ts` serves it in a loop (transport only), `registry.test.ts`
  * enforces the layer contract (completeness, naming, output shapes), and
  * `scripts/gen-tooldoc.mjs` regenerates the tool table in
  * docs/AGENT_TOOLS.md (a test fails if the doc drifts).
@@ -30,6 +30,17 @@ export interface ToolDefinition {
   /** The pure handler from tools.ts (JSON in → JSON out, no transport). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly handler: (args: any) => unknown;
+  /**
+   * Transport hint: the input field that holds a whole file's text. The MCP
+   * server (host.ts) then also accepts `path` in its place and reads the file
+   * itself; `name` is the field that receives the file's base name.
+   */
+  readonly fileInput?: { readonly text: string; readonly name?: string };
+  /**
+   * Transport hint: the tool acts on the `fixed` flags of its `parameters`, so
+   * the server also accepts `free` (ids or globs) and sets the flags itself.
+   */
+  readonly selectsFree?: boolean;
 }
 
 // Loose schemas for the (already-validated, methods-free) domain objects: the
@@ -44,6 +55,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     title: "Parse structure (CIF/mCIF)",
     description: "Parse CIF/mCIF text into a StructureModel (cell, sites, space group) and any magnetic model. The entry point: feed its `structure` to build_refinement / interpret_structure.",
     inputSchema: { cif: z.string().describe("CIF or mCIF file text"), id: z.string().optional() },
+    fileInput: { text: "cif" },
     handler: tools.parse_structure,
   },
   {
@@ -51,6 +63,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     title: "Parse powder pattern",
     description: "Auto-detect and parse powder data (xye/xy/dat/GSAS/FullProf/ILL). Returns the pattern, a summary (points, unit, range, radiation), and how the format was detected (source + confidence).",
     inputSchema: { text: z.string().describe("Powder data file text"), filename: z.string().optional() },
+    fileInput: { text: "text", name: "filename" },
     handler: tools.parse_powder_data,
   },
   {
@@ -58,6 +71,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
     title: "Parse instrument file",
     description: "Parse an instrument-parameter file (GSAS-II .instprm, classic GSAS .prm, FullProf .irf) into a CW or TOF calibration. Pass the result to build_refinement/refine_powder so the wavelength and profile are right.",
     inputSchema: { text: z.string().describe("Instrument-parameter file text") },
+    fileInput: { text: "text" },
     handler: tools.parse_instrument,
   },
   {
@@ -76,7 +90,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "refine_powder",
     title: "Refine (constrained least squares)",
-    description: "Run the deterministic Levenberg–Marquardt refinement of the FREED parameters (fix a parameter by setting its `fixed:true`). Returns refined values, esds, agreement (wR/GoF), the SVD/correlation/at-bound diagnostics, the observation count, and the residual — everything assess_refinement needs. The agent decides what to free; it never sets values.",
+    description: "Run the deterministic Levenberg–Marquardt refinement of the FREED parameters (fix a parameter by setting its `fixed:true`). Returns refined values, esds, agreement (wR/GoF), the SVD/correlation/at-bound diagnostics, the observation count, and the residual — everything assess_refinement needs — plus `parameters`: the input set carrying the refined values, ready for the next block. The agent decides what to free; it never sets values.",
     inputSchema: {
       structure: anyObj, pattern: anyObj,
       parameters: anyArr.describe("RefinementParameter[] (set fixed:true/false to choose what refines)"),
@@ -87,6 +101,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       fitRange: z.object({ min: z.number(), max: z.number() }).optional(),
       maxIterations: z.number().int().min(1).max(200).optional(),
     },
+    selectsFree: true,
     handler: tools.refine_powder,
   },
   {
@@ -238,12 +253,13 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       parameters: anyArr, bindings: anyArr, profile: anyObj,
       magnetic: anyObj.nullable().optional(),
     },
+    selectsFree: true,
     handler: tools.rank_next_parameters,
   },
   {
     name: "refine_magnetic_powder",
     title: "Refine nuclear + magnetic (staged)",
-    description: "Co-refine nuclear + magnetic against a powder pattern. Staged by default: scale + background converge with moments and profile held, then everything requested is freed — a flat co-refinement from a poor moment start can collapse the scale against exploding moments. Combine the nuclear parameters/bindings from build_refinement with the moment set from build_magnetic_model. Returns the result, the refined magnetic model, and separated nuclear/magnetic component curves.",
+    description: "Co-refine nuclear + magnetic against a powder pattern. Staged by default: scale + background converge with moments and profile held, then everything requested is freed — a flat co-refinement from a poor moment start can collapse the scale against exploding moments. Combine the nuclear parameters/bindings from build_refinement with the moment set from build_magnetic_model. Returns the result, the refined `parameters` (ready for the next call), the refined magnetic model, and separated nuclear/magnetic component curves.",
     inputSchema: {
       structure: anyObj, magnetic: anyObj, pattern: anyObj,
       parameters: anyArr.describe("Nuclear + moment parameters (set fixed:false on what refines)"),
@@ -251,6 +267,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       staged: z.boolean().optional(),
       maxIterations: z.number().int().min(1).max(200).optional(),
     },
+    selectsFree: true,
     handler: tools.refine_magnetic_powder,
   },
   {
@@ -263,6 +280,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       id: z.string().optional().describe("Dataset id (bind a scale to it)"),
       skipForwardBeam: z.boolean().optional().describe("Skip a 0 0 0 row — the forward beam (default true). Pass false for a fundamental-indexed magnetic file, whose 0 0 0 is the satellite at k."),
     },
+    fileInput: { text: "text", name: "name" },
     handler: tools.parse_single_crystal_data,
   },
   {
@@ -320,6 +338,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       filename: z.string().optional(),
       signal: z.enum(["observed", "difference"]).optional().describe(".fgr only: which curve becomes the pattern"),
     },
+    fileInput: { text: "text", name: "filename" },
     handler: tools.parse_pdf_data,
   },
   {
@@ -336,7 +355,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "refine_pdf",
     title: "Refine against G(r) (real space)",
-    description: "Run the deterministic least-squares PDF refinement of the FREED parameters against an observed G(r) — real-space Rietveld with uniform weights (G(r) errors are correlated; Rw is a relative indicator). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → positions); single- or multi-phase; restrict with `fitRange` (low r below r_poly is reduction artifact). Returns refined values, esds, agreement, diagnostics, the r-space residual, and — in `warnings` — any correlated-motion model conflict or missing-ADP defect that makes the reported convergence meaningless.",
+    description: "Run the deterministic least-squares PDF refinement of the FREED parameters against an observed G(r) — real-space Rietveld with uniform weights (G(r) errors are correlated; Rw is a relative indicator). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → positions); single- or multi-phase; restrict with `fitRange` (low r below r_poly is reduction artifact). Returns refined values, esds, agreement, diagnostics, the refined `parameters` (ready for the next call), the r-space residual, and — in `warnings` — any correlated-motion model conflict or missing-ADP defect that makes the reported convergence meaningless.",
     inputSchema: {
       structure: anyObj, pattern: anyObj,
       parameters: anyArr.describe("RefinementParameter[] (set fixed:true/false to choose what refines)"),
@@ -347,6 +366,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       fitRange: z.object({ min: z.number().optional(), max: z.number().optional() }).optional(),
       maxIterations: z.number().int().min(1).max(200).optional(),
     },
+    selectsFree: true,
     handler: tools.refine_pdf,
   },
   {
@@ -366,6 +386,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       restarts: z.number().int().min(0).max(20).optional().describe("Randomly perturbed restarts per box beyond the seeded start; the lowest-chi2 one wins and seeds the next box. Use when a track may have inherited one box's local minimum — seeding forward makes the series path-dependent. Costs (restarts + 1)x the scan. Default 0."),
       maxIterations: z.number().int().min(1).max(200).optional(),
     },
+    selectsFree: true,
     handler: tools.refine_pdf_boxcar,
   },
   {
@@ -384,7 +405,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "refine_mpdf",
     title: "Refine magnetic PDF (real space)",
-    description: "Co-refine the nuclear G(r) and the magnetic d_mag(r) against one observed NEUTRON PDF — the real-space counterpart of refine_magnetic_powder (Frandsen & Billinge 2015 unnormalized mPDF, added into the same residual). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → moments → positions); restrict with `fitRange`. Returns refined values, esds, agreement, diagnostics, the refined magnetic model, and separated nuclear/magnetic component curves. COMMENSURATE k ONLY — an incommensurate k is rejected (refine it against Bragg satellites with refine_magnetic_powder instead). X-ray patterns get no magnetic term (reported in `warnings`).",
+    description: "Co-refine the nuclear G(r) and the magnetic d_mag(r) against one observed NEUTRON PDF — the real-space counterpart of refine_magnetic_powder (Frandsen & Billinge 2015 unnormalized mPDF, added into the same residual). Flat co-refinement or the staged sequence (scale → cell → ADP → δ1 → moments → positions); restrict with `fitRange`. Returns refined values, esds, agreement, diagnostics, the refined `parameters` (ready for the next call), the refined magnetic model, and separated nuclear/magnetic component curves. COMMENSURATE k ONLY — an incommensurate k is rejected (refine it against Bragg satellites with refine_magnetic_powder instead). X-ray patterns get no magnetic term (reported in `warnings`).",
     inputSchema: {
       structure: anyObj, magnetic: anyObj.describe("MagneticModel from build_magnetic_model / build_mpdf_model"),
       pattern: anyObj,
@@ -395,6 +416,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       fitRange: z.object({ min: z.number().optional(), max: z.number().optional() }).optional(),
       maxIterations: z.number().int().min(1).max(200).optional(),
     },
+    selectsFree: true,
     handler: tools.refine_mpdf,
   },
   {
@@ -438,6 +460,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       resume: anyObj.optional().describe("Resume token from a previous sample_posterior call (continues the chain)"),
       includeChains: z.boolean().optional().describe("Return raw chains (token-heavy; for plotting only)"),
     },
+    selectsFree: true,
     handler: tools.sample_posterior,
   },
   {
