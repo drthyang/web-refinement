@@ -34,7 +34,7 @@ import {
 import { buildMpdfSpec, mpdfComponents, unsupportedMpdfK, unsupportedMpdfModel } from "@/core/workflow/mpdf";
 import { applyMagneticMoments } from "@/core/workflow/magnetic";
 import type { MagneticModel } from "@/core/magnetic/types";
-import { isMomentParameterKind } from "@/core/refinement/types";
+import { isMagneticModelParameterKind, isMomentParameterKind } from "@/core/refinement/types";
 import { KSearchPanel, type MagneticFit } from "@/components/KSearchPanel";
 import { buildDistortionModes, buildSymmetryModes, positionShiftValuesFor, withDistortionModes, type DistortionModeSet } from "@/core/crystal/distortionModes";
 import { decomposeDisplacementRepresentation, type DisplaciveIrrepTerm } from "@/core/crystal/displaciveModes";
@@ -359,7 +359,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         // stable across magnetic space groups (mom_<site>_<n>), so the id-keyed
         // carryover would otherwise stamp the PREVIOUS model's amplitudes over
         // the ones the magnetic page just refined and handed across.
-        if (spinChanged && isMomentParameterKind(p.kind)) return p;
+        if (spinChanged && isMagneticModelParameterKind(p.kind)) return p;
         const old = prevById.get(p.id);
         return old ? { ...p, value: old.value, fixed: old.fixed } : p;
       });
@@ -1246,9 +1246,10 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       // rows, which include the ordScale that is exactly degenerate with |m|)
       // is frozen, so the moment subspace is read cleanly.
       const nuclearFixed = activeParams
-        .filter((p) => !isMomentParameterKind(p.kind))
+        .filter((p) => !isMagneticModelParameterKind(p.kind))
         .map((p) => ({ ...p, fixed: true }));
-      const nuclearBindings = spec.bindings.filter((b) => !isMomentParameterKind(b.kind));
+      // The applied model's k rows would write ITS k onto every candidate.
+      const nuclearBindings = spec.bindings.filter((b) => !isMagneticModelParameterKind(b.kind));
       const ms = await client.refineMpdfMultiStart(
         {
           structure: fitStructure,
@@ -1289,8 +1290,9 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       return;
     }
     setSpinModel({ magnetic, params: momentParams, bindings: momentBindings });
+    const nMoment = momentParams.filter((p) => isMomentParameterKind(p.kind)).length;
     console.info(
-      `[status] spin model applied to the PDF fit — ${momentParams.length} moment parameter${momentParams.length === 1 ? "" : "s"} added. ` +
+      `[status] spin model applied to the PDF fit — ${nMoment} moment parameter${nMoment === 1 ? "" : "s"} added. ` +
       "Refine now fits nuclear + magnetic G(r) together.",
     );
   }

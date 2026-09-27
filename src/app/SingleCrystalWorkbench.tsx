@@ -29,7 +29,7 @@ import {
 } from "@/core/workflow/singleCrystalRefinement";
 import { normalProbabilityPlot } from "@/core/refinement/diagnostics";
 import { dSpacing } from "@/core/crystal/unitCell";
-import { isMomentParameterKind } from "@/core/refinement/types";
+import { isMagneticModelParameterKind } from "@/core/refinement/types";
 import type { ParameterBinding } from "@/core/refinement/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import { applyMagneticMoments, magneticComparison } from "@/core/workflow/magnetic";
@@ -457,7 +457,8 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
     setMagnetic(mag);
     setMomentBindings(mag ? mBindings : []);
     setParams((prev) => [
-      ...prev.filter((p) => !isMomentParameterKind(p.kind)),
+      // The whole magnetic model is replaced — k rows included, never orphaned.
+      ...prev.filter((p) => !isMagneticModelParameterKind(p.kind)),
       ...(mag ? momentParams.map((p) => ({ ...p, fixed: !!p.expression })) : []),
     ]);
   }

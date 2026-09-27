@@ -55,6 +55,9 @@ const CATEGORY: Record<ParameterKind, string> = {
   momentY: "Magnetic",
   momentZ: "Magnetic",
   momentMode: "Magnetic",
+  // Its own group: freeing "all Magnetic" must not also move k — refining the
+  // propagation vector is a deliberate step, not a side effect of the moments.
+  propagationK: "Propagation vector",
   // Real-space PDF fit: the G(r) scale joins "Scale"; the remaining PDF terms
   // split by PHYSICS — they are independent effects that happen to share a page,
   // so they get separate groups rather than one catch-all "PDF" bucket:
@@ -82,7 +85,7 @@ const CATEGORY: Record<ParameterKind, string> = {
   corrLength: "mPDF",
 };
 
-const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "Instrument", "Correlated motion", "Particle shape", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic", "mPDF"];
+const ORDER = ["Scale", "Background", "Lattice", "Instrument / profile", "Instrument", "Correlated motion", "Particle shape", "ADPs (thermal)", "Positions", "Occupancy", "Microstructure", "Corrections", "Magnetic", "Propagation vector", "mPDF"];
 
 /** difC/difA/difB come from instrument calibration — shown but not togglable. */
 /** Rows the user cannot free: instrument calibration, and parameters derived
@@ -150,7 +153,10 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
       const g = CATEGORY[p.kind] ?? "Other";
       (byGroup.get(g) ?? byGroup.set(g, []).get(g)!).push(p);
     }
-    return ORDER.filter((g) => byGroup.has(g)).map((g) => ({ name: g, rows: byGroup.get(g)! }));
+    // Groups outside ORDER still render (after it) — a new CATEGORY must never
+    // make its rows silently invisible.
+    const names = [...ORDER.filter((g) => byGroup.has(g)), ...[...byGroup.keys()].filter((g) => !ORDER.includes(g))];
+    return names.map((g) => ({ name: g, rows: byGroup.get(g)! }));
   }, [params]);
 
   // All parameter groups start collapsed; the user expands the ones they need.

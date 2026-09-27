@@ -26,7 +26,7 @@ validation). One minimal example per technique lives in
     "title": "Mn3Ga · Rietveld (powder)",
     "createdAt": "2026-09-15T10:00:00.000Z",   // ISO-8601
     "modifiedAt": "2026-09-15T10:42:11.000Z",
-    "appVersion": "0.1.0",
+    "appVersion": "0.2.0",
     "notes": "…"                                 // optional
   },
   "structures": [ /* StructureModel[] — [0] is the primary phase */ ],

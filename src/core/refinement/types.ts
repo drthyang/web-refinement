@@ -53,6 +53,9 @@ export type ParameterKind =
   | "momentY"
   | "momentZ"
   | "momentMode"
+  // Propagation-vector component (r.l.u.), targetKey "k1" | "k2" | "k3" on the
+  // magnetic model — see core/magnetic/refinableK.ts.
+  | "propagationK"
   // Pair-distribution-function (real-space) parameters — PDF_MPDF_ROADMAP §2.
   // `pdfScale` multiplies the whole G(r) (linear, like `scale`); Qdamp/Qbroad are
   // the instrument-resolution envelope/broadening (Å⁻¹, calibrated from a
@@ -90,6 +93,18 @@ export function isMomentParameterKind(kind: ParameterKind): boolean {
   return kind === "momentMode";
 }
 
+/**
+ * True for every parameter kind that belongs to the magnetic MODEL rather than
+ * the nuclear one: the moment modes plus the propagation-vector components.
+ * Use it where a magnetic model's rows are added, replaced or dropped as a set
+ * (so k rows never outlive the model they drive); keep
+ * {@link isMomentParameterKind} where the rows are treated as moments — a
+ * time-reversal sign flip must never negate k.
+ */
+export function isMagneticModelParameterKind(kind: ParameterKind): boolean {
+  return kind === "momentMode" || kind === "propagationK";
+}
+
 /** A single refinable (or fixed) parameter. */
 export interface RefinementParameter {
   readonly id: string;
@@ -116,6 +131,13 @@ export interface RefinementParameter {
    * and magnetic scale are treated as linear); set explicitly to override.
    */
   readonly linear?: boolean;
+  /**
+   * Absolute cap on the per-cycle shift, for a parameter whose useful step is
+   * set by the data rather than by its own size — a propagation-vector
+   * component, where a step larger than a satellite's width loses the minimum
+   * and the default relative cap (5×|value|) is far too loose.
+   */
+  readonly maxShift?: number;
   /** Optional group name for grouped/tied refinement (Phase 8). */
   readonly group?: string;
   /**

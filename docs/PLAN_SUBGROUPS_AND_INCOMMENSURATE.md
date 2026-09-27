@@ -255,7 +255,7 @@ and A-V are independent.
 - **No real incommensurate dataset has been refined.** The real-data magnetic
   golden (Eu₃In₂Te₄, `data/fullprof_int_handles/`) is k = (¼,0,¼) — two-arm but
   commensurate.
-- **k is not a parameter.** It is read from `magnetic.propagation[0]` at seven
+- **k is not a parameter** *(superseded by B1: it now is, on the powder path)*. It is read from `magnetic.propagation[0]` at seven
   call sites (structureFactor ×2, cellExpansion ×2, obsCalc, magneticPowder,
   export/cif) and never varies during a fit.
 - **The powder peak builder already recomputes satellite POSITIONS** when a
@@ -287,6 +287,31 @@ and A-V are independent.
   to constrain) — [`momentModel.ts`](../src/core/magnetic/momentModel.ts).
 
 ## B1 · Refine k  *(the highest value per unit of risk; powder first)*
+
+> **Status — powder shipped** (`core/magnetic/refinableK.ts`). Deviations from
+> the sketch below, each deliberate:
+> - **Absolute components, not a shift.** The workbench re-applies refined
+>   parameters onto the already-refined model, so a `k₀ + value·axis` row would
+>   be added twice; `prop_k1..3` carry k itself and re-applying is idempotent.
+> - **Only symmetry-allowed components.** The free directions are the null space
+>   of (Rᵀ − I) over the little group G_k (the k-space twin of `positionShift`):
+>   k on (α,α,0) moves along the line through a tie, k ∥ c* in 6/mmm frees γ
+>   alone, a zone-boundary point frees nothing. Not three raw rows.
+> - **Guards.** A self-conjugate k is refused; a direction along which the
+>   Fourier mode space changes (probed at k₀ ± 10⁻³) is held; bounds keep each
+>   free component strictly between the half-integers around k₀, so the basis is
+>   never recomputed mid-fit. Per-cycle step capped at 0.005 r.l.u.
+>   (`RefinementParameter.maxShift`, an engine-level absolute cap).
+> - **Validation (b) and (c) do not apply as written.** AWO₄'s k = (½,0,0) is
+>   self-conjugate — it is the refusal case, not a refinement. Eu₃In₂Te₄ is
+>   single-crystal, where k stays fixed (step 7; the problem builder throws on a
+>   free k). The real-data gate is instead **DyMn₆Ge₆** (PSI DMC, a genuinely
+>   incommensurate spiral): γ refines to 0.1648(7) against FullProf's
+>   0.16509(43) on the same file ([VALIDATION.md](VALIDATION.md)).
+> - **UI** is a "Refine k" checkbox beside *Continue* in step 5 (it decides what
+>   Continue hands over), and the refined k and its esd show in the
+>   *Propagation vector* parameter group rather than the k chip.
+> - The mPDF refuses a free k as well: a moving k changes the spin box.
 
 **Why first.** Every incommensurate study starts by measuring k, and today the
 app can only accept a typed value. The machinery to move it already exists.
