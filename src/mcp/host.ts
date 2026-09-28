@@ -21,6 +21,7 @@ import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, parse, relative, resolve, sep } from "node:path";
 import { TOOL_REGISTRY, type ToolDefinition } from "@/mcp/registry";
 import { REF_KEY, RefStore, buildView, resolveRefs } from "@/mcp/refs";
+import { APP_VERSION } from "@/app/constants";
 
 export interface HostOptions {
   /** Folders a `path` argument may read from. Default: `defaultRoots()`. */
@@ -63,7 +64,7 @@ export function createMateriaServer(opts: HostOptions = {}): McpServer {
   const roots = opts.roots ?? defaultRoots();
   const budget = opts.budget ?? RESPONSE_BUDGET;
   const store = new RefStore(opts.capacity);
-  const server = new McpServer({ name: "materia", version: "0.2.0" }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "materia", version: APP_VERSION }, { instructions: INSTRUCTIONS });
 
   const respond = (out: unknown): CallResult => {
     const ref = store.put(out);

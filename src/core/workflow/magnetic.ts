@@ -17,12 +17,17 @@ import { weightsFromSigma } from "@/core/refinement/factors";
 import { resolveTies } from "@/core/refinement/constraints";
 import { nuclearStructureFactorSquared } from "@/core/diffraction/structureFactor";
 import { magneticStructureFactor } from "@/core/magnetic/structureFactor";
+import { resolvePropagation } from "@/core/magnetic/refinableK";
 
 /**
  * Apply moment-mode / momentX/Y/Z parameter values onto a magnetic model's
  * moments. A `momentMode` binding with `momentPart: "sin"` drives the site's
  * sine (quadrature) amplitude — the imaginary part of its Fourier coefficient
  * for a two-arm propagation vector — instead of the cosine amplitude.
+ *
+ * `propagationK` bindings write the refined propagation vector (absolute
+ * components, so re-applying onto an already-refined model is idempotent);
+ * every consumer that applies moments through here sees the refined k.
  */
 export function applyMagneticMoments(
   magnetic: MagneticModel,
@@ -76,7 +81,9 @@ export function applyMagneticMoments(
       (moment.components as [number, number, number])[idx] = v;
     }
   }
-  return { ...magnetic, moments };
+  const k0 = magnetic.propagation[0];
+  const k = k0 ? resolvePropagation(k0, bindings, values) : null;
+  return k ? { ...magnetic, moments, propagation: [k, ...magnetic.propagation.slice(1)] } : { ...magnetic, moments };
 }
 
 /** True when (h, k, l) is not an integer triple — a magnetic satellite H + k
@@ -149,6 +156,12 @@ export function buildMagneticSingleCrystalProblem(
   parameters: readonly RefinementParameter[],
   bindings: readonly ParameterBinding[],
 ): RefinementProblem {
+  // The satellite indices H ± k are read from the reflection file, so k is
+  // fixed by the data here: a moved k would leave every satellite row off its
+  // arm and silently zero its magnetic intensity.
+  if (parameters.some((p) => p.kind === "propagationK" && !p.fixed)) {
+    throw new Error("Single-crystal refinement keeps k fixed — satellite indices come from the reflection file.");
+  }
   const observations = Float64Array.from(dataset.reflections.map((r) => r.iObs));
   const weights = weightsFromSigma(dataset.reflections.map((r) => r.sigma));
 

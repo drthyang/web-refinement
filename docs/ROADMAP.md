@@ -50,7 +50,7 @@ what is missing. [VALIDATION.md](./VALIDATION.md) records the evidence.
 | PDF and mPDF | 🚧 | Nuclear and magnetic PDF, boxcar fits, posteriors; local spin model open | [PDF_MPDF_ROADMAP.md](./PDF_MPDF_ROADMAP.md) |
 | PDF symmetry modes | ✅ | Γ distortion modes and the translationengleiche subgroup tree | [Track A plan](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md) |
 | Track A: PDF supercells | ⬜ | Klassengleiche subgroups, zone-boundary modes, child-cell PDF model | [Track A plan](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md) |
-| Track B: incommensurate | ⬜ | Refine k, Fourier-loop mCIF, star of k, harmonics | [Track B plan](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md) |
+| Track B: incommensurate | 🚧 | Refine k ✅ (powder; FullProf golden on DyMn₆Ge₆); Fourier-loop mCIF, star of k, harmonics open | [Track B plan](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md) |
 | [Agent layer](#5-agent-tools-skills-and-llm-guided-refinement) | 🚧 | MCP tools per milestone; a powder Rietveld skill | [AGENT_TOOLS.md](./AGENT_TOOLS.md) |
 
 ## 3. Foundations
@@ -223,7 +223,7 @@ planned.
   through the whole M4 path ([`propagation.ts`](../src/core/magnetic/propagation.ts)).
 
 **Next**
-1. Refine k, scheduled with M4 as Track B1.
+1. ~~Refine k (Track B1)~~ — done for powder; see M4.
 2. Score candidates by magnetic intensity (Le Bail), not only by position.
 3. Multi-k structures.
 
@@ -288,7 +288,7 @@ each M3 candidate, then rank candidates by fit and physical plausibility.
 
 **Next** (items 1–4 are Track B phases in
 [PLAN_SUBGROUPS_AND_INCOMMENSURATE.md](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md))
-1. Refine k (B1).
+1. ~~Refine k (B1)~~ — done for powder (DyMn₆Ge₆ FullProf golden).
 2. A Fourier-loop mCIF and a labelled approximant in the viewer (B2).
 3. The star of k: arms, domain populations, type-IV candidates (B3).
 4. Harmonics at 3k and 5k (B4); (3+1)D superspace is a later milestone.

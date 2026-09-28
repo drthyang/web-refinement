@@ -52,7 +52,7 @@ function returningTranslation(
  * Real null space of a (rows × n) matrix by Gauss–Jordan elimination with
  * partial pivoting; returns a basis of n-vectors (one per free column).
  */
-function nullSpace(rows: number[][], n: number, tol = 1e-6): number[][] {
+export function nullSpace(rows: number[][], n: number, tol = 1e-6): number[][] {
   const mat = rows.map((r) => [...r]);
   const pivotCols: number[] = [];
   let pr = 0;

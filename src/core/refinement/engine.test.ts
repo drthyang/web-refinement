@@ -28,6 +28,30 @@ describe("refinement engine (Levenberg–Marquardt)", () => {
     expect(result.esd.scale).toBeGreaterThanOrEqual(0);
   });
 
+  it("caps each cycle's shift at an explicit maxShift, and still converges", () => {
+    // Linear offset y = x + p, truth p = 1 from 0.2: one unconstrained LM step
+    // would land on it; a 0.05 cap forces ≥ 16 accepted cycles of ≤ 0.05.
+    const xs = [0, 1, 2, 3, 4];
+    const observations = Float64Array.from(xs.map((x) => x + 1));
+    const weights = Float64Array.from(xs.map(() => 1));
+    const parameters: RefinementParameter[] = [
+      { id: "p", label: "p", kind: "propagationK", value: 0.2, initialValue: 0.2, fixed: false, maxShift: 0.05 },
+    ];
+    const seen: number[] = [0.2];
+    const problem: RefinementProblem = {
+      parameters, observations, weights,
+      calculate: (v) => Float64Array.from(xs.map((x) => x + (v.p ?? 0))),
+    };
+    const result = refine(problem, {
+      maxIterations: 40,
+      // y(x = 0) = p, so each accepted cycle's calc reports the current p.
+      onIteration: (yCalc) => { seen.push(yCalc[0]!); },
+    });
+    expect(result.parameters.p).toBeCloseTo(1, 6);
+    for (let i = 1; i < seen.length; i++) expect(Math.abs(seen[i]! - seen[i - 1]!)).toBeLessThanOrEqual(0.05 + 1e-12);
+    expect(seen.length).toBeGreaterThanOrEqual(17);
+  });
+
   it("calls onIteration once per accepted cycle with the current calc + agreement", () => {
     const model = [1, 4, 9, 16, 25];
     const observations = Float64Array.from(model.map((m) => 2.5 * m));

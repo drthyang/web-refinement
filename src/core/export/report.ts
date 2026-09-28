@@ -158,7 +158,7 @@ const KIND_DECIMALS: Partial<Record<ParameterKind, number>> = {
   cellLength: 5, cellAngle: 4,
   atomX: 5, atomY: 5, atomZ: 5, positionShift: 5,
   occupancy: 4, bIso: 4, uAniso: 5,
-  momentX: 3, momentY: 3, momentZ: 3, momentMode: 3,
+  momentX: 3, momentY: 3, momentZ: 3, momentMode: 3, propagationK: 5,
   zeroShift: 4, tofCalibration: 3,
   qdamp: 4, qbroad: 4, delta1: 4, delta2: 4, sratio: 4, rcut: 3, spdiameter: 2, corrLength: 2, mpdfPsigma: 4,
 };
@@ -166,7 +166,7 @@ const KIND_DECIMALS: Partial<Record<ParameterKind, number>> = {
 const KIND_UNIT: Partial<Record<ParameterKind, string>> = {
   cellLength: "Å", cellAngle: "°",
   positionShift: "(frac.)", bIso: "Å²", uAniso: "Å²",
-  momentX: "µB", momentY: "µB", momentZ: "µB", momentMode: "µB",
+  momentX: "µB", momentY: "µB", momentZ: "µB", momentMode: "µB", propagationK: "(r.l.u.)",
   zeroShift: "° 2θ", sampleDisplacement: "µm",
   qdamp: "Å⁻¹", qbroad: "Å⁻¹", delta1: "Å", delta2: "Å²", rcut: "Å", spdiameter: "Å", corrLength: "Å", mpdfPsigma: "Å",
   tofCalibration: "µs", stephensStrain: "×10⁻⁶", mustrainIso: "×10⁻⁶", mustrainPar: "×10⁻⁶", mustrainPerp: "×10⁻⁶",
@@ -189,6 +189,7 @@ const PARAMETER_GROUPS: readonly ParameterGroup[] = [
   { title: "Unit cell", kinds: ["cellLength", "cellAngle"] },
   { title: "Atoms", kinds: ["atomX", "atomY", "atomZ", "positionShift", "occupancy", "bIso", "uAniso"] },
   { title: "Magnetic moments", kinds: ["momentMode", "momentX", "momentY", "momentZ"] },
+  { title: "Propagation vector", kinds: ["propagationK"] },
   {
     title: "Peak shape, instrument & sample",
     kinds: [
