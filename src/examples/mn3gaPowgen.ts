@@ -23,7 +23,7 @@ const DIF_C = 22585.8;
 
 // Rock-salt MnO (Fm-3m) — the common impurity phase in this Mn₃Ga sample. The
 // H-M name alone resolves the full group from the built-in space-group table.
-const MNO_CIF = `data_MnO
+export const MNO_CIF = `data_MnO
 _pd_phase_name  MnO
 _cell_length_a  4.446
 _cell_length_b  4.446

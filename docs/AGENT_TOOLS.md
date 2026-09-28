@@ -262,6 +262,11 @@ could call the same functions.
   ([`pdfAgentLoop.test.ts`](../src/mcp/pdfAgentLoop.test.ts),
   [`mpdfAgentLoop.test.ts`](../src/mcp/mpdfAgentLoop.test.ts)).
 
+Worked examples — a structure inspected before any data, and a PDF fit read
+for local versus average structure — are in
+[AGENT_EXAMPLES.md](./AGENT_EXAMPLES.md), with real runs and a test that
+replays them.
+
 ## The layer contract
 
 The agent surface has three layers. Each has one owner and one invariant, and
@@ -351,6 +356,9 @@ Tool slices, in priority order (names are provisional):
 | Microstructure | `extract_size_strain` | `diffraction/microstructure` |
 
 Other planned work:
+- Two more worked examples: a Rietveld refinement driven by the skill (the
+  cell gate, the freeing blocks, the cross-check bundle), and a magnetic
+  structure solved from residual peaks.
 - Expose `knowledge/*.md` as **MCP resources**, so an agent can read the domain
   knowledge the tools assume.
 - Richer per-tool JSON schemas.

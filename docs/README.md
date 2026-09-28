@@ -39,6 +39,7 @@ workbench? Start with the [user guide](./USER_GUIDE.md), and read
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | The layers, the source tree, and the rules the code follows |
 | [DATA_MODEL.md](./DATA_MODEL.md) | The core data types, their units and conventions |
 | [AGENT_TOOLS.md](./AGENT_TOOLS.md) | The MCP agent tools, skills, and the LLM-guided refinement design |
+| [AGENT_EXAMPLES.md](./AGENT_EXAMPLES.md) | Worked examples of a language model driving the tools, with real runs |
 
 ## Plans
 
