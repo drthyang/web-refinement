@@ -370,7 +370,8 @@ Conventions are pinned in
 
 **Supported: output**
 - The whole session as a `.materia.json` project
-  ([PROJECT_FORMAT.md](./PROJECT_FORMAT.md)).
+  ([PROJECT_FORMAT.md](./PROJECT_FORMAT.md)), with the powder page's step
+  history. Between saves, the browser keeps the last session.
 - Refined CIF with esds, and mCIF. For a commensurate k ≠ 0 the mCIF is the
   magnetic supercell in its own magnetic space group.
 - An HTML refinement report (Export ▾ → Report).
@@ -388,6 +389,7 @@ Conventions are pinned in
 - `.pcr` export for single-crystal and multi-phase refinements.
 - Bond-length and angle tables in the report.
 - Saving and opening projects through the agent tools.
+- Step history on the single-crystal and PDF pages.
 - Saving posterior samples or the magnetic page's k-search exploration in a
   project. The applied magnetic model is saved; the exploration is re-run.
 

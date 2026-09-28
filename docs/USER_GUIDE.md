@@ -135,6 +135,24 @@ refinement result exists: a Le Bail cell pre-fit, then broad restarts. Once a fi
 exists it reads **Escape min ↻**: a few restarts around the fit, for when
 **Refine** has stalled.
 
+### Go back to an earlier step
+
+The **History** card under the parameters lists the steps of the session:
+each refinement, each load, each magnetic-model change and each reset. Changes
+made since the last step (freed parameters, edited values, settings) become an
+**Edit** step when the next refinement starts.
+
+- Click a step to go back to it. Nothing is lost: if you then refine, the new
+  steps form a branch, and **other branches** lists the old ones.
+- ⌘Z / Ctrl+Z steps back and ⇧⌘Z / Ctrl+Shift+Z steps forward, except inside a
+  text field.
+- ✎ names a step, such as "before ADPs".
+- The history is saved with the project. Between saves it is kept in the
+  browser. After a reload, the start page offers to restore the last session.
+
+The History card is on the powder page. Single-crystal and PDF sessions have
+no step history yet.
+
 ### Fit window, axis and phases
 
 - Drag the blue handles on the plot to set the fit window. **Reset range**
@@ -420,8 +438,8 @@ near 1 supports the least-squares esds.
 file. **Open project…**, or **… or open a saved project (.materia.json)** on the
 start page, reopens it on the page you saved from.
 
-A project keeps the phases, data, parameters, model settings, last result and
-applied magnetic model. It does not keep the magnetic page's search state,
+A project keeps the phases, data, parameters, model settings, last result,
+applied magnetic model and the step history. It does not keep the magnetic page's search state,
 posterior samples, the single-crystal supercell result or view choices. See
 [PROJECT_FORMAT.md](./PROJECT_FORMAT.md).
 
