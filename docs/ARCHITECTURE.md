@@ -209,7 +209,9 @@ cross-checked against established tools where possible, with results labeled
 Three CPU layers speed up evaluation:
 
 - **Windowed peak synthesis.** Each peak is summed only within ±20 FWHM of its
-  center, located by binary search on a monotonic grid.
+  center, located by binary search on a monotonic grid. It fades smoothly to
+  zero over the outer 4 FWHM, so the pattern stays continuous in every width and
+  position parameter. A hard edge would spike finite-difference columns.
 - **Geometry cache.** The problem builders reuse the structure-factor stage while
   no geometry parameter moves.
   [`peakCache.test.ts`](../src/core/workflow/peakCache.test.ts) pins cache hits

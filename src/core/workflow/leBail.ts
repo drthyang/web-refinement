@@ -16,7 +16,7 @@ import type { UnitCell, SpaceGroup } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { braggTheta } from "@/core/crystal/unitCell";
-import { gaussian, pseudoVoigt, type PeakShape } from "@/core/diffraction/profile";
+import { gaussian, pseudoVoigt, supportTaper, type PeakShape } from "@/core/diffraction/profile";
 
 export interface LeBailReflection {
   readonly h: number;
@@ -116,10 +116,13 @@ export function leBailExtract(
   const x = pattern.points.map((p) => p.x);
   const yObs = pattern.points.map((p) => p.yObs);
 
-  const rawShape = (xi: number, center: number): number =>
-    shape === "gaussian" ? gaussian(xi, center, fwhm) : pseudoVoigt(xi, center, fwhm, eta);
-
   const support = 12 * fwhm;
+  // Faded to zero at the support edge: the cell prefit refines fwhm and the
+  // cell by finite differences, and a hard cutoff made yCalc (and each norm_k)
+  // jump whenever a point crossed a moving edge.
+  const rawShape = (xi: number, center: number): number =>
+    (shape === "gaussian" ? gaussian(xi, center, fwhm) : pseudoVoigt(xi, center, fwhm, eta)) *
+    supportTaper(Math.abs(xi - center), support);
 
   // Point-sum-normalized profile Ω_ik (Σ_i Ω_ik = 1) so that the Le Bail
   // partition conserves counts and the reconstruction matches the data
