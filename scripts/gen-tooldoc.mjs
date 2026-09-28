@@ -46,6 +46,7 @@ const TOOL_GROUPS = [
   ["Pair distribution function (PDF)", ["parse_pdf_data", "build_pdf_model", "refine_pdf", "refine_pdf_boxcar", "compute_partial_pdf", "calibrate_qdamp", "sample_posterior"]],
   ["Magnetic PDF", ["build_mpdf_model", "refine_mpdf", "compute_mpdf_components"]],
   ["Symmetry modes", ["build_distortion_modes", "build_symmetry_modes"]],
+  ["Export", ["export_bundle"]],
 ];
 
 const esc = (s) => s.replaceAll("|", "\\|");

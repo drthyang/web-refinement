@@ -454,7 +454,9 @@ posterior samples, the single-crystal supercell result or view choices. See
 | **FullProf bundle (.zip)** | yes | — | — | `.pcr`, data and a README |
 
 Both bundles hold your original data and instrument files, unchanged. They
-carry the primary phase only.
+carry the primary phase only, at its refined values. In the `.pcr`, scale,
+background and the constant-wavelength peak shape are starting values: free
+them in FullProf before comparing.
 
 ### CIF or mCIF
 

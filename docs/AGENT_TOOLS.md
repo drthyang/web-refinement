@@ -42,16 +42,20 @@ servers in `/` or the home folder, so name the data folder too:
 The tools pass whole domain objects. A parsed powder pattern is about 200 k
 characters of JSON, and every refinement needs it back. A model cannot carry
 that, so the transport ([`host.ts`](../src/mcp/host.ts),
-[`refs.ts`](../src/mcp/refs.ts)) adds four things. The handlers never see them.
+[`refs.ts`](../src/mcp/refs.ts)) adds five things. The handlers never see them.
 
 - **Refs.** The server stores every tool output. The response is a compact view:
   bulky parts come back as `{"ref": "#3/pattern", …summary}`. Any argument may
   be such a ref, and the server substitutes the stored value. Each object result
   also carries `"ref": "#n"` for the whole output.
 - **`path`.** The parse tools read a file on the server instead of taking its
-  text. Paths are confined to the data folders: `MATERIA_ROOTS` (a path list),
-  else the working directory. File reading stays off when that is `/` or the
-  home folder.
+  text. Whole-file fields, such as `export_bundle`'s `rawInstrument`, take
+  `{"path": …}` the same way. Paths are confined to the data folders:
+  `MATERIA_ROOTS` (a path list), else the working directory. File access stays
+  off when that is `/` or the home folder.
+- **`outDir`.** Tools that produce files write them into this folder, inside the
+  data folders. An existing file is replaced only with `overwrite: true`, and a
+  symlink is never written through.
 - **`free`.** Refining tools take parameter ids or globs, such as
   `["scale", "bkg*", "cell_*"]`. Exactly those refine; every other parameter is
   held fixed. A pattern that matches nothing is an error that lists the ids.
@@ -150,6 +154,12 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 | `build_distortion_modes` | Build distortion-mode parameters |
 | `build_symmetry_modes` | Enumerate symmetry modes from the space group |
 
+**Export**
+
+| Tool | What it does |
+|---|---|
+| `export_bundle` | Export cross-check bundle (FullProf / GSAS-II) |
+
 <details>
 <summary>Full descriptions — the text an agent reads for each tool</summary>
 
@@ -226,6 +236,8 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 **`build_distortion_modes`** — Decompose a low-symmetry CHILD structure against its high-symmetry PARENT (same lattice; origin shift searched automatically) into refinable DISTORTION-MODE amplitudes — the AMPLIMODES/ISODISTORT paradigm. Modes are tagged with their Brillouin-zone star (`star`: Γ, X, H, or a literal k) from the parent centerings the child breaks, and the observed distortion is split into one frozen (order-parameter) mode per star. Use `structure`/`parameters`/`bindings` with refine_pdf or refine_powder instead of per-coordinate positions: same engine, fewer and more informative parameters (the frozen modes come free).
 
 **`build_symmetry_modes`** — Enumerate the symmetry-adapted displacement modes of a structure FROM ITS OWN SPACE GROUP — no parent/child CIF pair. Every asymmetric site contributes its symmetry-allowed shift directions, orthonormalized as whole-cell Å amplitudes seeded at 0 (activating modes never changes the curve; they enter fixed and are freed deliberately). Rigid-translation (acoustic) combinations — exactly unobservable in G(r) or |F|² — are projected out (`acousticExcluded`), so freeing every mode is always a well-posed fit. These are the symmetry-CONSERVING (Γ) modes: the same DOF as per-coordinate positions in a physically informative basis. Use `structure`/`parameters`/`bindings` with refine_pdf or refine_powder.
+
+**`export_bundle`** — Write a refinement as the files another program needs to re-run it — the external cross-check. `target: "fullprof"` gives a .pcr + data + README; `"gsas2"` gives a CIF + .instprm + data + a GSASIIscriptable build_gpx.py + README. The structure goes out at its REFINED values, applied from `parameters`; pass `result` for the esds and agreement factors in the CIF. Pass the original instrument file as `rawInstrument`: GSAS-II then uses your .instprm verbatim, not a regenerated one that loses detail. In the .pcr, scale, background and the constant-wavelength peak shape are starting values, to free in FullProf before comparing. One phase per bundle. Returns `files` (name + text).
 
 </details>
 <!-- TOOLS:END -->
@@ -330,7 +342,7 @@ Tool slices, in priority order (names are provisional):
 
 | Slice | Tools | Wraps |
 |---|---|---|
-| Exports and project files | `export_cif` / `export_mcif`, `export_bundle`, `generate_report`, `save_project` / `load_project` | `core/export`, `core/project` |
+| Exports and project files | `export_cif` / `export_mcif`, `generate_report`, `save_project` / `load_project` | `core/export`, `core/project` |
 | Single-crystal refinement | `build_single_crystal_refinement`, `refine_single_crystal` | `workflow/singleCrystalRefinement` |
 | Absorption | `attenuation_coefficient`, `transmission_correction`, `index_crystal_faces` (or one `correct_absorption`) | `core/absorption` |
 | Microstructure | `extract_size_strain` | `diffraction/microstructure` |

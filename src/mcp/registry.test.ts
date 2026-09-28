@@ -304,6 +304,10 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
     },
     keys: ["components", "magnetic", "observationCount", "parallel", "parameters", "result", "warnings"],
   },
+  export_bundle: {
+    args: { target: "fullprof", structure, pattern, parameters: refined.parameters, bindings: built.bindings, result: refined.result },
+    keys: ["files", "target"],
+  },
   compute_mpdf_components: {
     args: {
       structure: mnStructure, magnetic: mpdfBuilt.magnetic, pattern: mpdfPattern,

@@ -73,6 +73,8 @@ import {
 import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
 import { writeFullProfInt } from "@/core/export/fullprofInt";
+import { refinementBundle, type BundleTarget } from "@/core/export/bundle";
+import type { CifRefinementMeta } from "@/core/export/cif";
 import { parseHklRows } from "@/parsers/hkl";
 import { isCifReflectionLoop, parseFcf, parseShelxHkl } from "@/parsers/shelxHkl";
 import {
@@ -1782,5 +1784,58 @@ export function build_symmetry_modes(args: { structure: StructureModel }): {
       ...(m.star !== undefined ? { star: m.star } : {}),
     })),
     acousticExcluded: set.acousticExcluded ?? 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Export — the external cross-check (the Rietveld skill's acceptance step).
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a refinement as the files FullProf or GSAS-II needs to re-run it. The
+ * structure goes out at its refined values (applied from `parameters` by
+ * `refinementBundle`), annotated with the esds and agreement of `result`. Pure:
+ * returns the files; the MCP server writes them when asked (`outDir`).
+ */
+export function export_bundle(args: {
+  target: BundleTarget;
+  structure: StructureModel;
+  pattern?: PowderPattern;
+  dataset?: SingleCrystalDataset;
+  parameters: RefinementParameter[];
+  bindings: ParameterBinding[];
+  result?: RefinementResult;
+  instrument?: InstrumentParameters;
+  extraPhases?: StructureModel[];
+  rawInstrument?: { name: string; text: string };
+  rawData?: { name: string; text: string };
+  name?: string;
+}): { target: BundleTarget; files: { name: string; text: string }[] } {
+  const data = args.pattern ?? args.dataset;
+  if (!data || (args.pattern && args.dataset)) {
+    throw new Error("export_bundle: pass `pattern` (powder) or `dataset` (single crystal), not both");
+  }
+  const esd = args.result?.esd ?? {};
+  const params = args.parameters.map((p) => (esd[p.id] !== undefined ? { ...p, esd: esd[p.id]! } : p));
+  const a = args.result?.agreement;
+  const nParam = params.filter((p) => !p.fixed && !p.expression).length;
+  const refinement: CifRefinementMeta | undefined = !a ? undefined : {
+    ...(a.rWeighted !== undefined ? (args.dataset ? { wr2: a.rWeighted } : { rwp: 100 * a.rWeighted }) : {}),
+    ...(a.goodnessOfFit !== undefined ? { gof: a.goodnessOfFit } : {}),
+    nParam,
+  };
+  const entries = refinementBundle(args.target, args.structure, data, {
+    params,
+    bindings: args.bindings,
+    otherPhaseIds: (args.extraPhases ?? []).map((s) => s.id),
+    ...(args.name ? { name: args.name } : {}),
+    ...(args.instrument ? { instrument: args.instrument } : {}),
+    ...(refinement ? { refinement } : {}),
+    ...(args.rawInstrument ? { rawInstrument: args.rawInstrument } : {}),
+    ...(args.rawData ? { rawData: args.rawData } : {}),
+  });
+  return {
+    target: args.target,
+    files: entries.map((e) => ({ name: e.name, text: typeof e.data === "string" ? e.data : new TextDecoder().decode(e.data) })),
   };
 }

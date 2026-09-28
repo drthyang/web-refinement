@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern, SingleCrystalDataset } from "@/core/diffraction/types";
-import type { RefinementParameter } from "@/core/refinement/types";
+import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { powderDataXye, singleCrystalHkl, singleCrystalInt } from "@/core/export/data";
-import { fullprofBundle, gsas2Bundle } from "@/core/export/bundle";
+import { fullprofBundle, gsas2Bundle, refinementBundle } from "@/core/export/bundle";
 import { zipStore } from "@/core/export/zip";
 
 const structure: StructureModel = {
@@ -147,5 +147,34 @@ describe("FullProf TOF peak-shape carries the refined profile", () => {
     const pcr = (e.find((x) => x.name === "MnO.pcr")!.data as string).split("\n");
     const sig = pcr[pcr.findIndex((l) => l.includes("sigma^2 = Sig-2")) + 1]!.trim().split(/\s+/).map(Number);
     expect(sig[1]).toBeCloseTo((22585.8 * 3000e-6) ** 2, 1);
+  });
+});
+
+describe("refinementBundle", () => {
+  // The loaded model says a = 4.445 Å, B = 0.5; the fit moved them. The bundlers
+  // write whatever the structure holds, so the refined values must be applied
+  // first — exporting the as-loaded structure (the old app behavior) shipped the
+  // starting model with the refined esds attached.
+  const params: RefinementParameter[] = [
+    { id: "cell_a", label: "a", kind: "cellLength", value: 4.4512, initialValue: 4.445, fixed: false, esd: 0.0003 },
+    { id: "B_Mn1", label: "B", kind: "bIso", value: 0.83, initialValue: 0.5, fixed: false, esd: 0.02 },
+    { id: "other_a", label: "a", kind: "cellLength", value: 9.9, initialValue: 9.0, fixed: false },
+  ];
+  const bindings: ParameterBinding[] = [
+    ...(["a", "b", "c"] as const).map((k) => ({ parameterId: "cell_a", kind: "cellLength" as const, targetId: "t", targetKey: k })),
+    { parameterId: "B_Mn1", kind: "bIso", targetId: "t", targetKey: "Mn1" },
+    // A second phase's cell, bound by the same key: must never reach this phase.
+    ...(["a", "b", "c"] as const).map((k) => ({ parameterId: "other_a", kind: "cellLength" as const, targetId: "other", targetKey: k })),
+  ];
+
+  it("writes the refined structure, with esds, in both programs' files", () => {
+    const opts = { params, bindings, otherPhaseIds: ["other"] };
+    const pcr = refinementBundle("fullprof", structure, powder, opts).find((x) => x.name === "MnO.pcr")!.data as string;
+    expect(pcr).toMatch(/4\.4512/);
+    expect(pcr).not.toMatch(/4\.4450/);
+    const cif = refinementBundle("gsas2", structure, powder, opts).find((x) => x.name === "MnO.cif")!.data as string;
+    expect(cif).toMatch(/_cell_length_a\s+4\.45120\(30\)/);
+    expect(cif).toMatch(/Mn1 Mn .* Uiso 0\.01051\(25\)/); // B = 0.83 Å² as U = B/8π²
+    expect(cif).not.toMatch(/9\.9/);
   });
 });
