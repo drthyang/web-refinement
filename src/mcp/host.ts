@@ -41,7 +41,7 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
 
 const INSTRUCTIONS = `MATERIA: crystallographic refinement tools (powder, single crystal, PDF, magnetic).
 
-Data travels by reference. Every object result carries "ref": "#n" for the whole output, and bulky parts (structure, pattern, parameters, residual, …) come back as {"ref": "#n/key", …summary}. Pass such an object, or just {"ref": "#n/key"}, wherever a tool expects that value: the server substitutes the stored data. Never retype data you received as a ref.
+Data travels by reference. Every object result carries "ref": "#n" for the whole output, and bulky parts (structure, pattern, parameters, residual, …) come back as {"ref": "#n/key", …summary}. Pass such an object, or just {"ref": "#n/key"}, wherever a tool expects that value: the server substitutes the stored data. Never retype data you received as a ref. To join lists, list their refs: parameters: [{"ref": "#4/parameters"}, {"ref": "#9/parameters"}] is the nuclear set followed by the magnetic one.
 
 Files: the parse_* tools take \`path\` instead of the file's text — relative to the server's data folder, or absolute inside it. Tools that produce files (export_bundle) write them into \`outDir\` on the server.
 

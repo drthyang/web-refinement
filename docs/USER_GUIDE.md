@@ -248,6 +248,8 @@ the **allowed** row.
    group on the refinement page.
 4. Click **Refine** to fit the nuclear and magnetic models together, with one
    shared scale. **Prefit ↻** and **Escape min ↻** then also search the moments.
+   Prefit kicks every moment on the scale of the largest one, so a sublattice
+   an earlier fit switched off can turn back on.
 
 **Show on refinement pattern** puts the candidate on the refinement page with
 its moments held at the amplitudes shown here. It joins the calculated pattern,

@@ -47,7 +47,10 @@ that, so the transport ([`host.ts`](../src/mcp/host.ts),
 - **Refs.** The server stores every tool output. The response is a compact view:
   bulky parts come back as `{"ref": "#3/pattern", …summary}`. Any argument may
   be such a ref, and the server substitutes the stored value. Each object result
-  also carries `"ref": "#n"` for the whole output.
+  also carries `"ref": "#n"` for the whole output. Inside a list, a ref to a list
+  of records is spliced in, so
+  `parameters: [{"ref": "#4/parameters"}, {"ref": "#9/parameters"}]` is the
+  nuclear set followed by the magnetic one.
 - **`path`.** The parse tools read a file on the server instead of taking its
   text. Whole-file fields, such as `export_bundle`'s `rawInstrument`, take
   `{"path": …}` the same way. Paths are confined to the data folders:
@@ -204,7 +207,7 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 
 **`rank_next_parameters`** — The next-step diagnostic: rank the currently-FIXED parameter groups by the χ² improvement freeing them is expected to buy (Gauss–Newton estimate from probed Jacobian columns at the current values). Read `predictedWr` vs `wrNow` for absolute progress — on a converged model every group promises nothing. A LOCAL probe: align the pattern first; badly displaced peaks under-credit the cell/zero groups.
 
-**`refine_magnetic_powder`** — Co-refine nuclear + magnetic against a powder pattern. Staged by default: scale + background converge with moments and profile held, then everything requested is freed — a flat co-refinement from a poor moment start can collapse the scale against exploding moments. Combine the nuclear parameters/bindings from build_refinement with the moment set from build_magnetic_model. Returns the result, the refined `parameters` (ready for the next call), the refined magnetic model, and separated nuclear/magnetic component curves.
+**`refine_magnetic_powder`** — Co-refine nuclear + magnetic against a powder pattern. Staged by default: scale + background converge with moments and profile held, then everything requested is freed — a flat co-refinement from a poor moment start can collapse the scale against exploding moments. Combine the nuclear parameters/bindings from build_refinement with the moment set from build_magnetic_model. Returns the result, the refined `parameters` (ready for the next call), the refined magnetic model, and separated nuclear/magnetic component curves. The moments have several local minima (magnetic intensity is quadratic in them), so a single run can land in the wrong one: pass `restarts` (e.g. 12) to restart the moments from kicked starts on the frozen nuclear model first; `multiStart` then reports the costs, the ±m-canonical answer, and any poorly determined moment directions.
 
 **`parse_single_crystal_data`** — Parse single-crystal integrated intensities — a FullProf .int, a SHELX HKLF 4 .hkl, a .fcf CIF reflection loop, or a plain h k l I σ list — into a SingleCrystalDataset. ALWAYS pass `name`: .int and .fcf are detected from the text, but HKLF 4 is fixed-column and looks exactly like a free-format list, so only the .hkl filename selects the column-exact reader (whitespace-splitting an HKLF 4 row reads σ as the intensity once F² ≥ 10000.00 fills its field). `format` reports which reader ran. Parse the nuclear and magnetic files, then merge_magnetic_supercell into one dataset for the magnetic refinement. A 0 0 0 row (the forward beam, not a Bragg reflection) is skipped by default — pass skipForwardBeam:false for a fundamental-indexed MAGNETIC file, where 0 0 0 is the satellite at k itself.
 
@@ -262,8 +265,9 @@ could call the same functions.
   ([`pdfAgentLoop.test.ts`](../src/mcp/pdfAgentLoop.test.ts),
   [`mpdfAgentLoop.test.ts`](../src/mcp/mpdfAgentLoop.test.ts)).
 
-Worked examples — a structure inspected before any data, and a PDF fit read
-for local versus average structure — are in
+Worked examples — a structure inspected before any data, a magnetic structure
+solved from the peaks a nuclear fit leaves, and a PDF fit read for local versus
+average structure — are in
 [AGENT_EXAMPLES.md](./AGENT_EXAMPLES.md), with real runs and a test that
 replays them.
 
@@ -356,9 +360,8 @@ Tool slices, in priority order (names are provisional):
 | Microstructure | `extract_size_strain` | `diffraction/microstructure` |
 
 Other planned work:
-- Two more worked examples: a Rietveld refinement driven by the skill (the
-  cell gate, the freeing blocks, the cross-check bundle), and a magnetic
-  structure solved from residual peaks.
+- One more worked example: a Rietveld refinement driven by the skill (the cell
+  gate, the freeing blocks, the cross-check bundle).
 - Expose `knowledge/*.md` as **MCP resources**, so an agent can read the domain
   knowledge the tools assume.
 - Richer per-tool JSON schemas.

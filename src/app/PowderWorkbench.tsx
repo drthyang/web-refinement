@@ -53,6 +53,7 @@ import { useOnChange } from "@/app/useOnChange";
 import { withAdpModel } from "@/core/crystal/adp";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
 import { detectExtraPeaks, annotateExtraPeaks, type ExtraPeak } from "@/core/magnetic/extraPeaks";
+import { momentKickFloor } from "@/core/magnetic/canonicalize";
 import { powderReflectionObsCalc, type ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import { normalProbabilityPlot, weightedResiduals } from "@/core/refinement/diagnostics";
 import { QualityPlots } from "@/app/ui/QualityPlots";
@@ -834,7 +835,7 @@ export function PowderWorkbench({
       // net (more restarts); Escape is a lighter nudge around a converged fit.
       if (magneticApplied) {
         await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
-        const msOptions = mode === "prefit" ? { restarts: 12 } : { restarts: 6, escapeSigma: 3 };
+        const msOptions = mode === "prefit" ? { restarts: 12, minKick: momentKickFloor(powderParams) } : { restarts: 6, escapeSigma: 3 };
         const ms = await client.refineMagneticPowderMultiStart({
           structure, magnetic: session.magnetic!, pattern, parameters: [...powderParams], bindings: [...pBindings],
           ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),

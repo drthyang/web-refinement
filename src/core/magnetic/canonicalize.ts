@@ -83,6 +83,24 @@ export function canonicalizeMomentValues(
   return out;
 }
 
+/**
+ * Kick floor for a cold moment search (MultiStartOptions.minKick). A restart
+ * kicks each mode by max(escapeSigma·esd, relFraction·|value|), which scales
+ * with the mode — so a mode the baseline collapsed toward 0 (a sublattice the
+ * fit switched off) barely moves again, and the search never leaves that
+ * minimum. A synthetic Mn₃Ga P2₁'/m' pattern shows it: the baseline stops at
+ * wR 4.86 % with Mn1 at 0.6 µB, the truth (2.1 µB) sits at 4.61 %, and 12
+ * restarts found it for 7 of 12 seeds; with this floor, 21 of 24.
+ *
+ * The floor is the largest moment amplitude in `parameters` (the start), so
+ * every mode is kicked on the scale of a real moment. Non-moment parameters get
+ * none. Meant for a wide search; a gentle "escape" nudge should not use it.
+ */
+export function momentKickFloor(parameters: readonly RefinementParameter[]): (p: RefinementParameter) => number | undefined {
+  const scale = Math.max(0, ...parameters.filter((p) => isMomentParameterKind(p.kind)).map((p) => Math.abs(p.value)));
+  return (p) => (scale > 0 && isMomentParameterKind(p.kind) ? scale : undefined);
+}
+
 /** One data-limited direction among the magnetic parameters. */
 export interface MomentDegeneracy {
   /** "soft" = a near-null (poorly determined) singular direction; "correlated" =

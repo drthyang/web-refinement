@@ -42,8 +42,9 @@ approximate, however plausible its output looks.
 - Exact derivatives for linear parameters: scale, background, magnetic scale.
 - Protection against false minima: automatic starting values for the background
   and zero shift; seeded multi-start searches (Prefit / Escape min), including
-  for magnetic moments; and, in the agent tools, a staged sequence that fixes a
-  newly freed parameter again when it makes the fit degenerate.
+  for magnetic moments (`restarts` in the agent tools); and, in the agent tools,
+  a staged sequence that fixes a newly freed parameter again when it makes the
+  fit degenerate.
 
 **Approximate**
 - Fits fall back to central finite differences for every non-linear parameter
