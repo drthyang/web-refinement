@@ -9,6 +9,8 @@
  * shell mounts it (keyed on the dataset) whenever a reduced `.gr` PDF is loaded.
  */
 
+import type { HistoryBinding } from "@/app/historyBinding";
+import { HistoryPanel } from "@/app/ui/HistoryPanel";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { PdfWorkspace } from "@/core/project/types";
@@ -100,7 +102,7 @@ function rwInk(rw: number): string {
   return color.warnInk;
 }
 
-export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructure = false, client, step = 0, onStep, onMagneticPresent, exportsRef, onLoadData, onLoadCif, onAddPhase, onRemovePhase, presetValues, presetFitRange, restore }: {
+export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructure = false, client, step = 0, onStep, onMagneticPresent, exportsRef, onLoadData, onLoadCif, onAddPhase, onRemovePhase, presetValues, presetFitRange, restore, stepHistory }: {
   structure: StructureModel;
   pattern: PdfPattern;
   /** Active workflow step (0 = refinement, 1 = magnetic PDF analysis). */
@@ -130,6 +132,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
    *  page with a fresh key when it opens a project; the workspace seeds the
    *  initial state and overlays the saved parameter rows onto the spec. */
   restore?: PdfWorkspace;
+  /** The shell's step history: recorded at this page's refinements and model changes. */
+  stepHistory?: HistoryBinding;
 }): JSX.Element {
   const multiPhase = extraPhases.length > 0;
   // The workspace this page was mounted to reopen, read once. It applies only
@@ -320,7 +324,14 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // runs — those hold the live refined state and their ids are
   // setting-independent.
   const skipPositionCarryoverOnce = useRef(false);
+  // The spec this effect last handled. React's StrictMode runs a mount effect
+  // twice in development; without this the second run took the mount spec for
+  // a swap and dropped a reopened project's result (the step history showed it
+  // as phantom "No change" steps).
+  const specHandled = useRef<typeof spec | null>(null);
   useEffect(() => {
+    if (specHandled.current === spec) return;
+    specHandled.current = spec;
     const prev = prevSpecCtx.current;
     const prevParams = paramsRef.current;
     const skipPos = skipPositionCarryoverOnce.current;
@@ -529,6 +540,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   }, [spinFit, activeParams, spec.bindings]);
 
   async function runRefine(): Promise<void> {
+    stepHistory?.recordNow("edit");
     setBusy(true);
     const specAtCall = specRef.current;
     try {
@@ -547,6 +559,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       }
       setParams((ps) => ps.map((p) => ({ ...p, value: res.parameters[p.id] ?? p.value })));
       setResult(res);
+      stepHistory?.requestStep("refine", spinFit ? "Refine nuclear + magnetic G(r)" : "Refine");
     } catch (e) {
       console.error(`[status] PDF refinement failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -559,6 +572,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // "Prefit" search; once a fit exists it's a lighter "Escape min" nudge out of
   // the current basin. Keeps the lowest-χ² of baseline + restarts.
   async function runMultiStart(): Promise<void> {
+    stepHistory?.recordNow("edit");
     setBusy(true);
     const specAtCall = specRef.current;
     try {
@@ -581,6 +595,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       }
       setParams((ps) => ps.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value })));
       setResult(ms.final);
+      stepHistory?.requestStep("refine", escape ? "Escape minimum" : "Prefit");
       console.info(
         `[status] PDF multi-start (${escape ? "escape" : "prefit"}): best of ${ms.restartsRun + 1} starts` +
         `${ms.bestStartIndex > 0 ? ` (restart ${ms.bestStartIndex} won)` : " (baseline held)"} · Rw ${(100 * (ms.final.agreement.rWeighted ?? 0)).toFixed(2)}%`,
@@ -799,6 +814,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     setParams((ps) => ps.map((p) => ({ ...p, value: step.result.parameters[p.id] ?? p.value })));
     setResult(null);
     setLive(null);
+    stepHistory?.requestStep("edit", `Adopted the ${w.center.toFixed(2)} Å box's values`);
     console.info(
       `[status] adopted the ${w.center.toFixed(2)} Å box's values from the ${series.direction === "up" ? "low → high r" : "high → low r"} pass ` +
       `(${w.min.toFixed(2)}–${w.max.toFixed(2)} Å, Rw ${(100 * (step.result.agreement.rWeighted ?? 0)).toFixed(2)}%) — ` +
@@ -978,6 +994,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     skipPositionCarryoverOnce.current = true; // fresh child setting — carry nothing
     setModes({ set, parentName: label, fromActivation: true });
     setPositionMode("irreps");
+    stepHistory?.requestStep("settings", `Distortion modes: ${label}`);
     console.info(
       `[status] lowered to ${label}: ${child.sites.length} child site(s) · ${set.modes.length} distortion mode(s) — free the rows to refine (Positions group)`,
     );
@@ -1041,6 +1058,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     skipPositionCarryoverOnce.current = true; // keep the kick; carry the rest by id
     setModes({ set, parentName: label, fromActivation: true });
     setPositionMode("irreps");
+    stepHistory?.requestStep("settings", `Distortion modes: ${label}`);
     console.info(
       `[status] activated ${label}${sub.identity.number !== undefined ? ` (#${sub.identity.number})` : ""}: ` +
       `${act.child.sites.length} child site(s) · starting amplitude ${ACTIVATION_KICK} Å`,
@@ -1061,16 +1079,19 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       }
       setModes({ set, parentName: parent.name || file.name.replace(/\.[^.]+$/, "") });
       setPositionMode("irreps");
+      stepHistory?.requestStep("settings", `Distortion modes against ${parent.name || file.name}`);
       console.info(`[status] distortion modes: ${set.modes.length} mode(s), total |A| = ${set.totalAmplitude.toFixed(4)} Å${set.unpaired.length ? ` · unpaired: ${set.unpaired.join(", ")}` : ""}`);
     } catch (e) {
       console.error(`[status] parent CIF failed to parse: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
+  /** Values back to their starting values, every row and free/fixed choice kept — as on the powder page. */
   function reset(): void {
-    setParams(spec.params);
+    setParams((prev) => prev.map((p) => ({ ...p, value: p.initialValue })));
     setResult(null);
     setLive(null);
+    stepHistory?.requestStep("edit", "Reset to starting values");
   }
 
   // Exports published to the app header (engine contract): the output triple —
@@ -1290,6 +1311,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       return;
     }
     setSpinModel({ magnetic, params: momentParams, bindings: momentBindings });
+    stepHistory?.requestStep("magnetic", "Spin model added to the fit");
     const nMoment = momentParams.filter((p) => isMomentParameterKind(p.kind)).length;
     console.info(
       `[status] spin model applied to the PDF fit — ${nMoment} moment parameter${nMoment === 1 ? "" : "s"} added. ` +
@@ -1308,6 +1330,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       }
     }
     setSpinModel(magnetic ? { magnetic, params: [], bindings: [] } : null);
+    stepHistory?.requestStep("magnetic", magnetic ? "Spin model shown on the fit" : "Spin model removed");
   }
 
   return (
@@ -1718,6 +1741,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           )}
         </div>
 
+        {/* Parameters, with the step history under them. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: space.gap }}>
         <ParameterPanel
           params={params}
           esd={result?.esd}
@@ -1823,6 +1848,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                 )
           }
         />
+        {stepHistory && <HistoryPanel binding={stepHistory} />}
+        </div>
       </div>
       </div>
 

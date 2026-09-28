@@ -19,7 +19,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { downloadText, downloadBlob } from "@/app/download";
 import { HistoryPanel } from "@/app/ui/HistoryPanel";
-import type { ProjectHistory, StepKind } from "@/core/project/history";
+import type { HistoryBinding } from "@/app/historyBinding";
 import { refinementBundle, type RefinementBundleOptions } from "@/core/export/bundle";
 import { zipStore } from "@/core/export/zip";
 import type { StructureModel } from "@/core/crystal/types";
@@ -149,17 +149,8 @@ export interface PowderWorkbenchProps {
    *  CPU path. Default true — the kernel applies to the flat single-phase
    *  nuclear fit only, and the client falls back to the CPU pool otherwise. */
   useGpu?: boolean;
-  /** The shell's step history (core/project/history.ts), shown in the History card. */
-  history?: ProjectHistory | null;
-  /** Record the live state as a step now (before a refinement). */
-  recordNow?: (kind: StepKind, label?: string) => void;
-  /** Record a step once the change just made has rendered (after a refinement). */
-  requestStep?: (kind: StepKind, label?: string) => void;
-  onGoToStep?: (id: string) => void;
-  onRenameStep?: (id: string, name: string) => void;
-  /** Present when there is a step to go back / forward to. */
-  onStepBack?: () => void;
-  onStepForward?: () => void;
+  /** The shell's step history: recorded at this page's refinements and model changes. */
+  stepHistory?: HistoryBinding;
 }
 
 export function PowderWorkbench({
@@ -168,7 +159,7 @@ export function PowderWorkbench({
   onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, detection, onOverrideXUnit,
   onLoadInstrument, onLoadDemo, demos = [],
   onOpenProject, viewRestore, useGpu = true,
-  history = null, recordNow, requestStep, onGoToStep, onRenameStep, onStepBack, onStepForward,
+  stepHistory,
 }: PowderWorkbenchProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
@@ -537,7 +528,7 @@ export function PowderWorkbench({
     const nK = momentParams.filter((p) => p.kind === "propagationK" && !p.expression).length;
     const kNote = nK > 0 ? ` and ${nK} k component${nK === 1 ? "" : "s"} (Propagation vector group)` : "";
     setMessage(`Magnetic model passed to the refinement page — ${nMoment} moment parameter${nMoment === 1 ? "" : "s"} added (Magnetic group)${kNote}. Click Refine to fit nuclear + magnetic together.`);
-    requestStep?.("magnetic", "Magnetic model added to the refinement");
+    stepHistory?.requestStep("magnetic", "Magnetic model added to the refinement");
   }
 
   const profileReq = (): { shape: PeakShape; eta?: number; lorentz?: boolean; backgroundType?: BackgroundType } => ({
@@ -691,14 +682,14 @@ export function PowderWorkbench({
     }));
     setPowderResult(null);
     setMessage("Parameters reset to initial values.");
-    requestStep?.("edit", "Reset to starting values");
+    stepHistory?.requestStep("edit", "Reset to starting values");
   }
 
   /** Flat co-refinement of the currently-freed parameters. */
   async function runPowder(): Promise<void> {
     // The starting point (freed parameters, edited values, settings) is a step
     // of its own, so going back lands before this refinement, not after it.
-    recordNow?.("edit");
+    stepHistory?.recordNow("edit");
     setBusy(true);
     try {
       // Magnetic-aware branch: an applied magnetic model joins the calculated
@@ -727,7 +718,7 @@ export function PowderWorkbench({
           `${coRefined ? "Nuclear + magnetic" : "Nuclear (magnetic model held)"} refinement ${result.status}: ` +
           `wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`,
         );
-        requestStep?.("refine", coRefined ? "Refine nuclear + magnetic" : "Refine (magnetic model held)");
+        stepHistory?.requestStep("refine", coRefined ? "Refine nuclear + magnetic" : "Refine (magnetic model held)");
         return;
       }
       // The WebGPU structure-factor kernel accelerates only the flat single-phase
@@ -752,7 +743,7 @@ export function PowderWorkbench({
       }));
       setPowderResult(result);
       setMessage(`Powder refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%${gpuActive ? " · GPU |F|²" : ""}.`);
-      requestStep?.("refine", "Refine");
+      stepHistory?.requestStep("refine", "Refine");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setMessage(msg === CANCELLED ? "Refinement cancelled." : `Powder refinement failed: ${msg}`);
@@ -833,7 +824,7 @@ export function PowderWorkbench({
     // One engine, two faces: with no fit yet it's a "Prefit" (broad cold-start
     // search + Le Bail); once a fit exists it's a light "Escape min" nudge.
     const mode: "prefit" | "escape" = powderResult ? "escape" : "prefit";
-    recordNow?.("edit");
+    stepHistory?.recordNow("edit");
     setBusy(true);
     try {
       // Magnetic branch — moment-subspace multi-start (GAP #1): freeze the
@@ -869,7 +860,7 @@ export function PowderWorkbench({
           ? `found a lower minimum (start ${ms.bestStartIndex} of ${ms.restartsRun})`
           : `baseline held over ${ms.restartsRun + 1} starts`;
         setMessage(`Magnetic ${mode === "prefit" ? "prefit" : "escape"}: ${bestNote} — wR ${wr}%.${degNote}`);
-        requestStep?.("refine", mode === "prefit" ? "Magnetic prefit" : "Magnetic escape minimum");
+        stepHistory?.requestStep("refine", mode === "prefit" ? "Magnetic prefit" : "Magnetic escape minimum");
         return;
       }
       // Stage 1 — Le Bail cell pre-fit (prefit only; single-phase, when a cell
@@ -925,7 +916,7 @@ export function PowderWorkbench({
           ? `Escaped a local minimum (restart ${ms.bestStartIndex} of ${ms.restartsRun}) — wR ${wr}%, best of ${ms.restartsRun + 1} starts.`
           : `Already at the best minimum — the baseline beat all ${ms.restartsRun + 1} starts, wR ${wr}%.`);
       }
-      requestStep?.("refine", mode === "prefit" ? "Prefit" : "Escape minimum");
+      stepHistory?.requestStep("refine", mode === "prefit" ? "Prefit" : "Escape minimum");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setMessage(msg === CANCELLED ? "Refinement cancelled." : `${mode === "prefit" ? "Prefit" : "Escape min"} failed: ${msg}`);
@@ -1040,7 +1031,7 @@ export function PowderWorkbench({
       };
     });
     setPowderResult(null);
-    requestStep?.("magnetic", mag ? "Magnetic model shown on the pattern" : "Magnetic model removed");
+    stepHistory?.requestStep("magnetic", mag ? "Magnetic model shown on the pattern" : "Magnetic model removed");
   }
 
   // The magnetic pattern card's live toolbar pieces, passed OUTSIDE the memoized
@@ -1598,15 +1589,7 @@ export function PowderWorkbench({
                   ),
                 }}
               />
-              {onGoToStep && onRenameStep && (
-                <HistoryPanel
-                  history={history}
-                  onGoTo={onGoToStep}
-                  onRename={onRenameStep}
-                  {...(onStepBack ? { onBack: onStepBack } : {})}
-                  {...(onStepForward ? { onForward: onStepForward } : {})}
-                />
-              )}
+              {stepHistory && <HistoryPanel binding={stepHistory} />}
               </div>
             </div>
           </>
