@@ -40,6 +40,7 @@ import {
   type Workspace,
 } from "@/core/project/types";
 import { isMomentParameterKind, type ParameterBinding, type RefinementParameter, type RefinementResult } from "@/core/refinement/types";
+import type { ProjectHistory } from "@/core/project/history";
 import type { BoxcarPlan, BoxcarRun } from "@/core/workflow/pdfBoxcar";
 
 // ---------------------------------------------------------------------------
@@ -89,6 +90,8 @@ export interface ProjectEnvelope {
   readonly notes?: string;
   /** Active page (0 nuclear / 1 magnetic). */
   readonly step?: number;
+  /** The step history, when the session has one. */
+  readonly history?: ProjectHistory;
 }
 
 /** Wrap a workspace into a complete, timestamped project file. */
@@ -106,6 +109,7 @@ export function projectFileFor(env: ProjectEnvelope): ProjectFile {
     structures: env.structures,
     workspace: env.workspace,
     ...(env.step !== undefined ? { view: { step: env.step } } : {}),
+    ...(env.history ? { history: env.history } : {}),
   };
 }
 

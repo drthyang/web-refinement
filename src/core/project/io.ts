@@ -14,14 +14,16 @@
 import { PROJECT_SCHEMA_VERSION, type ProjectFile } from "@/core/project/types";
 import { stringifyProject } from "@/core/project/serialize";
 import { migrateProjectData } from "@/core/project/migrate";
-import { ProjectFileError, isRecord, validateProjectFile } from "@/core/project/validate";
+import { ProjectFileError, isRecord, validateProjectFile, validateSnapshot } from "@/core/project/validate";
+import { packHistory, restoreStep, unpackHistory, type ProjectHistory, type Snapshot } from "@/core/project/history";
 
 export { ProjectFileError };
 
 const PROJECT_FILE_EXTENSION = ".materia.json";
 
 export function serializeProject(file: ProjectFile): string {
-  return `${stringifyProject(file)}\n`;
+  const out = file.history ? { ...file, history: packHistory(file.history, file.structures, file.workspace) } : file;
+  return `${stringifyProject(out)}\n`;
 }
 
 /** Parse, migrate and validate. Throws `ProjectFileError` on any problem. */
@@ -42,7 +44,13 @@ export function parseProject(text: string): ProjectFile {
       `this project was saved by a newer version of the app (schema v${version}; this build reads up to v${PROJECT_SCHEMA_VERSION}) — update the app to open it`,
     );
   }
-  return validateProjectFile(version < PROJECT_SCHEMA_VERSION ? migrateProjectData(data) : data);
+  const file = validateProjectFile(version < PROJECT_SCHEMA_VERSION ? migrateProjectData(data) : data);
+  if (!file.history) return file;
+  try {
+    return { ...file, history: unpackHistory(file.history, file.structures, file.workspace) };
+  } catch (e) {
+    throw new ProjectFileError(`history: ${e instanceof Error ? e.message : String(e)}`, "history");
+  }
 }
 
 /**
@@ -65,4 +73,18 @@ export function projectFileName(file: ProjectFile): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
   return `${slug || "project"}${PROJECT_FILE_EXTENSION}`;
+}
+
+/**
+ * The snapshot of a history step, validated like a file's own model — what
+ * "go back to this step" restores. Throws `ProjectFileError` for a damaged step.
+ */
+export function restoreHistoryStep(history: ProjectHistory, id: string): Snapshot {
+  let snap: Snapshot;
+  try {
+    snap = restoreStep(history, id);
+  } catch (e) {
+    throw new ProjectFileError(`history: ${e instanceof Error ? e.message : String(e)}`, "history");
+  }
+  return validateSnapshot(snap.structures, snap.workspace, `history step ${id}`);
 }

@@ -15,8 +15,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { APP_VERSION } from "@/app/constants";
 import type { RefinementResult } from "@/core/refinement/types";
 import type { StructureModel } from "@/core/crystal/types";
-import { TECHNIQUE_LABEL, type PdfWorkspace, type ProjectFile, type SingleCrystalWorkspace } from "@/core/project/types";
-import { looksLikeProjectFile, parseProject, projectFileName, serializeProject } from "@/core/project/io";
+import { TECHNIQUE_LABEL, type PdfWorkspace, type ProjectFile, type SingleCrystalWorkspace, type Workspace } from "@/core/project/types";
+import { looksLikeProjectFile, parseProject, projectFileName, restoreHistoryStep, serializeProject } from "@/core/project/io";
+import { moveTo, recordStep, redoTarget, renameStep, undoTarget, type ProjectHistory, type Snapshot, type StepKind } from "@/core/project/history";
+import { clearAutosave, readAutosave, writeAutosave, type AutosaveEntry } from "@/app/autosave";
 import { defaultProjectTitle, projectFileFor, sessionFromPowderWorkspace, type PowderViewState } from "@/app/projectIo";
 import { downloadText } from "@/app/download";
 import type { MagneticModel } from "@/core/magnetic/types";
@@ -116,6 +118,15 @@ interface ProjectRestore {
 }
 const NO_RESTORE: ProjectRestore = { token: 0 };
 
+/** A step to record once the state change that caused it has rendered. */
+interface StepRequest {
+  readonly n: number;
+  readonly kind: StepKind;
+  readonly label?: string;
+  /** Start a new history (a new material, a demo) instead of extending this one. */
+  readonly fresh?: boolean;
+}
+
 /** Identity of the project the session came from, so Save keeps its title and creation date. */
 interface ProjectMeta {
   readonly title: string;
@@ -200,6 +211,11 @@ export function App(): JSX.Element {
   // Project save/open (see workbenchEngine.ts, "The project boundary").
   const [projectMeta, setProjectMeta] = useState<ProjectMeta | null>(null);
   const [restore, setRestore] = useState<ProjectRestore>(NO_RESTORE);
+  // Step history (core/project/history.ts): a tree of snapshots of the session.
+  const [history, setHistory] = useState<ProjectHistory | null>(null);
+  const [stepRequest, setStepRequest] = useState<StepRequest | null>(null);
+  // The previous session found in browser storage, offered on the landing view.
+  const [autosaveOffer, setAutosaveOffer] = useState<AutosaveEntry | null>(null);
   // A user-facing problem from the last project open. The app has no status
   // bar (status goes to the console), but a refused file must be seen.
   const [notice, setNotice] = useState<string | null>(null);
@@ -224,6 +240,120 @@ export function App(): JSX.Element {
 
   const { structure } = session;
 
+  // ── Step history ────────────────────────────────────────────────────────
+  // A step is recorded from the active engine's own project snapshot, so it is
+  // exactly what Save would write, and going back reuses the Open path
+  // (applyWorkspace). The powder page records steps; single crystal and PDF
+  // pages do not yet.
+
+  /** The live session as a step snapshot, or null when there is nothing to record. */
+  function liveSnapshot(): Snapshot | null {
+    if (scDataset || pdfDataset || session.powderSource === EMPTY_SOURCE) return null;
+    const workspace = powderExports.current?.projectWorkspace?.();
+    return workspace ? { structures: [session.structure, ...session.extraPhases], workspace } : null;
+  }
+
+  /**
+   * Record the live state now — before a refinement, before going back, before
+   * saving — so no change is ever lost. A no-op when nothing changed.
+   */
+  function recordNow(kind: StepKind, label?: string): ProjectHistory | null {
+    const snap = liveSnapshot();
+    if (!snap) return history;
+    const next = recordStep(history, { ...snap, kind, ...(label ? { label } : {}) });
+    if (next !== history) setHistory(next);
+    return next;
+  }
+
+  /** Record a step once the state change that caused it has rendered. */
+  const requestStep = useCallback((kind: StepKind, label?: string, fresh = false): void => {
+    setStepRequest((r) => ({ n: (r?.n ?? 0) + 1, kind, ...(label ? { label } : {}), ...(fresh ? { fresh } : {}) }));
+  }, []);
+
+  useEffect(() => {
+    if (!stepRequest) return;
+    const { kind, label, fresh } = stepRequest;
+    const snap = liveSnapshot();
+    if (!snap) {
+      if (fresh) setHistory(null);
+      return;
+    }
+    setHistory((h) => recordStep(fresh ? null : h, { ...snap, kind, ...(label ? { label } : {}) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per request, on the state that request rendered
+  }, [stepRequest]);
+
+  /** Go back (or forward) to a step: restored as opening its project would, history kept. */
+  function goToStep(id: string): void {
+    if (!history) return;
+    let snap: Snapshot;
+    try {
+      snap = restoreHistoryStep(history, id);
+    } catch (e) {
+      setNotice(`Could not go back to that step — ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    const withLive = recordNow("edit") ?? history; // unrecorded changes become a step first
+    setHistory(moveTo(withLive, id));
+    applyWorkspace(snap.structures, snap.workspace);
+    setMessage(`Went to step ${id}.`);
+  }
+
+  /** Back: the parent step — or, with unrecorded changes, the current step itself. */
+  function stepBack(): void {
+    if (!history) return;
+    const snap = liveSnapshot();
+    const dirty = snap !== null && recordStep(history, { ...snap, kind: "edit" }) !== history;
+    const target = dirty ? history.current : undoTarget(history);
+    if (target) goToStep(target);
+  }
+
+  function stepForward(): void {
+    const target = history ? redoTarget(history) : undefined;
+    if (target) goToStep(target);
+  }
+
+  function onRenameStep(id: string, name: string): void {
+    setHistory((h) => (h ? renameStep(h, id, name) : h));
+  }
+
+  // ⌘Z / Ctrl+Z steps back, with Shift steps forward — except inside a text
+  // field, which keeps its own undo.
+  const historyKeys = useRef({ back: stepBack, forward: stepForward });
+  useEffect(() => {
+    historyKeys.current = { back: stepBack, forward: stepForward };
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== "z") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      e.preventDefault();
+      if (e.shiftKey) historyKeys.current.forward();
+      else historyKeys.current.back();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Autosave: after every history change the whole project, history included,
+  // goes to browser storage, so a reload or a crash does not lose the steps.
+  useEffect(() => {
+    if (!history) return;
+    const file = buildProjectFile(history);
+    if (!file) return;
+    void writeAutosave({ text: serializeProject(file), title: file.metadata.title, steps: history.steps.length, savedAt: file.metadata.modifiedAt });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a history change is the trigger; the rest is read at that render
+  }, [history]);
+
+  // On start, offer the last autosaved session (shown on the landing view).
+  useEffect(() => {
+    let cancelled = false;
+    void readAutosave().then((entry) => {
+      if (!cancelled && entry) setAutosaveOffer(entry);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   function onLoadCif(file: File): void {
     file.text().then((text) => {
       try {
@@ -237,6 +367,7 @@ export function App(): JSX.Element {
           setDemoActive(false);
           setPowderResult(null);
           setMessage(`Loaded magnetic CIF: ${parsed.name} · ${magnetic.moments.length} moments · ${parsed.spaceGroup.hermannMauguin ?? "BNS"}. Nuclear + magnetic pattern shown.`);
+          requestStep("load", `Loaded ${parsed.name} (magnetic CIF)`, true);
           return;
         }
         setSession(newSession({ ...parsed, id: "loaded" }, instrument));
@@ -244,6 +375,7 @@ export function App(): JSX.Element {
         setDemoActive(false);
         setPowderResult(null);
         setMessage(`Loaded CIF: ${parsed.name} (${parsed.sites.length} sites, ${parsed.spaceGroup.operations.length} symmetry ops). Load button is now "Add CIF…" to add impurity/secondary phases.`);
+        requestStep("load", `Loaded ${parsed.name}`, true);
       } catch (e) {
         setMessage(`CIF parse failed: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -266,6 +398,7 @@ export function App(): JSX.Element {
     setRestore((r) => ({ token: r.token }));
     setNotice(null);
     setDetection(null);
+    setHistory(null);
   }
 
   function onClearStructures(): void {
@@ -306,6 +439,7 @@ export function App(): JSX.Element {
           setDemo("magnetic");
           setNotice(null);
           setMessage(`Loaded the local AWO₄ magnetic demo (POWGEN 6 K, k = (½ 0 0), ${ex.group}) — magnetic page.`);
+          requestStep("load", "AWO₄ 6 K magnetic demo", true);
         },
         (e: unknown) => {
           const msg = e instanceof Error ? e.message : String(e);
@@ -326,6 +460,7 @@ export function App(): JSX.Element {
       setStep(0);
       setDemo("rietveld");
       setMessage("Loaded the bundled Mn₃Ga + MnO POWGEN demo (two-phase TOF, converged fit).");
+      requestStep("load", "Mn₃Ga + MnO POWGEN demo", true);
       return;
     }
     const ex = gata4se8PdfExample();
@@ -339,6 +474,7 @@ export function App(): JSX.Element {
     setStep(0);
     setDemo("pdf");
     setMessage("Loaded the bundled GaTa4Se8 299 K X-ray PDF demo (cubic lacunar spinel, converged fit).");
+    setHistory(null);
   }
 
   /** Header Demos menu exit: clear back to the landing. */
@@ -375,6 +511,7 @@ export function App(): JSX.Element {
         });
         setPowderResult(null);
         setMessage(`Added phase "${parsed.name}" (${parsed.spaceGroup.hermannMauguin ?? "?"}). Refine to fit its scale/cell.`);
+        requestStep("load", `Added phase ${parsed.name}`);
       } catch (e) {
         setMessage(`Add phase failed: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -383,6 +520,8 @@ export function App(): JSX.Element {
 
   /** Remove an added phase (by id) and rebuild the spec back down. */
   function onRemovePhase(id: string): void {
+    const removed = session.extraPhases.find((p) => p.id === id);
+    requestStep("load", `Removed phase ${removed?.name || id}`);
     setSession((s) => {
       const extraPhases = s.extraPhases.filter((p) => p.id !== id);
       const spec = buildSpecFor(s.structure, extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic");
@@ -407,29 +546,37 @@ export function App(): JSX.Element {
   // the other way: the file's technique tag decides which mode the app enters,
   // and the engine gets its block as a `restore` prop on a fresh mount.
 
-  function onSaveProject(): void {
+  /** The session as a project file (with `h` as its history), or null when there is nothing to save. */
+  function buildProjectFile(h: ProjectHistory | null): ProjectFile | null {
     const engine = pdfDataset ? pdfExports : scDataset ? scExports : powderExports;
     const workspace = engine.current?.projectWorkspace?.();
-    if (!workspace) {
-      setNotice("Nothing to save yet — load a structure and a dataset first.");
-      return;
-    }
+    if (!workspace) return null;
     // Single crystal refines one phase; the powder / PDF blocks carry every phase.
     const structures: StructureModel[] =
       workspace.technique === "singleCrystal" ? [session.structure] : [session.structure, ...session.extraPhases];
-    const title = projectMeta?.title ?? defaultProjectTitle(session.structure, workspace.technique);
-    const file = projectFileFor({
+    return projectFileFor({
       structures,
       workspace,
-      title,
+      title: projectMeta?.title ?? defaultProjectTitle(session.structure, workspace.technique),
       step,
       ...(projectMeta ? { createdAt: projectMeta.createdAt } : {}),
       ...(projectMeta?.notes !== undefined ? { notes: projectMeta.notes } : {}),
+      ...(h ? { history: h } : {}),
     });
+  }
+
+  function onSaveProject(): void {
+    // Unrecorded changes become the last step, so the saved history ends where the file does.
+    const file = buildProjectFile(recordNow("edit"));
+    if (!file) {
+      setNotice("Nothing to save yet — load a structure and a dataset first.");
+      return;
+    }
+    const title = file.metadata.title;
     downloadText(projectFileName(file), serializeProject(file), "application/json");
     if (!projectMeta) setProjectMeta({ title, createdAt: file.metadata.createdAt });
     setNotice(null);
-    setMessage(`Saved project “${title}” (${TECHNIQUE_LABEL[workspace.technique]}).`);
+    setMessage(`Saved project “${title}” (${TECHNIQUE_LABEL[file.workspace.technique]}${file.history ? `, ${file.history.steps.length} steps` : ""}).`);
   }
 
   function onOpenProject(file: File): void {
@@ -446,9 +593,33 @@ export function App(): JSX.Element {
       setMessage(`Project open failed: ${msg}`);
       return;
     }
+    applyWorkspace(file.structures, file.workspace);
     const structures = file.structures;
-    const primary = structures[0]!;
     const ws = file.workspace;
+    setOwnStructure(true);
+    setDemo(null);
+    // The magnetic page exists for every technique except a PDF that cannot
+    // carry a magnetic term (X-ray, or multi-phase) — stay on the nuclear page there.
+    const wantStep = file.view?.step === 1 ? 1 : 0;
+    const magneticPage = ws.technique !== "pdf" || (ws.pattern.scatteringType === "neutron" && structures.length === 1);
+    setStep(magneticPage ? wantStep : 0);
+    setProjectMeta({ title: file.metadata.title, createdAt: file.metadata.createdAt, ...(file.metadata.notes !== undefined ? { notes: file.metadata.notes } : {}) });
+    setNotice(null);
+    // A project stores the resolved pattern, not the detector's reasoning.
+    setDetection(null);
+    // The file's own history, or a new one that starts at this open.
+    setHistory(file.history ?? null);
+    if (!file.history) requestStep("open", `Opened ${sourceName}`, true);
+    setMessage(`Opened project “${file.metadata.title}” — ${TECHNIQUE_LABEL[ws.technique]}, saved by v${file.metadata.appVersion}${file.history ? `, ${file.history.steps.length} steps` : ""}.`);
+  }
+
+  /**
+   * Put a project's model on screen — the Open path, shared with going back to
+   * a history step. The technique tag decides which mode the app enters; the
+   * engine gets its block as a `restore` prop (powder: the session itself).
+   */
+  function applyWorkspace(structures: readonly StructureModel[], ws: Workspace): void {
+    const primary = structures[0]!;
     switch (ws.technique) {
       case "powder": {
         const r = sessionFromPowderWorkspace(ws, structures);
@@ -488,18 +659,6 @@ export function App(): JSX.Element {
         break;
       }
     }
-    setOwnStructure(true);
-    setDemo(null);
-    // The magnetic page exists for every technique except a PDF that cannot
-    // carry a magnetic term (X-ray, or multi-phase) — stay on the nuclear page there.
-    const wantStep = file.view?.step === 1 ? 1 : 0;
-    const magneticPage = ws.technique !== "pdf" || (ws.pattern.scatteringType === "neutron" && structures.length === 1);
-    setStep(magneticPage ? wantStep : 0);
-    setProjectMeta({ title: file.metadata.title, createdAt: file.metadata.createdAt, ...(file.metadata.notes !== undefined ? { notes: file.metadata.notes } : {}) });
-    setNotice(null);
-    // A project stores the resolved pattern, not the detector's reasoning.
-    setDetection(null);
-    setMessage(`Opened project “${file.metadata.title}” — ${TECHNIQUE_LABEL[ws.technique]}, saved by v${file.metadata.appVersion}.`);
   }
 
   // Unified, auto-detecting data loader: the resolver classifies the file
@@ -625,6 +784,7 @@ export function App(): JSX.Element {
     setPowderResult(null);
     const last = parsed.points[parsed.points.length - 1]!;
     setMessage(`Loaded FullProf INSTRM=6 powder “${filename}” · ${parsed.points.length} pts · 2θ ${parsed.points[0]!.x.toFixed(2)}–${last.x.toFixed(2)}° · neutron λ=${wavelength} Å.`);
+    requestStep("load", `Loaded data ${filename}`);
   }
 
   function applyIllPowder(text: string, filename: string): void {
@@ -646,6 +806,7 @@ export function App(): JSX.Element {
       `Loaded ILL powder “${filename}” · ${parsed.points.length} pts · 2θ ${parsed.points[0]!.x.toFixed(2)}–${last.x.toFixed(2)}° · neutron λ=${wavelength} Å` +
       `${cw ? " (Caglioti widths from instrument)" : " — load the .irf for Caglioti widths"}.`,
     );
+    requestStep("load", `Loaded data ${filename}`);
   }
 
   /**
@@ -672,6 +833,7 @@ export function App(): JSX.Element {
   }
 
   function applyPowder(text: string, filename: string, fmt: DetectedFormat, tag: string): void {
+    requestStep("load", `Loaded data ${filename}`);
     const id = `${structure.id}-powder`;
     const isGsasCsv = /(^|,)\s*"?obs"?\s*,/i.test(text) && /calc/i.test(text);
     const isGsasHist = isGsasHistogram(text);
@@ -761,6 +923,7 @@ export function App(): JSX.Element {
             ? `Loaded TOF instrument: difC=${parsed.difC.toFixed(2)}, Zero=${(parsed.zero ?? 0).toFixed(3)}. Profile re-seeded.`
             : `Loaded CW instrument: λ=${parsed.wavelength} Å. Profile re-seeded.`,
         );
+        requestStep("load", `Loaded instrument ${file.name}`);
       } catch (e) {
         setMessage(`Instrument parse failed: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -862,6 +1025,16 @@ export function App(): JSX.Element {
           <button onClick={() => setNotice(null)} style={noticeClose} title="Dismiss">✕</button>
         </div>
       )}
+      {autosaveOffer && !hasContent && (
+        <div role="status" style={offerBar}>
+          <span style={{ flex: 1 }}>
+            Restore your last session — “{autosaveOffer.title}”, {autosaveOffer.steps} step{autosaveOffer.steps === 1 ? "" : "s"}, saved{" "}
+            {new Date(autosaveOffer.savedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}?
+          </span>
+          <button style={offerButton} onClick={() => { openProjectText(autosaveOffer.text, "the autosaved session"); setAutosaveOffer(null); }}>Restore</button>
+          <button style={offerButton} onClick={() => { void clearAutosave(); setAutosaveOffer(null); }}>Discard</button>
+        </div>
+      )}
       {hasContent && (
         <div style={disclaimerBar}>
           <b>Public beta</b> — validated against published reference fits for the cases in its docs, not for
@@ -904,6 +1077,13 @@ export function App(): JSX.Element {
         onOpenProject={onOpenProject}
         useGpu={gpuEnabled}
         {...(restore.powderView ? { viewRestore: restore.powderView } : {})}
+        history={history}
+        recordNow={recordNow}
+        requestStep={requestStep}
+        onGoToStep={goToStep}
+        onRenameStep={onRenameStep}
+        {...(history && undoTarget(history) ? { onStepBack: stepBack } : {})}
+        {...(history && redoTarget(history) ? { onStepForward: stepForward } : {})}
       />
       {pdfDataset && (
         // PDF mode (auto-switched on loading a reduced .gr). Keyed on the dataset
@@ -954,6 +1134,8 @@ const LIMITATIONS_URL = "https://github.com/drthyang/web-refinement/blob/main/do
 const noticeBar: React.CSSProperties = { display: "flex", alignItems: "center", gap: 12, padding: `8px ${space.edge}`, fontSize: 12.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
 const noticeClose: React.CSSProperties = { border: "none", background: "transparent", color: theme.warnInk, cursor: "pointer", fontSize: 13, padding: "0 4px" };
 const disclaimerBar: React.CSSProperties = { padding: `7px ${space.edge}`, fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
+const offerBar: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, padding: `8px ${space.edge}`, fontSize: 12.5, background: theme.noteBg, borderBottom: `1px solid ${theme.noteBorder}`, color: theme.noteInk, lineHeight: 1.45 };
+const offerButton: React.CSSProperties = { border: `1px solid ${theme.noteBorder}`, background: theme.surface, color: theme.ink, borderRadius: 7, padding: "3px 12px", fontSize: 12.5, cursor: "pointer" };
 const disclaimerLink: React.CSSProperties = { color: theme.warnInk, textDecoration: "underline" };
 const copyrightBar: React.CSSProperties = { display: "flex", justifyContent: "center", alignItems: "center", gap: 8, padding: `10px ${space.edge}`, fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised };
 const footerLink: React.CSSProperties = { color: theme.secondary, textDecoration: "none" };

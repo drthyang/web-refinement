@@ -31,7 +31,8 @@ validation). One minimal example per technique lives in
   },
   "structures": [ /* StructureModel[] — [0] is the primary phase */ ],
   "workspace":  { "technique": "powder" | "singleCrystal" | "pdf", /* … */ },
-  "view":       { "step": 0 }                    // optional UI hint
+  "view":       { "step": 0 },                   // optional UI hint
+  "history":    { "current": "s7", "steps": [ /* … */ ], "blobs": { /* … */ } }  // optional
 }
 ```
 
@@ -42,6 +43,7 @@ validation). One minimal example per technique lives in
 | `structures` | The phases. `structures[0]` is the **primary phase** — the one a magnetic model decorates (`MagneticModel.structureId`) and the one the single-crystal engine refines. Further entries are additional phases (powder / PDF multi-phase). |
 | `workspace` | **Exactly one** technique block, selected by its `technique` tag (below). |
 | `view` | Ignorable UI hints. `step`: 0 = nuclear refinement page, 1 = magnetic page. |
+| `history` | Optional. The session's step history ([below](#step-history)). |
 
 ## The workspace: a tagged union on `technique`
 
@@ -146,6 +148,33 @@ The single-crystal and PDF pages read their block **once, at mount** (the shell
 remounts them with a fresh key when a project opens) and apply it only while
 the structure and dataset are the very objects the file carried, so a later CIF
 or data load can never re-stamp saved values onto a different model.
+
+## Step history
+
+`history` records how the session got here, as a tree of steps. A step is a
+snapshot of what Save writes: the phases and the technique workspace. It is
+taken at a committed action (a refinement, a load, a magnetic-model change, a
+reset). Going back to a step restores it exactly as opening a project would.
+
+| Field | Meaning |
+| --- | --- |
+| `current` | The step the saved session was last restored from or recorded as. |
+| `steps[]` | In creation order; a `parent` always comes before its children. |
+| `steps[].id` / `parent` | `"s1"`, `"s2"`, … The root has no parent. Going back and acting starts a branch, so nothing is discarded. |
+| `steps[].kind` | `load`, `open`, `edit`, `settings`, `refine` or `magnetic`. |
+| `steps[].label` / `name` | What happened (`"Freed p0_B_Mn1, p0_B_Ga1 +2"`), and an optional user name. |
+| `steps[].summary` | `nFree`, and `wR` / `gof` / `status` when the snapshot has a result. |
+| `steps[].actor` | Absent for the user; `"agent"` for an agent-made step. |
+| `steps[].structures`, `steps[].workspace` | The snapshot. Data-sized parts are `{"blob": key}` pointers. |
+| `blobs` | Shared values by content hash: data, raw files, phases, bindings, magnetic model. A blob equal to the file's own value is written as `{"sameAs": "pattern"}`, so the history never stores the current data twice. |
+
+Rules:
+- The file's `workspace` stays the live session. The history is extra.
+- The shape of `history` is checked on open. A step's full snapshot is checked
+  only when you go back to it, so a damaged old step never blocks opening.
+- Each parent → child edge is a state, an action and an outcome. The action is
+  the difference between the two snapshots, so nothing else is stored.
+- Older builds ignore the field, and drop it if they re-save the file.
 
 ## What is *not* persisted (and why)
 

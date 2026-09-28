@@ -19,7 +19,8 @@
  */
 
 import type { StructureModel } from "@/core/crystal/types";
-import type { ProjectFile } from "@/core/project/types";
+import type { ProjectFile, Workspace } from "@/core/project/types";
+import { STEP_ACTORS, STEP_KINDS } from "@/core/project/history";
 import {
   PROJECT_SCHEMA_VERSION,
   TECHNIQUES,
@@ -471,34 +472,93 @@ export function validateProjectFile(raw: unknown): ProjectFile {
   for (const k of ["title", "createdAt", "modifiedAt", "appVersion"]) str(meta[k], `metadata.${k}`);
   opt(meta.notes, "metadata.notes", str);
 
-  const structures = each(root.structures, "structures", checkStructure);
-  if (structures.length === 0) fail("structures", "a project needs at least one phase");
-  const ids = new Set<string>();
-  structures.forEach((s, i) => {
-    const id = (s as Rec).id as string;
-    if (ids.has(id)) fail(`structures[${i}].id`, `duplicate phase id ${JSON.stringify(id)}`);
-    ids.add(id);
-  });
-  const primary = structures[0] as unknown as StructureModel;
-  const ctx: PhaseContext = { primaryId: primary.id, siteLabels: new Set(primary.sites.map((s) => s.label)) };
-
-  const ws = rec(root.workspace, "workspace");
-  const technique = oneOf(TECHNIQUES)(ws.technique, "workspace.technique");
-  switch (technique) {
-    case "powder":
-      checkPowderWorkspace(ws, "workspace", ctx);
-      break;
-    case "singleCrystal":
-      checkSingleCrystalWorkspace(ws, "workspace", ctx);
-      break;
-    case "pdf":
-      checkPdfWorkspace(ws, "workspace", ctx);
-      break;
-  }
+  checkPhasesAndWorkspace(root.structures, "structures", root.workspace, "workspace");
 
   if (root.view !== undefined && root.view !== null) {
     const view = rec(root.view, "view");
     opt(view.step, "view.step", int);
   }
+  if (root.history !== undefined && root.history !== null) checkHistory(root.history, "history");
   return root as unknown as ProjectFile;
+}
+
+/** The phases and the workspace that uses them — a project's model, or a history step's. */
+function checkPhasesAndWorkspace(rawStructures: unknown, sPath: string, rawWorkspace: unknown, wPath: string): void {
+  const structures = each(rawStructures, sPath, checkStructure);
+  if (structures.length === 0) fail(sPath, "a project needs at least one phase");
+  const ids = new Set<string>();
+  structures.forEach((s, i) => {
+    const id = (s as Rec).id as string;
+    if (ids.has(id)) fail(`${sPath}[${i}].id`, `duplicate phase id ${JSON.stringify(id)}`);
+    ids.add(id);
+  });
+  const primary = structures[0] as unknown as StructureModel;
+  const ctx: PhaseContext = { primaryId: primary.id, siteLabels: new Set(primary.sites.map((s) => s.label)) };
+
+  const ws = rec(rawWorkspace, wPath);
+  const technique = oneOf(TECHNIQUES)(ws.technique, `${wPath}.technique`);
+  switch (technique) {
+    case "powder":
+      checkPowderWorkspace(ws, wPath, ctx);
+      break;
+    case "singleCrystal":
+      checkSingleCrystalWorkspace(ws, wPath, ctx);
+      break;
+    case "pdf":
+      checkPdfWorkspace(ws, wPath, ctx);
+      break;
+  }
+}
+
+/**
+ * Validate a history step's restored snapshot with the same rules as a file's
+ * own model. Run when the user goes back to the step, so a damaged old step is
+ * reported then — it never blocks opening the project.
+ */
+export function validateSnapshot(structures: unknown, workspace: unknown, path: string): { structures: StructureModel[]; workspace: Workspace } {
+  checkPhasesAndWorkspace(structures, `${path}.structures`, workspace, `${path}.workspace`);
+  return { structures: structures as StructureModel[], workspace: workspace as Workspace };
+}
+
+/**
+ * The history's shape: unique step ids, parents that exist and come first (so
+ * the tree has no cycles), blob references that resolve, a current step that
+ * exists. Step snapshots are checked in full only when restored.
+ */
+function checkHistory(raw: unknown, path: string): void {
+  const h = rec(raw, path);
+  const blobs = rec(h.blobs, `${path}.blobs`);
+  const seen = new Set<string>();
+  const blobRef = (v: unknown, p: string): void => {
+    const ref = rec(v, p);
+    const key = str(ref.blob, `${p}.blob`);
+    if (!(key in blobs)) fail(`${p}.blob`, `no blob ${JSON.stringify(key)} in the history`);
+  };
+  each(h.steps, `${path}.steps`, (item, p) => {
+    const step = rec(item, p);
+    const id = str(step.id, `${p}.id`);
+    if (seen.has(id)) fail(`${p}.id`, `duplicate step id ${JSON.stringify(id)}`);
+    const parent = opt(step.parent, `${p}.parent`, str);
+    if (parent !== undefined && !seen.has(parent)) fail(`${p}.parent`, `step ${JSON.stringify(parent)} does not come before it`);
+    seen.add(id);
+    str(step.at, `${p}.at`);
+    oneOf(STEP_KINDS)(step.kind, `${p}.kind`);
+    str(step.label, `${p}.label`);
+    opt(step.actor, `${p}.actor`, oneOf(STEP_ACTORS));
+    opt(step.name, `${p}.name`, str);
+    const summary = rec(step.summary, `${p}.summary`);
+    int(summary.nFree, `${p}.summary.nFree`);
+    opt(summary.wR, `${p}.summary.wR`, num);
+    opt(summary.gof, `${p}.summary.gof`, num);
+    opt(summary.status, `${p}.summary.status`, str);
+    blobRef(step.structures, `${p}.structures`);
+    const ws = rec(step.workspace, `${p}.workspace`);
+    oneOf(TECHNIQUES)(ws.technique, `${p}.workspace.technique`);
+    for (const [k, v] of Object.entries(ws)) if (isRecord(v) && Object.keys(v).length === 1 && "blob" in v) blobRef(v, `${p}.workspace.${k}`);
+    const refinement = rec(ws.refinement, `${p}.workspace.refinement`);
+    blobRef(refinement.bindings, `${p}.workspace.refinement.bindings`);
+  });
+  if (seen.size === 0) fail(`${path}.steps`, "a history needs at least one step");
+  const current = str(h.current, `${path}.current`);
+  if (!seen.has(current)) fail(`${path}.current`, `no step ${JSON.stringify(current)} in the history`);
 }

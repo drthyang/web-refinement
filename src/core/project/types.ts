@@ -13,7 +13,8 @@
  *   schemaVersion, metadata,
  *   structures: [primary, ...additionalPhases],
  *   workspace:  { technique: "powder" | "singleCrystal" | "pdf", ...technique-specific },
- *   view?:      { step }
+ *   view?:      { step },
+ *   history?:   { current, steps, blobs }   — the step tree (history.ts)
  * }
  * ```
  *
@@ -55,6 +56,7 @@ import type { ParameterBinding, RefinementParameter, RefinementResult } from "@/
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { MustrainModel, SiteTies } from "@/core/workflow/powderModelOptions";
 import type { BoxcarPlan, BoxcarRun } from "@/core/workflow/pdfBoxcar";
+import type { ProjectHistory } from "@/core/project/history";
 
 /** Current schema version. Bump on any breaking change and add a migration. */
 export const PROJECT_SCHEMA_VERSION = 2;
@@ -254,6 +256,11 @@ export interface ProjectFile {
   readonly structures: readonly StructureModel[];
   readonly workspace: Workspace;
   readonly view?: ProjectView;
+  /**
+   * The step history (core/project/history.ts): a tree of snapshots of this
+   * session. Optional — older files have none, and older builds ignore it.
+   */
+  readonly history?: ProjectHistory;
 }
 
 // Re-exported for call sites that narrow on the dataset types.
