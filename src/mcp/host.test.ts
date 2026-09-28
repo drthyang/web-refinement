@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -196,6 +196,41 @@ describe("MCP host — an LLM-sized powder loop over a real client", () => {
       expect(m.response, `${m.name} response`).toBeLessThanOrEqual(RESPONSE_LIMIT);
       expect(m.request, `${m.name} request`).toBeLessThanOrEqual(REQUEST_LIMIT);
     }
+  });
+
+  it("export_bundle writes the refined model into outDir, safely", async () => {
+    writeFileSync(join(dir, "powgen.prm"), "POWGEN instrument, verbatim\n");
+    const s = await call("parse_structure", { path: join(dir, "mn3ga.cif") });
+    const p = await call("parse_powder_data", { path: MN3GA_DAT });
+    const b = await call("build_refinement", { structure: s.structure, pattern: p.pattern, instrument: TOF });
+    const r = await call("refine_powder", {
+      structure: s.structure, pattern: p.pattern, instrument: TOF, parameters: b.parameters, bindings: b.bindings, profile: b.profile,
+      free: ["scale", "bkg*", "cell_*"], maxIterations: 4,
+    });
+    const args = {
+      target: "gsas2", structure: s.structure, pattern: p.pattern, parameters: r.parameters, bindings: b.bindings,
+      result: r.result, instrument: TOF, rawInstrument: { path: join(dir, "powgen.prm") }, outDir: "bundle",
+    };
+    const out = await call("export_bundle", args);
+    const byName = Object.fromEntries((out.files as { name: string; path: string }[]).map((f) => [f.name, f.path]));
+    expect(Object.keys(byName)).toEqual(expect.arrayContaining(["Mn3Ga.cif", "Mn3Ga.xye", "build_gpx.py", "README.txt", "powgen.prm"]));
+    expect(byName["Mn3Ga.cif"]).toBe(join(realpathSync(dir), "bundle", "Mn3Ga.cif")); // relative to the first data folder (symlinks resolved)
+    expect(readFileSync(byName["powgen.prm"]!, "utf8")).toBe("POWGEN instrument, verbatim\n");
+    // The CIF carries the REFINED cell, not the as-loaded 5.42215 Å.
+    const a = (await call("read_ref", { ref: `${r.result.ref}/parameters/cell_a` })).value as number;
+    expect(Math.abs(a - 5.42215)).toBeGreaterThan(1e-4);
+    const written = Number(/_cell_length_a\s+([\d.]+)/.exec(readFileSync(byName["Mn3Ga.cif"]!, "utf8"))![1]);
+    expect(written).toBeCloseTo(a, 4);
+
+    await expect(call("export_bundle", args)).rejects.toThrow(/already has .*Mn3Ga\.cif.*overwrite: true/);
+    await call("export_bundle", { ...args, overwrite: true });
+    await expect(call("export_bundle", { ...args, outDir: "/etc/materia-bundle" })).rejects.toThrow(/outside the server's data folders/);
+    expect(existsSync("/etc/materia-bundle")).toBe(false);
+
+    // Without outDir the files come back as text, over budget as refs.
+    const inline = await call("export_bundle", { ...args, target: "fullprof", outDir: undefined });
+    expect(inline.files.ref ?? inline.files[0]).toBeDefined();
+    for (const m of log.filter((x) => x.name === "export_bundle")) expect(m.response).toBeLessThanOrEqual(RESPONSE_LIMIT);
   });
 
   it("fails with messages a model can act on", async () => {

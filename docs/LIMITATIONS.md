@@ -374,10 +374,13 @@ Conventions are pinned in
 - Refined CIF with esds, and mCIF. For a commensurate k ≠ 0 the mCIF is the
   magnetic supercell in its own magnetic space group.
 - An HTML refinement report (Export ▾ → Report).
-- A FullProf + GSAS-II cross-check bundle: a CW or TOF `.pcr`, plus your
-  original data and instrument files, unchanged.
+- A FullProf + GSAS-II cross-check bundle of the refined structure: a CW or
+  TOF `.pcr`, plus your original data and instrument files, unchanged. The
+  agent tools write it too (`export_bundle`).
 
 **Approximate**
+- The `.pcr` starts scale, background and the constant-wavelength peak shape
+  from seeds, not from the refined values (TOF peak shapes are carried).
 - GSAS histograms: banks in FXYE/FXY format with SLOG/RALF (TOF) or CONST (CW)
   binning are checked against real POWGEN files. STD/ESD fixed-column packing
   follows GSAS-II's reader and is covered by synthetic tests only.

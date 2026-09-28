@@ -41,6 +41,16 @@ export interface ToolDefinition {
    * the server also accepts `free` (ids or globs) and sets the flags itself.
    */
   readonly selectsFree?: boolean;
+  /**
+   * Transport hint: fields that take a whole file as `{ name, text }`. The
+   * server also accepts `{ path }` there and reads the file itself.
+   */
+  readonly fileObjects?: readonly string[];
+  /**
+   * Transport hint: the tool returns `files` (`{ name, text }[]`), which the
+   * server writes into `outDir` when the caller passes one.
+   */
+  readonly writesFiles?: boolean;
 }
 
 // Loose schemas for the (already-validated, methods-free) domain objects: the
@@ -506,5 +516,27 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       structure: anyObj.describe("StructureModel whose own space group defines the modes"),
     },
     handler: tools.build_symmetry_modes,
+  },
+  {
+    name: "export_bundle",
+    title: "Export cross-check bundle (FullProf / GSAS-II)",
+    description: "Write a refinement as the files another program needs to re-run it — the external cross-check. `target: \"fullprof\"` gives a .pcr + data + README; `\"gsas2\"` gives a CIF + .instprm + data + a GSASIIscriptable build_gpx.py + README. The structure goes out at its REFINED values, applied from `parameters`; pass `result` for the esds and agreement factors in the CIF. Pass the original instrument file as `rawInstrument`: GSAS-II then uses your .instprm verbatim, not a regenerated one that loses detail. In the .pcr, scale, background and the constant-wavelength peak shape are starting values, to free in FullProf before comparing. One phase per bundle. Returns `files` (name + text).",
+    inputSchema: {
+      target: z.enum(["fullprof", "gsas2"]),
+      structure: anyObj.describe("StructureModel as parsed — the refined values come from `parameters`"),
+      pattern: anyObj.optional().describe("PowderPattern (powder data)"),
+      dataset: anyObj.optional().describe("SingleCrystalDataset (single-crystal data)"),
+      parameters: anyArr.describe("Refined parameters, e.g. `parameters` from refine_powder"),
+      bindings: anyArr,
+      result: anyObj.optional().describe("RefinementResult from the refine call: esds + agreement for the CIF"),
+      instrument: anyObj.optional(),
+      extraPhases: anyArr.optional().describe("The other phases of a multi-phase fit; their bindings are left out"),
+      rawInstrument: z.object({ name: z.string(), text: z.string() }).optional().describe("The original instrument file, shipped verbatim"),
+      rawData: z.object({ name: z.string(), text: z.string() }).optional().describe("The original data file, shipped verbatim"),
+      name: z.string().optional().describe("Base file name (default: the structure name)"),
+    },
+    fileObjects: ["rawInstrument", "rawData"],
+    writesFiles: true,
+    handler: tools.export_bundle,
   },
 ];

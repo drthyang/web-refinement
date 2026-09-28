@@ -7,8 +7,11 @@
  *
  *  - REFS (`refs.ts`): every output is stored, the response is a compact view,
  *    and any argument may be a `{ "ref": … }` resolved before the handler runs;
- *  - `path` on the parse tools (`fileInput` in the registry): the server reads
- *    the file itself, confined to its data folders;
+ *  - `path` on the parse tools (`fileInput` in the registry), and `{ path }`
+ *    for whole-file fields (`fileObjects`): the server reads the file itself,
+ *    confined to its data folders;
+ *  - `outDir` on tools that return files (`writesFiles`): the server writes
+ *    them there, never replacing a file unless asked;
  *  - `free` on the refining tools (`selectsFree`): ids or globs that set every
  *    parameter's `fixed` flag, so the parameter array is never retyped;
  *  - `read_ref`, to look inside a stored value.
@@ -16,9 +19,9 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, delimiter, isAbsolute, parse, relative, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { TOOL_REGISTRY, type ToolDefinition } from "@/mcp/registry";
 import { REF_KEY, RefStore, buildView, resolveRefs } from "@/mcp/refs";
 import { APP_VERSION } from "@/app/constants";
@@ -40,7 +43,7 @@ const INSTRUCTIONS = `MATERIA: crystallographic refinement tools (powder, single
 
 Data travels by reference. Every object result carries "ref": "#n" for the whole output, and bulky parts (structure, pattern, parameters, residual, …) come back as {"ref": "#n/key", …summary}. Pass such an object, or just {"ref": "#n/key"}, wherever a tool expects that value: the server substitutes the stored data. Never retype data you received as a ref.
 
-Files: the parse_* tools take \`path\` instead of the file's text — relative to the server's data folder, or absolute inside it.
+Files: the parse_* tools take \`path\` instead of the file's text — relative to the server's data folder, or absolute inside it. Tools that produce files (export_bundle) write them into \`outDir\` on the server.
 
 What refines: refining tools take \`free\`, a list of parameter ids or globs such as ["scale", "bkg*", "*cell*"]. Exactly the matching parameters refine; every other one is held fixed. Globs can catch a parameter that must stay fixed (the magnetic phase gauge), so list ids when in doubt. Refining tools return \`parameters\` carrying the refined values — pass that ref to the next call and to assess_refinement.
 
@@ -81,8 +84,14 @@ export function createMateriaServer(opts: HostOptions = {}): McpServer {
       guarded(async (raw: any) => {
         let args = resolveRefs(raw, store) as Record<string, unknown>;
         if (tool.fileInput) args = await withFileText(args, tool.fileInput, roots);
+        if (tool.fileObjects) args = await withFileObjects(args, tool.fileObjects, roots);
         if (tool.selectsFree) args = withFree(args);
-        return respond(await tool.handler(args));
+        if (!tool.writesFiles) return respond(await tool.handler(args));
+        const { outDir, overwrite, ...rest } = args;
+        const out = (await tool.handler(rest)) as { files: FileOut[] };
+        if (outDir === undefined) return respond(out);
+        // Written files are on disk; the stored record keeps where, not the text.
+        return respond({ ...out, files: await writeFiles(out.files, String(outDir), overwrite === true, roots) });
       }),
     );
   }
@@ -153,7 +162,9 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 function describe(tool: ToolDefinition): string {
   return tool.description
     + (tool.fileInput ? ` Pass \`path\` instead of \`${tool.fileInput.text}\` to read the file on the server.` : "")
-    + (tool.selectsFree ? " `free` lists the parameter ids or globs to refine; every other parameter is held fixed." : "");
+    + (tool.fileObjects ? ` ${tool.fileObjects.map((f) => `\`${f}\``).join(" and ")} also take {"path": …} to read the file on the server.` : "")
+    + (tool.selectsFree ? " `free` lists the parameter ids or globs to refine; every other parameter is held fixed." : "")
+    + (tool.writesFiles ? " Pass `outDir` to write the files on the server instead of returning their text; existing files are kept unless `overwrite` is true." : "");
 }
 
 /** A ref object as an argument: `ref` plus whatever summary was copied along. */
@@ -172,8 +183,18 @@ export function transportSchema(tool: ToolDefinition): Record<string, z.ZodType>
     shape[text] = shape[text]!.optional();
     shape.path = z.string().optional().describe("File to read instead of passing its text: relative to the server's data folder, or absolute inside it");
   }
+  for (const field of tool.fileObjects ?? []) {
+    const s = tool.inputSchema[field]!;
+    const inner = s instanceof z.ZodOptional ? (s.unwrap() as z.ZodType) : s;
+    const either = z.union([inner, z.object({ path: z.string() })]);
+    shape[field] = (s instanceof z.ZodOptional ? either.optional() : either).describe(`${s.description ?? field}; or {"path": …} to read the file on the server`);
+  }
   if (tool.selectsFree) {
     shape.free = z.array(z.string()).optional().describe("Parameter ids or globs (\"bkg*\") to refine; every other parameter is held fixed. Omit to use the parameters' own `fixed` flags.");
+  }
+  if (tool.writesFiles) {
+    shape.outDir = z.string().optional().describe("Folder to write the files into (created if missing), inside the server's data folders; relative paths start from the first one");
+    shape.overwrite = z.boolean().optional().describe("Replace files that already exist in outDir (default false)");
   }
   return shape;
 }
@@ -231,6 +252,81 @@ async function allowedFile(p: string, roots: readonly string[]): Promise<string>
     return real;
   }
   throw new Error(`no such file: ${p} (data folders: ${roots.join(", ")})`);
+}
+
+/** Fields declared `fileObjects` may be `{ path }`: read the file into `{ name, text }`. */
+async function withFileObjects(
+  args: Record<string, unknown>,
+  fields: readonly string[],
+  roots: readonly string[],
+): Promise<Record<string, unknown>> {
+  const out = { ...args };
+  for (const field of fields) {
+    const v = out[field];
+    if (!isPlainObject(v) || typeof v.path !== "string" || "text" in v) continue;
+    const file = await allowedFile(v.path, roots);
+    out[field] = { name: basename(file), text: await readFile(file, "utf8") };
+  }
+  return out;
+}
+
+interface FileOut {
+  readonly name: string;
+  readonly text: string;
+}
+
+/**
+ * Write a tool's `files` into `outDir`, confined to the data folders. Names
+ * must be plain file names; nothing existing is replaced unless `overwrite`,
+ * and a symlink is never written through.
+ */
+async function writeFiles(
+  files: readonly FileOut[],
+  outDir: string,
+  overwrite: boolean,
+  roots: readonly string[],
+): Promise<{ name: string; path: string; bytes: number }[]> {
+  const dir = await allowedDir(outDir, roots);
+  const targets = files.map((f) => {
+    if (!f.name || f.name !== basename(f.name) || f.name.startsWith(".")) throw new Error(`refusing to write "${f.name}": not a plain file name`);
+    return { f, path: join(dir, f.name) };
+  });
+  const present: string[] = [];
+  for (const t of targets) {
+    const info = await lstat(t.path).catch(() => null);
+    if (!info) continue;
+    if (info.isSymbolicLink() || !info.isFile()) throw new Error(`refusing to write ${t.path}: it exists and is not a regular file`);
+    present.push(t.f.name);
+  }
+  if (present.length && !overwrite) {
+    throw new Error(`${outDir} already has ${present.join(", ")} — pass overwrite: true to replace them, or choose another outDir`);
+  }
+  await mkdir(dir, { recursive: true });
+  for (const t of targets) await writeFile(t.path, t.f.text, "utf8");
+  return targets.map((t) => ({ name: t.f.name, path: t.path, bytes: Buffer.byteLength(t.f.text, "utf8") }));
+}
+
+/** Resolve a folder to write into (it may not exist yet) inside one of `roots`. */
+async function allowedDir(p: string, roots: readonly string[]): Promise<string> {
+  if (!roots.length) {
+    throw new Error("writing files is off: the server has no data folder. Set MATERIA_ROOTS to a folder list, or start the server inside the project.");
+  }
+  const target = isAbsolute(p) ? resolve(p) : resolve(roots[0]!, p);
+  // Resolve symlinks on the deepest part that exists; the rest is created fresh.
+  let existing = target;
+  while (!(await lstat(existing).catch(() => null))) {
+    const up = dirname(existing);
+    if (up === existing) break;
+    existing = up;
+  }
+  const real = resolve(await realpath(existing), relative(existing, target));
+  const realRoots = (await Promise.all(roots.map((r) => realpath(r).catch(() => null)))).filter((r): r is string => r !== null);
+  if (!realRoots.some((r) => r === real || inside(r, real))) {
+    throw new Error(`${p} is outside the server's data folders (${roots.join(", ")})`);
+  }
+  const info = await stat(real).catch(() => null);
+  if (info && !info.isDirectory()) throw new Error(`${p} exists and is not a folder`);
+  return real;
 }
 
 function inside(root: string, file: string): boolean {

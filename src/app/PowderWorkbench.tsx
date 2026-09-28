@@ -18,7 +18,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { downloadText, downloadBlob } from "@/app/download";
-import { fullprofBundle, gsas2Bundle, type BundleOptions } from "@/core/export/bundle";
+import { refinementBundle, type RefinementBundleOptions } from "@/core/export/bundle";
 import { zipStore } from "@/core/export/zip";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern, PowderXUnit } from "@/core/diffraction/types";
@@ -1112,10 +1112,11 @@ export function PowderWorkbench({
     const refinement: CifRefinementMeta | undefined = powderResult
       ? { rwp: Number(wRpct), ...(s !== undefined ? { gof: s } : {}), nParam: withEsd.filter((p) => !p.fixed && !p.expression).length }
       : undefined;
-    const opts: BundleOptions = {
+    const opts: RefinementBundleOptions = {
       name: structure.name || structure.id,
       params: withEsd,
       bindings: pBindings,
+      otherPhaseIds: session.extraPhases.map((ph) => ph.id),
       ...(instrumentLoaded ? { instrument } : {}),
       ...(refinement ? { refinement } : {}),
       // The user's original files, retained verbatim on load — bundled as-is so
@@ -1123,7 +1124,8 @@ export function PowderWorkbench({
       ...(session.rawInstrument ? { rawInstrument: session.rawInstrument } : {}),
       ...(session.rawData ? { rawData: session.rawData } : {}),
     };
-    const entries = target === "fullprof" ? fullprofBundle(structure, pattern, opts) : gsas2Bundle(structure, pattern, opts);
+    // The refined values are applied inside: `structure` is the model as loaded.
+    const entries = refinementBundle(target, structure, pattern, opts);
     const base = (structure.name || structure.id).replace(/[^A-Za-z0-9._-]+/g, "_");
     downloadBlob(`${base}_${target}.zip`, zipStore(entries), "application/zip");
   }
