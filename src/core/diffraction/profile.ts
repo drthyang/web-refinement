@@ -275,6 +275,34 @@ export interface ProfileOptions {
   readonly backgroundType?: BackgroundType;
 }
 
+/** Half-width of a peak's finite support, in units of its FWHM. */
+export const PEAK_WINDOW_FWHM = 20;
+
+/** Outer fraction of the support over which a peak fades to zero. */
+const SUPPORT_TAPER_FRACTION = 0.2;
+
+/**
+ * Weight that fades a peak to zero at the edge of its finite support ±`half`:
+ * 1 out to 80 % of `half`, then a quintic smootherstep down to exactly 0 at
+ * `half`, so value, slope and curvature are all continuous.
+ *
+ * A hard cutoff made the pattern discontinuous in every parameter that moves
+ * the edge — each width (the window scales with Γ) and each peak position. When
+ * a data point crossed the edge, y jumped by the Lorentzian tail there (up to
+ * 6·10⁻⁴ of the peak height at 20 Γ), and a central difference divided that jump by
+ * 2h, so the column spiked ∝ 1/h at one point. The weight depends only on
+ * dist/half, so it moves smoothly with Γ and the centre. It removes 0.18 % of a
+ * Lorentzian's area (between 16 and 20 Γ; the 1.6 % beyond 20 Γ was never
+ * modelled); Gaussian and TOF shapes are already negligible there.
+ */
+export function supportTaper(dist: number, half: number): number {
+  const flat = (1 - SUPPORT_TAPER_FRACTION) * half;
+  if (dist <= flat) return 1;
+  if (dist >= half) return 0;
+  const t = (dist - flat) / (half - flat);
+  return 1 - t * t * t * (10 + t * (6 * t - 15));
+}
+
 function shapeAt(x: number, peak: ProfilePeak, opts: ProfileOptions): number {
   if (opts.shape === "tof" && peak.tof) {
     return tofBackToBack(x - peak.center, peak.tof);
@@ -311,11 +339,12 @@ export function synthesizePattern(
     y[i] = evaluateBackground(xValues[i]!, opts.background, bgType, xMin, xMax);
   }
 
-  // Each peak contributes only within ±20 FWHM of its center. On a monotonic
-  // grid (every real diffractogram) that support window is found by binary
-  // search, making the cost Σ(window widths) instead of points × peaks — the
-  // point-major loop with a per-pair distance test was >90% of every
-  // refinement evaluation on synchrotron-scale data (20k points × 5k peaks).
+  // Each peak contributes only within ±20 FWHM of its center, faded to zero at
+  // the edge (supportTaper). On a monotonic grid (every real diffractogram)
+  // that support window is found by binary search, making the cost Σ(window
+  // widths) instead of points × peaks — the point-major loop with a per-pair
+  // distance test was >90% of every refinement evaluation on synchrotron-scale
+  // data (20k points × 5k peaks).
   const n = xValues.length;
   const ascending = n < 2 || xValues[0]! <= xValues[n - 1]!;
   let monotonic = true;
@@ -339,12 +368,12 @@ export function synthesizePattern(
       return lo;
     };
     for (const peak of peaks) {
-      const half = 20 * peak.fwhm;
+      const half = PEAK_WINDOW_FWHM * peak.fwhm;
       const start = lowerBound(ascending ? peak.center - half : peak.center + half);
       for (let i = start; i < n; i++) {
         const x = xValues[i]!;
         if (ascending ? x > peak.center + half : x < peak.center - half) break;
-        y[i] = y[i]! + peak.intensity * shapeAt(x, peak, opts);
+        y[i] = y[i]! + peak.intensity * shapeAt(x, peak, opts) * supportTaper(Math.abs(x - peak.center), half);
       }
     }
   } else {
@@ -354,8 +383,10 @@ export function synthesizePattern(
       const x = xValues[i]!;
       let sum = 0;
       for (const peak of peaks) {
-        if (Math.abs(x - peak.center) > 20 * peak.fwhm) continue;
-        sum += peak.intensity * shapeAt(x, peak, opts);
+        const half = PEAK_WINDOW_FWHM * peak.fwhm;
+        const dist = Math.abs(x - peak.center);
+        if (dist > half) continue;
+        sum += peak.intensity * shapeAt(x, peak, opts) * supportTaper(dist, half);
       }
       y[i] = y[i]! + sum;
     }

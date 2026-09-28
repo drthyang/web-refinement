@@ -35,4 +35,18 @@ describe("Le Bail intensity extraction", () => {
     const maxI = Math.max(...result.reflections.map((r) => r.intensity));
     expect(maxI).toBeGreaterThan(0);
   });
+
+  it("is continuous in the width as a support edge crosses a data point", () => {
+    // The cell prefit refines the Le Bail FWHM by finite differences, and each
+    // reflection's support (±12 FWHM) moves with it. Pick the width that puts
+    // the strongest reflection's edge exactly on a grid point, then step across.
+    const top = result.reflections.reduce((a, b) => (b.intensity > a.intensity ? b : a));
+    const j = grid.findIndex((x) => x > top.center + 6);
+    const fwhm = (grid[j]! - top.center) / 12;
+    const run = (f: number) => leBailExtract(obs, structure.cell, structure.spaceGroup, { fwhm: f, shape: "pseudoVoigt", eta: 0.5, cycles: 12 }).yCalc;
+    const [lo, hi] = [run(fwhm * (1 - 1e-9)), run(fwhm * (1 + 1e-9))];
+    const peak = Math.max(...hi);
+    // A hard cutoff jumped by up to 7·10⁻⁴ of the peak (the tail there, and every norm_k).
+    for (let i = 0; i < grid.length; i++) expect(Math.abs(hi[i]! - lo[i]!) / peak, `point ${i}`).toBeLessThan(1e-7);
+  });
 });
