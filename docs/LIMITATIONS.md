@@ -186,6 +186,10 @@ approximate, however plausible its output looks.
   microstrain (isotropic,
   uniaxial, or generalized Stephens) — see [MICROSTRUCTURE.md](./MICROSTRUCTURE.md).
 - Multi-phase refinement and Le Bail extraction.
+- A cell and space-group gate before refinement (agent tool
+  `check_cell_symmetry`): a Le Bail fit refines the cell, then every leftover
+  peak must index and every forbidden reflection must show no intensity.
+  Forbidden reflections too close to an allowed one are reported as untestable.
 - Fit-quality plots beyond R, wR and GoF: F_obs vs F_calc, and a normal
   probability plot (Abrahams & Keve 1971). A straight line of slope 1 through
   the origin means both the model and the uncertainties are right. Overlapping
@@ -194,6 +198,9 @@ approximate, however plausible its output looks.
 
 **Approximate**
 - Axial asymmetry is modelled on the low-angle side (2θ < 90°) only.
+- The cell and space-group gate fits one peak width. On time-of-flight data
+  that width is scaled with TOF in place of the real resolution curve. The
+  gate reads d ≥ 0.7 Å by default.
 
 **Not yet**
 - Spherical-harmonic texture; powder extinction; microabsorption (Brindley);
@@ -202,6 +209,8 @@ approximate, however plausible its output looks.
   absorption and extinction.
 - Manually placed background points, real-space (Debye) backgrounds, and
   automatic peak stripping.
+- Catching a cell that is too large, or a space group with fewer absences than
+  the crystal's: the gate cannot see either. Indexing an unknown cell.
 
 ## Disorder
 

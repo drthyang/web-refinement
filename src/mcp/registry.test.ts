@@ -166,6 +166,10 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   },
   parse_instrument: { args: { text: "Lam:1.54\nType:PXC\n" }, keys: ["kind", "radiationKind", "wavelength"] },
   build_refinement: { args: { structure, pattern }, keys: ["bindings", "freeCount", "parameters", "profile"] },
+  check_cell_symmetry: {
+    args: { structure, pattern },
+    keys: ["absences", "absencesConsistent", "cell", "cellValues", "everyPeakIndexes", "leBail", "limits", "passed", "unindexedPeaks"],
+  },
   refine_powder: {
     args: { structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile, maxIterations: 2 },
     keys: ["observationCount", "parallel", "parameters", "residual", "result"],
