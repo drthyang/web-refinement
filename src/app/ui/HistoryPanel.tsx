@@ -8,16 +8,9 @@
  */
 
 import { useMemo, useState, type CSSProperties } from "react";
-import { childrenOf, lineage, type HistoryStep, type ProjectHistory } from "@/core/project/history";
+import { childrenOf, lineage, type HistoryStep } from "@/core/project/history";
+import type { HistoryBinding } from "@/app/historyBinding";
 import { card, color, fz, mono, radius, space, uppercaseLabel } from "@/app/theme";
-
-export interface HistoryPanelProps {
-  readonly history: ProjectHistory | null;
-  readonly onGoTo: (id: string) => void;
-  readonly onRename: (id: string, name: string) => void;
-  readonly onBack?: () => void;
-  readonly onForward?: () => void;
-}
 
 /** Rows shown before "Show all". */
 const COLLAPSED_ROWS = 6;
@@ -26,7 +19,8 @@ const KIND_GLYPH: Readonly<Record<HistoryStep["kind"], string>> = {
   load: "↧", open: "↧", edit: "✎", settings: "⚙", refine: "▶", magnetic: "M",
 };
 
-export function HistoryPanel({ history, onGoTo, onRename, onBack, onForward }: HistoryPanelProps): JSX.Element {
+export function HistoryPanel({ binding }: { readonly binding: HistoryBinding }): JSX.Element {
+  const { history, goTo: onGoTo, rename: onRename, back: onBack, forward: onForward } = binding;
   const [expanded, setExpanded] = useState(false);
   const path = useMemo(() => (history ? lineage(history) : []), [history]);
   // Tips of the branches the current path does not run through.

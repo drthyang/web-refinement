@@ -11,6 +11,8 @@
  */
 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, useCallback } from "react";
+import type { HistoryBinding } from "@/app/historyBinding";
+import { HistoryPanel } from "@/app/ui/HistoryPanel";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { SingleCrystalWorkspace } from "@/core/project/types";
 import { modulatedInputsFrom, restoreMomentBindings, restoreSingleCrystalParameters, singleCrystalWorkspaceFrom } from "@/app/projectIo";
@@ -82,7 +84,7 @@ type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: strin
  *  three-way value; the project file stores the same value. */
 type Probe = "xray" | "neutron" | "neutron-tof";
 
-export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, client, step, onStep, onMagneticPresent, instrumentProbe, exportsRef, onLoadData, onLoadMagneticData, onLoadCif, restore }: {
+export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, client, step, onStep, onMagneticPresent, instrumentProbe, exportsRef, onLoadData, onLoadMagneticData, onLoadCif, restore, stepHistory }: {
   structure: StructureModel;
   dataset: SingleCrystalDataset;
   /** Companion magnetic reflection file for joint co-refinement (Phase 2). When
@@ -115,6 +117,8 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
    *  mount — the shell remounts this page with a fresh key when it opens a
    *  project — and only seeds the initial state below. */
   restore?: SingleCrystalWorkspace;
+  /** The shell's step history: recorded at this page's refinements and model changes. */
+  stepHistory?: HistoryBinding;
 }): JSX.Element {
   // Captured at mount: the shell may drop the prop later without this page
   // losing what it restored.
@@ -222,6 +226,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   const nFree = params.filter((p) => !p.fixed && !p.expression).length;
 
   async function runRefine(guided: boolean): Promise<void> {
+    stepHistory?.recordNow("edit");
     setBusy(true);
     try {
       const start = guided ? guidedSingleCrystalParams(params) : params;
@@ -238,6 +243,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       setParams(start.map((p) => ({ ...p, value: res.parameters[p.id] ?? p.value, ...(guided ? { fixed: false } : {}) })));
       setResult(res);
       if (magnetic) setMagnetic(applyMagneticMoments(magnetic, momentBindings, res.parameters));
+      stepHistory?.requestStep("refine", guided ? "Guided refine" : magnetic ? "Refine nuclear + magnetic" : "Refine");
     } catch (e) {
       console.error(`[status] Single-crystal refinement failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -262,6 +268,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   async function runThorough(): Promise<void> {
     const mode: "prefit" | "escape" = result ? "escape" : "prefit";
     const wide = mode === "prefit";
+    stepHistory?.recordNow("edit");
     setBusy(true);
     setThoroughNote(null);
     try {
@@ -306,6 +313,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
         : (ms.improved
             ? `Escaped a local minimum (restart ${ms.bestStartIndex} of ${ms.restartsRun}) — wR2 ${wr}%, best of ${starts} starts.`
             : `Already at the best minimum — the baseline beat all ${starts} starts, wR2 ${wr}%.`));
+      stepHistory?.requestStep("refine", wide ? "Prefit" : "Escape minimum");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setThoroughNote(`${wide ? "Prefit" : "Escape min"} failed: ${msg}`);
@@ -461,16 +469,24 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       ...prev.filter((p) => !isMagneticModelParameterKind(p.kind)),
       ...(mag ? momentParams.map((p) => ({ ...p, fixed: !!p.expression })) : []),
     ]);
+    stepHistory?.requestStep("magnetic", mag ? "Magnetic model applied" : "Magnetic model removed");
   }
 
   function onParamChange(id: string, patch: Partial<RefinementParameter>): void {
     setParams((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
 
+  /**
+   * Values back to their starting values, every row kept — as on the powder
+   * page. (Rebuilding from `spec.params` instead dropped applied moment rows
+   * while the magnetic model stayed set, and the free/fixed choices of a
+   * reopened project.)
+   */
   function reset(): void {
-    setParams(spec.params.map((p) => ({ ...p, value: p.initialValue })));
+    setParams((prev) => prev.map((p) => ({ ...p, value: p.initialValue })));
     setResult(null);
     setThoroughNote(null);
+    stepHistory?.requestStep("edit", "Reset to starting values");
   }
 
   function exportCif(): void {
@@ -717,7 +733,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           </div>
         </div>
 
-        {/* Parameters — the shared collapsible panel, single-crystal actions. */}
+        {/* Parameters — the shared collapsible panel, single-crystal actions —
+            with the step history under it. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: space.gap }}>
         <ParameterPanel
           params={params}
           esd={result?.esd}
@@ -732,6 +750,8 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           title="Single-crystal parameters"
           extraActions={refineActions}
         />
+        {stepHistory && <HistoryPanel binding={stepHistory} />}
+        </div>
 
         {/* Magnetic single-k supercell refinement. Self-contained: expands the
             base structure, merges the nuclear + magnetic files into the

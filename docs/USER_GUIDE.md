@@ -114,7 +114,8 @@ and the cell are free, so the first **Refine** is safe.
 In the parameter panel, click a row to switch it between **● free** and
 **○ fixed**. Type a value and press Enter to set it. Tick **all** to free a
 whole group. A **= tied** row follows another parameter, and a **calib** row
-holds the instrument calibration. **Reset** restores every starting value.
+holds the instrument calibration. **Reset** restores every starting value and
+keeps every row and its free or fixed choice (on every page).
 
 Open a group for its model controls:
 
@@ -149,9 +150,12 @@ made since the last step (freed parameters, edited values, settings) become an
 - ✎ names a step, such as "before ADPs".
 - The history is saved with the project. Between saves it is kept in the
   browser. After a reload, the start page offers to restore the last session.
+- **Other branches** lists where each old branch ends; from there, back and
+  forward walk along it.
 
-The History card is on the powder page. Single-crystal and PDF sessions have
-no step history yet.
+The single-crystal and PDF pages have the same card. There, adopting a boxcar
+box, applying distortion modes or a subgroup, and handing over a spin model or
+magnetic model are steps too. Loading a new dataset starts a new history.
 
 ### Fit window, axis and phases
 

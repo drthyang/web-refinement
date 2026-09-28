@@ -19,6 +19,7 @@ import { TECHNIQUE_LABEL, type PdfWorkspace, type ProjectFile, type SingleCrysta
 import { looksLikeProjectFile, parseProject, projectFileName, restoreHistoryStep, serializeProject } from "@/core/project/io";
 import { moveTo, recordStep, redoTarget, renameStep, undoTarget, type ProjectHistory, type Snapshot, type StepKind } from "@/core/project/history";
 import { clearAutosave, readAutosave, writeAutosave, type AutosaveEntry } from "@/app/autosave";
+import type { HistoryBinding } from "@/app/historyBinding";
 import { defaultProjectTitle, projectFileFor, sessionFromPowderWorkspace, type PowderViewState } from "@/app/projectIo";
 import { downloadText } from "@/app/download";
 import type { MagneticModel } from "@/core/magnetic/types";
@@ -243,14 +244,17 @@ export function App(): JSX.Element {
   // ── Step history ────────────────────────────────────────────────────────
   // A step is recorded from the active engine's own project snapshot, so it is
   // exactly what Save would write, and going back reuses the Open path
-  // (applyWorkspace). The powder page records steps; single crystal and PDF
-  // pages do not yet.
+  // (applyWorkspace). Every engine records steps through `stepHistory`.
 
-  /** The live session as a step snapshot, or null when there is nothing to record. */
+  /** The live session as a step snapshot — from the active engine, as Save takes it. */
   function liveSnapshot(): Snapshot | null {
-    if (scDataset || pdfDataset || session.powderSource === EMPTY_SOURCE) return null;
-    const workspace = powderExports.current?.projectWorkspace?.();
-    return workspace ? { structures: [session.structure, ...session.extraPhases], workspace } : null;
+    if (!scDataset && !pdfDataset && session.powderSource === EMPTY_SOURCE) return null;
+    const engine = pdfDataset ? pdfExports : scDataset ? scExports : powderExports;
+    const workspace = engine.current?.projectWorkspace?.();
+    if (!workspace) return null;
+    // Single crystal refines one phase; the powder / PDF blocks carry every phase.
+    const structures = workspace.technique === "singleCrystal" ? [session.structure] : [session.structure, ...session.extraPhases];
+    return { structures, workspace };
   }
 
   /**
@@ -270,16 +274,24 @@ export function App(): JSX.Element {
     setStepRequest((r) => ({ n: (r?.n ?? 0) + 1, kind, ...(label ? { label } : {}), ...(fresh ? { fresh } : {}) }));
   }, []);
 
+  // Recorded a tick after the request renders: an engine may settle its state
+  // in its own effects first (the PDF page carries parameters over when its
+  // spec changes), and the step should be that settled state.
+  const liveSnapshotRef = useRef(liveSnapshot);
+  useEffect(() => {
+    liveSnapshotRef.current = liveSnapshot;
+  });
   useEffect(() => {
     if (!stepRequest) return;
     const { kind, label, fresh } = stepRequest;
-    const snap = liveSnapshot();
-    if (!snap) {
-      if (fresh) setHistory(null);
-      return;
-    }
-    setHistory((h) => recordStep(fresh ? null : h, { ...snap, kind, ...(label ? { label } : {}) }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per request, on the state that request rendered
+    setTimeout(() => {
+      const snap = liveSnapshotRef.current();
+      if (!snap) {
+        if (fresh) setHistory(null);
+        return;
+      }
+      setHistory((h) => recordStep(fresh ? null : h, { ...snap, kind, ...(label ? { label } : {}) }));
+    }, 0);
   }, [stepRequest]);
 
   /** Go back (or forward) to a step: restored as opening its project would, history kept. */
@@ -315,6 +327,17 @@ export function App(): JSX.Element {
   function onRenameStep(id: string, name: string): void {
     setHistory((h) => (h ? renameStep(h, id, name) : h));
   }
+
+  /** What every engine gets: the tree, and the calls that record and move through it. */
+  const stepHistory: HistoryBinding = {
+    history,
+    recordNow,
+    requestStep,
+    goTo: goToStep,
+    rename: onRenameStep,
+    ...(history && undoTarget(history) ? { back: stepBack } : {}),
+    ...(history && redoTarget(history) ? { forward: stepForward } : {}),
+  };
 
   // ⌘Z / Ctrl+Z steps back, with Shift steps forward — except inside a text
   // field, which keeps its own undo.
@@ -474,7 +497,7 @@ export function App(): JSX.Element {
     setStep(0);
     setDemo("pdf");
     setMessage("Loaded the bundled GaTa4Se8 299 K X-ray PDF demo (cubic lacunar spinel, converged fit).");
-    setHistory(null);
+    requestStep("load", "GaTa₄Se₈ PDF demo", true);
   }
 
   /** Header Demos menu exit: clear back to the landing. */
@@ -700,6 +723,7 @@ export function App(): JSX.Element {
             parsed.sourceKind === "sq" ? " (S(Q) → G(r) transformed at load)" :
             parsed.sourceKind === "fq" ? " (F(Q) → G(r) transformed at load)" :
             parsed.sourceKind === "fgr" ? " (PDFgui fit export: Gobs = Gcalc + Gdiff)" : "";
+          requestStep("load", `Loaded ${file.name}`, true);
           setMessage(
             `Loaded PDF “${file.name}” · ${parsed.points.length} pts · ${parsed.scatteringType} ${tag}` +
             `${parsed.qmax !== undefined ? ` · Qmax ${parsed.qmax}` : ""}${provenance}. Real-space G(r) fit ready. ${fmt.note}`,
@@ -721,6 +745,7 @@ export function App(): JSX.Element {
           setPdfDataset(null);
           setScNuclearDataset(loaded.dataset);
           setDetection(null);
+          requestStep("load", `Loaded ${file.name}`, true);
           setMessage(
             `Loaded single-crystal “${file.name}” · ${loaded.kept} reflections [${loaded.format}]` +
             `${describeDrops(loaded)}. Merge report + F² refinement ready.`,
@@ -747,6 +772,7 @@ export function App(): JSX.Element {
         const loaded = loadReflectionDataset(text, structure, `${structure.id}-mag-hkl`, file.name, { role: "magnetic" });
         if (loaded.kept < 1) throw new Error("no usable reflections in the magnetic file");
         setScMagneticDataset(loaded.dataset);
+        requestStep("load", `Loaded magnetic ${file.name}`);
         setMessage(
           `Loaded magnetic “${file.name}” · ${loaded.kept} reflections [${loaded.format}]` +
           `${describeDrops(loaded)}. Joint nuclear + magnetic co-refinement ready.`,
@@ -1077,26 +1103,20 @@ export function App(): JSX.Element {
         onOpenProject={onOpenProject}
         useGpu={gpuEnabled}
         {...(restore.powderView ? { viewRestore: restore.powderView } : {})}
-        history={history}
-        recordNow={recordNow}
-        requestStep={requestStep}
-        onGoToStep={goToStep}
-        onRenameStep={onRenameStep}
-        {...(history && undoTarget(history) ? { onStepBack: stepBack } : {})}
-        {...(history && redoTarget(history) ? { onStepForward: stepForward } : {})}
+        stepHistory={stepHistory}
       />
       {pdfDataset && (
         // PDF mode (auto-switched on loading a reduced .gr). Keyed on the dataset
         // id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <PdfWorkbench onMagneticPresent={setPdfMagnetic} key={`${pdfDataset.id}#${restore.token}`} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} {...(restore.pdf ? { restore: restore.pdf } : {})} />
+          <PdfWorkbench onMagneticPresent={setPdfMagnetic} key={`${pdfDataset.id}#${restore.token}`} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} {...(restore.pdf ? { restore: restore.pdf } : {})} stepHistory={stepHistory} />
         </main>
       )}
       {scDataset && (
         // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
         // the dataset id so a new file remounts with a fresh parameter set.
         <main className="wb-main" style={{ flex: 1 }}>
-          <SingleCrystalWorkbench onMagneticPresent={setScMagnetic} key={`${scDataset.id}#${restore.token}`} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} {...(restore.singleCrystal ? { restore: restore.singleCrystal } : {})} />
+          <SingleCrystalWorkbench onMagneticPresent={setScMagnetic} key={`${scDataset.id}#${restore.token}`} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} {...(restore.singleCrystal ? { restore: restore.singleCrystal } : {})} stepHistory={stepHistory} />
         </main>
       )}
       <footer style={copyrightBar}>
