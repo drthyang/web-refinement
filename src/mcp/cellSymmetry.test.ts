@@ -124,20 +124,25 @@ describe("check_cell_symmetry — real data", () => {
 
   const G = dataDir("GaNb4Se8_XRD");
   describe.skipIf(!existsSync(resolve(G, "GaNb4Se8_100K.cif")))("GaNb₄Se₈ at 28-ID (local data)", () => {
-    const read = (f: string): string => readFileSync(resolve(G, f), "utf8");
-    const structure = structureOf(read("GaNb4Se8_100K.cif"));
-    const instrument = parse_instrument({ text: read("xrd_instrum.instprm") });
-    const raw = parse_powder_data({ text: read("GaNb4Se8_799_T_298.8K_gsas.dat"), filename: "g.dat" }).pattern;
-    const wavelength = instrument.kind === "constantWavelength" ? instrument.wavelength : 0;
-    const pattern: PowderPattern = { ...raw, radiation: { kind: "xray", wavelength }, wavelength };
+    // Read inside the tests: a skipped describe's body still runs at collection,
+    // and the git-ignored data/ folder is absent on CI.
+    const load = (): { structure: StructureModel; instrument: ReturnType<typeof parse_instrument>; pattern: PowderPattern } => {
+      const read = (f: string): string => readFileSync(resolve(G, f), "utf8");
+      const instrument = parse_instrument({ text: read("xrd_instrum.instprm") });
+      const raw = parse_powder_data({ text: read("GaNb4Se8_799_T_298.8K_gsas.dat"), filename: "g.dat" }).pattern;
+      const wavelength = instrument.kind === "constantWavelength" ? instrument.wavelength : 0;
+      return { structure: structureOf(read("GaNb4Se8_100K.cif")), instrument, pattern: { ...raw, radiation: { kind: "xray", wavelength }, wavelength } };
+    };
 
     it("the published F-43m passes: every peak indexes, no absence violated", () => {
+      const { structure, instrument, pattern } = load();
       const r = check_cell_symmetry({ structure, pattern, instrument });
       expect(r.passed).toBe(true);
       expect(r.absences.tested).toBeGreaterThan(100);
     }, 30_000);
 
     it("declared Fd-3m, the d-glide's forbidden 200 and 420 are observed", () => {
+      const { structure, instrument, pattern } = load();
       const fd = structureOf(cif("F d -3 m", structure.cell.a, structure.cell.a, "Ga1 Ga 0 0 0 1 0.01"));
       const r = check_cell_symmetry({ structure: fd, pattern, instrument });
       expect(r.absencesConsistent).toBe(false);
