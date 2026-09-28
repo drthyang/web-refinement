@@ -47,8 +47,8 @@ export function HistoryPanel({ binding }: { readonly binding: HistoryBinding }):
         <span style={uppercaseLabel}>History</span>
         <span style={countNote}>{history.steps.length} step{history.steps.length === 1 ? "" : "s"}</span>
         <span style={{ flex: 1 }} />
-        <button type="button" style={navButton} disabled={!onBack} onClick={onBack} title="Back one step (⌘Z / Ctrl+Z)">↶</button>
-        <button type="button" style={navButton} disabled={!onForward} onClick={onForward} title="Forward one step (⇧⌘Z / Ctrl+Shift+Z)">↷</button>
+        <NavButton direction="back" onClick={onBack} title="Back one step (⌘Z / Ctrl+Z)" />
+        <NavButton direction="forward" onClick={onForward} title="Forward one step (⇧⌘Z / Ctrl+Shift+Z)" />
       </div>
       <Sparkline steps={path} />
       <ol style={list}>
@@ -73,6 +73,26 @@ export function HistoryPanel({ binding }: { readonly binding: HistoryBinding }):
         </details>
       )}
     </section>
+  );
+}
+
+/** A round button with a circular arrow: counter-clockwise for back, clockwise for forward. */
+function NavButton({ direction, onClick, title }: {
+  readonly direction: "back" | "forward";
+  readonly onClick: (() => void) | undefined;
+  readonly title: string;
+}): JSX.Element {
+  const disabled = !onClick;
+  return (
+    <button type="button" style={{ ...navButton, ...(disabled ? navButtonDisabled : {}) }} disabled={disabled} onClick={onClick}
+      title={title} aria-label={direction === "back" ? "Back one step" : "Forward one step"}>
+      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}
+        strokeLinecap="round" strokeLinejoin="round" aria-hidden style={direction === "forward" ? { transform: "scaleX(-1)" } : undefined}>
+        {/* Three quarters of a circle, open at the upper left, with the head at its start. */}
+        <path d="M4.5 9.5A8 8 0 1 1 6.3 17.7" />
+        <path d="M4 4.5v5h5" />
+      </svg>
+    </button>
   );
 }
 
@@ -155,9 +175,11 @@ const wrChip: CSSProperties = { fontFamily: mono, fontSize: fz.micro, color: col
 const timeText: CSSProperties = { fontFamily: mono, fontSize: fz.micro, color: color.faint, flexShrink: 0 };
 const tag: CSSProperties = { marginLeft: 6, fontSize: fz.micro, color: color.faint, border: `1px solid ${color.border}`, borderRadius: radius.chip, padding: "0 4px" };
 const navButton: CSSProperties = {
-  border: `1px solid ${color.control}`, background: color.surface, borderRadius: radius.small,
-  width: 26, height: 24, cursor: "pointer", fontSize: fz.small, color: color.ink, padding: 0,
+  border: `1px solid ${color.control}`, background: color.surface, borderRadius: "50%",
+  width: 26, height: 26, cursor: "pointer", color: color.ink, padding: 0, flexShrink: 0,
+  display: "inline-flex", alignItems: "center", justifyContent: "center",
 };
+const navButtonDisabled: CSSProperties = { color: color.faintest, cursor: "default", opacity: 0.6 };
 const renameButton: CSSProperties = { border: "none", background: "transparent", color: color.faintest, cursor: "pointer", fontSize: fz.micro, padding: "0 6px" };
 const linkButton: CSSProperties = { border: "none", background: "transparent", color: color.primary, cursor: "pointer", fontSize: fz.micro, padding: "4px 6px" };
 const branchSummary: CSSProperties = { fontSize: fz.micro, color: color.secondary, cursor: "pointer", padding: "2px 6px" };
