@@ -34,24 +34,23 @@ answer — the most expensive failure mode. So the workflow has a hard gate up f
 1. Load the three inputs: `parse_structure` (CIF), `parse_powder_data` (pattern),
    `parse_instrument`. Confirm the radiation/geometry (CW vs TOF; capillary, flat-plate,
    or cylindrical) — it decides which corrections are even meaningful later.
-2. Run a **free-intensity (Le Bail) check** — in the app this is the Prefit path, which
-   fits cell + profile + zero (+ background) with intensities free. The gate the user
-   applies:
-   - **every observed peak indexes**, and
-   - the **systematic absences are consistent with the chosen space group**.
+2. Run the **free-intensity (Le Bail) gate**: `check_cell_symmetry` (pass known impurity
+   phases as `extraPhases`). It refines the cell by a Le Bail fit and applies the user's
+   two tests:
+   - **every observed peak indexes** — `everyPeakIndexes`, with any `unindexedPeaks`;
+   - the **systematic absences are consistent with the chosen space group** —
+     `absencesConsistent`, with any `absences.violated` (hkl and σ).
    If a peak won't index or an absence is violated, STOP and say so — the cell or space
-   group is wrong, and no amount of structural refinement will fix it. Do not proceed.
-3. Only once that holds do you carry the cell, zero, background, and a decent starting
-   profile forward as the seed for the structural refinement.
+   group is wrong (or a phase is missing), and no amount of structural refinement will fix
+   it. Do not proceed. Report the numbers, not just "passed": how many absences were
+   tested, how many were untestable (overlapped), and the tool's `limits` — it cannot see
+   a too-large cell or a group with too few absences, so those stay his call.
+3. Only once that holds do you carry the cell (the tool's Le Bail `cell`), zero,
+   background, and a decent starting profile forward as the seed for the structural
+   refinement.
 
 Rationale: he gates on *indexing + absences*, not just "the Le Bail wR looks low" — a low
 free-intensity wR can hide a wrong space group that still fits by absorbing intensity.
-
-> **Dependency (MCP):** enforcing this gate needs an executable Le Bail fit **plus** an
-> indexing / systematic-absence check. Until an MCP tool provides that (e.g. a
-> `check_indexing` / Le Bail-gate tool), this gate is a *narrated judgement*, not a
-> computed one — so state explicitly which peaks you checked index and which absences you
-> verified, and have the user confirm the cell/SG rather than asserting "trusted."
 
 ## Stage 1 — Structural refinement, in his fixed order
 
@@ -174,7 +173,7 @@ Report the outcome as: GoF + the key refined values with ESDs + which correction
 | Step | Tool |
 |------|------|
 | Load | `parse_structure`, `parse_powder_data`, `parse_instrument` |
-| Cell/SG gate | free-intensity (Le Bail/Prefit) check |
+| Cell/SG gate | `check_cell_symmetry` (Le Bail cell, unindexed peaks, violated absences) |
 | Build param set + staged plan | `build_refinement` |
 | Run a refinement block | `refine_powder` |
 | Judge a block / the fit | `assess_refinement` |

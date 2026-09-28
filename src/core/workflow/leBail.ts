@@ -46,7 +46,8 @@ export interface LeBailOptions {
   readonly tof?: TofCalibration;
 }
 
-function dToX(pattern: PowderPattern, d: number, tof?: TofCalibration): number {
+/** Position of a d-spacing on the pattern's own axis (NaN when it cannot be placed). */
+export function dToX(pattern: PowderPattern, d: number, tof?: TofCalibration): number {
   const wl = pattern.wavelength ?? (pattern.radiation.kind !== "neutron-tof" ? pattern.radiation.wavelength : undefined);
   switch (pattern.xUnit) {
     case "twoTheta": {
@@ -61,7 +62,8 @@ function dToX(pattern: PowderPattern, d: number, tof?: TofCalibration): number {
   }
 }
 
-function dRange(pattern: PowderPattern, tof?: TofCalibration): { dMin: number; dMax: number } {
+/** The d-spacing span a pattern covers. */
+export function dRange(pattern: PowderPattern, tof?: TofCalibration): { dMin: number; dMax: number } {
   const xs = pattern.points.map((p) => p.x);
   const xMin = Math.min(...xs);
   const xMax = Math.max(...xs);

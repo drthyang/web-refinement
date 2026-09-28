@@ -28,6 +28,7 @@ import { parseInstrumentParameters } from "@/parsers/instrument";
 import { buildPowderSpec, type MustrainModel } from "@/app/powderSpec";
 import { runPowderRefinement, runPdfRefinement, runMpdfRefinement } from "@/workers/runPowder";
 import { powderCurves } from "@/core/workflow/powder";
+import { checkCellSymmetry, type CellSymmetryCheck } from "@/core/workflow/cellSymmetryCheck";
 import {
   buildPdfSpec,
   buildMultiPhasePdfSpec,
@@ -168,6 +169,46 @@ export function build_refinement(args: {
     profile: spec.profile,
     freeCount: spec.params.filter((p) => !p.fixed && !p.expression).length,
   };
+}
+
+/**
+ * The cell / space-group gate, run before any structural refinement: a Le Bail
+ * fit refines the cell from peak positions alone, then every leftover peak
+ * must index and every forbidden reflection must be absent. A wrong cell or
+ * lattice shows as unindexed peaks; a space group that is too symmetric (a
+ * centring or glide the crystal lacks) shows as violated absences.
+ */
+export function check_cell_symmetry(args: {
+  structure: StructureModel;
+  pattern: PowderPattern;
+  instrument?: InstrumentParameters;
+  extraPhases?: StructureModel[];
+  fitRange?: { min: number; max: number };
+  dMin?: number;
+  significance?: number;
+}): CellSymmetryCheck {
+  const instrument = args.instrument ?? DEFAULT_INSTRUMENT;
+  if (args.pattern.xUnit === "tof" && instrument.kind !== "tof") {
+    throw new Error("check_cell_symmetry: a time-of-flight pattern needs its TOF instrument (difC) to place reflections");
+  }
+  const spec = buildPowderSpec(args.structure, args.pattern, instrument, true, 1, {}, "isotropic");
+  const isCell = (kind: string): boolean => kind === "cellLength" || kind === "cellAngle";
+  const tof = instrument.kind === "tof"
+    ? { difC: instrument.difC, difA: instrument.difA ?? 0, difB: instrument.difB ?? 0, zero: instrument.zero ?? 0 }
+    : undefined;
+  return checkCellSymmetry(
+    args.structure,
+    args.pattern,
+    spec.params.filter((p) => isCell(p.kind)),
+    spec.bindings.filter((b) => isCell(b.kind)),
+    {
+      ...(tof ? { tof } : {}),
+      ...(args.extraPhases ? { extraPhases: args.extraPhases } : {}),
+      ...(args.fitRange ? { fitRange: args.fitRange } : {}),
+      ...(args.dMin !== undefined ? { dMin: args.dMin } : {}),
+      ...(args.significance !== undefined ? { significance: args.significance } : {}),
+    },
+  );
 }
 
 /**

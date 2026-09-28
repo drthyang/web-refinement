@@ -93,6 +93,7 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 | Tool | What it does |
 |---|---|
 | `build_refinement` | Build refinement parameter set |
+| `check_cell_symmetry` | Check cell & space group (Le Bail gate) |
 | `refine_powder` | Refine (constrained least squares) |
 | `evaluate_pattern` | Evaluate pattern (no refinement) |
 | `simulate_pattern` | Simulate pattern (structure only) |
@@ -170,6 +171,8 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 **`parse_instrument`** — Parse an instrument-parameter file (GSAS-II .instprm, classic GSAS .prm, FullProf .irf) into a CW or TOF calibration. Pass the result to build_refinement/refine_powder so the wavelength and profile are right.
 
 **`build_refinement`** — Build the SYMMETRY-ALLOWED parameter set, bindings, and profile for a structure + pattern. Only symmetry-allowed parameters are created, so an agent cannot free a forbidden one. Feed `parameters`/`bindings`/`profile` to refine_powder.
+
+**`check_cell_symmetry`** — The gate BEFORE refining a structure: does the cell index every peak, and does the data respect the space group's systematic absences? A Le Bail fit refines the cell from peak positions alone (free intensities); then every leftover peak must sit on a reflection and every forbidden reflection must carry no intensity (≥ `significance` σ counts). `unindexedPeaks` mean a wrong cell or lattice, or a missing phase — pass known impurities as `extraPhases`. `absences.violated` means the group is too symmetric (a centring or glide the crystal lacks). `absences.untestable` lists forbidden reflections too close to an allowed one to judge. Only d ≥ `dMin` (0.7 Å) is read. It cannot catch a too-LARGE cell (a supercell indexes anything) or a group with too FEW absences — read `limits`. `passed` and `cell` (the Le Bail cell) are the result.
 
 **`refine_powder`** — Run the deterministic Levenberg–Marquardt refinement of the FREED parameters (fix a parameter by setting its `fixed:true`). Returns refined values, esds, agreement (wR/GoF), the SVD/correlation/at-bound diagnostics, the observation count, and the residual — everything assess_refinement needs — plus `parameters`: the input set carrying the refined values, ready for the next block. The agent decides what to free; it never sets values.
 
