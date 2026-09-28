@@ -1,0 +1,3 @@
+! POWGEN 600 K bank — the TOF calibration of src/examples/datasets/mn3ga_powgen_600k.dat
+! (difC from the PG3_45607.gsa header). D2TOF: difC difA difB zero.
+D2TOF  22585.80  0.0000  0.0000  0.0000
