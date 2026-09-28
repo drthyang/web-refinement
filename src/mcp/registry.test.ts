@@ -34,7 +34,7 @@ describe("MCP tool registry — completeness & hygiene", () => {
     const registered = TOOL_REGISTRY.map((t) => t.name).sort();
     expect(registered).toEqual(exported);
     // The registered handler IS the exported function (no ad-hoc wrappers —
-    // transport concerns belong to server.ts, science to the core).
+    // transport concerns belong to host.ts, science to the core).
     for (const t of TOOL_REGISTRY) {
       expect(t.handler).toBe((tools as Record<string, unknown>)[t.name]);
     }
@@ -168,7 +168,7 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   build_refinement: { args: { structure, pattern }, keys: ["bindings", "freeCount", "parameters", "profile"] },
   refine_powder: {
     args: { structure, pattern, parameters: built.parameters, bindings: built.bindings, profile: built.profile, maxIterations: 2 },
-    keys: ["observationCount", "parallel", "residual", "result"],
+    keys: ["observationCount", "parallel", "parameters", "residual", "result"],
   },
   assess_refinement: {
     args: { result: refined.result, parameters: built.parameters, observationCount: refined.observationCount },
@@ -213,7 +213,7 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
         profile: built.profile,
         maxIterations: 2,
       },
-      keys: ["components", "magnetic", "observationCount", "parallel", "result"],
+      keys: ["components", "magnetic", "observationCount", "parallel", "parameters", "result"],
     };
   })(),
   parse_single_crystal_data: {
@@ -247,7 +247,7 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
   build_pdf_model: { args: { structure, pattern: pdfPattern }, keys: ["bindings", "freeCount", "parameters", "restraints", "warnings"] },
   refine_pdf: {
     args: { structure, pattern: pdfPattern, parameters: pdfBuilt.parameters, bindings: pdfBuilt.bindings, maxIterations: 2 },
-    keys: ["observationCount", "parallel", "residual", "result", "warnings"],
+    keys: ["observationCount", "parallel", "parameters", "residual", "result", "warnings"],
   },
   refine_pdf_boxcar: {
     // Three 2 Å boxes across the 0.5–6.45 Å fixture, 2 iterations each.
@@ -302,7 +302,7 @@ const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
       structure: mnStructure, magnetic: mpdfBuilt.magnetic, pattern: mpdfPattern,
       parameters: mpdfBuilt.parameters, bindings: mpdfBuilt.bindings, maxIterations: 2,
     },
-    keys: ["components", "magnetic", "observationCount", "parallel", "result", "warnings"],
+    keys: ["components", "magnetic", "observationCount", "parallel", "parameters", "result", "warnings"],
   },
   compute_mpdf_components: {
     args: {

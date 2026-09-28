@@ -7,7 +7,7 @@
 import { parseCif } from "@/parsers/cif";
 import type { StructureModel } from "@/core/crystal/types";
 
-const MN3GA_CIF = `data_Mn3Ga
+export const MN3GA_CIF = `data_Mn3Ga
 _pd_phase_name  Mn3Ga
 _cell_length_a  5.42215
 _cell_length_b  5.42215
