@@ -18,6 +18,7 @@ import { structureToCif, type CifRefinementMeta } from "@/core/export/cif";
 import { structureToPcr, type PcrExportOptions } from "@/core/export/fullprof";
 import { instrumentToInstprm, buildGpxScript } from "@/core/export/gsas2";
 import { powderDataXye, singleCrystalHkl, singleCrystalInt, radiationWavelength } from "@/core/export/data";
+import { applyParameters } from "@/core/workflow/apply";
 
 export interface BundleOptions {
   /** Base filename (default: sanitized structure name). */
@@ -95,6 +96,35 @@ function deriveInstrument(radiation: Radiation): InstrumentParameters {
     wavelength: radiation.wavelength,
     radiationKind: radiation.kind === "xray" ? "xray" : "neutron",
   };
+}
+
+export type BundleTarget = "fullprof" | "gsas2";
+
+export interface RefinementBundleOptions extends BundleOptions {
+  /** The refinement's parameters, carrying the refined values (and `esd`). */
+  readonly params: readonly RefinementParameter[];
+  readonly bindings: readonly ParameterBinding[];
+  /** Ids of the other phases in a multi-phase fit, whose bindings are left out. */
+  readonly otherPhaseIds?: readonly string[];
+}
+
+/**
+ * The cross-check bundle of a refinement. The bundlers write the values the
+ * structure holds (`params` only annotate esds), so the refined values are
+ * applied first — cell, positions, ADPs, occupancies. The files then carry the
+ * model the fit converged to, not the one it started from. Bindings aimed at
+ * another phase are left out, so a multi-phase fit cannot cross-apply a cell.
+ */
+export function refinementBundle(
+  target: BundleTarget,
+  structure: StructureModel,
+  dataset: DiffractionDataset,
+  opts: RefinementBundleOptions,
+): ZipEntry[] {
+  const others = new Set(opts.otherPhaseIds ?? []);
+  const values = Object.fromEntries(opts.params.map((p) => [p.id, p.value]));
+  const refined = applyParameters(structure, opts.bindings.filter((b) => !others.has(b.targetId)), values).model;
+  return target === "fullprof" ? fullprofBundle(refined, dataset, opts) : gsas2Bundle(refined, dataset, opts);
 }
 
 /** FullProf bundle: `.pcr` + data + README (+ verbatim originals when present). */
@@ -232,12 +262,15 @@ function fullprofReadme(name: string, sc: boolean, dataName: string, rawInstrNam
   ];
   if (rawInstrName) lines.push(`  ${rawInstrName}   your original instrument file, verbatim (e.g. point the .pcr Irf at it, or cross-check).`);
   if (rawDataName) lines.push(`  ${rawDataName}   your original data file, verbatim (the exact input; ${dataName} is the portable re-serialization).`);
-  lines.push(
-    ``,
-    `Refined values are written; refinement flags are 0 (a reproducible model).`,
-    sc ? `` : `Confirm the data-format code (Ins) in the .pcr matches your FullProf setup.`,
-    ``,
-  );
+  lines.push(``, `The structure is written at its refined values; refinement flags are 0.`);
+  if (!sc) {
+    lines.push(
+      `Scale, background and the constant-wavelength peak shape are starting values:`,
+      `free them in FullProf before comparing parameters.`,
+      `Confirm the data-format code (Ins) in the .pcr matches your FullProf setup.`,
+    );
+  }
+  lines.push(``);
   return lines.join("\n");
 }
 

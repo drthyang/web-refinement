@@ -138,8 +138,11 @@ He does **not** chase absolute Rwp. A fit is acceptable when all of:
    lengths/angles are reasonable. `assess_refinement` surfaces at-bounds and unphysical
    parameters; treat any as a blocker, not a rounding detail.
 3. **External cross-check agrees** — export and re-run in **both GSAS-II and FullProf**
-   (the app has one-click FullProf `.pcr` + GSAS-II bundle export) and confirm the
-   parameters and ESDs are consistent. Offer to produce that bundle as the final step.
+   and confirm the parameters and ESDs are consistent. Write both bundles with
+   `export_bundle` (`target` `"fullprof"` and `"gsas2"`, the refine call's `parameters`
+   and `result`, the original instrument file as `rawInstrument`, an `outDir`) and give
+   him the paths. The `.pcr` starts scale, background and the CW peak shape from seeds —
+   say so, since they must be freed in FullProf before the comparison means anything.
 
 **Stopping rule — cross-check agreement.** The signal that the refinement is *done* is not
 an internal Δχ² threshold; it's that the **external cross-check agrees**. Levenberg–
@@ -177,5 +180,5 @@ Report the outcome as: GoF + the key refined values with ESDs + which correction
 | Judge a block / the fit | `assess_refinement` |
 | Decide what's limiting the fit | `rank_next_parameters`, `suggest_next_steps` |
 | Geometry / bonds sanity | `bond_geometry`, `interpret_structure` |
-| Cross-check export | FullProf `.pcr` + GSAS-II bundle |
+| Cross-check export | `export_bundle` (`fullprof` + `gsas2`, into `outDir`) |
 | Magnetic handoff | `build_magnetic_model`, `list_magnetic_subgroups`, `refine_magnetic_powder` |
