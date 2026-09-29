@@ -2,7 +2,24 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: the header/footer bands run under the iPhone's
+         rounded corners and sensor housing; workbench.css keeps their content
+         inside env(safe-area-inset-*). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      // iOS Safari zooms the page into any focused input under 16px, and the
+      // parameter tables' value fields are 12px — every edit left the page
+      // zoomed in. maximum-scale stops that auto-zoom; iOS still lets the user
+      // pinch-zoom regardless, so only iOS gets it (Android would lose pinch).
+      if (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) {
+        document.querySelector('meta[name="viewport"]').content += ", maximum-scale=1";
+      }
+    </script>
+    <meta name="theme-color" content="#fffdf9" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="MATERIA" />
     <title>MATERIA Workbench</title>
     <meta name="description" content="MATERIA — an AI-native foundation for materials science: browser-native crystal & magnetic structure refinement, callable by agents and people." />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='6' y='6' width='88' height='88' rx='22' fill='%231f4fd8'/><path d='M18 82 L18 20 L50 58 L82 20 L82 82' fill='none' stroke='%23ffffff' stroke-width='12' stroke-linejoin='round' stroke-linecap='round'/></svg>" />

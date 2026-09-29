@@ -21,6 +21,7 @@ import { fractionalToCartesian } from "@/core/crystal/unitCell";
 import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
 import { color as theme, mono as themeMono } from "@/app/theme";
 import { covalentRadius, elementColor } from "@/app/ui/elementData";
+import { cssZoom } from "@/app/ui/cssZoom";
 import { buildCellAtoms, displayMoment, magneticSupercell, type MomentEntry } from "@/app/ui/cellModel";
 
 const MAX_BOND_LABELS = 80; // labelling every bond of a big cell is unreadable
@@ -358,7 +359,9 @@ export function StructureView({
         })();
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    // The canvas is laid out in CSS px and then scaled by the UI zoom (4K
+    // screens), so render that many more pixels or the model would be upscaled.
+    renderer.setPixelRatio(window.devicePixelRatio * cssZoom());
     mount.innerHTML = "";
     mount.appendChild(renderer.domElement);
 

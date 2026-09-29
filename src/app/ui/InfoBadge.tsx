@@ -15,6 +15,7 @@
 
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { color } from "@/app/theme";
+import { cssZoom } from "@/app/ui/cssZoom";
 
 export function InfoBadge({
   text,
@@ -41,11 +42,14 @@ export function InfoBadge({
     const a = anchorRef.current?.getBoundingClientRect();
     const t = tipRef.current?.getBoundingClientRect();
     if (!a || !t) return;
+    // Rects and the window size are in screen px; the tip's left/top are
+    // scaled by the UI zoom (4K screens), so place in screen px, then undo it.
+    const z = cssZoom();
     let left = align === "right" ? a.right + 2 - t.width : a.left - 2;
     left = Math.max(8, Math.min(left, window.innerWidth - t.width - 8));
     let top = a.bottom + 7;
     if (top + t.height > window.innerHeight - 8) top = Math.max(8, a.top - 7 - t.height);
-    setPos({ left, top });
+    setPos({ left: left / z, top: top / z });
   }, [open, align, width]);
   return (
     <span
