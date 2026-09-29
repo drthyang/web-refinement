@@ -67,6 +67,7 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
               {ph.label}
               {ph.removable && data.onRemovePhase && (
                 <button
+                  className="wb-tight"
                   onClick={() => data.onRemovePhase!(ph.id)}
                   title={`Remove the ${ph.label} phase`}
                   style={{ border: "none", background: "none", cursor: "pointer", color: color.secondary, fontSize: fz.small, lineHeight: 1, padding: 0 }}

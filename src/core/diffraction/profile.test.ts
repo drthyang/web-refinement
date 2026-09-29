@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { tchPseudoVoigt, lorentzianFwhm, cagliotiFwhm, fcjSubPeaks } from "@/core/diffraction/profile";
+import {
+  tchPseudoVoigt, lorentzianFwhm, cagliotiFwhm, fcjSubPeaks, gaussian, pseudoVoigt, synthesizePattern,
+  PEAK_WINDOW_FWHM, type ProfileOptions, type ProfilePeak,
+} from "@/core/diffraction/profile";
 
 describe("Thompson–Cox–Hastings pseudo-Voigt", () => {
   it("reduces to a pure Gaussian when Γ_L = 0", () => {
@@ -73,5 +76,60 @@ describe("Finger–Cox–Jephcoat axial-divergence asymmetry", () => {
     const lowTail = 4 - Math.min(...fcjSubPeaks(4, { sl: 0.03, hl: 0.03 }).map((s) => s.center));
     const highTail = 40 - Math.min(...fcjSubPeaks(40, { sl: 0.03, hl: 0.03 }).map((s) => s.center));
     expect(lowTail).toBeGreaterThan(highTail);
+  });
+});
+
+describe("finite peak support", () => {
+  // A strong pseudo-Voigt with a large Lorentzian fraction: at the ±20 Γ edge
+  // its tail is still ~3·10⁻⁴ of the peak height, which a hard cutoff dropped
+  // at once — a jump in y whenever the moving edge crossed a data point.
+  const peak: ProfilePeak = { center: 50, intensity: 1e6, fwhm: 0.3, eta: 0.6 };
+  const opts: ProfileOptions = { shape: "pseudoVoigt" };
+  const edge = peak.center + PEAK_WINDOW_FWHM * peak.fwhm;
+  /** A 0.02° grid over the whole support with one point exactly on the upper edge. */
+  const grid = Array.from({ length: 701 }, (_, i) => (i === 600 ? edge : edge + (i - 600) * 0.02));
+
+  it("fades each peak to exactly zero at the edge of its support", () => {
+    const top = synthesizePattern([peak.center], [peak], opts)[0]!;
+    const tail = peak.intensity * pseudoVoigt(edge, peak.center, peak.fwhm, peak.eta!);
+    expect(tail / top).toBeGreaterThan(1e-4); // what a hard cutoff dropped here
+    const [inside, onEdge] = synthesizePattern([edge - 1e-6, edge], [peak], opts);
+    expect(onEdge).toBe(0);
+    expect(inside! / top).toBeLessThan(1e-15);
+  });
+
+  it("has a width derivative that matches the analytic one at every finite-difference step", () => {
+    // ∂/∂Γ of the untruncated pseudo-Voigt at fixed η. The fade changes it only
+    // in the outer 20 % of the support, where the profile is already ≲ 10⁻³ of the peak.
+    const analytic = grid.map((x) => {
+      const d = x - peak.center;
+      const g = peak.fwhm;
+      const q = d * d + (g * g) / 4;
+      const dL = (d * d - (g * g) / 4) / (2 * Math.PI * q * q);
+      const dG = gaussian(x, peak.center, g) * (-1 / g + (8 * Math.LN2 * d * d) / (g * g * g));
+      return peak.intensity * (peak.eta! * dL + (1 - peak.eta!) * dG);
+    });
+    const scale = Math.max(...analytic.map(Math.abs));
+    for (const rel of [1e-2, 1e-4, 1e-6, 1e-8]) {
+      const h = peak.fwhm * rel;
+      const yF = synthesizePattern(grid, [{ ...peak, fwhm: peak.fwhm + h }], opts);
+      const yB = synthesizePattern(grid, [{ ...peak, fwhm: peak.fwhm - h }], opts);
+      let worst = 0;
+      for (let i = 0; i < grid.length; i++) worst = Math.max(worst, Math.abs((yF[i]! - yB[i]!) / (2 * h) - analytic[i]!));
+      // A hard cutoff put jump/2h on the edge point: 1.6 % of the scale at 10⁻², 1.6·10⁴ at 10⁻⁸.
+      expect(worst / scale, `h = ${rel}·Γ`).toBeLessThan(5e-3);
+    }
+  });
+
+  it("gives the same pattern on ascending, descending and unordered grids", () => {
+    const peaks: ProfilePeak[] = [peak, { center: 53, intensity: 4e5, fwhm: 0.4, eta: 0.3 }];
+    const asc = synthesizePattern(grid, peaks, opts);
+    const desc = synthesizePattern([...grid].reverse(), peaks, opts).reverse();
+    const order = grid.map((_, i) => (i * 263) % grid.length); // a fixed permutation (263 ⊥ 701)
+    const mixed = synthesizePattern(order.map((i) => grid[i]!), peaks, opts);
+    for (let i = 0; i < grid.length; i++) {
+      expect(desc[i]).toBe(asc[i]);
+      expect(Math.abs(mixed[order.indexOf(i)]! - asc[i]!)).toBeLessThanOrEqual(1e-12 * Math.abs(asc[i]!));
+    }
   });
 });

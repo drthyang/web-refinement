@@ -5,7 +5,7 @@
  * download) against a running dev server, runs a real refinement of the
  * bundled Mn₃Ga + MnO POWGEN dataset so the plots show a converged fit, and
  * captures the workbench at a full-HD desktop viewport (wide enough that no
- * panel is squeezed; the app is fluid up to 2100px).
+ * panel is squeezed; the app is fluid up to 2560px, then scales on 4K).
  *
  * Usage:  npm run dev   (in another terminal)
  *         node scripts/device-screenshots.mjs [baseUrl]

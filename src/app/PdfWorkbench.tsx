@@ -1344,7 +1344,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           spaced. */}
       {/* `auto 1fr` hands the leftover height to the working row, the way the
           powder page's rows get it directly from `.wb-main`. */}
-      <div style={{ display: step === 1 ? "none" : "grid", gap: space.gap, gridTemplateRows: "auto 1fr", flex: 1, minHeight: 0 }}>
+      <div style={{ display: step === 1 ? "none" : "grid", gap: space.gap, gridTemplateRows: "auto 1fr", gridTemplateColumns: "minmax(0, 1fr)", flex: 1, minHeight: 0 }}>
       <SummaryCards cards={summaryCards} />
       <div className="wb-work2">
         <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", height: "100%" }}>

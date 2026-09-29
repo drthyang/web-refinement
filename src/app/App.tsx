@@ -1022,14 +1022,19 @@ export function App(): JSX.Element {
       )
     : IDLE_STEPS;
 
+  const crossCheck = crossCheckTargets(pdfDataset ? "pdf" : scDataset ? "sc" : "rietveld");
+
   return (
     // The shell is exactly the window: header, disclaimer and footer are fixed
     // chrome and the content column between them takes the rest. That is what
     // lets a working row fill a 16:9 screen without anyone computing how tall
     // the chrome happens to be — and a page whose content genuinely exceeds the
     // window (the magnetic workflow, single crystal) scrolls inside the column
-    // instead of pushing the footer off-screen.
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    // instead of pushing the footer off-screen. Its sizing lives in
+    // workbench.css (.wb-shell): the height must follow the dynamic viewport on
+    // iOS and undo the large-screen UI zoom, and on phones the whole page
+    // scrolls instead, header included.
+    <div className="wb-shell">
       <WorkbenchHeader
         steps={headerSteps}
         active={step}
@@ -1062,11 +1067,18 @@ export function App(): JSX.Element {
         </div>
       )}
       {hasContent && (
-        <div style={disclaimerBar}>
-          <b>Public beta</b> — validated against published reference fits for the cases in its docs, not for
-          yours. Reproduce anything you intend to publish in{" "}
-          {crossCheckTargets(pdfDataset ? "pdf" : scDataset ? "sc" : "rietveld")}; agreement is the evidence.
-          Unmodelled effects:{" "}
+        <div className="wb-disclaimer" style={disclaimerBar}>
+          <b>Public beta</b> —{" "}
+          {/* The full sentence runs four lines on a phone; there the bar keeps
+              its point — reproduce before you publish — and the link. */}
+          <span className="wb-disclaimer-long">
+            validated against published reference fits for the cases in its docs, not for yours. Reproduce anything
+            you intend to publish in {crossCheck}; agreement
+            is the evidence. Unmodelled effects:{" "}
+          </span>
+          <span className="wb-disclaimer-short">
+            reproduce anything you intend to publish in {crossCheck}; see the{" "}
+          </span>
           <a href={LIMITATIONS_URL} target="_blank" rel="noreferrer" style={disclaimerLink}>
             limitations
           </a>
@@ -1119,7 +1131,7 @@ export function App(): JSX.Element {
           <SingleCrystalWorkbench onMagneticPresent={setScMagnetic} key={`${scDataset.id}#${restore.token}`} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} {...(restore.singleCrystal ? { restore: restore.singleCrystal } : {})} stepHistory={stepHistory} />
         </main>
       )}
-      <footer style={copyrightBar}>
+      <footer className="wb-footer" style={copyrightBar}>
         <span>© 2026 Tsung-Han Yang</span>
         <span aria-hidden style={{ color: theme.faintest }}>·</span>
         <a href="https://github.com/drthyang/web-refinement#readme" target="_blank" rel="noopener noreferrer" style={footerLink}>

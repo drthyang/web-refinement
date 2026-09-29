@@ -19,7 +19,7 @@ export function SegmentedToggle<T extends string>({ options, value, onChange }: 
   onChange: (id: T) => void;
 }): JSX.Element {
   return (
-    <div style={{ display: "inline-flex", gap: 2, background: color.chipBg, border: `1px solid ${color.border}`, borderRadius: 8, padding: 2 }}>
+    <div className="wb-seg" style={{ display: "inline-flex", gap: 2, background: color.chipBg, border: `1px solid ${color.border}`, borderRadius: 8, padding: 2 }}>
       {options.map((o) => (
         <button
           key={o.id}

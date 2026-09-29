@@ -50,9 +50,26 @@
    * narrower than the cap, then half the surplus plus the gutter. Percentage
    * padding resolves against the containing block's width — the window, for
    * every band and for .wb-main alike — so the same expression aligns them all.
+   *
+   * The cap is a QHD / Studio Display width: a 2560px window is filled edge to
+   * edge (a workbench wants the room for its plot), and anything wider is
+   * either zoomed down to it (see --ui-zoom) or centred.
+   *
+   * --wb-safe-x keeps content clear of the iPhone's sensor housing and rounded
+   * corners in landscape (index.html sets viewport-fit=cover, so the bands'
+   * backgrounds run edge to edge while their content stays inside the safe
+   * area). Both sides take the larger inset so the column stays centred.
    */
-  --wb-max: 2100px;
-  --wb-edge: max(var(--wb-pad), calc((100% - var(--wb-max)) / 2 + var(--wb-pad)));
+  --wb-max: 2560px;
+  --wb-safe-x: max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+  --wb-edge: max(calc(var(--wb-pad) + var(--wb-safe-x)), calc((100% - var(--wb-max)) / 2 + var(--wb-pad)));
+
+  /*
+   * Whole-UI scale for dense large screens (see the zoom steps at the end of
+   * this file). 1 everywhere else. Anything sized in viewport units must divide
+   * by it — a zoomed 100vh is taller than the window.
+   */
+  --ui-zoom: 1;
 
   /*
    * Floor for the main working row. It does not set the height — the row FILLS
@@ -69,7 +86,36 @@
   --wb-plot-min-h: 380px;
   /* Secondary plot (the magnetic page's pattern check, which shares its column
    * with the 3D model, so it cannot simply fill). */
-  --wb-plot-h-sm: clamp(300px, calc((100vh - 380px) * 0.6), 600px);
+  --wb-plot-h-sm: clamp(300px, calc((100vh / var(--ui-zoom) - 380px) * 0.6), 600px);
+}
+
+html {
+  zoom: var(--ui-zoom);
+  /* iOS Safari inflates text in landscape unless told not to; the fluid type
+     scale above already sizes text for the viewport. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/*
+ * The app shell is exactly the visible viewport: header, bars and footer are
+ * fixed chrome and the content column between them takes the rest (see
+ * App.tsx). `dvh` is the viewport iOS Safari actually shows — `100vh` there is
+ * the toolbar-collapsed height, which hid the footer behind the toolbar — and
+ * the division undoes the UI zoom (a zoomed 100dvh would overflow the window).
+ */
+.wb-shell {
+  height: calc(100vh / var(--ui-zoom));
+  height: calc(100dvh / var(--ui-zoom));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The copyright footer clears the home indicator when the page runs full-bleed. */
+.wb-footer {
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
 }
 
 /* "Refining…" shimmer: a bright band sweeps across the button text while a
@@ -121,6 +167,17 @@
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: var(--wb-gap);
 }
+/* Tablet portrait band (iPad mini / Air / 11"): two columns. With three cards
+ * auto-fit left the third alone beside a hole; it spans the row instead, so
+ * both rows end on the page's right edge (alignment rule). */
+@media (min-width: 560px) and (max-width: 899px) {
+  .wb-autofit {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wb-autofit > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
 
 /* Working area: quality rail (1/6) | main refinement (2/3) | parameters (1/6). */
 .wb-work3 {
@@ -158,20 +215,36 @@
 .wb-work3 > * {
   min-height: 0;
 }
-@media (max-width: 820px) {
+/* Stacked below 820px, on any portrait window up to 1100px (iPad Pro and Air
+ * 13" held upright) and on short windows (a phone in landscape): side by side
+ * there, the parameter column is ~300px and truncates its labels or squeezes
+ * its Refine bar, while the plot becomes taller than it is wide or ~380px tall
+ * in a 360px window. The page scrolls in all three (see "Whole-page
+ * scrolling" below). */
+@media (max-width: 820px), (max-height: 540px), (max-width: 1100px) and (orientation: portrait) {
   .wb-work2 {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     /* Stacked, the cards share one column, so filling the window would halve
        each of them. Give them their natural height and let the page scroll —
-       the usual phone/tablet reading model. */
-    flex: 0 1 auto;
+       the usual phone/tablet reading model. Never shrink: squeezed by the
+       column, the grid's rows overran each other (the plot card's caption
+       ran into the parameter card on an iPad in portrait). */
+    flex: 0 0 auto;
     min-height: 0;
-  }
-  .wb-work2 > :first-child {
-    grid-column: auto;
   }
   .wb-work2 > * {
     min-height: var(--wb-plot-min-h);
+  }
+  /* The plot card: a comfortable, landscape-proportioned plot. */
+  .wb-work2 > :first-child {
+    grid-column: auto;
+    min-height: clamp(var(--wb-plot-min-h), 62vw, 640px);
+  }
+  /* The parameter card (first in the right column) takes its natural height:
+     collapsed groups are short, and an open one should not scroll inside a
+     card inside a scrolling page. */
+  .wb-work2 > :last-child > :first-child {
+    height: auto !important;
   }
 }
 
@@ -306,40 +379,189 @@
   }
 }
 
-/* ---- Compact header for phones / small tablets --------------------------
+/* ---- Disclaimer bar -------------------------------------------------------
+ * The short form (phones) keeps the point — reproduce before you publish — and
+ * the limitations link; the long form runs four lines at phone width. */
+.wb-disclaimer-short {
+  display: none;
+}
+@media (max-width: 700px), (max-height: 540px) {
+  .wb-disclaimer-long {
+    display: none;
+  }
+  .wb-disclaimer-short {
+    display: inline;
+  }
+}
+
+/* ---- Whole-page scrolling on phones and short windows -----------------------
+ * With fixed chrome, an iPhone in portrait spent ~40% of its height on the
+ * header, the beta bar and the footer, and in landscape (~360px tall) more
+ * than half. Where the working rows stack anyway (and on any short window) the
+ * page scrolls as one document instead: the chrome scrolls away with it, the
+ * content gets the whole screen, and Safari can collapse its toolbars. */
+@media (max-width: 820px), (max-height: 540px), (max-width: 1100px) and (orientation: portrait) {
+  .wb-shell {
+    height: auto;
+    min-height: calc(100vh / var(--ui-zoom));
+    min-height: calc(100dvh / var(--ui-zoom));
+    overflow: visible;
+  }
+  .wb-main {
+    overflow: visible;
+  }
+}
+/* A short but wide window keeps the magnetic page's two columns: give the row
+ * a working height of its own instead of the leftover of a window that has
+ * none. */
+@media (max-height: 540px) {
+  .wb-mag-page {
+    flex: 0 0 auto;
+  }
+  .wb-mag2 {
+    flex: 0 0 auto;
+    min-height: max(var(--wb-plot-min-h), calc(100dvh - 2 * var(--wb-pad)));
+  }
+}
+
+/* ---- Header on tablets and phones ------------------------------------------
  * The header's base look is inline (component-owned); this layer only
- * overrides what must respond to the viewport, hence the !important. */
-@media (max-width: 700px) {
+ * overrides what must respond to the viewport, hence the !important.
+ *
+ * Up to 900px (iPad mini / Air in portrait, phones) the bar has two rows: the
+ * brand and the three menus, then the navigation chips with the GPU chip. Left
+ * to wrap on its own it put the menus alone on a second row (or orphaned the
+ * divider at the end of the first). The brand block's wrappers dissolve
+ * (display: contents) so its pieces can be ordered into those rows. */
+@media (max-width: 900px) {
   .wb-header {
-    padding: 10px var(--wb-edge) !important;
-    gap: 10px !important;
+    gap: 12px 10px !important;
   }
-  .wb-header-title {
-    font-size: 16px !important;
-    white-space: normal !important;
+  .wb-header-brand,
+  .wb-header-meta {
+    display: contents !important;
   }
-  .wb-header-kicker,
+  .wb-header-mark,
+  .wb-header-wordmark,
+  .wb-beta-badge {
+    order: 0;
+  }
+  .wb-beta-badge {
+    margin-right: auto;
+  }
   .wb-header-divider {
     display: none !important;
   }
+  .wb-header-actions {
+    order: 1;
+    margin-left: 0 !important;
+  }
+  .wb-header-nav {
+    order: 2;
+    flex: 1 1 auto;
+  }
+  .wb-gpu-badge {
+    order: 3;
+  }
+}
+/* Tablet landscape / small laptop band: one row, which fits once the
+ * sample-form indicator (Powder | Crystal — the technique chip and the data card
+ * say the same) and the divider make room. */
+@media (min-width: 901px) and (max-width: 1180px) {
+  .wb-header {
+    gap: 12px 16px !important;
+  }
+  .wb-header-divider,
+  .wb-chips-form {
+    display: none !important;
+  }
+}
+
+/* Phones: tighter still. The sample-form indicator and the beta pill drop out —
+ * the technique chip and the beta bar right below carry the same facts. */
+@media (max-width: 700px) {
+  .wb-header {
+    padding: max(10px, env(safe-area-inset-top, 0px)) var(--wb-edge) 10px !important;
+    gap: 10px 8px !important;
+  }
   .wb-header-mark {
-    width: 34px !important;
-    height: 34px !important;
+    width: 32px !important;
+    height: 32px !important;
     border-radius: 9px !important;
   }
-  .wb-header-step {
-    padding: 6px 12px 6px 7px !important;
-    font-size: 12.5px !important;
+  .wb-header-mark svg {
+    width: 21px;
+    height: 21px;
+  }
+  .wb-header-wordmark {
+    margin-right: auto;
+  }
+  .wb-header-title {
+    font-size: 16px !important;
+  }
+  .wb-header-sub {
+    font-size: 8.5px !important;
+    letter-spacing: 0.32em !important;
+  }
+  .wb-beta-badge,
+  .wb-chips-form {
+    display: none !important;
   }
   .wb-header-actions {
-    margin-left: 0 !important;
-    width: 100%;
-    gap: 7px !important;
+    gap: 6px !important;
+    flex-wrap: nowrap !important;
   }
   .wb-header-action {
-    padding: 6px 11px !important;
+    padding: 6px 10px !important;
     font-size: 12px !important;
-    flex: 1 1 auto;
+    white-space: nowrap;
+  }
+  .wb-header-nav {
+    gap: 8px !important;
+  }
+  .wb-header-step {
+    padding: 6px 11px !important;
+    font-size: 10.5px !important;
+  }
+  .wb-header-indicator {
+    padding: 4px 9px !important;
+  }
+}
+
+/* Narrowest phones (iPhone 16e / SE width and below): the wordmark's second
+ * line goes, which keeps the brand and three menus on one row. */
+@media (max-width: 400px) {
+  .wb-header-sub {
+    display: none !important;
+  }
+  .wb-header-action {
+    padding: 6px 8px !important;
+  }
+}
+
+/* Phone in landscape: one row — brand, navigation, GPU, menus — so the header
+ * does not take a third of a 360px-tall screen. */
+@media (max-height: 540px) and (min-width: 701px) {
+  .wb-header {
+    padding: 8px var(--wb-edge) !important;
+    gap: 10px 14px !important;
+  }
+  .wb-header-mark {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 9px !important;
+  }
+  .wb-header-title {
+    font-size: 17px !important;
+  }
+  .wb-header-divider,
+  .wb-beta-badge,
+  .wb-chips-form {
+    display: none !important;
+  }
+  .wb-header-action {
+    padding: 6px 12px !important;
+    font-size: 12.5px !important;
   }
 }
 
@@ -350,16 +572,86 @@
   }
 }
 
+/* ---- Plot-card view switchers (Refinement | Validation | …) ---------------
+ * Five views do not fit a phone-width card at desktop padding; tighten the
+ * segments and let the track wrap rather than push the card past the screen. */
+@media (max-width: 520px) {
+  .wb-seg {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+  .wb-seg > button {
+    padding: 3px 6px !important;
+    font-size: 10px !important;
+  }
+}
+
 /* ---- Touch ergonomics ----------------------------------------------------
  * On coarse pointers (fingers), give every control a comfortable hit area.
- * min-height composes with the components' inline padding, so no !important. */
+ * min-height composes with the components' inline padding, so no !important.
+ * Glyph-sized inline controls (a chip's ×) opt out with .wb-tight: growing
+ * them to 34px inflated the chip around them into a bubble. */
 @media (pointer: coarse) {
-  button,
+  button:not(.wb-tight),
   select {
     min-height: 34px;
   }
   input[type="checkbox"] {
     width: 17px;
     height: 17px;
+  }
+  /* The header's chip groups and GPU chip share one 32px row height (the
+     indicator track adds 3px of padding + border on each side of its chips),
+     instead of the bare 34px rule lifting only the clickable ones. */
+  .wb-header .wb-header-step,
+  .wb-header .wb-header-indicator,
+  .wb-header .wb-gpu-badge {
+    display: inline-flex;
+    align-items: center;
+  }
+  .wb-header .wb-header-step {
+    min-height: 30px;
+  }
+  .wb-header .wb-header-indicator {
+    min-height: 26px;
+  }
+  .wb-header .wb-gpu-badge {
+    min-height: 32px;
+  }
+}
+
+/* ---- Large, dense screens: scale the whole UI ------------------------------
+ * A 4K monitor at 100% (3840 CSS px, ~160 px/inch on a 27") renders 12px type
+ * at under 2mm, and the 2560px column sat in a sea of margin. These steps
+ * zoom the UI so the layout lays out at roughly QHD width with QHD-sized type.
+ * The height condition keeps an ultrawide (3440×1440, normal density) at 1:1.
+ * The Apple 5K/6K displays at their default scaling (2560 / 3008 CSS px) stay
+ * at or near 1:1 — their CSS pixel is already ~1/109 inch.
+ * Everything in viewport units divides by --ui-zoom; the few scripts that place
+ * things from getBoundingClientRect (tooltips, the 3D canvas's pixel ratio) read
+ * the zoom back (src/app/ui/cssZoom.ts). */
+@media (min-width: 2880px) and (min-height: 1450px) {
+  :root {
+    --ui-zoom: 1.125;
+  }
+}
+@media (min-width: 3200px) and (min-height: 1650px) {
+  :root {
+    --ui-zoom: 1.25;
+  }
+}
+@media (min-width: 3600px) and (min-height: 1800px) {
+  :root {
+    --ui-zoom: 1.5;
+  }
+}
+@media (min-width: 4800px) and (min-height: 2400px) {
+  :root {
+    --ui-zoom: 2;
+  }
+}
+@media (min-width: 6400px) and (min-height: 3200px) {
+  :root {
+    --ui-zoom: 2.5;
   }
 }

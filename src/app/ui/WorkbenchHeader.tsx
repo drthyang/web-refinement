@@ -79,15 +79,15 @@ const PROJECT_ACCEPT = ".materia.json,.json,application/json";
 export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo, onOpenProject, onSaveProject, gpu }: Props): JSX.Element {
   return (
     <header className="wb-header" style={headerBar}>
-      <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
+      <div className="wb-header-brand" style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
         <div className="wb-header-mark" style={brandMark}>
           {/* MATERIA monogram: a clean geometric M. */}
           <svg viewBox="0 0 100 100" width={28} height={28} aria-hidden>
             <path d="M18 82 L18 20 L50 58 L82 20 L82 82" fill="none" stroke="#fff" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
           </svg>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", minWidth: 0 }}>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.05, minWidth: 0 }}>
+        <div className="wb-header-meta" style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", minWidth: 0 }}>
+          <div className="wb-header-wordmark" style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.05, minWidth: 0 }}>
             <span className="wb-header-title" style={{ fontFamily: display, fontSize: 21, fontWeight: 600, letterSpacing: "0.14em", color: color.ink, whiteSpace: "nowrap" }}>
               MATERIA
             </span>
@@ -99,7 +99,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
               the same fact about this build, so they share a chip instead of
               lining up two boxes in two colours beside the wordmark. The
               version hides itself on a phone (wb-version-chip). */}
-          <span style={betaBadge} title="MATERIA is in public beta — validate results against established tools before publication">
+          <span className="wb-beta-badge" style={betaBadge} title="MATERIA is in public beta — validate results against established tools before publication">
             beta
             <span className="wb-version-chip" style={betaVersion}>{version}</span>
           </span>
@@ -107,7 +107,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
         </div>
       </div>
       <div className="wb-header-divider" style={{ width: 1, alignSelf: "stretch", margin: "4px 0", background: color.border }} />
-      <nav style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+      <nav className="wb-header-nav" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <FormChips technique={technique} />
         <TechniqueChips technique={technique} />
         <ChipGroup
@@ -235,10 +235,11 @@ interface Chip {
   readonly onClick?: () => void;
 }
 
-function ChipGroup({ chips, variant = "nav" }: { chips: readonly Chip[]; variant?: ChipVariant }): JSX.Element {
+function ChipGroup({ chips, variant = "nav", className }: { chips: readonly Chip[]; variant?: ChipVariant; className?: string }): JSX.Element {
   const indicator = variant === "indicator";
   return (
     <span
+      className={className}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -300,7 +301,7 @@ function GroupChip({ chip, variant = "nav" }: { chip: Chip; variant?: ChipVarian
   );
   return chip.onClick
     ? <button className="wb-header-step" {...shared} onClick={chip.onClick}>{content}</button>
-    : <span {...shared}>{content}</span>;
+    : <span className={indicator ? "wb-header-indicator" : "wb-header-step"} {...shared}>{content}</span>;
 }
 
 /** The "in the model" marker on a lit (present, not active) chip: a small
@@ -327,6 +328,7 @@ function FormChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | null 
   return (
     <ChipGroup
       variant="indicator"
+      className="wb-chips-form"
       chips={chips.map((c) => ({
         key: c.id,
         label: c.label,
