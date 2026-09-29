@@ -1,9 +1,15 @@
 /**
  * Powder-pattern chart, rebuilt to the design handoff spec: a custom SVG plot
- * (viewBox 860×560, preserveAspectRatio="none") with auto-scaled y/x "nice"
- * ticks, obs/calc/bkg/diff series, a difference band, a Bragg-reflection tick
- * row (coloured per phase), excluded-region scrims, draggable fit-range handles,
- * and drag-to-zoom on the x-axis. Fed by the real refinement curves.
+ * with auto-scaled y/x "nice" ticks, obs/calc/bkg/diff series, a difference
+ * band, a Bragg-reflection tick row (coloured per phase), excluded-region
+ * scrims, draggable fit-range handles, and drag-to-zoom on the x-axis. Fed by
+ * the real refinement curves.
+ *
+ * The viewBox is the element's own measured size, so one user unit is one CSS
+ * pixel: labels keep the same readable size on a phone, a 1080p laptop and a 4K
+ * monitor, and the extra height of a tall plot goes to the data rather than to
+ * ever-larger text. (A fixed 560-unit viewBox used to scale every glyph with the
+ * card height — ~5px labels on an iPad, ~30px on a 4K screen.)
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -83,28 +89,50 @@ interface Props {
 /** Muted overlay palette — distinct from the obs/calc/diff/bkg series inks. */
 const OVERLAY_COLORS = ["#b0812f", "#7a5ea8", "#2f8f8a", "#c05575", "#5d7f34", "#8a6652"];
 
-// Fixed plot geometry (SVG user units); the SVG stretches to its container.
+// Plot geometry in CSS px (the viewBox tracks the rendered size; see above).
 // Vertical stack (top→bottom): intensity plot, x-axis ticks/labels, a Bragg
 // reflection tick band, then the difference band — each with clear separation.
-const X0 = 58;
+// The fixed-height bands (labels, ticks, caps) are laid out from the bottom
+// edge; the intensity region takes whatever height is left. At a 560px-tall plot
+// this reproduces the original 560-unit layout exactly.
+const X0_MIN = 58; // left margin: y tick labels + the rotated axis title
 const RIGHT_PAD = 14; // right margin; the drawable width fills to boxW − RIGHT_PAD
-const VB_H = 560; // viewBox height (user units); width is measured to avoid distortion
+const MIN_W = 240; // narrowest drawing width (a phone card is ~330px)
+const MIN_H = 300; // the plot box is at least 320px tall (see the wrapper)
 const TOP = 14;
-const BASE = 356; // main-region baseline
-const MAINH = BASE - TOP - 6; // intensity drawable height
-const X_LABEL_Y = 372; // x-axis tick labels (below the axis marks)
-const TICK_TOP = 382; // Bragg tick band (below the x-axis labels)
 const TICK_H = 9; // tick mark height at the default row spacing
 const TICK_ROW = 13; // vertical step per phase row (> tick height so rows never overlap)
-const TICK_MAX_BOT = 420; // tick band floor (just above the difference band)
-const DIFF_Y = 470; // difference-band zero line
-const DIFF_A = 46; // difference band half-height
-const CAP_Y = 522; // fit-handle caps, below the difference band
 // Found-peak (▽) markers: a row of downward triangles just below the legend,
 // above the intensity plot — a distinct mark from the Bragg tick rows below.
 const FOUND_TOP = 30; // flat top edge of the triangle
 const FOUND_H = 8; // triangle height (apex points down toward the peak x)
 const FOUND_W = 5; // triangle half-width
+const LEGEND_Y = 24; // first legend row's centre line
+const LEGEND_ROW = 16; // extra legend rows (a narrow plot wraps its legend)
+
+/** Vertical layout for a plot `h` px tall (bottom-up; see the constants above). */
+function plotLayout(h: number) {
+  const capY = h - 38; // fit-handle caps, below the difference band
+  const diffA = Math.round(Math.min(110, Math.max(26, h * 0.082))); // difference half-height
+  const diffY = capY - 6 - diffA; // difference-band zero line
+  const tickMaxBot = diffY - diffA - 4; // tick band floor (just above the difference band)
+  const tickTop = tickMaxBot - 38; // Bragg tick band (below the x-axis labels)
+  const base = tickTop - 26; // main-region baseline
+  return { capY, diffA, diffY, tickMaxBot, tickTop, base, mainH: base - TOP - 6, xLabelY: base + 16, axisTitleY: h - 10 };
+}
+
+/**
+ * Plot type size, tracking the app's fluid micro text (--fz-micro in
+ * workbench.css: 10.5px → 12.5px with the window) so the chart never reads
+ * smaller than the UI around it.
+ */
+function plotTypeScale(): number {
+  const vw = typeof window === "undefined" ? 1280 : window.innerWidth;
+  return Math.min(12.5, Math.max(10.5, vw * 0.0018 + 9)) / 10.5;
+}
+
+/** Monospace advance (IBM Plex Mono is 0.6 em) — sizes legend entries and labels. */
+const MONO_ADVANCE = 0.6;
 
 function niceNum(x: number, round: boolean): number {
   if (x <= 0) return 1;
@@ -180,22 +208,29 @@ export function WorkbenchPlot({
   // and clicking a scatter point replaces the tick pick. There is no separate
   // per-plot selection state — the parent owns the single selection.
 
-  // The viewBox width tracks the rendered pixel aspect ratio so the plot fills
-  // its (width-controlled, fixed-height) box with SQUARE units — no horizontal
-  // text/line stretching, and the plot uses the full width at any window size.
-  const [boxW, setBoxW] = useState(860);
+  // The viewBox is the rendered box in CSS px (the element's own, unzoomed
+  // size — contentRect, not getBoundingClientRect, which a CSS zoom scales), so
+  // units are square and one unit is one pixel: no stretched text or lines, and
+  // the plot uses the full width and height at any window size.
+  const [box, setBox] = useState({ w: 860, h: 560 });
   useEffect(() => {
     const el = svgRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
-      const r = el.getBoundingClientRect();
-      if (r.height > 0) setBoxW(Math.max(560, Math.round((VB_H * r.width) / r.height)));
+    const ro = new ResizeObserver(([entry]) => {
+      const r = entry?.contentRect;
+      if (r && r.height > 0 && r.width > 0) {
+        setBox({ w: Math.max(MIN_W, Math.round(r.width)), h: Math.max(MIN_H, Math.round(r.height)) });
+      }
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const X1 = boxW - RIGHT_PAD;
-  const XW = X1 - X0;
+  const boxW = box.w;
+  const VB_H = box.h;
+  const { capY: CAP_Y, diffA: DIFF_A, diffY: DIFF_Y, tickMaxBot: TICK_MAX_BOT, tickTop: TICK_TOP, base: BASE, mainH: MAINH, xLabelY: X_LABEL_Y, axisTitleY: AXIS_TITLE_Y } = plotLayout(VB_H);
+  const ts = plotTypeScale();
+  const fsTick = 10 * ts; // axis tick labels
+  const fsLabel = 11 * ts; // axis titles, legend, spotlight label
   // When the domain changes (new data, or an x-axis unit switch), default the
   // zoom to the active fit range — switching units lands on the region being
   // fitted — or to the full range when no window is set. Keyed only on the
@@ -224,7 +259,6 @@ export function WorkbenchPlot({
   const vlo = view ? view.min : fullMin;
   const vhi = view ? view.max : fullMax;
   const vspan = vhi - vlo || 1;
-  const sx = (x: number): number => X0 + ((x - vlo) / vspan) * XW;
 
   // Fit window (defaults to full domain) clips the calc/diff curves.
   const fitLo = fitRange ? fitRange.min : fullMin;
@@ -254,6 +288,24 @@ export function WorkbenchPlot({
   }
   const ySpan = yTop - yLo || 1;
   const sy = (y: number): number => BASE - ((Math.min(Math.max(y, yLo), yTop) - yLo) / ySpan) * MAINH;
+
+  // Y nice ticks. The signed scale starts at the first step at/above yLo.
+  const yStep = niceNum((yTop - yLo) / 4, true);
+  const yTicks: number[] = [];
+  for (let v = Math.ceil(yLo / yStep) * yStep; v <= yTop + 1e-6 * yStep; v += yStep) yTicks.push(v);
+  // The left margin fits the widest y label beside the rotated axis title
+  // (which occupies x ≈ 16 ± 0.75 em), so neither collides as the type grows.
+  const yLabelChars = Math.max(...yTicks.map((v) => formatY(v, yStep).length), 1);
+  const X0 = Math.max(X0_MIN, Math.ceil(16 + 0.25 * fsLabel + 13 + yLabelChars * MONO_ADVANCE * fsTick));
+  const X1 = boxW - RIGHT_PAD;
+  const XW = X1 - X0;
+  const sx = (x: number): number => X0 + ((x - vlo) / vspan) * XW;
+  // X nice ticks: as many as the width holds without labels crowding (six on a
+  // desktop plot, fewer on a phone).
+  const xLabelW = Math.max(formatX(vlo, vspan).length, formatX(vhi, vspan).length) * MONO_ADVANCE * fsTick;
+  const xStep = niceNum(vspan / Math.max(2, Math.min(6, Math.floor(XW / (xLabelW * 1.8)))), true);
+  const xTicks: number[] = [];
+  for (let v = Math.ceil(vlo / xStep) * xStep; v <= vhi + 1e-6; v += xStep) xTicks.push(v);
 
   // Difference band scaled to its own max in view (with headroom) so a poor fit
   // fills the band instead of clipping flat against its edge; a floor keeps a
@@ -294,7 +346,7 @@ export function WorkbenchPlot({
       out.push(<circle key={i} cx={mx(x)} cy={my(yObs[i]!)} r={1.3} fill={color.obs} opacity={0.5} />);
     }
     return out;
-  }, [xs, yObs, vlo, vhi, vspan, yTop, yLo, XW]);
+  }, [xs, yObs, vlo, vhi, vspan, yTop, yLo, X0, XW, BASE, MAINH]);
 
   // The single selected reflection (from a scatter-point OR a Bragg-tick click):
   // locate its Bragg tick so we can spotlight that peak. Prefer the row whose
@@ -365,7 +417,7 @@ export function WorkbenchPlot({
         </g>
       );
     });
-  }, [phases, vlo, vhi, vspan, XW, highlight, onHighlight, tickStep, tickH]);
+  }, [phases, vlo, vhi, vspan, X0, XW, TICK_TOP, highlight, onHighlight, tickStep, tickH]);
 
   // Pan to reveal a freshly-spotlighted peak when it sits outside the zoom
   // window — keyed on the pick only, so re-zooming/panning doesn't fight the user.
@@ -393,14 +445,6 @@ export function WorkbenchPlot({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on the command token only
   }, [focusPeakToken]);
 
-  // Y / X nice ticks. The signed scale starts at the first step at/above yLo.
-  const yStep = niceNum((yTop - yLo) / 4, true);
-  const yTicks: number[] = [];
-  for (let v = Math.ceil(yLo / yStep) * yStep; v <= yTop + 1e-6 * yStep; v += yStep) yTicks.push(v);
-  const xStep = niceNum(vspan / 6, true);
-  const xTicks: number[] = [];
-  for (let v = Math.ceil(vlo / xStep) * xStep; v <= vhi + 1e-6; v += xStep) xTicks.push(v);
-
   // --- pointer helpers -------------------------------------------------------
   const clientToX = useCallback(
     (clientX: number): number => {
@@ -409,7 +453,7 @@ export function WorkbenchPlot({
       const px = ((clientX - rect.left) / rect.width) * boxW; // user-space px
       return vlo + ((px - X0) / XW) * vspan;
     },
-    [vlo, vspan, boxW, XW],
+    [vlo, vspan, boxW, X0, XW],
   );
 
   const startGrip = (which: "min" | "max") => (e: React.PointerEvent): void => {
@@ -467,6 +511,34 @@ export function WorkbenchPlot({
     setView({ min: Math.max(c - ns / 2, fullMin), max: Math.min(c + ns / 2, fullMax) });
   };
 
+  // Legend layout (see the render): measured from the label widths, wrapping
+  // onto extra rows on a narrow plot. The found-peak markers sit below it.
+  const legend = layoutLegend(
+    [
+      { color: color.obs, label: "obs", shape: "dot" },
+      { color: color.calc, label: "calc", shape: "line" },
+      { color: color.diff, label: "diff", shape: "line" },
+      { color: color.bkg, label: "bkg", shape: "dashline" },
+      // The ▽ "found" key leads the dynamic entries when found peaks exist.
+      ...(foundPeaks && foundPeaks.length > 0 ? [{ color: color.obs, label: "found", shape: "triangle" as const }] : []),
+      ...(overlays ?? []).map((o, i) => ({ color: OVERLAY_COLORS[i % OVERLAY_COLORS.length]!, label: o.label, shape: "dash" as const })),
+      // Overlays replace the generic "hkl" key only; explicit Bragg rows (the
+      // magnetic page draws its candidate over the pattern AND needs its tick
+      // rows named) stay in the legend. No Bragg rows on a signed-y (PDF) plot —
+      // the generic "hkl" key only applies where reflection ticks can render.
+      ...(phases && phases.length > 0
+        ? phases.map((p) => ({ color: p.color, label: p.label, shape: "tick" as const }))
+        : signedY || (overlays && overlays.length > 0)
+          ? []
+          : [{ color: color.hkl, label: "hkl", shape: "tick" as const }]),
+    ],
+    X0 + 6,
+    X1,
+    fsLabel,
+    ts,
+  );
+  const foundTop = FOUND_TOP + (legend.length ? legend[legend.length - 1]!.row : 0) * LEGEND_ROW * ts;
+
   const minPx = sx(Math.min(fullMax, Math.max(fullMin, fitLo)));
   const maxPx = sx(Math.min(fullMax, Math.max(fullMin, fitHi)));
 
@@ -490,7 +562,7 @@ export function WorkbenchPlot({
         {yTicks.map((v) => (
           <g key={v}>
             <line x1={X0 - 4} y1={sy(v)} x2={X0} y2={sy(v)} stroke="#c9c0b0" />
-            <text x={X0 - 7} y={sy(v) + 3} textAnchor="end" fontSize={9.5} fontFamily={mono} fill={color.faint}>
+            <text x={X0 - 7} y={sy(v) + 0.32 * fsTick} textAnchor="end" fontSize={fsTick} fontFamily={mono} fill={color.faint}>
               {formatY(v, yStep)}
             </text>
           </g>
@@ -499,20 +571,27 @@ export function WorkbenchPlot({
         {signedY && yLo < 0 && (
           <line x1={X0} y1={sy(0)} x2={X1} y2={sy(0)} stroke="#c9c0b0" strokeDasharray="4 4" opacity={0.6} />
         )}
-        <text x={16} y={(TOP + BASE) / 2} fontSize={10} fontFamily={mono} fill={color.faint} textAnchor="middle" transform={`rotate(-90 16 ${(TOP + BASE) / 2})`}>
+        <text x={16} y={(TOP + BASE) / 2} fontSize={fsTick} fontFamily={mono} fill={color.faint} textAnchor="middle" transform={`rotate(-90 16 ${(TOP + BASE) / 2})`}>
           {yLabel}
         </text>
 
         {/* x ticks */}
-        {xTicks.map((v) => (
-          <g key={v}>
-            <line x1={sx(v)} y1={BASE} x2={sx(v)} y2={BASE + 4} stroke="#c9c0b0" />
-            <text x={sx(v)} y={X_LABEL_Y} textAnchor="middle" fontSize={10} fontFamily={mono} fill={color.faint}>
-              {formatX(v, vspan)}
-            </text>
-          </g>
-        ))}
-        <text x={(X0 + X1) / 2} y={550} textAnchor="middle" fontSize={11} fontFamily={mono} fill={color.faint}>
+        {xTicks.map((v) => {
+          // A label centred on the last tick would run past the plot's right
+          // edge (the fit range often ends on a round number): pin it inside.
+          const label = formatX(v, vspan);
+          const half = (label.length * MONO_ADVANCE * fsTick) / 2;
+          const atEdge = sx(v) + half > boxW - 2;
+          return (
+            <g key={v}>
+              <line x1={sx(v)} y1={BASE} x2={sx(v)} y2={BASE + 4} stroke="#c9c0b0" />
+              <text x={atEdge ? boxW - 2 : sx(v)} y={X_LABEL_Y} textAnchor={atEdge ? "end" : "middle"} fontSize={fsTick} fontFamily={mono} fill={color.faint}>
+                {label}
+              </text>
+            </g>
+          );
+        })}
+        <text x={(X0 + X1) / 2} y={AXIS_TITLE_Y} textAnchor="middle" fontSize={fsLabel} fontFamily={mono} fill={color.faint}>
           {xLabel}
         </text>
 
@@ -536,7 +615,7 @@ export function WorkbenchPlot({
         {/* difference band */}
         <line x1={X0} y1={DIFF_Y} x2={X1} y2={DIFF_Y} stroke="#e0d8c9" strokeDasharray="4 3" />
         <polyline points={diffLine} fill="none" stroke={color.diff} strokeWidth={1} />
-        <text x={16} y={DIFF_Y} fontSize={10} fontFamily={mono} fill={color.faint} textAnchor="middle" transform={`rotate(-90 16 ${DIFF_Y})`}>
+        <text x={16} y={DIFF_Y} fontSize={fsTick} fontFamily={mono} fill={color.faint} textAnchor="middle" transform={`rotate(-90 16 ${DIFF_Y})`}>
           Difference
         </text>
 
@@ -557,12 +636,12 @@ export function WorkbenchPlot({
               return (
                 <g key={i}>
                   <path
-                    d={`M ${(px - FOUND_W).toFixed(1)} ${FOUND_TOP} L ${(px + FOUND_W).toFixed(1)} ${FOUND_TOP} L ${px.toFixed(1)} ${FOUND_TOP + FOUND_H} Z`}
+                    d={`M ${(px - FOUND_W).toFixed(1)} ${foundTop} L ${(px + FOUND_W).toFixed(1)} ${foundTop} L ${px.toFixed(1)} ${foundTop + FOUND_H} Z`}
                     fill={color.obs}
                     stroke={color.raised}
                     strokeWidth={0.8}
                   />
-                  <rect x={px - 6} y={FOUND_TOP - 2} width={12} height={FOUND_H + 6} fill="transparent">
+                  <rect x={px - 6} y={foundTop - 2} width={12} height={FOUND_H + 6} fill="transparent">
                     <title>{`found peak · d ${p.d.toFixed(3)} Å`}</title>
                   </rect>
                 </g>
@@ -590,7 +669,7 @@ export function WorkbenchPlot({
                 x={right ? hx - 8 : hx + 8}
                 y={TOP + 26}
                 textAnchor={right ? "end" : "start"}
-                fontSize={11}
+                fontSize={fsLabel}
                 fontFamily={mono}
                 fontWeight={600}
                 fill={color.ink}
@@ -653,58 +732,27 @@ export function WorkbenchPlot({
         )}
 
         {/* legend: the series, then one vertical-tick entry per phase row (the
-            phase legend) — or a generic "hkl" entry when no rows are supplied. */}
-        <g fontSize={11} fill={color.secondary} fontFamily={mono}>
-          <circle cx={X0 + 6} cy={24} r={2} fill={color.obs} />
-          <text x={X0 + 13} y={27}>obs</text>
-          <line x1={X0 + 40} y1={24} x2={X0 + 56} y2={24} stroke={color.calc} strokeWidth={1.6} />
-          <text x={X0 + 60} y={27}>calc</text>
-          <line x1={X0 + 88} y1={24} x2={X0 + 104} y2={24} stroke={color.diff} strokeWidth={1.6} />
-          <text x={X0 + 108} y={27}>diff</text>
-          <line x1={X0 + 134} y1={24} x2={X0 + 150} y2={24} stroke={color.bkg} strokeWidth={1.6} strokeDasharray="5 3" />
-          <text x={X0 + 154} y={27}>bkg</text>
-          {(() => {
-            // No Bragg rows on a signed-y (PDF) plot — the generic "hkl" key
-            // only applies where reflection ticks can render.
-            const phaseEntries = phases && phases.length > 0
-              ? phases.map((p) => ({ color: p.color, label: p.label, shape: "line" as const }))
-              : signedY
-                ? []
-                : [{ color: color.hkl, label: "hkl", shape: "line" as const }];
-            // The ▽ "found" key leads the dynamic entries when found peaks exist.
-            const entries = [
-              ...(foundPeaks && foundPeaks.length > 0
-                ? [{ color: color.obs, label: "found", shape: "triangle" as const }]
-                : []),
-              ...(overlays ?? []).map((o, i) => ({
-                color: OVERLAY_COLORS[i % OVERLAY_COLORS.length]!,
-                label: o.label,
-                shape: "dash" as const,
-              })),
-              // Overlays replace the generic "hkl" key only; explicit Bragg rows
-              // (the magnetic page draws its candidate over the pattern AND
-              // needs its tick rows named) stay in the legend.
-              ...(overlays && overlays.length > 0 && !(phases && phases.length > 0) ? [] : phaseEntries),
-            ];
-            let x = X0 + 182;
-            return entries.map((e, i) => {
-              const gx = x;
-              const swatchW = e.shape === "dash" ? 16 : 0;
-              x += 10 + swatchW + e.label.length * 6.6 + 16;
-              return (
-                <g key={i}>
-                  {e.shape === "triangle" ? (
-                    <path d={`M ${gx - 4} 20 L ${gx + 4} 20 L ${gx} 28 Z`} fill={e.color} />
-                  ) : e.shape === "dash" ? (
-                    <line x1={gx} y1={24} x2={gx + 14} y2={24} stroke={e.color} strokeWidth={1.6} />
-                  ) : (
-                    <line x1={gx} y1={19} x2={gx} y2={29} stroke={e.color} strokeWidth={2} />
-                  )}
-                  <text x={gx + (e.shape === "dash" ? 18 : 7)} y={27}>{e.label}</text>
-                </g>
-              );
-            });
-          })()}
+            phase legend) — or a generic "hkl" entry when no rows are supplied.
+            Entries are laid out from their own label widths (so the swatch of
+            one never butts against the label of the last) and wrap onto a new
+            row when a narrow plot runs out of width. */}
+        <g fontSize={fsLabel} fill={color.secondary} fontFamily={mono}>
+          {legend.map((e, i) => (
+            <g key={i}>
+              {e.shape === "dot" ? (
+                <circle cx={e.x + 2} cy={e.cy} r={2} fill={e.color} />
+              ) : e.shape === "triangle" ? (
+                <path d={`M ${e.x} ${e.cy - 4} L ${e.x + 8} ${e.cy - 4} L ${e.x + 4} ${e.cy + 4} Z`} fill={e.color} />
+              ) : e.shape === "tick" ? (
+                <line x1={e.x + 1} y1={e.cy - 5} x2={e.x + 1} y2={e.cy + 5} stroke={e.color} strokeWidth={2} />
+              ) : (
+                <line x1={e.x} y1={e.cy} x2={e.x + e.swatch} y2={e.cy} stroke={e.color} strokeWidth={1.6} {...(e.shape === "dashline" ? { strokeDasharray: "5 3" } : {})} />
+              )}
+              {/* A halo in the plot's background keeps a label legible where a
+                  fit handle or a tall peak runs through the legend row. */}
+              <text x={e.x + e.swatch + 5} y={e.cy + 0.3 * fsLabel} stroke={color.raised} strokeWidth={3} paintOrder="stroke">{e.label}</text>
+            </g>
+          ))}
         </g>
       </svg>
       {/* corner overlays (HTML on top of the SVG). wR lives in the
@@ -726,6 +774,37 @@ export function WorkbenchPlot({
       )}
     </div>
   );
+}
+
+type LegendShape = "dot" | "line" | "dashline" | "tick" | "triangle" | "dash";
+
+/**
+ * Place legend entries left to right from their label widths (monospace, so
+ * the width is exact), starting a new row whenever the next entry would cross
+ * `right` — a phone-width plot wraps instead of running off the edge.
+ */
+function layoutLegend(
+  entries: readonly { readonly color: string; readonly label: string; readonly shape: LegendShape }[],
+  left: number,
+  right: number,
+  fontSize: number,
+  typeScale: number,
+): { color: string; label: string; shape: LegendShape; x: number; cy: number; row: number; swatch: number }[] {
+  const swatchW = (shape: LegendShape): number =>
+    shape === "line" || shape === "dashline" || shape === "dash" ? 16 : shape === "dot" ? 4 : shape === "triangle" ? 8 : 2;
+  let x = left;
+  let row = 0;
+  return entries.map((e, i) => {
+    const swatch = swatchW(e.shape);
+    const w = swatch + 5 + e.label.length * MONO_ADVANCE * fontSize;
+    if (i > 0 && x + w > right) {
+      x = left;
+      row += 1;
+    }
+    const placed = { ...e, x, cy: LEGEND_Y + row * LEGEND_ROW * typeScale, row, swatch };
+    x += w + 14;
+    return placed;
+  });
 }
 
 function SmallButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }): JSX.Element {
