@@ -141,10 +141,12 @@ exists it reads **Escape min ↻**: a few restarts around the fit, for when
 The **History** card under the parameters lists the steps of the session:
 each refinement, each load, each magnetic-model change and each reset. Changes
 made since the last step (freed parameters, edited values, settings) become an
-**Edit** step when the next refinement starts.
+**Edit** step when the next refinement starts. The newest step is at the top,
+with its wR. The card keeps one small height; scroll it for older steps.
 
 - Click a step to go back to it. Nothing is lost: if you then refine, the new
-  steps form a branch, and **other branches** lists the old ones.
+  steps form a branch, and **other branches**, below the steps, lists the old
+  ones.
 - ⌘Z / Ctrl+Z steps back and ⇧⌘Z / Ctrl+Shift+Z steps forward, except inside a
   text field.
 - ✎ names a step, such as "before ADPs".
@@ -414,10 +416,10 @@ Never judge a fit by its R value alone. The definitions are in
   jump to the peak.
 - **Normal probability**: a straight line with slope 1 and intercept 0 means
   both the model and the uncertainties are right.
-- **Result:**, in the panel footer, gives the status and cycles. A note may
-  follow: **SVD dropped** (undetermined combinations, whose esds mean nothing),
-  **High correlation:** (consider fixing one) or **At bound:**.
-  **Refinement history** lists χ² and wR per cycle.
+- **Result:**, in the panel footer, gives the status and cycles. Click it to
+  list χ² and wR per cycle. A note may follow: **SVD dropped** (undetermined
+  combinations, whose esds mean nothing), **High correlation:** (consider
+  fixing one) or **At bound:**.
 - **Largest outliers · (Fo²−Fc²)/σ**, on the single-crystal page, lists the
   worst reflections.
 - **Bond lengths**, in any 3D model, labels the bonds. **View** with a, b or c

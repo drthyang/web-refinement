@@ -328,10 +328,30 @@ function ResultBanner({ result }: { result: RefinementResult }): JSX.Element {
   const hasDiag = d !== undefined && (d.svdZeroCount > 0 || d.highCorrelations.length > 0 || d.atBounds.length > 0);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {/* wR lives on the pattern plot (one readout per page); GoF in the quality rail. */}
-      <div style={{ ...banner, background: color.okBg, border: `1px solid ${color.okBorder}`, color: color.okInk }}>
-        Result: {result.status} · {result.history.length} cycle{result.history.length === 1 ? "" : "s"}
-      </div>
+      {/* The status line opens the per-cycle table: one line, not two, so the
+          footer takes less from the parameter list above.
+          wR lives on the pattern plot (one readout per page); GoF in the quality rail. */}
+      <details style={{ fontSize: 11.5, color: color.secondary }}>
+        <summary style={{ ...banner, background: color.okBg, border: `1px solid ${color.okBorder}`, color: color.okInk, cursor: "pointer" }} title="Show the χ² and wR of each cycle">
+          Result: {result.status} · {result.history.length} cycle{result.history.length === 1 ? "" : "s"}
+        </summary>
+        {/* Capped and scrolling: opened on a long refinement, the table would
+            otherwise grow the footer and squeeze the parameter list above. */}
+        <div style={cycleTableBox}>
+          <table style={{ fontSize: 11, fontFamily: mono, borderCollapse: "collapse" }}>
+            <thead><tr><th style={hhead}>cycle</th><th style={hhead}>χ²</th><th style={hhead}>wR %</th></tr></thead>
+            <tbody>
+              {result.history.map((h) => (
+                <tr key={h.iteration}>
+                  <td style={hcell}>{h.iteration}</td>
+                  <td style={hcell}>{h.chiSquared.toPrecision(4)}</td>
+                  <td style={hcell}>{(100 * (h.agreement.rWeighted ?? 0)).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
       {hasDiag && d && (
         <div style={{ ...banner, background: color.noteBg, border: `1px solid ${color.noteBorder}`, color: color.noteInk }}>
           {d.svdZeroCount > 0 && <div>SVD dropped {d.svdZeroCount} near-null direction{d.svdZeroCount === 1 ? "" : "s"}.</div>}
@@ -339,21 +359,6 @@ function ResultBanner({ result }: { result: RefinementResult }): JSX.Element {
           {d.atBounds.length > 0 && <div>At bound: {d.atBounds.map((b) => b.parameterId).join(", ")}.</div>}
         </div>
       )}
-      <details style={{ fontSize: 11.5, color: color.secondary }}>
-        <summary style={{ cursor: "pointer" }}>Refinement history ({result.history.length} cycles)</summary>
-        <table style={{ fontSize: 11, marginTop: 4, fontFamily: mono, borderCollapse: "collapse" }}>
-          <thead><tr><th style={hcell}>cycle</th><th style={hcell}>χ²</th><th style={hcell}>wR %</th></tr></thead>
-          <tbody>
-            {result.history.map((h) => (
-              <tr key={h.iteration}>
-                <td style={hcell}>{h.iteration}</td>
-                <td style={hcell}>{h.chiSquared.toPrecision(4)}</td>
-                <td style={hcell}>{(100 * (h.agreement.rWeighted ?? 0)).toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
     </div>
   );
 }
@@ -369,6 +374,9 @@ const frameworkBar: CSSProperties = { display: "flex", alignItems: "center", gap
 const footer: CSSProperties = { borderTop: `1px solid ${color.border}`, padding: `12px ${space.inset}`, background: color.muted2, display: "flex", flexDirection: "column", gap: 8 };
 const banner: CSSProperties = { borderRadius: 8, padding: "6px 10px", fontSize: 12 };
 const hcell: CSSProperties = { padding: "1px 10px 1px 0", textAlign: "left", color: color.faint };
+const hhead: CSSProperties = { ...hcell, position: "sticky", top: 0, background: color.muted2 };
+// The header plus about four cycles; longer runs scroll under the sticky header.
+const cycleTableBox: CSSProperties = { marginTop: 4, maxHeight: 84, overflowY: "auto" };
 const disabledStyle: CSSProperties = { opacity: 0.55, cursor: "not-allowed" };
 const cancelButton: CSSProperties = { padding: "11px 15px", fontSize: 13.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${color.warnBorder}`, background: color.warnBg, color: color.warnInk, cursor: "pointer" };
 // While refining, keep the button vivid (so the shimmer reads) but show progress.
