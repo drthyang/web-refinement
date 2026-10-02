@@ -18,7 +18,6 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { downloadText, downloadBlob } from "@/app/download";
-import { HistoryPanel } from "@/app/ui/HistoryPanel";
 import type { HistoryBinding } from "@/app/historyBinding";
 import { refinementBundle, type RefinementBundleOptions } from "@/core/export/bundle";
 import { zipStore } from "@/core/export/zip";
@@ -53,6 +52,7 @@ import { useOnChange } from "@/app/useOnChange";
 import { withAdpModel } from "@/core/crystal/adp";
 import { momentEntriesFrom } from "@/app/ui/cellModel";
 import { detectExtraPeaks, annotateExtraPeaks, type ExtraPeak } from "@/core/magnetic/extraPeaks";
+import { momentKickFloor } from "@/core/magnetic/canonicalize";
 import { powderReflectionObsCalc, type ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import { normalProbabilityPlot, weightedResiduals } from "@/core/refinement/diagnostics";
 import { QualityPlots } from "@/app/ui/QualityPlots";
@@ -834,7 +834,7 @@ export function PowderWorkbench({
       // net (more restarts); Escape is a lighter nudge around a converged fit.
       if (magneticApplied) {
         await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
-        const msOptions = mode === "prefit" ? { restarts: 12 } : { restarts: 6, escapeSigma: 3 };
+        const msOptions = mode === "prefit" ? { restarts: 12, minKick: momentKickFloor(powderParams) } : { restarts: 6, escapeSigma: 3 };
         const ms = await client.refineMagneticPowderMultiStart({
           structure, magnetic: session.magnetic!, pattern, parameters: [...powderParams], bindings: [...pBindings],
           ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
@@ -1530,9 +1530,9 @@ export function PowderWorkbench({
                   </>
                 )}
               </div>
-              {/* The right column: parameters above, the step history below. */}
-              {/* min-height comes from `.wb-work2 > *` (0 wide, a floor when stacked). */}
-              <div style={{ display: "flex", flexDirection: "column", gap: space.gap }}>
+              {/* The right column is the parameter card alone: the step history
+                  is the header's History menu, so a long parameter list keeps
+                  the whole column. */}
               <ParameterPanel
                 params={powderParams}
                 esd={powderResult?.esd}
@@ -1589,8 +1589,6 @@ export function PowderWorkbench({
                   ),
                 }}
               />
-              {stepHistory && <HistoryPanel binding={stepHistory} />}
-              </div>
             </div>
           </>
         );

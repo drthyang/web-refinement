@@ -480,6 +480,12 @@ export function App(): JSX.Element {
       setScNuclearDataset(null);
       setPdfDataset(null);
       setPowderResult(null);
+      // The demo's fit window rides the project-open view restore, which the
+      // powder page applies after its pattern-change reset.
+      setRestore((prev) => {
+        const token = prev.token + 1;
+        return { token, powderView: { fitRange: ex.fitRange, displayUnit: null, manualPeakD: [], token } };
+      });
       setStep(0);
       setDemo("rietveld");
       setMessage("Loaded the bundled Mn₃Ga + MnO POWGEN demo (two-phase TOF, converged fit).");
@@ -1049,6 +1055,7 @@ export function App(): JSX.Element {
         onOpenProject={onOpenProject}
         {...(hasContent ? { onSaveProject } : {})}
         gpu={{ enabled: gpuEnabled, onChange: setGpu }}
+        {...(hasContent ? { history: stepHistory } : {})}
       />
       {notice && (
         <div role="alert" style={noticeBar}>

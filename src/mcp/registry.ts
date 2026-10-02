@@ -285,13 +285,15 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "refine_magnetic_powder",
     title: "Refine nuclear + magnetic (staged)",
-    description: "Co-refine nuclear + magnetic against a powder pattern. Staged by default: scale + background converge with moments and profile held, then everything requested is freed — a flat co-refinement from a poor moment start can collapse the scale against exploding moments. Combine the nuclear parameters/bindings from build_refinement with the moment set from build_magnetic_model. Returns the result, the refined `parameters` (ready for the next call), the refined magnetic model, and separated nuclear/magnetic component curves.",
+    description: "Co-refine nuclear + magnetic against a powder pattern. Staged by default: scale + background converge with moments and profile held, then everything requested is freed — a flat co-refinement from a poor moment start can collapse the scale against exploding moments. Combine the nuclear parameters/bindings from build_refinement with the moment set from build_magnetic_model. Returns the result, the refined `parameters` (ready for the next call), the refined magnetic model, and separated nuclear/magnetic component curves. The moments have several local minima (magnetic intensity is quadratic in them), so a single run can land in the wrong one: pass `restarts` (e.g. 12) to restart the moments from kicked starts on the frozen nuclear model first; `multiStart` then reports the costs, the ±m-canonical answer, and any poorly determined moment directions.",
     inputSchema: {
       structure: anyObj, magnetic: anyObj, pattern: anyObj,
       parameters: anyArr.describe("Nuclear + moment parameters (set fixed:false on what refines)"),
       bindings: anyArr, profile: anyObj,
       staged: z.boolean().optional(),
       maxIterations: z.number().int().min(1).max(200).optional(),
+      restarts: z.number().int().min(0).max(40).optional().describe("Moment restarts before the joint solve (default 0). Use it when choosing between magnetic groups or when the moments look odd: one LM run lands in the nearest of several moment minima"),
+      seed: z.number().int().optional().describe("Seed for the restart kicks (reproducible runs)"),
     },
     selectsFree: true,
     handler: tools.refine_magnetic_powder,

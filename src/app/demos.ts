@@ -25,7 +25,7 @@ export const DEMOS: readonly DemoEntry[] = [
     label: "Rietveld · Mn₃Ga neutron TOF",
     kicker: "Rietveld · reciprocal space",
     title: "Mn₃Ga neutron TOF",
-    blurb: "Two-phase POWGEN fit at 600 K (paramagnetic, with a MnO impurity) · wR 3.9%",
+    blurb: "Two-phase POWGEN fit at 600 K (paramagnetic, with a MnO impurity) · wR 4.0%",
   },
   {
     id: "magnetic",

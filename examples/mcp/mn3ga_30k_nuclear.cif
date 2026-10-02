@@ -1,0 +1,28 @@
+# Mn3Ga at 30 K: the nuclear part of the P2_1'/m' magnetic structure in
+# src/examples/mn3gaMagnetic.ts (GSAS-II validation data), without moments.
+data_Mn3Ga_30K_nuclear
+_cell_length_a 5.42006
+_cell_length_b 4.33961
+_cell_length_c 5.32237
+_cell_angle_alpha 90.0000
+_cell_angle_beta 60.6939
+_cell_angle_gamma 90.0000
+_symmetry_space_group_name_H-M 'P 1 21/m 1'
+loop_
+_space_group_symop_operation_xyz
+'x,y,z'
+'-x,y+1/2,-z'
+'-x,-y,-z'
+'x,-y+1/2,z'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_U_iso_or_equiv
+Mn1_0 Mn 0.34332 0.25000 0.83329 0.9940 0.00400
+Mn2_1 Mn 0.84235 0.25000 0.33484 0.9890 0.00400
+Mn3_2 Mn 0.84395 0.25000 0.83426 0.9830 0.00200
+Ga1 Ga 0.33884 0.25000 0.32892 1.0050 0.00200

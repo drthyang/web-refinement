@@ -12,7 +12,6 @@
 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, useCallback } from "react";
 import type { HistoryBinding } from "@/app/historyBinding";
-import { HistoryPanel } from "@/app/ui/HistoryPanel";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { SingleCrystalWorkspace } from "@/core/project/types";
 import { modulatedInputsFrom, restoreMomentBindings, restoreSingleCrystalParameters, singleCrystalWorkspaceFrom } from "@/app/projectIo";
@@ -733,9 +732,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           </div>
         </div>
 
-        {/* Parameters — the shared collapsible panel, single-crystal actions —
-            with the step history under it. */}
-        <div style={{ display: "flex", flexDirection: "column", gap: space.gap }}>
+        {/* Parameters — the shared collapsible panel, single-crystal actions. */}
         <ParameterPanel
           params={params}
           esd={result?.esd}
@@ -750,8 +747,6 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           title="Single-crystal parameters"
           extraActions={refineActions}
         />
-        {stepHistory && <HistoryPanel binding={stepHistory} />}
-        </div>
 
         {/* Magnetic single-k supercell refinement. Self-contained: expands the
             base structure, merges the nuclear + magnetic files into the

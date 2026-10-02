@@ -55,6 +55,17 @@ describe("RefStore / resolveRefs / buildView", () => {
     expect(resolveRefs({ ref: "hello" }, store)).toEqual({ ref: "hello" });
   });
 
+  it("inside a list, a ref to a list of records is spliced in — anything else stays one item", () => {
+    const store = new RefStore();
+    store.put({ parameters: [{ id: "scale" }, { id: "bkg0" }], structure: { sites: [] }, k: [0.5, 0, 0] });
+    store.put({ parameters: [{ id: "mom_Mn1_0" }] });
+    expect(resolveRefs([{ ref: "#1/parameters" }, { ref: "#2/parameters" }, { id: "zero" }], store))
+      .toEqual([{ id: "scale" }, { id: "bkg0" }, { id: "mom_Mn1_0" }, { id: "zero" }]);
+    expect(resolveRefs([{ ref: "#1/structure" }], store)).toEqual([{ sites: [] }]); // one extra phase
+    expect(resolveRefs([{ ref: "#1/k" }, [0, 0, 0]], store)).toEqual([[0.5, 0, 0], [0, 0, 0]]); // k-vectors stay vectors
+    expect(resolveRefs({ ref: "#1/parameters" }, store)).toEqual([{ id: "scale" }, { id: "bkg0" }]); // a whole-value ref as before
+  });
+
   it("evicts the least recently used call, and reading refreshes it", () => {
     const store = new RefStore(2);
     store.put(1);

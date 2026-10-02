@@ -10,7 +10,6 @@
  */
 
 import type { HistoryBinding } from "@/app/historyBinding";
-import { HistoryPanel } from "@/app/ui/HistoryPanel";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { PdfWorkspace } from "@/core/project/types";
@@ -1741,8 +1740,6 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           )}
         </div>
 
-        {/* Parameters, with the step history under them. */}
-        <div style={{ display: "flex", flexDirection: "column", gap: space.gap }}>
         <ParameterPanel
           params={params}
           esd={result?.esd}
@@ -1848,8 +1845,6 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                 )
           }
         />
-        {stepHistory && <HistoryPanel binding={stepHistory} />}
-        </div>
       </div>
       </div>
 
