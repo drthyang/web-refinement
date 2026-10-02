@@ -84,6 +84,14 @@ interface Props {
    * clipped to the fit window, coloured from a fixed muted palette.
    */
   readonly overlays?: readonly { readonly label: string; readonly y: readonly number[] }[];
+  /**
+   * Standard uncertainty of each observed point (aligned with `curves.x`):
+   * drawn as a ±σ error RIBBON around the observations, and included in the
+   * y auto-scale so the ribbon is never clipped. Omit for no ribbon.
+   */
+  readonly obsSigma?: readonly number[];
+  /** Legend label for the ribbon (e.g. "±σ propagated"); default "±σ". */
+  readonly obsSigmaLabel?: string;
 }
 
 /** Muted overlay palette — distinct from the obs/calc/diff/bkg series inks. */
@@ -191,6 +199,8 @@ export function WorkbenchPlot({
   signedY = false,
   yLabel = "Intensity (a.u.)",
   overlays,
+  obsSigma,
+  obsSigmaLabel = "±σ",
 }: Props): JSX.Element {
   const svgRef = useRef<SVGSVGElement>(null);
   const draggingGrip = useRef(false);
@@ -274,8 +284,9 @@ export function WorkbenchPlot({
   let yLo = 0;
   for (let i = 0; i < xs.length; i++) {
     if (xs[i]! >= vlo && xs[i]! <= vhi) {
-      yTop = Math.max(yTop, yObs[i]!);
-      if (signedY) yLo = Math.min(yLo, yObs[i]!);
+      const sd = obsSigma?.[i] ?? 0;
+      yTop = Math.max(yTop, yObs[i]! + sd);
+      if (signedY) yLo = Math.min(yLo, yObs[i]! - sd);
     }
   }
   if (!Number.isFinite(yTop)) yTop = 1;
@@ -347,6 +358,26 @@ export function WorkbenchPlot({
     }
     return out;
   }, [xs, yObs, vlo, vhi, vspan, yTop, yLo, X0, XW, BASE, MAINH]);
+
+  // The ±σ ribbon: one closed path, upper edge left→right then lower edge back.
+  // Memoized on the same stable inputs as the markers (σ never changes during
+  // a refinement), so the live calc update never rebuilds it.
+  const sigmaRibbon = useMemo(() => {
+    if (!obsSigma || obsSigma.length !== xs.length) return null;
+    const mx = (x: number): number => X0 + ((x - vlo) / vspan) * XW;
+    const my = (y: number): number => BASE - ((Math.min(Math.max(y, yLo), yTop) - yLo) / (yTop - yLo || 1)) * MAINH;
+    const upper: string[] = [];
+    const lower: string[] = [];
+    for (let i = 0; i < xs.length; i++) {
+      const x = xs[i]!;
+      if (x < vlo || x > vhi) continue;
+      const sd = obsSigma[i] ?? 0;
+      upper.push(`${mx(x).toFixed(1)},${my(yObs[i]! + sd).toFixed(1)}`);
+      lower.push(`${mx(x).toFixed(1)},${my(yObs[i]! - sd).toFixed(1)}`);
+    }
+    if (upper.length < 2) return null;
+    return `M ${upper.join(" L ")} L ${lower.reverse().join(" L ")} Z`;
+  }, [obsSigma, xs, yObs, vlo, vhi, vspan, yTop, yLo, X0, XW, BASE, MAINH]);
 
   // The single selected reflection (from a scatter-point OR a Bragg-tick click):
   // locate its Bragg tick so we can spotlight that peak. Prefer the row whose
@@ -516,6 +547,7 @@ export function WorkbenchPlot({
   const legend = layoutLegend(
     [
       { color: color.obs, label: "obs", shape: "dot" },
+      ...(sigmaRibbon ? [{ color: color.obs, label: obsSigmaLabel, shape: "band" as const }] : []),
       { color: color.calc, label: "calc", shape: "line" },
       { color: color.diff, label: "diff", shape: "line" },
       { color: color.bkg, label: "bkg", shape: "dashline" },
@@ -595,6 +627,8 @@ export function WorkbenchPlot({
           {xLabel}
         </text>
 
+        {/* ±σ error ribbon, under the observed markers */}
+        {sigmaRibbon && <path d={sigmaRibbon} fill={color.obs} fillOpacity={0.18} stroke="none" />}
         {/* observed markers (memoized — see obsMarkers) */}
         {obsMarkers}
         {/* decomposition overlays (e.g. partial PDFs), under the calc line */}
@@ -743,6 +777,8 @@ export function WorkbenchPlot({
                 <circle cx={e.x + 2} cy={e.cy} r={2} fill={e.color} />
               ) : e.shape === "triangle" ? (
                 <path d={`M ${e.x} ${e.cy - 4} L ${e.x + 8} ${e.cy - 4} L ${e.x + 4} ${e.cy + 4} Z`} fill={e.color} />
+              ) : e.shape === "band" ? (
+                <rect x={e.x} y={e.cy - 4} width={e.swatch} height={8} fill={e.color} fillOpacity={0.25} />
               ) : e.shape === "tick" ? (
                 <line x1={e.x + 1} y1={e.cy - 5} x2={e.x + 1} y2={e.cy + 5} stroke={e.color} strokeWidth={2} />
               ) : (
@@ -776,7 +812,7 @@ export function WorkbenchPlot({
   );
 }
 
-type LegendShape = "dot" | "line" | "dashline" | "tick" | "triangle" | "dash";
+type LegendShape = "dot" | "line" | "dashline" | "tick" | "triangle" | "dash" | "band";
 
 /**
  * Place legend entries left to right from their label widths (monospace, so
@@ -791,7 +827,7 @@ function layoutLegend(
   typeScale: number,
 ): { color: string; label: string; shape: LegendShape; x: number; cy: number; row: number; swatch: number }[] {
   const swatchW = (shape: LegendShape): number =>
-    shape === "line" || shape === "dashline" || shape === "dash" ? 16 : shape === "dot" ? 4 : shape === "triangle" ? 8 : 2;
+    shape === "line" || shape === "dashline" || shape === "dash" ? 16 : shape === "band" ? 12 : shape === "dot" ? 4 : shape === "triangle" ? 8 : 2;
   let x = left;
   let row = 0;
   return entries.map((e, i) => {
