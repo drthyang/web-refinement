@@ -49,6 +49,7 @@ import { PowderWorkbench } from "@/app/PowderWorkbench";
 import { SingleCrystalWorkbench } from "@/app/SingleCrystalWorkbench";
 import { PdfWorkbench } from "@/app/PdfWorkbench";
 import { WorkbenchHeader, type Step, type ExportAction } from "@/app/ui/WorkbenchHeader";
+import { WorkbenchErrorBoundary } from "@/app/ui/WorkbenchErrorBoundary";
 import { color as theme, space } from "@/app/theme";
 import {
   type Session,
@@ -1121,6 +1122,7 @@ export function App(): JSX.Element {
       {/* The powder engine stays mounted in single-crystal mode (hidden) so all
           its state — fit range, plot mode, k-search picks — survives switching.
           On a clean start it renders its load cards + an empty-state placeholder. */}
+      <WorkbenchErrorBoundary resetKeys={[session]} visible={!scDataset && !pdfDataset} onClear={clearWorkbench}>
       <PowderWorkbench
         session={session}
         setSession={setSession}
@@ -1150,19 +1152,24 @@ export function App(): JSX.Element {
         {...(restore.powderView ? { viewRestore: restore.powderView } : {})}
         stepHistory={stepHistory}
       />
+      </WorkbenchErrorBoundary>
       {pdfDataset && (
         // PDF mode (auto-switched on loading a reduced .gr). Keyed on the dataset
         // id so a new file remounts with a fresh parameter set.
+        <WorkbenchErrorBoundary resetKeys={[pdfDataset, structure, session.extraPhases, restore.token]} onClear={clearWorkbench}>
         <main className="wb-main" style={{ flex: 1 }}>
           <PdfWorkbench onMagneticPresent={setPdfMagnetic} key={`${pdfDataset.id}#${restore.token}`} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} {...(restore.pdf ? { restore: restore.pdf } : {})} stepHistory={stepHistory} />
         </main>
+        </WorkbenchErrorBoundary>
       )}
       {scDataset && (
         // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
         // the dataset id so a new file remounts with a fresh parameter set.
+        <WorkbenchErrorBoundary resetKeys={[scDataset, scMagneticDataset, structure, restore.token]} onClear={clearWorkbench}>
         <main className="wb-main" style={{ flex: 1 }}>
           <SingleCrystalWorkbench onMagneticPresent={setScMagnetic} key={`${scDataset.id}#${restore.token}`} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} {...(restore.singleCrystal ? { restore: restore.singleCrystal } : {})} stepHistory={stepHistory} />
         </main>
+        </WorkbenchErrorBoundary>
       )}
       <footer className="wb-footer" style={copyrightBar}>
         <span>© 2026 Tsung-Han Yang</span>

@@ -29,9 +29,9 @@ function transformIndices(rot: Mat3, h: number, k: number, l: number): Vec3 {
 }
 
 // Pack a Miller index triple into one integer for fast Set membership.
-// Safe for |index| < 512, which far exceeds any powder loop bound.
-const PACK_OFFSET = 512;
-const PACK_BASE = 1024;
+// Safe for |index| < 2048 — generateReflections refuses larger index ranges.
+const PACK_OFFSET = 2048;
+const PACK_BASE = 4096;
 function pack(h: number, k: number, l: number): number {
   return ((h + PACK_OFFSET) * PACK_BASE + (k + PACK_OFFSET)) * PACK_BASE + (l + PACK_OFFSET);
 }
@@ -77,6 +77,24 @@ function reflectionCacheKey(cell: UnitCell, sg: SpaceGroup, dMin: number, dMax: 
   return `${cell.a},${cell.b},${cell.c},${cell.alpha},${cell.beta},${cell.gamma}|${dMin},${dMax}|${sg.operations.length}|${sg.hermannMauguin ?? ""}|${absences ? "" : "noabs"}`;
 }
 
+/** Upper limit on the Miller-index box the enumeration scans (cells). */
+export const MAX_INDEX_BOX = 60_000_000;
+/** Upper limit on the reflection families returned. */
+export const MAX_REFLECTION_FAMILIES = 300_000;
+
+/**
+ * The reflection list would be too large to enumerate — a cell or d-range
+ * that is wrong (a typo such as 54.2 → 542 Å, a diverged refinement) or far
+ * outside what this tool targets. The list is never truncated instead: a
+ * truncated list silently drops reflections and gives a wrong pattern.
+ */
+export class ReflectionLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReflectionLimitError";
+  }
+}
+
 /**
  * Generate unique powder reflection families with dMin ≤ d ≤ dMax.
  * Sorted by decreasing d (increasing |Q|).
@@ -92,6 +110,12 @@ function reflectionCacheKey(cell: UnitCell, sg: SpaceGroup, dMin: number, dMax: 
  * FeCoSn 1.7 K) the (0,0,½)′ op looks like a nuclear centring, yet every
  * magnetic satellite lives exactly at those l-odd "absent" positions —
  * filtering them silently deletes the entire magnetic signal.
+ *
+ * Completeness: the index search is exact — h = a·g with |g| ≤ 1/dMin, so
+ * |h| ≤ ⌊a/dMin⌋ (and likewise k, l). The list is never truncated: a cell and
+ * range needing more than {@link MAX_INDEX_BOX} index cells, an index of 2048
+ * or more, or more than {@link MAX_REFLECTION_FAMILIES} families throw a
+ * {@link ReflectionLimitError}.
  */
 export function generateReflections(
   cell: UnitCell,
@@ -111,36 +135,57 @@ export function generateReflections(
   const invDMax2 = 1 / (dMax * dMax); // lower bound on 1/d²
   const invDMin2 = 1 / (dMin * dMin); // upper bound on 1/d²
 
-  // Miller-index search half-width. Capped so an unreasonable cell edge (a typo
-  // like 54.2→542, or a diverged refinement value) cannot blow the triple loop
-  // up to astronomical size and freeze the thread. NMAX_CAP=160 covers cells up
-  // to ~80 Å at dMin=0.5 — far beyond any inorganic powder this tool targets.
-  const NMAX_CAP = 120;
-  const MAX_REFLECTIONS = 12000; // a physical powder cell yields far fewer
-  const nMax = Math.min(NMAX_CAP, Math.ceil(Math.max(cell.a, cell.b, cell.c) / dMin) + 1);
-  const seen = new Set<number>(); // every individual (hkl) already assigned to a family
+  // Exact Miller-index half-widths: h = a·g and |g| ≤ 1/dMin ⇒ |h| ≤ a/dMin.
+  const nH = Math.floor(cell.a / dMin + 1e-9);
+  const nK = Math.floor(cell.b / dMin + 1e-9);
+  const nL = Math.floor(cell.c / dMin + 1e-9);
+  const spanH = 2 * nH + 1;
+  const spanK = 2 * nK + 1;
+  const spanL = 2 * nL + 1;
+  const box = spanH * spanK * spanL;
+  const tooLarge = (why: string): ReflectionLimitError =>
+    new ReflectionLimitError(
+      `Reflection list too large for d ≥ ${+dMin.toPrecision(4)} Å with a = ${cell.a}, b = ${cell.b}, c = ${cell.c} Å: ${why}. ` +
+        `Check the cell, or raise d_min.`,
+    );
+  if (Math.max(nH, nK, nL) >= PACK_OFFSET) throw tooLarge(`Miller indices up to ${Math.max(nH, nK, nL)} (limit ${PACK_OFFSET - 1})`);
+  if (!(box <= MAX_INDEX_BOX)) throw tooLarge(`${box.toExponential(2)} index triples to scan (limit ${MAX_INDEX_BOX.toExponential(0)})`);
+
+  // Every (hkl) already assigned to a family, as one bit per cell of the index
+  // box: symmetry-equivalent reflections share d, so they stay inside it.
+  const seen = new Uint8Array(Math.ceil(box / 8));
+  const cellIndex = (h: number, k: number, l: number): number => ((h + nH) * spanK + (k + nK)) * spanL + (l + nL);
+  const inBox = (h: number, k: number, l: number): boolean => Math.abs(h) <= nH && Math.abs(k) <= nK && Math.abs(l) <= nL;
   const reflections: Reflection[] = [];
 
-  outer: for (let h = -nMax; h <= nMax; h++) {
-    for (let k = -nMax; k <= nMax; k++) {
-      for (let l = -nMax; l <= nMax; l++) {
+  for (let h = -nH; h <= nH; h++) {
+    for (let k = -nK; k <= nK; k++) {
+      for (let l = -nL; l <= nL; l++) {
         if (h === 0 && k === 0 && l === 0) continue;
-        if (seen.has(pack(h, k, l))) continue; // family already emitted — cheap skip
+        const idx = cellIndex(h, k, l);
+        if (seen[idx >> 3]! & (1 << (idx & 7))) continue; // family already emitted — cheap skip
         const invd2 = A.a11 * h * h + A.a22 * k * k + A.a33 * l * l + A.a12 * h * k + A.a13 * h * l + A.a23 * k * l;
         if (invd2 < invDMax2 || invd2 > invDMin2) continue;
 
         // First time we meet this family: expand once, mark all members seen.
         const family = equivalentPacked(sg, h, k, l);
-        for (const p of family) seen.add(p);
+        for (const p of family) {
+          const mh = Math.floor(p / (PACK_BASE * PACK_BASE)) - PACK_OFFSET;
+          const mk = (Math.floor(p / PACK_BASE) % PACK_BASE) - PACK_OFFSET;
+          const ml = (p % PACK_BASE) - PACK_OFFSET;
+          if (!inBox(mh, mk, ml)) continue; // a metric that breaks the symmetry slightly
+          const j = cellIndex(mh, mk, ml);
+          seen[j >> 3] = seen[j >> 3]! | (1 << (j & 7));
+        }
         const rep = canonicalPacked(family);
         if (absences && isReflectionAbsent(sg.operations, rep.h, rep.k, rep.l)) continue;
 
         const repInvd2 = A.a11 * rep.h * rep.h + A.a22 * rep.k * rep.k + A.a33 * rep.l * rep.l + A.a12 * rep.h * rep.k + A.a13 * rep.h * rep.l + A.a23 * rep.k * rep.l;
         const d = 1 / Math.sqrt(repInvd2);
         reflections.push({ h: rep.h, k: rep.k, l: rep.l, d, q: (2 * Math.PI) / d, multiplicity: family.size });
-        // Bail out on a pathological cell (a typo/diverged value) rather than
-        // grinding through an enormous reciprocal shell and freezing the thread.
-        if (reflections.length >= MAX_REFLECTIONS) break outer;
+        if (reflections.length > MAX_REFLECTION_FAMILIES) {
+          throw tooLarge(`more than ${MAX_REFLECTION_FAMILIES} reflection families`);
+        }
       }
     }
   }

@@ -173,6 +173,11 @@ approximate, however plausible its output looks.
 ## Powder diffraction
 
 **Supported**
+- Reflection lists are complete: every (hkl) with d ≥ d_min, found with exact
+  per-axis index bounds (|h| ≤ a/d_min). A list is never truncated; a cell and
+  range needing more than 300 000 reflection families (or 6×10⁷ index triples,
+  or an index above 2047) is an error naming the cell, as a typo'd or diverged
+  cell usually is.
 - Constant-wavelength peaks: Gaussian or pseudo-Voigt, with Caglioti U/V/W
   widths, a Thompson–Cox–Hastings Lorentzian size/strain term, and
   Finger–Cox–Jephcoat axial asymmetry.
