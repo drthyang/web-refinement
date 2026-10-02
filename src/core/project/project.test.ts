@@ -132,6 +132,15 @@ describe("parseProject — referential integrity", () => {
     expect(() => parseProject(corrupt(pdf, "workspace.fitRange", { min: 2, max: 2 }))).toThrow(/must be below/);
   });
 
+  it("validates the retained S(Q) of a PDF pattern: equal-length columns, non-negative σ, known transform options", () => {
+    expect(() => parseProject(corrupt(pdf, "workspace.pattern.reciprocal.y", [1, 2]))).toThrow(/reciprocal\.y: expected 6 values \(one per Q\), got 2/);
+    expect(() => parseProject(corrupt(pdf, "workspace.pattern.reciprocal.sigma", [0.01, -0.01, 0, 0, 0, 0]))).toThrow(/reciprocal\.sigma\[1\]: an uncertainty cannot be negative/);
+    expect(() => parseProject(corrupt(pdf, "workspace.pattern.reciprocal.kind", "gr"))).toThrow(/reciprocal\.kind: expected one of "sq", "fq"/);
+    expect(() => parseProject(corrupt(pdf, "workspace.pattern.transform.modification", "hann"))).toThrow(/transform\.modification/);
+    // σ is optional (an S(Q) file without an error column).
+    expect(() => parseProject(corrupt(pdf, "workspace.pattern.reciprocal.sigma", null))).not.toThrow();
+  });
+
   it("rejects a view-only overlay that does not match the pattern length", () => {
     expect(() => parseProject(corrupt(powder, "workspace.overlay", { calc: [1, 2], background: [0, 0] }))).toThrow(/one value per pattern point \(5\)/);
   });
