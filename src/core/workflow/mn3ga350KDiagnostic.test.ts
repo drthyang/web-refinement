@@ -144,7 +144,7 @@ describe.skipIf(!hasData)("Mn3Ga 350K — Phase 1a magnetic instability diagnost
         m1,
         cond: d?.conditionNumber ?? NaN,
         maxLambda: d?.maxLambda ?? NaN,
-        maxShift: d?.maxParameterShift ?? NaN,
+        maxShift: d?.maxShiftOverEsd ?? NaN,
         atBounds: d?.atBounds?.length ?? 0,
         topCorr: topCorr ? `${topCorr.parameterIdA}~${topCorr.parameterIdB}=${topCorr.coefficient.toFixed(2)}` : "-",
       });

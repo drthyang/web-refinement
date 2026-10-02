@@ -93,6 +93,15 @@ export interface AssessmentInput {
   readonly mode?: "powder" | "single-crystal";
 }
 
+/**
+ * Shift/esd of the last step (`maxShiftOverEsd`). Below SHIFT_SETTLED the
+ * parameters have settled by the crystallographic convention. Above
+ * SHIFT_MOVING a parameter moved by more than its own esd, so its quoted value
+ * is not yet the minimum.
+ */
+const SHIFT_SETTLED = 0.1;
+const SHIFT_MOVING = 1;
+
 /** Displacement-parameter kinds, for physical (negative-ADP) checks. */
 const ADP_KINDS: ReadonlySet<ParameterKind> = new Set(["bIso", "uAniso"]);
 
@@ -159,13 +168,25 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
   const verdict = verdictFrom(result);
 
   // --- convergence -------------------------------------------------------
-  if (result.status === "converged" && diag && diag.maxParameterShift > 0.05) {
+  // Shift/esd of the last accepted step. The χ² test alone bounds it only by
+  // about √(tolerance·N), so a long pattern can pass that test with a
+  // parameter still moving by a sizeable fraction of its esd, or more.
+  const shift = diag?.maxShiftOverEsd ?? 0;
+  if (result.status === "converged" && shift > SHIFT_SETTLED) {
+    const id = diag?.maxShiftParameterId;
+    const name = id ? byId.get(id)?.label ?? id : "a parameter";
+    const moving = shift > SHIFT_MOVING;
     findings.push({
       category: "convergence",
-      severity: "warning",
-      summary: `Converged on χ² while a parameter was still shifting (max relative shift ${diag.maxParameterShift.toFixed(3)}).`,
-      detail: "The objective flattened but a parameter had not settled — often a sign of a shallow/degenerate direction. Refine a few more cycles or fix the drifting parameter.",
-      evidence: { maxParameterShift: diag.maxParameterShift },
+      severity: moving ? "warning" : "note",
+      summary: moving
+        ? `Converged on χ² while ${name} was still moving: the last step shifted it by ${shift.toFixed(2)} esd.`
+        : `${name} had not fully settled: the last step shifted it by ${shift.toFixed(2)} esd (settled is < ${SHIFT_SETTLED}).`,
+      detail: moving
+        ? "A parameter moved by more than its own esd on the final step, so its value ± esd does not yet describe the minimum. χ² flattened first, which is typical of a shallow or correlated direction, where steps zig-zag across a narrow valley. Refine more cycles from these values; if it keeps moving, find the correlation behind it or fix the parameter."
+        : "By the crystallographic convention a refinement has converged when every shift is below a tenth of its esd. Refine a few more cycles before quoting final values.",
+      ...(id ? { parameterIds: [id] } : {}),
+      evidence: { maxShiftOverEsd: shift, ...(id ? { parameterId: id } : {}) },
     });
   } else if (result.status !== "converged") {
     findings.push({

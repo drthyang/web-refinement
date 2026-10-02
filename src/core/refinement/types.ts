@@ -275,13 +275,19 @@ export interface RefinementDiagnostics {
    */
   readonly atBounds: readonly BoundActiveParameter[];
   /**
-   * Largest *relative* parameter shift on the final accepted step,
-   * `max_j |Δp_j| / (|p_j| + tiny)` — scale-invariant, so a ~1e-11 scale factor
-   * and a ~10 cell length compare on equal footing. Near zero means the
-   * parameters stopped moving; a large value alongside a "converged" χ² means the
-   * fit stopped on the objective while a parameter was still drifting.
+   * Largest shift/esd on the final accepted step, `max_j |Δp_j| / σ_j`, with
+   * σ_j the reported esd — the crystallographic convergence measure (SHELXL's
+   * max shift/su, GSAS-II's max shift/esd). Below ~0.1 every parameter has
+   * settled well inside its uncertainty; a larger value alongside a
+   * "converged" χ² means the fit stopped on the objective while a parameter
+   * was still moving. Unlike a shift relative to |p_j|, it stays meaningful
+   * for parameters that refine near zero (atom-position offsets, zero shift).
+   * Parameters with esd 0 are skipped. It is 0 when no step was accepted, and
+   * for an exact fit (wR < 1e-6: noise-free data, whose esds are round-off).
    */
-  readonly maxParameterShift: number;
+  readonly maxShiftOverEsd: number;
+  /** The free parameter that set `maxShiftOverEsd`, when one did. */
+  readonly maxShiftParameterId?: string;
 }
 
 /** Full result of a refinement run. */
@@ -326,10 +332,13 @@ export interface RefinementOptions {
   /** Relative change in χ² below which the fit is considered converged. */
   readonly convergenceTolerance: number;
   /**
-   * Relative-shift convergence threshold: when the largest relative parameter
-   * shift on an accepted step falls below this, the fit is considered converged
-   * on the *parameters* (complementing the χ² test). Defaults to 0 (disabled),
-   * leaving the χ² test as the sole stopping rule; set > 0 to opt in.
+   * Shift/esd convergence threshold: when every parameter's shift on an
+   * accepted step is below this fraction of its esd (`max_j |Δp_j|/σ_j`, the
+   * measure reported as `maxShiftOverEsd`), the fit is considered converged on
+   * the *parameters* (complementing the χ² test). Conventional values are
+   * 0.01–0.1. The esds scale with the residual, so a noise-free fit (χ² → 0)
+   * never meets it and stops on χ² instead. Defaults to 0 (disabled), leaving
+   * the χ² test as the sole stopping rule; set > 0 to opt in.
    */
   readonly shiftTolerance?: number;
   /** Initial Levenberg–Marquardt damping factor. */
