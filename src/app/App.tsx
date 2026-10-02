@@ -27,6 +27,7 @@ import type { PdfPattern, SingleCrystalDataset } from "@/core/diffraction/types"
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { buildPowderSpec } from "@/app/powderSpec";
 import { parseMagneticCif, parseCif } from "@/parsers/cif";
+import { SpaceGroupSettingError, type SpaceGroupSettingInfo } from "@/core/crystal/spaceGroups";
 import { parsePowderData } from "@/parsers/powderData";
 import { parseIllD1b, looksLikeIllD1b } from "@/parsers/illPowder";
 import { parseFullProfInstrm6, looksLikeInstrm6 } from "@/parsers/fullprofInstrm6";
@@ -48,6 +49,7 @@ import { PowderWorkbench } from "@/app/PowderWorkbench";
 import { SingleCrystalWorkbench } from "@/app/SingleCrystalWorkbench";
 import { PdfWorkbench } from "@/app/PdfWorkbench";
 import { WorkbenchHeader, type Step, type ExportAction } from "@/app/ui/WorkbenchHeader";
+import { WorkbenchErrorBoundary } from "@/app/ui/WorkbenchErrorBoundary";
 import { color as theme, space } from "@/app/theme";
 import {
   type Session,
@@ -220,6 +222,13 @@ export function App(): JSX.Element {
   // A user-facing problem from the last project open. The app has no status
   // bar (status goes to the console), but a refused file must be seen.
   const [notice, setNotice] = useState<string | null>(null);
+  // When a CIF names a space group that fits several settings (e.g. "F d -3 m",
+  // origin choice 1 or 2) and lists no operations, the user picks one here —
+  // the setting is never guessed.
+  const [settingChoice, setSettingChoice] = useState<{
+    readonly candidates: readonly SpaceGroupSettingInfo[];
+    readonly pick: (symbol: string) => void;
+  } | null>(null);
   // How the loaded powder file was classified — shown on the Data card, so the
   // unit is never a silent guess, and re-runnable with an explicit override.
   // Only the auto-detected path sets it; a reader that reads its own header
@@ -377,10 +386,29 @@ export function App(): JSX.Element {
     return () => { cancelled = true; };
   }, []);
 
-  function onLoadCif(file: File): void {
+  /** Show a CIF that could not be read — and, when its space group fits
+   *  several settings, offer them so the user can choose and retry. */
+  function reportCifError(prefix: string, e: unknown, retry: (setting: string) => void): void {
+    const text = `${prefix}: ${e instanceof Error ? e.message : String(e)}`;
+    setMessage(text);
+    setNotice(text);
+    setSettingChoice(
+      e instanceof SpaceGroupSettingError && e.candidates.length > 1
+        ? { candidates: e.candidates, pick: (symbol) => { setNotice(null); setSettingChoice(null); retry(symbol); } }
+        : null,
+    );
+  }
+  /** A CIF that loads clears the notice of one that did not. */
+  function clearCifNotice(): void {
+    setNotice(null);
+    setSettingChoice(null);
+  }
+
+  function onLoadCif(file: File, spaceGroupSetting?: string): void {
     file.text().then((text) => {
       try {
-        const { structure: parsed, magnetic } = parseMagneticCif(text, "loaded");
+        const { structure: parsed, magnetic } = parseMagneticCif(text, "loaded", spaceGroupSetting ? { spaceGroupSetting } : {});
+        clearCifNotice();
         if (magnetic) {
           // Drive the powder view from the magnetic structure so the plot shows
           // the nuclear + magnetic pattern and reflection ticks.
@@ -400,7 +428,7 @@ export function App(): JSX.Element {
         setMessage(`Loaded CIF: ${parsed.name} (${parsed.sites.length} sites, ${parsed.spaceGroup.operations.length} symmetry ops). Load button is now "Add CIF…" to add impurity/secondary phases.`);
         requestStep("load", `Loaded ${parsed.name}`, true);
       } catch (e) {
-        setMessage(`CIF parse failed: ${e instanceof Error ? e.message : String(e)}`);
+        reportCifError("CIF parse failed", e, (setting) => onLoadCif(file, setting));
       }
     });
   }
@@ -514,10 +542,11 @@ export function App(): JSX.Element {
 
   /** Append a CIF as an additional crystallographic phase (multi-phase refinement),
    *  rebuilding the spec while preserving every existing parameter value/state. */
-  function onAddPhase(file: File): void {
+  function onAddPhase(file: File, spaceGroupSetting?: string): void {
     file.text().then((text) => {
       try {
-        const raw = parseCif(text, `phase-${Date.now().toString(36)}`);
+        const raw = parseCif(text, `phase-${Date.now().toString(36)}`, spaceGroupSetting ? { spaceGroupSetting } : {});
+        clearCifNotice();
         // Fall back to a composition name (e.g. "MnO") when the CIF omits _pd_phase_name.
         const name = raw.name && raw.name !== "structure"
           ? raw.name
@@ -542,7 +571,7 @@ export function App(): JSX.Element {
         setMessage(`Added phase "${parsed.name}" (${parsed.spaceGroup.hermannMauguin ?? "?"}). Refine to fit its scale/cell.`);
         requestStep("load", `Added phase ${parsed.name}`);
       } catch (e) {
-        setMessage(`Add phase failed: ${e instanceof Error ? e.message : String(e)}`);
+        reportCifError("Add phase failed", e, (setting) => onAddPhase(file, setting));
       }
     });
   }
@@ -1061,7 +1090,12 @@ export function App(): JSX.Element {
       {notice && (
         <div role="alert" style={noticeBar}>
           <span style={{ flex: 1 }}>{notice}</span>
-          <button onClick={() => setNotice(null)} style={noticeClose} title="Dismiss">✕</button>
+          {settingChoice?.candidates.map((c) => (
+            <button key={c.symbol} onClick={() => settingChoice.pick(c.symbol)} style={noticeAction} title={`Hall symbol ${c.hall}`}>
+              Use {c.symbol} ({c.description})
+            </button>
+          ))}
+          <button onClick={() => { setNotice(null); setSettingChoice(null); }} style={noticeClose} title="Dismiss">✕</button>
         </div>
       )}
       {autosaveOffer && !hasContent && (
@@ -1096,6 +1130,7 @@ export function App(): JSX.Element {
       {/* The powder engine stays mounted in single-crystal mode (hidden) so all
           its state — fit range, plot mode, k-search picks — survives switching.
           On a clean start it renders its load cards + an empty-state placeholder. */}
+      <WorkbenchErrorBoundary resetKeys={[session]} visible={!scDataset && !pdfDataset} onClear={clearWorkbench}>
       <PowderWorkbench
         session={session}
         setSession={setSession}
@@ -1125,19 +1160,24 @@ export function App(): JSX.Element {
         {...(restore.powderView ? { viewRestore: restore.powderView } : {})}
         stepHistory={stepHistory}
       />
+      </WorkbenchErrorBoundary>
       {pdfDataset && (
         // PDF mode (auto-switched on loading a reduced .gr). Keyed on the dataset
         // id so a new file remounts with a fresh parameter set.
+        <WorkbenchErrorBoundary resetKeys={[pdfDataset, structure, session.extraPhases, restore.token]} onClear={clearWorkbench}>
         <main className="wb-main" style={{ flex: 1 }}>
           <PdfWorkbench onMagneticPresent={setPdfMagnetic} key={`${pdfDataset.id}#${restore.token}`} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} {...(restore.pdf ? { restore: restore.pdf } : {})} stepHistory={stepHistory} />
         </main>
+        </WorkbenchErrorBoundary>
       )}
       {scDataset && (
         // Single-crystal mode (auto-switched on loading hkl/fcf data). Keyed on
         // the dataset id so a new file remounts with a fresh parameter set.
+        <WorkbenchErrorBoundary resetKeys={[scDataset, scMagneticDataset, structure, restore.token]} onClear={clearWorkbench}>
         <main className="wb-main" style={{ flex: 1 }}>
           <SingleCrystalWorkbench onMagneticPresent={setScMagnetic} key={`${scDataset.id}#${restore.token}`} structure={structure} dataset={scDataset} magneticDataset={scMagneticDataset} client={client.current} step={step} onStep={setStep} {...(instrumentLoaded && instrument.kind === "constantWavelength" && instrument.radiationKind ? { instrumentProbe: instrument.radiationKind } : {})} exportsRef={scExports} onLoadData={onLoadData} onLoadMagneticData={onLoadMagneticData} onLoadCif={onLoadCif} {...(restore.singleCrystal ? { restore: restore.singleCrystal } : {})} stepHistory={stepHistory} />
         </main>
+        </WorkbenchErrorBoundary>
       )}
       <footer className="wb-footer" style={copyrightBar}>
         <span>© 2026 Tsung-Han Yang</span>
@@ -1172,6 +1212,7 @@ function crossCheckTargets(technique: "rietveld" | "pdf" | "sc"): string {
 const LIMITATIONS_URL = "https://github.com/drthyang/web-refinement/blob/main/docs/LIMITATIONS.md";
 
 const noticeBar: React.CSSProperties = { display: "flex", alignItems: "center", gap: 12, padding: `8px ${space.edge}`, fontSize: 12.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
+const noticeAction: React.CSSProperties = { border: `1px solid ${theme.warnBorder}`, background: "transparent", color: theme.warnInk, cursor: "pointer", fontSize: 12, padding: "3px 8px", borderRadius: 4, whiteSpace: "nowrap" };
 const noticeClose: React.CSSProperties = { border: "none", background: "transparent", color: theme.warnInk, cursor: "pointer", fontSize: 13, padding: "0 4px" };
 const disclaimerBar: React.CSSProperties = { padding: `7px ${space.edge}`, fontSize: 11.5, background: theme.warnBg, borderBottom: `1px solid ${theme.warnBorder}`, color: theme.warnInk, lineHeight: 1.45 };
 const offerBar: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, padding: `8px ${space.edge}`, fontSize: 12.5, background: theme.noteBg, borderBottom: `1px solid ${theme.noteBorder}`, color: theme.noteInk, lineHeight: 1.45 };

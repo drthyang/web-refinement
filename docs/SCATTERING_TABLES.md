@@ -12,8 +12,8 @@ The scattering variable throughout is `s = sinθ/λ = 1/(2d)` (Å⁻¹).
 
 | Table | File | Form | Coverage | Source |
 |---|---|---|---|---|
-| **Neutron** `b` | [`neutronData.ts`](../src/core/scattering/neutronData.ts) | Constant bound coherent length `b` (fm), s-independent | **92 entries** (91 natural elements H–Cm + D) | Sears, ITC-C Vol. C §4.4.4; Ti/Mn/Zn/Au pinned to GSAS-II's Sears (1992) values |
-| **X-ray** `f(s)` | [`cromerMannData.ts`](../src/core/scattering/cromerMannData.ts) | 4-Gaussian Cromer–Mann `Σ aᵢe^{−bᵢs²} + c` | **97 neutral atoms** (H–Cf; Pu omitted, bad source fit) | International Tables Vol. C pp. 500–502 (DABAX `f0_InterTables`); f(0)=Z verified per row |
+| **Neutron** `b` | [`neutronData.ts`](../src/core/scattering/neutronData.ts) | Constant bound coherent length `b = b′ − i·b″` (fm), s-independent, complex for absorbers | **88 elements + D, 248 isotopes** (Pu, Cm and Am by isotope only) | Sears (1992) *Neutron News*, as entered by NIST; one evaluation (Hf corrected to 7.77) |
+| **X-ray** `f(s)` | [`cromerMannData.ts`](../src/core/scattering/cromerMannData.ts) | 4-Gaussian Cromer–Mann `Σ aᵢe^{−bᵢs²} + c` | **98 neutral atoms** (H–Cf) | International Tables Vol. C Table 6.1.1.4 (DABAX `f0_InterTables`, checked row by row against cctbx `it1992`); f(0)=Z verified per row |
 | **Magnetic** ⟨j0⟩ | [`magneticFormFactorData.ts`](../src/core/scattering/magneticFormFactorData.ts) | `A e^{−a s²} + B e^{−b s²} + C e^{−c s²} + D`, normalized to 1 at s=0 | **97 ions** (3d Sc–Cu, 4d Y–Pd, rare earths Ce–Yb, actinides U–Am, all common valences) | ITC-C Vol. C §4.4.5 (Brown), via the public-domain CrysFML table in `periodictable` |
 | **Magnetic** ⟨j2⟩ | [`magneticFormFactorData.ts`](../src/core/scattering/magneticFormFactorData.ts) | `(A e^{−a s²} + … + D)·s²`, → 0 at s=0 | **95 ions** (every ⟨j0⟩ ion except O¹⁺ and Pr³⁺) | same |
 
@@ -21,13 +21,19 @@ The scattering variable throughout is `s = sinθ/λ = 1/(2d)` (Å⁻¹).
 produced from a cited source by its generator, with the evaluation logic kept in
 the sibling module (`neutron.ts`, `xray.ts`, `magnetic.ts`):
 
-- Neutron — [`scripts/gen_neutron_b.py`](../scripts/gen_neutron_b.py). Fills the
-  full periodic table from the Sears/ITC-C table while pinning the four elements
-  (Ti, Mn, Zn, Au) where GSAS-II uses the earlier *Neutron News* (1992) values,
-  so the neutron structure factor keeps matching GSAS-II `.lst` output.
+- Neutron — [`scripts/gen_neutron_b.py`](../scripts/gen_neutron_b.py). Reads
+  the NIST table of Sears (1992), pinned by SHA-256 of its extracted rows, and
+  emits every element and isotope that prints a value, complex parts included.
+  Pu and Cm print no element value (their isotopes differ by up to 10 fm), so a
+  Pu or Cm site must name its isotope. Am's row is the ²⁴³Am value (its
+  half-life is printed), so it is emitted as ²⁴³Am and an Am site must name
+  its isotope too. Hf is corrected from NIST's 7.7 to 7.77 (below).
 - X-ray — [`scripts/gen_xray_ff.py`](../scripts/gen_xray_ff.py). All neutral
-  atoms from the ITC-C Cromer–Mann parametrization; every row is checked to give
-  `f(0)=Z` within 0.1 e (Pu's source row misses by 5 e and is dropped).
+  atoms from the ITC-C Cromer–Mann parametrization. Two pinned transcriptions
+  are read (DABAX `f0_InterTables.dat` and cctbx `it1992.cpp`); every row must
+  agree between them and give `f(0)=Z` within 0.1 e. DABAX prints the ITC Np4+
+  row under "Pu" (f(0) = 89), so Pu comes from the cctbx transcription — the
+  same row gemmi and GSAS-II carry (f(0) = 93.965).
 - Magnetic — [`scripts/gen_magnetic_ff.py`](../scripts/gen_magnetic_ff.py),
   copying coefficients verbatim (no digit-altering float round-trips).
 
@@ -35,7 +41,9 @@ Only **neutral-atom** X-ray form factors are tabulated; the structure-factor
 code looks up by element symbol and does not yet use ionic X-ray species (the
 DABAX source carries them, so `gen_xray_ff.py` can be widened when needed).
 
-The neutron `b` table covers nuclear scattering only. For magnetic neutron
+The neutron `b` table covers nuclear scattering only. Its isotope entries are
+used when a site sets `isotope` (a mass number); an isotope Sears does not list
+is an error, never a fall-back to the natural value. For magnetic neutron
 scattering, an ion's form factor comes from the ⟨j0⟩/⟨j2⟩ table below.
 
 ## Magnetic form factor — spin-only and dipole
@@ -105,19 +113,42 @@ tables below). Web resources accessed **2026-07-08**.
 
 ### Neutron scattering lengths (`neutron.ts`)
 
-- **Primary reference:** Sears, V. F. (1992). "Neutron scattering lengths and
+- **Evaluation used:** Sears, V. F. (1992). "Neutron scattering lengths and
   cross sections." *Neutron News* **3**(3), 26–37.
   doi:[10.1080/10448639208218770](https://doi.org/10.1080/10448639208218770)
-- **Convenient tabulation:** NIST Center for Neutron Research, "Neutron
-  scattering lengths and cross sections,"
-  <https://www.ncnr.nist.gov/resources/n-lengths/>
-- **Redistribution actually imported:** the Sears table (labeled ITC-C Vol. C
-  §4.4.4) shipped in the `Dans_Diffraction` package
-  (`data/neutron_isotope_scattering_lengths_sears.dat`), real part of the bound
-  coherent length per natural element.
-- Cross-checked against printed values in bundled GSAS-II `.lst` files; Ti, Mn,
-  Zn and Au are pinned to GSAS-II's *Neutron News* (1992) values, which differ
-  slightly from the ITC edition, so the structure factor still matches GSAS-II.
+  — the one evaluation for every element. The single correction is Hf (below);
+  GSAS-II's per-element pins are gone.
+- **Redistribution actually imported:** the NIST Center for Neutron Research
+  table "Neutron scattering lengths and cross sections"
+  (<https://www.ncnr.nist.gov/resources/n-lengths/list.html>), NIST's manual
+  entry of Sears (1992). The page cannot be pinned by URL, so the generator pins
+  the SHA-256 of its extracted data rows (`dcf8ea74…`, the same snapshot as
+  ScatterPlan's `data-sources/snapshots/nist-sears1992.tsv`).
+- **Sign convention.** Sears prints `b = b′ − i·b″`, with `b″ ≥ 0` for an
+  absorbing nucleus (B, Cd, In, Sm, Eu, Gd, Dy, …). The table stores that as
+  printed. That is the physics convention (scattered amplitude ∝ Σ b·e^{−iQ·r});
+  the crystallographic `F = Σ a·e^{+2πi h·x}` is its complex conjugate, so the
+  structure factor uses `a = conj(b) = b′ + i·b″` (`neutronAmplitude`), the same
+  sign as X-ray f″. Taking the printed b directly would give I(−h): powder
+  patterns and centrosymmetric crystals would not notice, Bijvoet differences of
+  a non-centrosymmetric crystal would flip. The real-space PDF weights a pair by
+  Re(b_i·b_j*) and normalizes by |⟨b⟩|² (`compositionWeights`).
+- **Not used:** the ITC Vol. C §4.4.4 edition as redistributed by
+  `Dans_Diffraction` (the previous source of this table). It revises Ti, Mn, Zn
+  and Hf, gives In as 2.08 fm (In's σ_coh in barn; Sears prints 4.065 − 0.0539i),
+  assigns the ²³⁸Pu and ²⁴⁴Cm values to the elements, and stores the imaginary
+  part with inconsistent signs. Also not used: Rauch & Waschkowski (2003) plus
+  newer measurements, GSAS-II's `AtmBlens` (e.g. Au 7.90 there, 7.63 here).
+- The GSAS-II validation elements (Mn, O, Ga, Sn, Co, Fe) print the same values
+  in its `.lst` output.
+- **Known inconsistencies in the printed table:** b and σ_coh = 4π|b|²/100
+  disagree beyond rounding for Sn, Xe, Eu and Hf. Sn, Xe and Eu are used as
+  printed. Hf is corrected: NIST's 7.7 fm gives 7.45 b against its σ_coh of
+  7.6 b, while 7.77 fm (the ITC edition and Rauch 2003) fits, so 7.7 is read as
+  an entry error. The generator applies this only while NIST still prints 7.7.
+- **Am:** the table's Am row carries a half-life of 7.37E3 a, i.e. it is the
+  ²⁴³Am value; the common ²⁴¹Am is not tabulated. It is emitted as "243Am", and
+  an Am site must set its isotope.
 
 ### X-ray form factors (`xray.ts`)
 
@@ -128,9 +159,10 @@ tables below). Web resources accessed **2026-07-08**.
 - **Tabulated form used** (4-Gaussian coefficients): International Tables for
   Crystallography Vol. C, pp. 500–502 / Table 6.1.1.4.
 - **Redistribution actually imported:** the ESRF **DABAX** `f0_InterTables.dat`
-  table (public domain), as shipped in the `xrayutilities` package
-  (`materials/data/f0_InterTables.dat.xz`). The 14 originally hand-entered rows
-  match it exactly; regenerating expands to all 97 neutral atoms.
+  table (oasys-kit/DabaxFiles @ `70ff903`, SHA-256 `d8c594a8…`), checked row by
+  row against the cctbx `it1992.cpp` transcription (cctbx_project @ `d2d1c70`,
+  SHA-256 `7ca28976…`). All 98 neutral atoms; Pu is taken from cctbx because the
+  DABAX Pu/Np3+/Np4+/Np6+ rows are shuffled.
 
 ### Magnetic form factors ⟨j0⟩ / ⟨j2⟩ (`magneticFormFactorData.ts`)
 

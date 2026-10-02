@@ -1,18 +1,21 @@
 /**
  * Nuclear structure-factor calculation.
  *
- *   F_N(hkl) = Σ_j occ_j · b_j(s) · T_j · exp[2πi(h·x_j + k·y_j + l·z_j)]
+ *   F_N(hkl) = Σ_j occ_j · a_j(s) · T_j · exp[2πi(h·x_j + k·y_j + l·z_j)]
  *
- * where the sum runs over all symmetry-equivalent atoms in the unit cell, b_j
- * is the scattering factor (neutron length or X-ray form factor), and T_j is
- * the isotropic or anisotropic Debye-Waller factor.
+ * where the sum runs over all symmetry-equivalent atoms in the unit cell, a_j
+ * is the complex scattering amplitude (X-ray form factor, or the neutron
+ * conj(b) — see ScatteringTable for the sign), and T_j is the isotropic or
+ * anisotropic Debye-Waller factor. A real amplitude takes exactly the real
+ * arithmetic it always did; only an absorbing nucleus (imaginary part ≠ 0)
+ * takes the complex product.
  */
 
 import type { Complex, Vec3 } from "@/core/math/types";
 import type { StructureModel, SymmetryOperation, DisplacementParameters } from "@/core/crystal/types";
 import type { Radiation } from "@/core/diffraction/types";
 import type { ScatteringTable } from "@/core/scattering/types";
-import { add, expι, modulusSquared, scale, ZERO } from "@/core/math/complex";
+import { add, expι, modulusSquared, mul, scale, ZERO } from "@/core/math/complex";
 import { applyOperation } from "@/core/crystal/symmetry";
 import { adpForOperation, rotateUAniso } from "@/core/crystal/adp";
 import { wrapFractional } from "@/core/math/vec3";
@@ -123,7 +126,9 @@ export function nuclearStructureFactor(
 
   let f = ZERO;
   for (const site of model.sites) {
-    const b = table.factor(site.element, s, site.isotope);
+    const amp = table.amplitude(site.element, s, site.isotope);
+    const b = amp.re;
+    const complexAmp = amp.im !== 0;
     // Isotropic Debye–Waller is rotation-invariant and hoists out of the orbit
     // loop; an anisotropic tensor is NOT — each image sees U′ = R·U·Rᵀ, so its
     // factor is evaluated per operation below.
@@ -138,7 +143,9 @@ export function nuclearStructureFactor(
       const dw = isoDw ?? anisotropicDebyeWaller(model.cell, rotateUAniso((site.adp as { uAniso: UAniso6 }).uAniso, op.rotation), h, k, l);
       const p = applyOperation(op, site.position);
       const phase = TWO_PI * (h * p[0] + k * p[1] + l * p[2]);
-      f = add(f, scale(expι(phase), site.occupancy * b * dw));
+      f = complexAmp
+        ? add(f, scale(mul(expι(phase), amp), site.occupancy * dw))
+        : add(f, scale(expι(phase), site.occupancy * b * dw));
     }
   }
   return f;
@@ -229,7 +236,7 @@ export function nuclearStructureFactorPartials(
   let f = ZERO;
   const perSite: { label: string; unitSite: Complex; occupancy: number; isotropic: boolean }[] = [];
   for (const site of model.sites) {
-    const b = table.factor(site.element, s, site.isotope);
+    const amp = table.amplitude(site.element, s, site.isotope);
     // Per-image Debye–Waller: isotropic hoists; anisotropic rotates with each
     // orbit operation (U′ = R·U·Rᵀ), so it multiplies inside the phase sum.
     const isoDw = site.adp.kind === "isotropic" ? debyeWaller(site.adp.bIso, s) : null;
@@ -243,7 +250,7 @@ export function nuclearStructureFactorPartials(
         ? add(sum, expι(phase))
         : add(sum, scale(expι(phase), anisotropicDebyeWaller(model.cell, rotateUAniso((site.adp as { uAniso: UAniso6 }).uAniso, op.rotation), h, k, l)));
     }
-    const unitSite = scale(sum, b * (isoDw ?? 1));
+    const unitSite = amp.im !== 0 ? scale(mul(sum, amp), isoDw ?? 1) : scale(sum, amp.re * (isoDw ?? 1));
     perSite.push({ label: site.label, unitSite, occupancy: site.occupancy, isotropic: site.adp.kind === "isotropic" });
     f = add(f, scale(unitSite, site.occupancy));
   }

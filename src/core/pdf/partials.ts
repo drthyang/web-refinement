@@ -18,7 +18,7 @@
 
 import type { UnitCell } from "@/core/crystal/types";
 import type { ExpandedAtom } from "@/core/diffraction/structureFactor";
-import { compositionWeights } from "@/core/totalscattering/weights";
+import { compositionWeights, pairWeight } from "@/core/totalscattering/weights";
 import { enumeratePairs, type PdfPair } from "@/core/pdf/pairEnumerator";
 import { sphereEnvelope, PAIR_REACH_MARGIN, type PdfModelParams } from "@/core/pdf/forwardModel";
 import { cellVolume } from "@/core/crystal/unitCell";
@@ -56,17 +56,20 @@ export function computePartialsGofR(
   const rMaxGrid = rGrid[n - 1]!;
 
   const weights = compositionWeights(atoms, params.scatteringType);
-  const norm = 1 / (weights.bAvg * weights.bAvg * weights.nEff);
+  const norm = 1 / (weights.bAvgAbs2 * weights.nEff);
   const sratio = params.sratio ?? 1;
   const rcut = params.rcut ?? 0;
 
   // One accumulator per unordered element pair present in the cell, plus the
   // per-element scattering weight totals W_A for the baseline shares.
   const elements = [...new Set(atoms.map((a) => a.element))].sort();
+  // (complex amplitudes: W_A = Σ o·b over the element, real and imaginary parts)
   const wByElement = new Map<string, number>(elements.map((e) => [e, 0]));
+  const wImByElement = new Map<string, number>(elements.map((e) => [e, 0]));
   for (let i = 0; i < atoms.length; i++) {
     const e = atoms[i]!.element;
     wByElement.set(e, wByElement.get(e)! + weights.perAtom[i]!);
+    if (weights.perAtomIm) wImByElement.set(e, wImByElement.get(e)! + weights.perAtomIm[i]!);
   }
   const acc = new Map<string, Float64Array>();
   for (let a = 0; a < elements.length; a++) {
@@ -85,7 +88,7 @@ export function computePartialsGofR(
     if (rcut > 0 && r < rcut) sigma *= sratio;
     if (sigma < SIGMA_FLOOR) sigma = SIGMA_FLOOR;
 
-    const amp = (weights.perAtom[pair.i]! * weights.perAtom[pair.j]!) * norm / r;
+    const amp = pairWeight(weights, pair.i, pair.j) * norm / r;
     const invTwoSig2 = 1 / (2 * sigma * sigma);
     const peak = amp * INV_SQRT_2PI / sigma;
     const g = acc.get(pairLabel(atoms[pair.i]!.element, atoms[pair.j]!.element))!;
@@ -104,7 +107,11 @@ export function computePartialsGofR(
   const out: PartialPdf[] = [];
   for (const [label, g] of acc) {
     const [ea, eb] = label.split("–") as [string, string];
-    const share = (ea === eb ? 1 : 2) * wByElement.get(ea)! * wByElement.get(eb)! * norm / (v > 0 ? v : Infinity);
+    // Re(W_A·W_B*) — the imaginary term is absent for real amplitudes.
+    const wAB = weights.perAtomIm
+      ? wByElement.get(ea)! * wByElement.get(eb)! + wImByElement.get(ea)! * wImByElement.get(eb)!
+      : wByElement.get(ea)! * wByElement.get(eb)!;
+    const share = (ea === eb ? 1 : 2) * wAB * norm / (v > 0 ? v : Infinity);
     for (let k = 0; k < n; k++) {
       const r = rGrid[k]!;
       let val = g[k]! - 4 * Math.PI * share * r;

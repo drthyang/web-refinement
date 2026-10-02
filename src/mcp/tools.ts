@@ -109,9 +109,15 @@ import { interpretStructure } from "@/core/diagnostics/interpret";
 
 const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", wavelength: 1.54 };
 
-/** Parse a CIF/mCIF into a structure (and magnetic model, when present). */
-export function parse_structure(args: { cif: string; id?: string }): { structure: StructureModel; magnetic: MagneticModel | null } {
-  const { structure, magnetic } = parseMagneticCif(args.cif, args.id ?? "loaded");
+/** Parse a CIF/mCIF into a structure (and magnetic model, when present). A
+ *  CIF without symmetry operations whose space group fits several settings is
+ *  an error naming them; `spaceGroupSetting` picks one. */
+export function parse_structure(args: { cif: string; id?: string; spaceGroupSetting?: string }): { structure: StructureModel; magnetic: MagneticModel | null } {
+  const { structure, magnetic } = parseMagneticCif(
+    args.cif,
+    args.id ?? "loaded",
+    args.spaceGroupSetting !== undefined ? { spaceGroupSetting: args.spaceGroupSetting } : {},
+  );
   return { structure, magnetic: magnetic ?? null };
 }
 

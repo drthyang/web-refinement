@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { neutronScatteringLength, NEUTRON_B } from "@/core/scattering/neutron";
+import {
+  boundCoherentLength,
+  NEUTRON_B,
+  NEUTRON_B_ISOTOPES,
+  tabulatedIsotopes,
+} from "@/core/scattering/neutron";
+import { NEUTRON_CROSS_SECTIONS } from "@/core/scattering/neutronCrossSectionData";
+
+/** Real part b′ of the bound coherent length (fm). */
+const bRe = (element: string, isotope?: number): number => boundCoherentLength(element, isotope).re;
 import { xrayFormFactor, CROMER_MANN } from "@/core/scattering/xray";
 import {
   magneticFormFactorJ0,
@@ -20,36 +29,93 @@ const Z: Readonly<Record<string, number>> = {
   Pm: 61, Sm: 62, Eu: 63, Gd: 64, Tb: 65, Dy: 66, Ho: 67, Er: 68, Tm: 69,
   Yb: 70, Lu: 71, Hf: 72, Ta: 73, W: 74, Re: 75, Os: 76, Ir: 77, Pt: 78, Au: 79,
   Hg: 80, Tl: 81, Pb: 82, Bi: 83, Po: 84, At: 85, Rn: 86, Fr: 87, Ra: 88,
-  Ac: 89, Th: 90, Pa: 91, U: 92, Np: 93, Am: 95, Cm: 96, Bk: 97, Cf: 98,
+  Ac: 89, Th: 90, Pa: 91, U: 92, Np: 93, Pu: 94, Am: 95, Cm: 96, Bk: 97, Cf: 98,
 };
 
-describe("neutron scattering lengths (match GSAS-II .lst)", () => {
+describe("neutron scattering lengths (Sears 1992, via NIST)", () => {
   it("Mn, O, Ga match GSAS-II printed values (fm)", () => {
-    expect(neutronScatteringLength("Mn")).toBeCloseTo(-3.73, 2);
-    expect(neutronScatteringLength("O")).toBeCloseTo(5.803, 2);
-    expect(neutronScatteringLength("Ga")).toBeCloseTo(7.288, 2);
+    expect(bRe("Mn")).toBeCloseTo(-3.73, 2);
+    expect(bRe("O")).toBeCloseTo(5.803, 2);
+    expect(bRe("Ga")).toBeCloseTo(7.288, 2);
   });
   it("throws for an unknown element", () => {
-    expect(() => neutronScatteringLength("Xx")).toThrow();
+    expect(() => bRe("Xx")).toThrow();
   });
   it("covers the periodic table, not just a handful of elements", () => {
-    // The table used to hold ~50 curated elements; it now spans the full range.
-    expect(Object.keys(NEUTRON_B).length).toBeGreaterThanOrEqual(90);
-    // Common elements that were previously missing must resolve.
+    expect(Object.keys(NEUTRON_B).length).toBeGreaterThanOrEqual(89);
     for (const el of ["B", "Sc", "Ag", "Cd", "In", "Sb", "I", "Gd", "Hf", "Ta", "Re", "U"]) {
       expect(NEUTRON_B[el], el).toBeDefined();
     }
-    // A few authoritative Sears/ITC values (fm).
-    expect(neutronScatteringLength("B")).toBeCloseTo(5.3, 1);
-    expect(neutronScatteringLength("Ag")).toBeCloseTo(5.922, 2);
-    expect(neutronScatteringLength("Gd")).toBeCloseTo(6.5, 1);
-    expect(neutronScatteringLength("U")).toBeCloseTo(8.417, 2);
+    expect(bRe("Ag")).toBeCloseTo(5.922, 3);
+    expect(bRe("U")).toBeCloseTo(8.417, 3);
   });
-  it("keeps the GSAS-II-pinned values after regeneration", () => {
-    expect(neutronScatteringLength("Ti")).toBeCloseTo(-3.438, 3);
-    expect(neutronScatteringLength("Mn")).toBeCloseTo(-3.73, 3);
-    expect(neutronScatteringLength("Zn")).toBeCloseTo(5.68, 3);
-    expect(neutronScatteringLength("Au")).toBeCloseTo(7.9, 3);
+  it("is the Neutron News 1992 evaluation, without GSAS-II's per-element pins", () => {
+    // Ti, Mn, Zn: Sears (1992), which the ITC Vol. C edition revises
+    // (−3.37, −3.75, 5.6). Au: Sears (1992) 7.63, not the 7.90 of Rauch &
+    // Waschkowski (2003) that GSAS-II's AtmBlens carries.
+    expect(bRe("Ti")).toBe(-3.438);
+    expect(bRe("Mn")).toBe(-3.73);
+    expect(bRe("Zn")).toBe(5.68);
+    expect(bRe("Au")).toBe(7.63);
+  });
+  it("Hf is 7.77: NIST's 7.7 contradicts its own σ_coh = 7.6 b", () => {
+    // 4π·7.7²/100 = 7.45 b; 4π·7.77²/100 = 7.59 b. The ITC edition and Rauch
+    // (2003) both give 7.77, so 7.7 is read as an entry error.
+    expect(bRe("Hf")).toBe(7.77);
+    expect((4 * Math.PI * 7.77 ** 2) / 100).toBeCloseTo(NEUTRON_CROSS_SECTIONS.Hf!.coherent, 1);
+  });
+  it("In is 4.065 − 0.0539i fm (2.08 is In's σ_coh in barn, not b)", () => {
+    expect(boundCoherentLength("In")).toEqual({ re: 4.065, im: -0.0539 });
+  });
+  it("stores b = b′ − i·b″ as printed: absorbers carry a negative imaginary part", () => {
+    expect(boundCoherentLength("B")).toEqual({ re: 5.3, im: -0.213 });
+    expect(boundCoherentLength("Cd")).toEqual({ re: 4.87, im: -0.7 });
+    expect(boundCoherentLength("Sm")).toEqual({ re: 0.8, im: -1.65 });
+    expect(boundCoherentLength("Eu")).toEqual({ re: 7.22, im: -1.26 });
+    expect(boundCoherentLength("Gd")).toEqual({ re: 6.5, im: -13.82 });
+    expect(boundCoherentLength("Dy")).toEqual({ re: 16.9, im: -0.276 });
+    expect(boundCoherentLength("He", 3)).toEqual({ re: 5.74, im: -1.483 });
+    for (const [key, b] of [...Object.entries(NEUTRON_B), ...Object.entries(NEUTRON_B_ISOTOPES)]) {
+      expect(b.im, key).toBeLessThanOrEqual(0);
+    }
+  });
+  it("agrees with the tabulated σ_coh = 4π|b|²/100 (catches a b/σ mix-up like In)", () => {
+    // Sears' own printed b and σ_coh disagree beyond rounding for Xe and Eu
+    // (Hf's 7.7 did too; it is corrected to 7.77, which fits).
+    const printedInconsistency = new Set(["Xe", "Eu"]);
+    let checked = 0;
+    for (const [el, xs] of Object.entries(NEUTRON_CROSS_SECTIONS)) {
+      const b = NEUTRON_B[el];
+      if (!b || printedInconsistency.has(el)) continue;
+      const sigma = (4 * Math.PI * (b.re * b.re + b.im * b.im)) / 100;
+      expect(Math.abs(sigma - xs.coherent) / xs.coherent, el).toBeLessThan(0.02);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(70);
+  });
+  it("Pu, Cm and Am need an explicit isotope", () => {
+    // Sears gives no element value for Pu and Cm; its Am row carries ²⁴³Am's
+    // half-life (7.37E3 a), so it is the ²⁴³Am value, not ²⁴¹Am's.
+    expect(NEUTRON_B.Pu).toBeUndefined();
+    expect(NEUTRON_B.Cm).toBeUndefined();
+    expect(NEUTRON_B.Am).toBeUndefined();
+    expect(() => bRe("Am")).toThrow(/Am has no natural-abundance.*isotope.*Am 243/);
+    expect(bRe("Am", 243)).toBe(8.3);
+    expect(() => bRe("Am", 241)).toThrow(/241Am/);
+    expect(() => bRe("Pu")).toThrow(/isotope.*238, 239, 240, 242/);
+    expect(() => bRe("Cm")).toThrow(/isotope.*244, 246, 248/);
+    expect(bRe("Pu", 238)).toBe(14.1);
+    expect(bRe("Pu", 239)).toBe(7.7);
+    expect(bRe("Pu", 242)).toBe(8.1);
+    expect(bRe("Cm", 244)).toBe(9.5);
+    expect(tabulatedIsotopes("Pu")).toEqual([238, 239, 240, 242]);
+  });
+  it("resolves isotopes, and never falls back to the natural value", () => {
+    expect(bRe("H", 2)).toBe(6.671);
+    expect(bRe("D")).toBe(6.671);
+    expect(bRe("Ni", 62)).toBe(-8.7);
+    expect(bRe("Li", 7)).toBe(-2.22);
+    expect(() => bRe("Fe", 99)).toThrow(/99Fe.*54, 56, 57, 58/);
   });
 });
 
@@ -64,7 +130,7 @@ describe("X-ray form factors (Cromer-Mann)", () => {
     expect(xrayFormFactor("Mn", 0.5)).toBeLessThan(xrayFormFactor("Mn", 0));
   });
   it("covers the periodic table with every row normalized to Z at s = 0", () => {
-    expect(Object.keys(CROMER_MANN).length).toBeGreaterThanOrEqual(97);
+    expect(Object.keys(CROMER_MANN).length).toBe(98); // H–Cf, no gaps
     // Previously-missing common elements must resolve now.
     for (const el of ["H", "Ca", "Zn", "Ge", "Sr", "Zr", "Ba", "La", "Ce", "W", "Pb", "U"]) {
       expect(CROMER_MANN[el], el).toBeDefined();
@@ -76,6 +142,17 @@ describe("X-ray form factors (Cromer-Mann)", () => {
       expect(z, `Z for ${el}`).toBeDefined();
       expect(Math.abs(xrayFormFactor(el, 0) - z!), el).toBeLessThan(0.1);
     }
+  });
+  it("carries the ITC Pu row, not DABAX's shuffled one", () => {
+    // DABAX f0_InterTables prints the ITC Np4+ row under "Pu" (f0(0) = 89), so
+    // the generator takes Pu from the cctbx transcription of ITC Vol. C Table
+    // 6.1.1.4 — the row gemmi and GSAS-II also carry.
+    expect(CROMER_MANN.Pu).toEqual({
+      a: [36.5254, 23.8083, 16.7707, 3.47947],
+      b: [0.499384, 3.26371, 14.9455, 105.98],
+      c: 13.3812,
+    });
+    expect(xrayFormFactor("Pu", 0)).toBeCloseTo(93.96507, 5);
   });
 });
 

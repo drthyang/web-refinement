@@ -36,7 +36,7 @@
 import type { Mat3, Vec3 } from "@/core/math/types";
 import type { UnitCell } from "@/core/crystal/types";
 import type { ExpandedAtom } from "@/core/diffraction/structureFactor";
-import { compositionWeights, numberDensity, speciesWeight } from "@/core/totalscattering/weights";
+import { compositionWeights, numberDensity, pairWeight, speciesAmplitude } from "@/core/totalscattering/weights";
 import { cartesianAdpTensor, type PdfPair } from "@/core/pdf/pairEnumerator";
 import { sphereEnvelope, type PdfModelParams } from "@/core/pdf/forwardModel";
 
@@ -113,7 +113,7 @@ export function computeGofRWithColumns(
 
   const weights = compositionWeights(atoms, params.scatteringType);
   const rho0 = numberDensity(weights.nEff, cell);
-  const norm = 1 / (weights.bAvg * weights.bAvg * weights.nEff);
+  const norm = 1 / (weights.bAvgAbs2 * weights.nEff);
 
   const sratio = params.sratio ?? 1;
   const rcut = params.rcut ?? 0;
@@ -124,24 +124,37 @@ export function computeGofRWithColumns(
 
   // --- Per-request precomputation ------------------------------------------
   // Occupancy: dPer[a] = dOcc[a]·b_a, plus the normalization chain through
-  // N = Σocc and S1 = Σ occ·b (norm = N/S1², rho0 = N/V).
+  // N = Σocc and S1 = Σ occ·b (norm = N/|S1|², rho0 = N/V). Complex amplitudes
+  // add the imaginary parts: d Re(w_i w_j*) = dPer_i·w_j + w_i·dPer_j + (same
+  // for the imaginary parts), d ln|S1|² = 2·Re(S1*·dS1)/|S1|².
   const occPre = requests.map((req) => {
     if (req.kind !== "occupancy") return null;
     const dPer = new Float64Array(atoms.length);
+    const dPerIm = weights.perAtomIm ? new Float64Array(atoms.length) : null;
     let dS1 = 0;
+    let dS1Im = 0;
     let dN = 0;
     for (let a = 0; a < atoms.length; a++) {
       const dOcc = req.dOcc[a]!;
       if (dOcc === 0) continue;
-      const b = speciesWeight(atoms[a]!.element, params.scatteringType, atoms[a]!.isotope);
+      const amp = speciesAmplitude(atoms[a]!.element, params.scatteringType, atoms[a]!.isotope);
+      const b = amp.re;
       dPer[a] = dOcc * b;
       dS1 += dOcc * b;
+      if (dPerIm) {
+        dPerIm[a] = dOcc * amp.im;
+        dS1Im += dOcc * amp.im;
+      }
       dN += dOcc;
     }
     const S1 = weights.bAvg * weights.nEff;
-    // d(norm)/norm = dN/N − 2·dS1/S1 (norm = N/S1²).
-    const dNormRel = (weights.nEff > 0 ? dN / weights.nEff : 0) - (S1 !== 0 ? (2 * dS1) / S1 : 0);
-    return { dPer, dN, dNormRel };
+    // d(norm)/norm = dN/N − 2·Re(S1*·dS1)/|S1|² (norm = N/|S1|²).
+    const S1Im = weights.bAvgIm * weights.nEff;
+    const dLnS1Sq = dPerIm
+      ? (S1 !== 0 || S1Im !== 0 ? (2 * (S1 * dS1 + S1Im * dS1Im)) / (S1 * S1 + S1Im * S1Im) : 0)
+      : (S1 !== 0 ? (2 * dS1) / S1 : 0);
+    const dNormRel = (weights.nEff > 0 ? dN / weights.nEff : 0) - dLnS1Sq;
+    return { dPer, dPerIm, dN, dNormRel };
   });
 
   // Position requests need U_sum·n̂ only when the structure has anisotropic
@@ -174,7 +187,7 @@ export function computeGofRWithColumns(
     const clamped = sigma < SIGMA_FLOOR;
     if (clamped) sigma = SIGMA_FLOOR;
 
-    const amp = (weights.perAtom[pair.i]! * weights.perAtom[pair.j]!) * norm / r;
+    const amp = pairWeight(weights, pair.i, pair.j) * norm / r;
     const invTwoSig2 = 1 / (2 * sigma * sigma);
     const peak = amp * INV_SQRT_2PI / sigma;
 
@@ -258,9 +271,12 @@ export function computeGofRWithColumns(
         }
         case "occupancy": {
           const pre = occPre[c]!;
-          const dAmp =
-            ((pre.dPer[pair.i]! * weights.perAtom[pair.j]! + weights.perAtom[pair.i]! * pre.dPer[pair.j]!) * norm) / r +
-            amp * pre.dNormRel;
+          const im = weights.perAtomIm;
+          const dW = pre.dPerIm && im
+            ? pre.dPer[pair.i]! * weights.perAtom[pair.j]! + weights.perAtom[pair.i]! * pre.dPer[pair.j]! +
+              (pre.dPerIm[pair.i]! * im[pair.j]! + im[pair.i]! * pre.dPerIm[pair.j]!)
+            : pre.dPer[pair.i]! * weights.perAtom[pair.j]! + weights.perAtom[pair.i]! * pre.dPer[pair.j]!;
+          const dAmp = (dW * norm) / r + amp * pre.dNormRel;
           if (dAmp === 0) continue;
           a0 = dAmp * INV_SQRT_2PI * invSigma;
           break;

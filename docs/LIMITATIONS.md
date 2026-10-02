@@ -123,8 +123,15 @@ approximate, however plausible its output looks.
 ## Symmetry
 
 **Supported**
-- All 230 space groups in their standard settings, plus the operation list read
-  from a CIF. Systematic absences are generated from the operations.
+- All 230 space groups in all 564 settings gemmi tabulates (both origin
+  choices, H and R axes, monoclinic and orthorhombic settings), plus the
+  operation list read from a CIF. Systematic absences are generated from the
+  operations.
+- The setting is never guessed. A CIF without operations whose symbol or number
+  fits several settings (e.g. "F d -3 m") must say which — a Hall symbol, a
+  suffix ("F d -3 m:2", ICSD "Z"), or the user's choice when loading; the cell
+  decides H vs R axes. An unknown symbol, or no symmetry at all, is an error,
+  not P1.
 - Magnetic subgroup candidates carry standard BNS/OG labels from a bundled
   ISO-MAG table (types I and III). A setting search also names candidates
   written in other settings: axis permutations, origin shifts, orthohexagonal
@@ -149,10 +156,11 @@ approximate, however plausible its output looks.
 ## Scattering tables
 
 **Supported**
-- Neutron coherent scattering lengths: 92 entries (Sears, *International Tables*
-  Vol. C), with GSAS-II's values pinned for the elements used in validation.
-- X-ray form factors: Cromer–Mann coefficients for 97 neutral atoms (Vol. C),
-  each checked to give f(0) = Z.
+- Neutron coherent scattering lengths: Sears (1992) *Neutron News* via NIST,
+  88 elements + D and 248 isotopes (Hf corrected to 7.77). Pu, Cm and Am need
+  an explicit isotope.
+- X-ray form factors: Cromer–Mann coefficients for 98 neutral atoms H–Cf
+  (Vol. C), each checked to give f(0) = Z.
 - Magnetic form factors: ⟨j0⟩ for 97 ions and ⟨j2⟩ for 95 (Vol. C). The
   tables support the dipole form for g ≠ 2, but calculations use ⟨j0⟩ only
   (see [Magnetic structures](#magnetic-structures)).
@@ -167,6 +175,11 @@ approximate, however plausible its output looks.
 ## Powder diffraction
 
 **Supported**
+- Reflection lists are complete: every (hkl) with d ≥ d_min, found with exact
+  per-axis index bounds (|h| ≤ a/d_min). A list is never truncated; a cell and
+  range needing more than 300 000 reflection families (or 6×10⁷ index triples,
+  or an index above 2047) is an error naming the cell, as a typo'd or diverged
+  cell usually is.
 - Constant-wavelength peaks: Gaussian or pseudo-Voigt, with Caglioti U/V/W
   widths, a Thompson–Cox–Hastings Lorentzian size/strain term, and
   Finger–Cox–Jephcoat axial asymmetry.

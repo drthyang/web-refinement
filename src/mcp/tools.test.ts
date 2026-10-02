@@ -38,6 +38,29 @@ const read = (f: string): string => readFileSync(resolve(DATA, f), "utf8");
 const HAVE_DATA = existsSync(resolve(DATA, "GaNb4Se8_100K.cif"));
 
 describe("MCP tool handlers", () => {
+  it("parse_structure refuses to guess an origin choice, and takes spaceGroupSetting", () => {
+    const cif = `data_si
+_cell_length_a 5.431
+_cell_length_b 5.431
+_cell_length_c 5.431
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_symmetry_space_group_name_H-M 'F d -3 m'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+Si1 Si 0.125 0.125 0.125
+`;
+    expect(() => parse_structure({ cif })).toThrow(/ambiguous.*F d -3 m:1.*F d -3 m:2/);
+    const { structure } = parse_structure({ cif, spaceGroupSetting: "F d -3 m:2" });
+    expect(structure.spaceGroup.hermannMauguin).toBe("F d -3 m:2");
+    expect(structure.spaceGroup.operations).toHaveLength(192);
+  });
+
   it("parse_powder_data rejects single-crystal reflection lists with a clear error", () => {
     const hkl = "   1   0   0   100.0   2.0\n   1   1   0   250.0   3.0\n   2   0   0   80.0   2.5\n";
     expect(() => parse_powder_data({ text: hkl, filename: "x.hkl" })).toThrow(/single-crystal/i);

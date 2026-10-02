@@ -143,7 +143,7 @@ describe("check_cell_symmetry — real data", () => {
 
     it("declared Fd-3m, the d-glide's forbidden 200 and 420 are observed", () => {
       const { structure, instrument, pattern } = load();
-      const fd = structureOf(cif("F d -3 m", structure.cell.a, structure.cell.a, "Ga1 Ga 0 0 0 1 0.01"));
+      const fd = structureOf(cif("F d -3 m:2", structure.cell.a, structure.cell.a, "Ga1 Ga 0 0 0 1 0.01"));
       const r = check_cell_symmetry({ structure: fd, pattern, instrument });
       expect(r.absencesConsistent).toBe(false);
       const violated = r.absences.violated.map((v) => [v.h, v.k, v.l].map(Math.abs).sort().join(""));

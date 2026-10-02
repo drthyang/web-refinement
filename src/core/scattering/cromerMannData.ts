@@ -3,15 +3,16 @@
  *
  * Four-Gaussian Cromer-Mann parametrization
  *   f0(s) = Σ_{i=1..4} a_i·exp(−b_i·s²) + c,   s = sinθ/λ (Å⁻¹),   f0(0) = Z,
- * from *International Tables for Crystallography* Vol. C (1995), pp. 500-502
- * (Cromer & Mann, *Acta Cryst.* 1968, A24, 321), via the ESRF DABAX
- * `f0_InterTables.dat` table (redistributed in the `xrayutilities` package).
- * These are the coefficients GSAS-II uses; neutral-atom rows reproduce its
- * form factors. Regenerate with scripts/gen_xray_ff.py.
+ * from *International Tables for Crystallography* Vol. C (1992), Table 6.1.1.4,
+ * pp. 500-502 (Cromer & Mann, *Acta Cryst.* 1968, A24, 321). Read from the ESRF
+ * DABAX `f0_InterTables.dat` transcription and checked row by row against the
+ * independent cctbx `it1992.cpp` transcription (both pinned by SHA-256 in
+ * scripts/gen_xray_ff.py); every row equals both and gives f0(0) = Z within
+ * 0.1 e. Neutral-atom rows equal GSAS-II's XrayFF and gemmi's it92 tables.
+ * Rows taken from cctbx because the DABAX row fails f0(0) = Z:
+ *   Pu: the DABAX row is the Np4+ row (f0(0) = 89.00).
  *
- * Covers 97 neutral atoms (H–Cf), keyed by element symbol. Any row
- * whose f0(0) = Σaᵢ + c disagrees with the element's Z by more than 0.1 e is a
- * bad least-squares fit in the source and is omitted (currently only Pu).
+ * Covers 98 neutral atoms (H–Cf), keyed by element symbol.
  */
 
 export interface CromerMann {
@@ -114,6 +115,7 @@ export const CROMER_MANN: Readonly<Record<string, CromerMann>> = {
   Pa: { a: [35.8847, 23.2948, 14.1891, 4.17287], b: [0.547751, 3.41519, 16.9235, 105.251], c: 13.4287 },
   U: { a: [36.0228, 23.4128, 14.9491, 4.188], b: [0.5293, 3.3253, 16.0927, 100.613], c: 13.3966 },
   Np: { a: [36.1874, 23.5964, 15.6402, 4.1855], b: [0.511929, 3.25396, 15.3622, 97.4908], c: 13.3573 },
+  Pu: { a: [36.5254, 23.8083, 16.7707, 3.47947], b: [0.499384, 3.26371, 14.9455, 105.98], c: 13.3812 },
   Am: { a: [36.6706, 24.0992, 17.3415, 3.49331], b: [0.483629, 3.20647, 14.3136, 102.273], c: 13.3592 },
   Cm: { a: [36.6488, 24.4096, 17.399, 4.21665], b: [0.465154, 3.08997, 13.4346, 88.4834], c: 13.2887 },
   Bk: { a: [36.7881, 24.7736, 17.8919, 4.23284], b: [0.451018, 3.04619, 12.8946, 86.003], c: 13.2754 },

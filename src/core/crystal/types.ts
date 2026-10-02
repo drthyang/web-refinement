@@ -56,14 +56,16 @@ export interface AtomSite {
   readonly element: string;
   /**
    * Optional isotope mass number for neutron scattering, e.g. 2 for D or 57 for
-   * ⁵⁷Fe. Currently only deuterium (H, mass 2) is isotope-resolved; other
-   * isotopes fall back to natural-abundance b (see neutron.ts).
+   * ⁵⁷Fe. Every isotope Sears (1992) tabulates is resolved; an untabulated one
+   * is an error, never a silent fall-back to the natural value. Pu, Cm and Am
+   * have no natural-abundance value and require it (see neutron.ts).
    */
   readonly isotope?: number;
   /**
-   * Formal oxidation state. Used to pick the magnetic ⟨j0⟩/⟨j2⟩ ion; the X-ray
-   * form factors are neutral-atom Cromer–Mann only (no ionic species yet), so
-   * this does not affect X-ray scattering today.
+   * Formal oxidation state, e.g. +3 from a CIF type symbol "Fe3+". Used to pick
+   * the magnetic ⟨j0⟩/⟨j2⟩ ion; the X-ray form factors are neutral-atom
+   * Cromer–Mann only (no ionic species yet), so this does not affect X-ray
+   * scattering today.
    */
   readonly oxidationState?: number;
   /** Fractional coordinates [x, y, z] in the crystallographic basis. */

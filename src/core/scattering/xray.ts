@@ -9,6 +9,7 @@
  * data. This file holds only the evaluation logic.
  */
 
+import type { Complex } from "@/core/math/types";
 import type { ScatteringTable } from "@/core/scattering/types";
 import { CROMER_MANN, type CromerMann } from "@/core/scattering/cromerMannData";
 
@@ -29,8 +30,8 @@ export function xrayFormFactor(element: string, s: number): number {
 }
 
 export const xrayTable: ScatteringTable = {
-  factor(element: string, s: number): number {
-    return xrayFormFactor(element, s);
+  amplitude(element: string, s: number): Complex {
+    return { re: xrayFormFactor(element, s), im: 0 };
   },
   has(element: string): boolean {
     return element in CROMER_MANN;

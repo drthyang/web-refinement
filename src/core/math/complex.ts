@@ -19,3 +19,11 @@ export function modulusSquared(a: Complex): number {
   return a.re * a.re + a.im * a.im;
 }
 
+
+export function mul(a: Complex, b: Complex): Complex {
+  return { re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re };
+}
+
+export function conj(a: Complex): Complex {
+  return { re: a.re, im: -a.im };
+}
