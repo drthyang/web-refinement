@@ -416,10 +416,10 @@ Never judge a fit by its R value alone. The definitions are in
   jump to the peak.
 - **Normal probability**: a straight line with slope 1 and intercept 0 means
   both the model and the uncertainties are right.
-- **Result:**, in the panel footer, gives the status and cycles. Click it to
-  list χ² and wR per cycle. A note may follow: **SVD dropped** (undetermined
-  combinations, whose esds mean nothing), **High correlation:** (consider
-  fixing one) or **At bound:**.
+- **Result**, in the panel footer, gives the status and cycles on one line,
+  with ⚠ when there is a note. Click it to open the notes and χ² and wR per
+  cycle. A note is **SVD dropped** (undetermined combinations, whose esds mean
+  nothing), **High correlation:** (consider fixing one) or **At bound:**.
 - **Largest outliers · (Fo²−Fc²)/σ**, on the single-crystal page, lists the
   worst reflections.
 - **Bond lengths**, in any 3D model, labels the bonds. **View** with a, b or c

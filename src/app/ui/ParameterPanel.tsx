@@ -4,8 +4,8 @@
  * numeric input / esd / free-fixed-calib status pill and a blue left accent when
  * free. Reset lives in the panel header; the action bar pairs the primary Refine
  * with its multi-start alternative (Prefit / Escape min) and the
- * magnetic-analysis handoff, over a result banner and a collapsible
- * refinement-history table. Driven by the real refinement params.
+ * magnetic-analysis handoff, over one collapsible result section (status,
+ * diagnostics, cycle history). Driven by the real refinement params.
  */
 
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
@@ -161,6 +161,9 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
 
   // All parameter groups start collapsed; the user expands the ones they need.
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  // The result section likewise rests collapsed. Held here, not in the section,
+  // so a user who opened it keeps it open across refinements and resets.
+  const [resultOpen, setResultOpen] = useState(false);
 
   const freeCount = params.filter((p) => !p.fixed).length;
   // Current values of the tied rows (e.g. a moment amplitude "= hypot(…)" of
@@ -268,11 +271,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
           );
         })}
       </div>
-      {result && (
-        <div style={footer}>
-          <ResultBanner result={result} />
-        </div>
-      )}
+      {result && <ResultSection result={result} open={resultOpen} onToggle={() => setResultOpen((o) => !o)} />}
     </div>
   );
 }
@@ -323,23 +322,50 @@ function StatusPill({ param, locked }: { param: RefinementParameter; locked: boo
   return <span style={{ ...pill, border: `1px solid ${color.subtle2}`, background: "#f6f2ea", color: color.faint }}>○ fixed</span>;
 }
 
-function ResultBanner({ result }: { result: RefinementResult }): JSX.Element {
+/**
+ * The run summary as ONE collapsible section pinned under the parameter list.
+ * Collapsed it is a single line — status, cycle count, and a flag naming any
+ * diagnostics — so a finished fit never squeezes the rows being worked on.
+ * Expanded, the diagnostics and the cycle history share a height-capped body
+ * that scrolls on its own instead of pushing the parameter list up.
+ */
+function ResultSection({ result, open, onToggle }: { result: RefinementResult; open: boolean; onToggle: () => void }): JSX.Element {
   const d = result.diagnostics;
-  const hasDiag = d !== undefined && (d.svdZeroCount > 0 || d.highCorrelations.length > 0 || d.atBounds.length > 0);
+  const flags = d
+    ? [d.svdZeroCount > 0 && "SVD null direction", d.highCorrelations.length > 0 && "high correlation", d.atBounds.length > 0 && "at bound"].filter((f): f is string => !!f)
+    : [];
+  const converged = result.status === "converged";
+  const cycles = result.history.length;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {/* The status line opens the per-cycle table: one line, not two, so the
-          footer takes less from the parameter list above.
-          wR lives on the pattern plot (one readout per page); GoF in the quality rail. */}
-      <details style={{ fontSize: 11.5, color: color.secondary }}>
-        <summary style={{ ...banner, background: color.okBg, border: `1px solid ${color.okBorder}`, color: color.okInk, cursor: "pointer" }} title="Show the χ² and wR of each cycle">
-          Result: {result.status} · {result.history.length} cycle{result.history.length === 1 ? "" : "s"}
-        </summary>
-        {/* Capped and scrolling: opened on a long refinement, the table would
-            otherwise grow the footer and squeeze the parameter list above. */}
-        <div style={cycleTableBox}>
+    <div style={footer}>
+      <div style={resultHeader} onClick={onToggle} role="button" aria-expanded={open}>
+        <span style={{ color: color.primary, fontSize: 10 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>Result</span>
+        {/* wR lives on the pattern plot (one readout per page); GoF in the quality rail. */}
+        <span style={{ ...statusPill, ...(converged ? okTone : noteTone) }}>{result.status} · {cycles} cycle{cycles === 1 ? "" : "s"}</span>
+        {flags.length > 0 && (
+          <span style={{ ...flagText, color: color.noteInk }} title={flags.join(", ")}>⚠ {flags.join(" · ")}</span>
+        )}
+      </div>
+      {open && (
+        <div style={resultBody}>
+          {flags.length > 0 && d && (
+            <div style={{ ...banner, ...noteTone }}>
+              {d.svdZeroCount > 0 && <div>SVD dropped {d.svdZeroCount} near-null direction{d.svdZeroCount === 1 ? "" : "s"}.</div>}
+              {d.highCorrelations.length > 0 && (
+                <div>
+                  High correlation:{" "}
+                  {d.highCorrelations.slice(0, 3).map((c, i) => (
+                    // Each pair stays on one line — the narrow rail must never split a name from its coefficient.
+                    <span key={`${c.parameterIdA}/${c.parameterIdB}`} style={{ whiteSpace: "nowrap" }}>{i > 0 && "; "}{c.parameterIdA}/{c.parameterIdB} {c.coefficient.toFixed(2)}</span>
+                  ))}
+                </div>
+              )}
+              {d.atBounds.length > 0 && <div>At bound: {d.atBounds.map((b) => b.parameterId).join(", ")}.</div>}
+            </div>
+          )}
           <table style={{ fontSize: 11, fontFamily: mono, borderCollapse: "collapse" }}>
-            <thead><tr><th style={hhead}>cycle</th><th style={hhead}>χ²</th><th style={hhead}>wR %</th></tr></thead>
+            <thead><tr><th style={hcell}>cycle</th><th style={hcell}>χ²</th><th style={hcell}>wR %</th></tr></thead>
             <tbody>
               {result.history.map((h) => (
                 <tr key={h.iteration}>
@@ -350,13 +376,6 @@ function ResultBanner({ result }: { result: RefinementResult }): JSX.Element {
               ))}
             </tbody>
           </table>
-        </div>
-      </details>
-      {hasDiag && d && (
-        <div style={{ ...banner, background: color.noteBg, border: `1px solid ${color.noteBorder}`, color: color.noteInk }}>
-          {d.svdZeroCount > 0 && <div>SVD dropped {d.svdZeroCount} near-null direction{d.svdZeroCount === 1 ? "" : "s"}.</div>}
-          {d.highCorrelations.length > 0 && <div>High correlation: {d.highCorrelations.slice(0, 3).map((c) => `${c.parameterIdA}/${c.parameterIdB} ${c.coefficient.toFixed(2)}`).join("; ")}</div>}
-          {d.atBounds.length > 0 && <div>At bound: {d.atBounds.map((b) => b.parameterId).join(", ")}.</div>}
         </div>
       )}
     </div>
@@ -371,12 +390,15 @@ const valueInput: CSSProperties = { width: 88, border: `1px solid ${color.input}
 const pill: CSSProperties = { fontSize: 11, padding: "1px 8px", borderRadius: 999, textAlign: "center", justifySelf: "start" };
 const actionBar: CSSProperties = { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: `10px ${space.inset}`, borderBottom: `1px solid ${color.border}`, background: color.muted2 };
 const frameworkBar: CSSProperties = { display: "flex", alignItems: "center", gap: 10, rowGap: 6, flexWrap: "wrap", padding: `8px ${space.inset}`, borderBottom: `1px solid ${color.border}`, fontSize: 12, color: color.secondary };
-const footer: CSSProperties = { borderTop: `1px solid ${color.border}`, padding: `12px ${space.inset}`, background: color.muted2, display: "flex", flexDirection: "column", gap: 8 };
+const footer: CSSProperties = { flexShrink: 0, borderTop: `1px solid ${color.border}`, background: color.muted2 };
+const resultHeader: CSSProperties = { display: "flex", alignItems: "center", gap: 8, minWidth: 0, padding: `8px ${space.inset}`, cursor: "pointer" };
+const resultBody: CSSProperties = { maxHeight: "30vh", overflowY: "auto", padding: `0 ${space.inset} 10px calc(${space.inset} + 18px)`, display: "flex", flexDirection: "column", gap: 8 };
+const statusPill: CSSProperties = { ...pill, flexShrink: 0, whiteSpace: "nowrap" };
+const flagText: CSSProperties = { marginLeft: "auto", minWidth: 0, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const okTone: CSSProperties = { background: color.okBg, border: `1px solid ${color.okBorder}`, color: color.okInk };
+const noteTone: CSSProperties = { background: color.noteBg, border: `1px solid ${color.noteBorder}`, color: color.noteInk };
 const banner: CSSProperties = { borderRadius: 8, padding: "6px 10px", fontSize: 12 };
 const hcell: CSSProperties = { padding: "1px 10px 1px 0", textAlign: "left", color: color.faint };
-const hhead: CSSProperties = { ...hcell, position: "sticky", top: 0, background: color.muted2 };
-// The header plus about four cycles; longer runs scroll under the sticky header.
-const cycleTableBox: CSSProperties = { marginTop: 4, maxHeight: 84, overflowY: "auto" };
 const disabledStyle: CSSProperties = { opacity: 0.55, cursor: "not-allowed" };
 const cancelButton: CSSProperties = { padding: "11px 15px", fontSize: 13.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${color.warnBorder}`, background: color.warnBg, color: color.warnInk, cursor: "pointer" };
 // While refining, keep the button vivid (so the shimmer reads) but show progress.
