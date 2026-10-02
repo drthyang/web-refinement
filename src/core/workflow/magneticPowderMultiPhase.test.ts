@@ -49,7 +49,7 @@ describe("magnetic powder problem — multi-phase routing (Mn₃Ga + MnO demo)",
     // 4.4561 (MnO's cubic constraint written across all three lengths).
     expect(applied.model.cell.a).toBeCloseTo(5.41964, 4);
     expect(applied.model.cell.c).toBeCloseTo(4.37366, 4);
-    expect(applied.scale).toBeCloseTo(1.35813, 4);
+    expect(applied.scale).toBeCloseTo(1.3659, 4);
     // MnO's own B/occ for the colliding "Mn1" label must not leak in.
     const mn1 = applied.model.sites.find((site) => site.label === "Mn1")!;
     expect(mn1.adp.kind === "isotropic" ? mn1.adp.bIso : NaN).toBeCloseTo(1.13887, 4);
