@@ -20,7 +20,7 @@ const Z: Readonly<Record<string, number>> = {
   Pm: 61, Sm: 62, Eu: 63, Gd: 64, Tb: 65, Dy: 66, Ho: 67, Er: 68, Tm: 69,
   Yb: 70, Lu: 71, Hf: 72, Ta: 73, W: 74, Re: 75, Os: 76, Ir: 77, Pt: 78, Au: 79,
   Hg: 80, Tl: 81, Pb: 82, Bi: 83, Po: 84, At: 85, Rn: 86, Fr: 87, Ra: 88,
-  Ac: 89, Th: 90, Pa: 91, U: 92, Np: 93, Am: 95, Cm: 96, Bk: 97, Cf: 98,
+  Ac: 89, Th: 90, Pa: 91, U: 92, Np: 93, Pu: 94, Am: 95, Cm: 96, Bk: 97, Cf: 98,
 };
 
 describe("neutron scattering lengths (match GSAS-II .lst)", () => {
@@ -64,7 +64,7 @@ describe("X-ray form factors (Cromer-Mann)", () => {
     expect(xrayFormFactor("Mn", 0.5)).toBeLessThan(xrayFormFactor("Mn", 0));
   });
   it("covers the periodic table with every row normalized to Z at s = 0", () => {
-    expect(Object.keys(CROMER_MANN).length).toBeGreaterThanOrEqual(97);
+    expect(Object.keys(CROMER_MANN).length).toBe(98); // H–Cf, no gaps
     // Previously-missing common elements must resolve now.
     for (const el of ["H", "Ca", "Zn", "Ge", "Sr", "Zr", "Ba", "La", "Ce", "W", "Pb", "U"]) {
       expect(CROMER_MANN[el], el).toBeDefined();
@@ -76,6 +76,17 @@ describe("X-ray form factors (Cromer-Mann)", () => {
       expect(z, `Z for ${el}`).toBeDefined();
       expect(Math.abs(xrayFormFactor(el, 0) - z!), el).toBeLessThan(0.1);
     }
+  });
+  it("carries the ITC Pu row, not DABAX's shuffled one", () => {
+    // DABAX f0_InterTables prints the ITC Np4+ row under "Pu" (f0(0) = 89), so
+    // the generator takes Pu from the cctbx transcription of ITC Vol. C Table
+    // 6.1.1.4 — the row gemmi and GSAS-II also carry.
+    expect(CROMER_MANN.Pu).toEqual({
+      a: [36.5254, 23.8083, 16.7707, 3.47947],
+      b: [0.499384, 3.26371, 14.9455, 105.98],
+      c: 13.3812,
+    });
+    expect(xrayFormFactor("Pu", 0)).toBeCloseTo(93.96507, 5);
   });
 });
 

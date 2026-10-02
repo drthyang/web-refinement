@@ -150,8 +150,8 @@ approximate, however plausible its output looks.
 **Supported**
 - Neutron coherent scattering lengths: 92 entries (Sears, *International Tables*
   Vol. C), with GSAS-II's values pinned for the elements used in validation.
-- X-ray form factors: Cromer–Mann coefficients for 97 neutral atoms (Vol. C),
-  each checked to give f(0) = Z.
+- X-ray form factors: Cromer–Mann coefficients for 98 neutral atoms H–Cf
+  (Vol. C), each checked to give f(0) = Z.
 - Magnetic form factors: ⟨j0⟩ for 97 ions and ⟨j2⟩ for 95 (Vol. C). The
   tables support the dipole form for g ≠ 2, but calculations use ⟨j0⟩ only
   (see [Magnetic structures](#magnetic-structures)).

@@ -13,7 +13,7 @@ The scattering variable throughout is `s = sinθ/λ = 1/(2d)` (Å⁻¹).
 | Table | File | Form | Coverage | Source |
 |---|---|---|---|---|
 | **Neutron** `b` | [`neutronData.ts`](../src/core/scattering/neutronData.ts) | Constant bound coherent length `b` (fm), s-independent | **92 entries** (91 natural elements H–Cm + D) | Sears, ITC-C Vol. C §4.4.4; Ti/Mn/Zn/Au pinned to GSAS-II's Sears (1992) values |
-| **X-ray** `f(s)` | [`cromerMannData.ts`](../src/core/scattering/cromerMannData.ts) | 4-Gaussian Cromer–Mann `Σ aᵢe^{−bᵢs²} + c` | **97 neutral atoms** (H–Cf; Pu omitted, bad source fit) | International Tables Vol. C pp. 500–502 (DABAX `f0_InterTables`); f(0)=Z verified per row |
+| **X-ray** `f(s)` | [`cromerMannData.ts`](../src/core/scattering/cromerMannData.ts) | 4-Gaussian Cromer–Mann `Σ aᵢe^{−bᵢs²} + c` | **98 neutral atoms** (H–Cf) | International Tables Vol. C Table 6.1.1.4 (DABAX `f0_InterTables`, checked row by row against cctbx `it1992`); f(0)=Z verified per row |
 | **Magnetic** ⟨j0⟩ | [`magneticFormFactorData.ts`](../src/core/scattering/magneticFormFactorData.ts) | `A e^{−a s²} + B e^{−b s²} + C e^{−c s²} + D`, normalized to 1 at s=0 | **97 ions** (3d Sc–Cu, 4d Y–Pd, rare earths Ce–Yb, actinides U–Am, all common valences) | ITC-C Vol. C §4.4.5 (Brown), via the public-domain CrysFML table in `periodictable` |
 | **Magnetic** ⟨j2⟩ | [`magneticFormFactorData.ts`](../src/core/scattering/magneticFormFactorData.ts) | `(A e^{−a s²} + … + D)·s²`, → 0 at s=0 | **95 ions** (every ⟨j0⟩ ion except O¹⁺ and Pr³⁺) | same |
 
@@ -26,8 +26,11 @@ the sibling module (`neutron.ts`, `xray.ts`, `magnetic.ts`):
   (Ti, Mn, Zn, Au) where GSAS-II uses the earlier *Neutron News* (1992) values,
   so the neutron structure factor keeps matching GSAS-II `.lst` output.
 - X-ray — [`scripts/gen_xray_ff.py`](../scripts/gen_xray_ff.py). All neutral
-  atoms from the ITC-C Cromer–Mann parametrization; every row is checked to give
-  `f(0)=Z` within 0.1 e (Pu's source row misses by 5 e and is dropped).
+  atoms from the ITC-C Cromer–Mann parametrization. Two pinned transcriptions
+  are read (DABAX `f0_InterTables.dat` and cctbx `it1992.cpp`); every row must
+  agree between them and give `f(0)=Z` within 0.1 e. DABAX prints the ITC Np4+
+  row under "Pu" (f(0) = 89), so Pu comes from the cctbx transcription — the
+  same row gemmi and GSAS-II carry (f(0) = 93.965).
 - Magnetic — [`scripts/gen_magnetic_ff.py`](../scripts/gen_magnetic_ff.py),
   copying coefficients verbatim (no digit-altering float round-trips).
 
@@ -123,9 +126,10 @@ tables below). Web resources accessed **2026-07-08**.
 - **Tabulated form used** (4-Gaussian coefficients): International Tables for
   Crystallography Vol. C, pp. 500–502 / Table 6.1.1.4.
 - **Redistribution actually imported:** the ESRF **DABAX** `f0_InterTables.dat`
-  table (public domain), as shipped in the `xrayutilities` package
-  (`materials/data/f0_InterTables.dat.xz`). The 14 originally hand-entered rows
-  match it exactly; regenerating expands to all 97 neutral atoms.
+  table (oasys-kit/DabaxFiles @ `70ff903`, SHA-256 `d8c594a8…`), checked row by
+  row against the cctbx `it1992.cpp` transcription (cctbx_project @ `d2d1c70`,
+  SHA-256 `7ca28976…`). All 98 neutral atoms; Pu is taken from cctbx because the
+  DABAX Pu/Np3+/Np4+/Np6+ rows are shuffled.
 
 ### Magnetic form factors ⟨j0⟩ / ⟨j2⟩ (`magneticFormFactorData.ts`)
 
