@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   boundCoherentLength,
-  neutronScatteringLength,
   NEUTRON_B,
   NEUTRON_B_ISOTOPES,
   tabulatedIsotopes,
 } from "@/core/scattering/neutron";
 import { NEUTRON_CROSS_SECTIONS } from "@/core/scattering/neutronCrossSectionData";
+
+/** Real part b′ of the bound coherent length (fm). */
+const bRe = (element: string, isotope?: number): number => boundCoherentLength(element, isotope).re;
 import { xrayFormFactor, CROMER_MANN } from "@/core/scattering/xray";
 import {
   magneticFormFactorJ0,
@@ -32,31 +34,31 @@ const Z: Readonly<Record<string, number>> = {
 
 describe("neutron scattering lengths (Sears 1992, via NIST)", () => {
   it("Mn, O, Ga match GSAS-II printed values (fm)", () => {
-    expect(neutronScatteringLength("Mn")).toBeCloseTo(-3.73, 2);
-    expect(neutronScatteringLength("O")).toBeCloseTo(5.803, 2);
-    expect(neutronScatteringLength("Ga")).toBeCloseTo(7.288, 2);
+    expect(bRe("Mn")).toBeCloseTo(-3.73, 2);
+    expect(bRe("O")).toBeCloseTo(5.803, 2);
+    expect(bRe("Ga")).toBeCloseTo(7.288, 2);
   });
   it("throws for an unknown element", () => {
-    expect(() => neutronScatteringLength("Xx")).toThrow();
+    expect(() => bRe("Xx")).toThrow();
   });
   it("covers the periodic table, not just a handful of elements", () => {
     expect(Object.keys(NEUTRON_B).length).toBeGreaterThanOrEqual(89);
     for (const el of ["B", "Sc", "Ag", "Cd", "In", "Sb", "I", "Gd", "Hf", "Ta", "Re", "U"]) {
       expect(NEUTRON_B[el], el).toBeDefined();
     }
-    expect(neutronScatteringLength("Ag")).toBeCloseTo(5.922, 3);
-    expect(neutronScatteringLength("U")).toBeCloseTo(8.417, 3);
+    expect(bRe("Ag")).toBeCloseTo(5.922, 3);
+    expect(bRe("U")).toBeCloseTo(8.417, 3);
   });
   it("is the Neutron News 1992 evaluation, with no per-element overrides", () => {
     // Ti, Mn, Zn: Sears (1992), which the ITC Vol. C edition revises
     // (−3.37, −3.75, 5.6). Au: Sears (1992) 7.63, not the 7.90 of Rauch &
     // Waschkowski (2003) that GSAS-II's AtmBlens carries. Hf: 7.7 as entered
     // by NIST (the ITC edition prints 7.77).
-    expect(neutronScatteringLength("Ti")).toBe(-3.438);
-    expect(neutronScatteringLength("Mn")).toBe(-3.73);
-    expect(neutronScatteringLength("Zn")).toBe(5.68);
-    expect(neutronScatteringLength("Au")).toBe(7.63);
-    expect(neutronScatteringLength("Hf")).toBe(7.7);
+    expect(bRe("Ti")).toBe(-3.438);
+    expect(bRe("Mn")).toBe(-3.73);
+    expect(bRe("Zn")).toBe(5.68);
+    expect(bRe("Au")).toBe(7.63);
+    expect(bRe("Hf")).toBe(7.7);
   });
   it("In is 4.065 − 0.0539i fm (2.08 is In's σ_coh in barn, not b)", () => {
     expect(boundCoherentLength("In")).toEqual({ re: 4.065, im: -0.0539 });
@@ -89,20 +91,20 @@ describe("neutron scattering lengths (Sears 1992, via NIST)", () => {
   it("Pu and Cm need an explicit isotope; Sears gives no element value", () => {
     expect(NEUTRON_B.Pu).toBeUndefined();
     expect(NEUTRON_B.Cm).toBeUndefined();
-    expect(() => neutronScatteringLength("Pu")).toThrow(/isotope.*238, 239, 240, 242/);
-    expect(() => neutronScatteringLength("Cm")).toThrow(/isotope.*244, 246, 248/);
-    expect(neutronScatteringLength("Pu", 238)).toBe(14.1);
-    expect(neutronScatteringLength("Pu", 239)).toBe(7.7);
-    expect(neutronScatteringLength("Pu", 242)).toBe(8.1);
-    expect(neutronScatteringLength("Cm", 244)).toBe(9.5);
+    expect(() => bRe("Pu")).toThrow(/isotope.*238, 239, 240, 242/);
+    expect(() => bRe("Cm")).toThrow(/isotope.*244, 246, 248/);
+    expect(bRe("Pu", 238)).toBe(14.1);
+    expect(bRe("Pu", 239)).toBe(7.7);
+    expect(bRe("Pu", 242)).toBe(8.1);
+    expect(bRe("Cm", 244)).toBe(9.5);
     expect(tabulatedIsotopes("Pu")).toEqual([238, 239, 240, 242]);
   });
   it("resolves isotopes, and never falls back to the natural value", () => {
-    expect(neutronScatteringLength("H", 2)).toBe(6.671);
-    expect(neutronScatteringLength("D")).toBe(6.671);
-    expect(neutronScatteringLength("Ni", 62)).toBe(-8.7);
-    expect(neutronScatteringLength("Li", 7)).toBe(-2.22);
-    expect(() => neutronScatteringLength("Fe", 99)).toThrow(/99Fe.*54, 56, 57, 58/);
+    expect(bRe("H", 2)).toBe(6.671);
+    expect(bRe("D")).toBe(6.671);
+    expect(bRe("Ni", 62)).toBe(-8.7);
+    expect(bRe("Li", 7)).toBe(-2.22);
+    expect(() => bRe("Fe", 99)).toThrow(/99Fe.*54, 56, 57, 58/);
   });
 });
 

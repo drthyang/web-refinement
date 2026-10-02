@@ -10,6 +10,7 @@
  * See neutronSfValidation.test.ts. This file holds only the lookup logic.
  */
 
+import type { Complex } from "@/core/math/types";
 import type { ScatteringTable } from "@/core/scattering/types";
 import { NEUTRON_B, NEUTRON_B_ISOTOPES, type BoundCoherentLength } from "@/core/scattering/neutronData";
 
@@ -64,16 +65,24 @@ export function boundCoherentLength(element: string, isotope?: number): BoundCoh
 }
 
 /**
- * Real part b′ of the bound coherent scattering length (fm). The imaginary
- * (absorption) part of B, Cd, In, Sm, Eu, Gd and Dy is not applied here.
+ * Neutron scattering amplitude for the crystallographic structure factor
+ * F = Σ a·exp(+2πi h·x): the CONJUGATE of the printed length, a = b′ + i·b″ (fm).
+ *
+ * Why the conjugate: Sears' b = b′ − i·b″ belongs to the physics convention
+ * (time dependence exp(−iωt), scattered amplitude ∝ Σ(−b)·exp(−iQ·r), with
+ * Im(−b) > 0 by the optical theorem). The crystallographic F, with its +2πi
+ * phase and X-ray f″ > 0, is the complex conjugate of that sum, so its neutron
+ * term is conj(b). An absorbing nucleus therefore gets a positive imaginary
+ * amplitude — the same sign as X-ray f″.
  */
-export function neutronScatteringLength(element: string, isotope?: number): number {
-  return boundCoherentLength(element, isotope).re;
+export function neutronAmplitude(element: string, isotope?: number): Complex {
+  const b = boundCoherentLength(element, isotope);
+  return { re: b.re, im: b.im === 0 ? 0 : -b.im };
 }
 
 export const neutronTable: ScatteringTable = {
-  factor(element: string, _s: number, isotope?: number): number {
-    return neutronScatteringLength(element, isotope);
+  amplitude(element: string, _s: number, isotope?: number): Complex {
+    return neutronAmplitude(element, isotope);
   },
   has(element: string): boolean {
     return element in NEUTRON_B;

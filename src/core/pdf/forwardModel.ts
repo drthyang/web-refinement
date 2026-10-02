@@ -25,7 +25,7 @@
 import type { UnitCell } from "@/core/crystal/types";
 import type { ExpandedAtom } from "@/core/diffraction/structureFactor";
 import type { PdfScatteringType } from "@/core/diffraction/types";
-import { compositionWeights, numberDensity } from "@/core/totalscattering/weights";
+import { compositionWeights, numberDensity, pairWeight } from "@/core/totalscattering/weights";
 import { enumeratePairs, type PdfPair } from "@/core/pdf/pairEnumerator";
 
 export interface PdfModelParams {
@@ -98,7 +98,7 @@ export function computeGofR(
 
   const weights = compositionWeights(atoms, params.scatteringType);
   const rho0 = numberDensity(weights.nEff, cell);
-  const norm = 1 / (weights.bAvg * weights.bAvg * weights.nEff);
+  const norm = 1 / (weights.bAvgAbs2 * weights.nEff);
 
   const sratio = params.sratio ?? 1;
   const rcut = params.rcut ?? 0;
@@ -119,7 +119,7 @@ export function computeGofR(
     if (rcut > 0 && r < rcut) sigma *= sratio;
     if (sigma < SIGMA_FLOOR) sigma = SIGMA_FLOOR;
 
-    const amp = (weights.perAtom[pair.i]! * weights.perAtom[pair.j]!) * norm / r;
+    const amp = pairWeight(weights, pair.i, pair.j) * norm / r;
     const invTwoSig2 = 1 / (2 * sigma * sigma);
     const peak = amp * INV_SQRT_2PI / sigma;
 

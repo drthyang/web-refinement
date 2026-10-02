@@ -7,14 +7,29 @@
  * Cromer-Mann X-ray form factors and the ⟨j0⟩ magnetic approximation.
  */
 
-/** A scattering source: given an element/site, return its factor at a given s. */
+import type { Complex } from "@/core/math/types";
+
+/**
+ * A scattering source: given an element/site, return its complex scattering
+ * amplitude at a given s.
+ *
+ * The amplitude is in the CRYSTALLOGRAPHIC convention used by the structure
+ * factor, F = Σ a·exp(+2πi h·x) (ITC Vol. B), in which absorption makes the
+ * imaginary part positive (X-ray f″ > 0). For neutrons that is the complex
+ * conjugate of the bound coherent length as Sears prints it, b = b′ − i·b″
+ * (physics convention: Σ b·exp(−iQ·r)), so a = b′ + i·b″. Using b itself
+ * would give I(−h) instead of I(h): powder intensities and centrosymmetric
+ * structures do not notice, Bijvoet differences of a non-centrosymmetric
+ * crystal flip sign.
+ */
 export interface ScatteringTable {
   /**
-   * Coherent scattering factor.
-   *  - Neutron: constant scattering length b (fm), independent of s.
-   *  - X-ray: form factor f(s) in electrons.
+   * Coherent scattering amplitude.
+   *  - Neutron: conj(b) (fm), independent of s; imaginary for absorbers
+   *    (B, Cd, In, Sm, Eu, Gd, Dy, …).
+   *  - X-ray: form factor f0(s) in electrons (real; no anomalous terms yet).
    */
-  factor(element: string, s: number, isotope?: number): number;
+  amplitude(element: string, s: number, isotope?: number): Complex;
   /** True if `element` is present in this table. */
   has(element: string): boolean;
 }

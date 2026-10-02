@@ -7,7 +7,7 @@ import type { ExpandedAtom } from "@/core/diffraction/structureFactor";
 import { buildPowderSpec } from "@/app/powderSpec";
 import { exampleStructure } from "@/examples/mn3ga";
 import { powderCurves } from "@/core/workflow/powder";
-import { neutronScatteringLength } from "@/core/scattering/neutron";
+import { neutronAmplitude } from "@/core/scattering/neutron";
 import type { PowderPattern } from "@/core/diffraction/types";
 
 /**
@@ -30,13 +30,13 @@ describe("evaluatePowderBatchOnGpu (plumbing, stub GPU)", () => {
     let fr = 0;
     let fi = 0;
     for (const a of atoms) {
-      const b = neutronScatteringLength(a.element, a.isotope);
+      const amp = neutronAmplitude(a.element, a.isotope);
       const dw = a.adp.kind === "isotropic" ? Math.exp(-a.adp.bIso * r.s * r.s) : 1;
-      const w = a.occupancy * b * dw;
+      const w = a.occupancy * dw;
       const arg = r.h * a.position[0]! + r.k * a.position[1]! + r.l * a.position[2]!;
       const phase = 2 * Math.PI * (arg - Math.floor(arg));
-      fr += w * Math.cos(phase);
-      fi += w * Math.sin(phase);
+      fr += w * (amp.re * Math.cos(phase) - amp.im * Math.sin(phase));
+      fi += w * (amp.re * Math.sin(phase) + amp.im * Math.cos(phase));
     }
     return fr * fr + fi * fi;
   }

@@ -118,7 +118,13 @@ tables below). Web resources accessed **2026-07-08**.
   ScatterPlan's `data-sources/snapshots/nist-sears1992.tsv`).
 - **Sign convention.** Sears prints `b = b′ − i·b″`, with `b″ ≥ 0` for an
   absorbing nucleus (B, Cd, In, Sm, Eu, Gd, Dy, …). The table stores that as
-  printed.
+  printed. That is the physics convention (scattered amplitude ∝ Σ b·e^{−iQ·r});
+  the crystallographic `F = Σ a·e^{+2πi h·x}` is its complex conjugate, so the
+  structure factor uses `a = conj(b) = b′ + i·b″` (`neutronAmplitude`), the same
+  sign as X-ray f″. Taking the printed b directly would give I(−h): powder
+  patterns and centrosymmetric crystals would not notice, Bijvoet differences of
+  a non-centrosymmetric crystal would flip. The real-space PDF weights a pair by
+  Re(b_i·b_j*) and normalizes by |⟨b⟩|² (`compositionWeights`).
 - **Not used:** the ITC Vol. C §4.4.4 edition as redistributed by
   `Dans_Diffraction` (the previous source of this table). It revises Ti, Mn, Zn
   and Hf, gives In as 2.08 fm (In's σ_coh in barn; Sears prints 4.065 − 0.0539i),

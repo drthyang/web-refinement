@@ -282,8 +282,8 @@ export function buildMpdfProblem(
     const atoms = expandStructureAtoms(applied.model);
     const w = compositionWeights(atoms, "neutron");
     const nAtomsBox = w.nEff * field.boxVolumeCells;
-    const scale = w.bAvg !== 0 && nAtomsBox > 0
-      ? (field.spins.length / nAtomsBox) * (BARN_TO_FM2 / (w.bAvg * w.bAvg))
+    const scale = w.bAvgAbs2 !== 0 && nAtomsBox > 0
+      ? (field.spins.length / nAtomsBox) * (BARN_TO_FM2 / w.bAvgAbs2)
       : 0;
     const out = new Float64Array(modelGrid.length);
     for (let k = 0; k < out.length; k++) out[k] = scale * d[nDown + k]!;

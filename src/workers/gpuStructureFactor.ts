@@ -31,7 +31,8 @@
  *   Throughput 1439 reflections × 24 models: 2.5 ms GPU vs 34 ms CPU (13.6×);
  *   the win grows with atom count (the per-thread orbit sum dominates).
  *
- * SCOPE (v1): nuclear |F|² only; neutron (constant b) and X-ray (Cromer-Mann
+ * SCOPE (v1): nuclear |F|² only; neutron (constant complex amplitude conj(b),
+ * imaginary for absorbers — see ScatteringTable) and X-ray (Cromer-Mann
  * four-Gaussian) scattering; isotropic and anisotropic Debye-Waller. The
  * reflection list, s = sinθ/λ and reciprocal metric are SHARED across the model
  * batch — valid for position/occupancy/ADP columns (fixed cell). Cell columns
@@ -43,7 +44,7 @@ import type { StructureModel } from "@/core/crystal/types";
 import type { Radiation } from "@/core/diffraction/types";
 import { expandStructureAtoms, type ExpandedAtom } from "@/core/diffraction/structureFactor";
 import { dSpacing, reciprocalMetricTensor } from "@/core/crystal/unitCell";
-import { neutronScatteringLength } from "@/core/scattering/neutron";
+import { neutronAmplitude } from "@/core/scattering/neutron";
 import { CROMER_MANN } from "@/core/scattering/xray";
 
 const WGSL = /* wgsl */ `
@@ -65,11 +66,12 @@ struct Atom {
   u0: f32, u1: f32, u2: f32, u3: f32, u4: f32, u5: f32,  // [U11,U22,U33,U12,U13,U23]
 }
 struct Elem {                           // 16 f32 = 64 bytes, matching ELEM_STRIDE
-  neutronB: f32,
+  neutronB: f32,                        // Re of the neutron amplitude conj(b)
   a0: f32, a1: f32, a2: f32, a3: f32,   // Cromer-Mann a_i
   b0: f32, b1: f32, b2: f32, b3: f32,   // Cromer-Mann b_i
   c: f32,
-  _e0: f32, _e1: f32, _e2: f32, _e3: f32, _e4: f32, _e5: f32,
+  neutronBIm: f32,                      // Im of conj(b) = b″ ≥ 0 (absorbers)
+  _e1: f32, _e2: f32, _e3: f32, _e4: f32, _e5: f32,
 }
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read> refls: array<Refl>;
@@ -81,11 +83,12 @@ struct Elem {                           // 16 f32 = 64 bytes, matching ELEM_STRI
 const TWO_PI: f32 = 6.283185307179586;
 const PI2: f32 = 9.869604401089358;  // π²
 
-fn scatter(elem: u32, s2: f32) -> f32 {
+// Complex scattering amplitude (re, im).
+fn scatter(elem: u32, s2: f32) -> vec2<f32> {
   let e = elems[elem];
-  if (params.radiationKind == 0u) { return e.neutronB; }
-  return e.a0 * exp(-e.b0 * s2) + e.a1 * exp(-e.b1 * s2)
-       + e.a2 * exp(-e.b2 * s2) + e.a3 * exp(-e.b3 * s2) + e.c;
+  if (params.radiationKind == 0u) { return vec2<f32>(e.neutronB, e.neutronBIm); }
+  return vec2<f32>(e.a0 * exp(-e.b0 * s2) + e.a1 * exp(-e.b1 * s2)
+       + e.a2 * exp(-e.b2 * s2) + e.a3 * exp(-e.b3 * s2) + e.c, 0.0);
 }
 
 fn debyeWaller(a: Atom, h: f32, k: f32, l: f32, s2: f32) -> f32 {
@@ -109,7 +112,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var fi: f32 = 0.0;
   for (var p: u32 = range.x; p < range.y; p = p + 1u) {
     let a = atoms[p];
-    let w = a.occ * scatter(a.elem, s2) * debyeWaller(a, h, k, l, s2);
+    let amp = scatter(a.elem, s2);
+    let w = a.occ * debyeWaller(a, h, k, l, s2);
     // Phase 2π(h·x + k·y + l·z). Accumulate the hi part and the lo correction
     // separately (double-f32), reduce mod 1 before scaling so sin/cos see a small
     // argument even for high-index reflections.
@@ -118,8 +122,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let arg = argHi + argLo;
     let frac = arg - floor(arg);
     let phase = TWO_PI * frac;
-    fr = fr + w * cos(phase);
-    fi = fi + w * sin(phase);
+    let c = cos(phase);
+    let sn = sin(phase);
+    fr = fr + w * (amp.x * c - amp.y * sn);
+    fi = fi + w * (amp.x * sn + amp.y * c);
   }
   out[m * params.nRefl + r] = fr * fr + fi * fi;
 }
@@ -143,6 +149,35 @@ export interface SfReflection {
 export const ATOM_STRIDE = 16;
 export const ELEM_STRIDE = 16;
 export const STRUCTURE_FACTOR_WGSL = WGSL;
+
+/**
+ * The kernel's element table: one ELEM_STRIDE row per element key
+ * ("Fe", or "Pu-239" with an isotope), in the order given. Neutron rows carry
+ * the complex amplitude conj(b) in slots 0 (re) and 10 (im); X-ray rows the
+ * Cromer-Mann a (1–4), b (5–8) and c (9).
+ */
+export function packElementTable(keys: readonly string[], radiation: Radiation): Float32Array {
+  const elemData = new Float32Array(Math.max(keys.length, 1) * ELEM_STRIDE);
+  keys.forEach((key, idx) => {
+    const [element, iso] = key.split("-");
+    const isotope = iso !== undefined ? Number(iso) : undefined;
+    const base = idx * ELEM_STRIDE;
+    if (radiation.kind === "neutron" || radiation.kind === "neutron-tof") {
+      const amp = neutronAmplitude(element!, isotope);
+      elemData[base] = amp.re;
+      elemData[base + 10] = amp.im;
+    } else {
+      const cm = CROMER_MANN[element!];
+      if (!cm) throw new Error(`No Cromer-Mann coefficients for element "${element}"`);
+      for (let i = 0; i < 4; i++) {
+        elemData[base + 1 + i] = cm.a[i]!;
+        elemData[base + 5 + i] = cm.b[i]!;
+      }
+      elemData[base + 9] = cm.c;
+    }
+  });
+  return elemData;
+}
 
 export class GpuStructureFactor {
   private constructor(
@@ -195,23 +230,7 @@ export class GpuStructureFactor {
       }),
     );
 
-    const elemData = new Float32Array(Math.max(elementIndex.size, 1) * ELEM_STRIDE);
-    for (const [key, idx] of elementIndex) {
-      const [element, iso] = key.split("-");
-      const isotope = iso !== undefined ? Number(iso) : undefined;
-      const base = idx * ELEM_STRIDE;
-      if (radiation.kind === "neutron" || radiation.kind === "neutron-tof") {
-        elemData[base] = neutronScatteringLength(element!, isotope);
-      } else {
-        const cm = CROMER_MANN[element!];
-        if (!cm) throw new Error(`No Cromer-Mann coefficients for element "${element}"`);
-        for (let i = 0; i < 4; i++) {
-          elemData[base + 1 + i] = cm.a[i]!;
-          elemData[base + 5 + i] = cm.b[i]!;
-        }
-        elemData[base + 9] = cm.c;
-      }
-    }
+    const elemData = packElementTable([...elementIndex.keys()], radiation);
 
     const totalAtoms = marshalAtoms.reduce((n, a) => n + a.length, 0);
     const atomData = new Float32Array(Math.max(totalAtoms, 1) * ATOM_STRIDE);
