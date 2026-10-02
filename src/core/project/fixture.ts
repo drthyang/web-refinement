@@ -121,6 +121,16 @@ const PDF_WORKSPACE: PdfWorkspace = {
       { r: 3.0, gObs: 0.6 },
       { r: 3.5, gObs: -0.9 },
     ],
+    // The S(Q) the points were transformed from, with its error column — so
+    // every round-trip test also carries the retained reciprocal data.
+    sourceKind: "sq",
+    reciprocal: {
+      kind: "sq",
+      q: [0.5, 1, 1.5, 2, 2.5, 3],
+      y: [0.1, 0.4, 1.8, 0.9, 1.1, 1.0],
+      sigma: [0.01, 0.01, 0.012, 0.012, 0.014, 0.015],
+    },
+    transform: { qmin: 0.5, qmax: 3, modification: "none", lowQ: "none" },
   },
   refinement: {
     parameters: [

@@ -416,6 +416,21 @@ function checkBoxcarRun(v: unknown, path: string): void {
   opt(r.partial, `${path}.partial`, bool);
 }
 
+/** Retained S(Q)/F(Q): equal-length numeric columns (σ optional, ≥ 0). */
+function checkReciprocal(v: unknown, path: string): void {
+  const r = rec(v, path);
+  oneOf(["sq", "fq"] as const)(r.kind, `${path}.kind`);
+  const q = each(r.q, `${path}.q`, (x, p) => num(x, p));
+  const y = each(r.y, `${path}.y`, (x, p) => num(x, p));
+  if (y.length !== q.length) fail(`${path}.y`, `expected ${q.length} values (one per Q), got ${y.length}`);
+  if (r.sigma !== undefined && r.sigma !== null) {
+    const s = each(r.sigma, `${path}.sigma`, (x, p) => {
+      if (num(x, p) < 0) fail(p, "an uncertainty cannot be negative");
+    });
+    if (s.length !== q.length) fail(`${path}.sigma`, `expected ${q.length} values (one per Q), got ${s.length}`);
+  }
+}
+
 function checkPdfWorkspace(ws: Rec, path: string, ctx: PhaseContext): void {
   const pat = rec(ws.pattern, `${path}.pattern`);
   str(pat.id, `${path}.pattern.id`);
@@ -432,6 +447,14 @@ function checkPdfWorkspace(ws: Rec, path: string, ctx: PhaseContext): void {
   for (const k of ["qmax", "qmin", "qmaxInst", "qdamp", "qbroad", "rpoly", "rstep"]) opt(pat[k], `${path}.pattern.${k}`, num);
   opt(pat.composition, `${path}.pattern.composition`, str);
   opt(pat.sourceKind, `${path}.pattern.sourceKind`, oneOf(PDF_SOURCE_KINDS));
+  opt(pat.reciprocal, `${path}.pattern.reciprocal`, checkReciprocal);
+  if (pat.transform !== undefined && pat.transform !== null) {
+    const t = rec(pat.transform, `${path}.pattern.transform`);
+    num(t.qmin, `${path}.pattern.transform.qmin`);
+    num(t.qmax, `${path}.pattern.transform.qmax`);
+    oneOf(["none", "lorch"] as const)(t.modification, `${path}.pattern.transform.modification`);
+    oneOf(["none", "linear"] as const)(t.lowQ, `${path}.pattern.transform.lowQ`);
+  }
 
   checkRefinement(ws.refinement, `${path}.refinement`);
   checkWindow(ws.fitRange, `${path}.fitRange`);

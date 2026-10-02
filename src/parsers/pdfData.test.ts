@@ -6,6 +6,7 @@ import { IDENTITY3 } from "@/core/math/mat3";
 import { expandStructureAtoms } from "@/core/diffraction/structureFactor";
 import { computeGofR, makeRGrid } from "@/core/pdf/forwardModel";
 import { bandLimit } from "@/core/pdf/termination";
+import { sigmaFFromSigmaS, sineTransformOperator, sineTransformSigma, fOfQFromSOfQ, sineTransform, defaultTransformGrid } from "@/core/totalscattering/fourier";
 
 const DIFFPY_XRAY = `[DEFAULT]
 
@@ -85,6 +86,20 @@ describe("looksLikePdf", () => {
     expect(looksLikePdf(DIFFPY_XRAY, "x.dat")).toBe(true);
     expect(looksLikePdf(MANTID_NEUTRON, "x.dat")).toBe(true);
   });
+  it("routes a Mantid `*_SQ.dat` (`# X Y E`) by name AND an S(Q) baseline — never by either alone", () => {
+    const rows = Array.from({ length: 300 }, (_, i) => {
+      const qq = 0.5 + 0.08 * i;
+      return `${qq.toFixed(3)} ${(1 + Math.sin(2.6 * qq) / (2.6 * qq)).toFixed(6)} 0.004`;
+    }).join("\n");
+    const sq = `# X Y E\n${rows}\n`;
+    expect(looksLikePdf(sq, "PG3_55526_SQ.dat")).toBe(true);
+    expect(looksLikePdf(sq, "nomad_SofQ.txt")).toBe(true);
+    expect(looksLikePdf(sq, "PG3_55526.dat")).toBe(false); // no S(Q) in the name
+    // A powder pattern whose name happens to say "SQ": counts, not a baseline at 1.
+    const powder = Array.from({ length: 300 }, (_, i) => `${(10 + 0.05 * i).toFixed(2)} ${(200 + 50 * Math.sin(i)).toFixed(1)} 14`).join("\n");
+    expect(looksLikePdf(`# X Y E\n${powder}\n`, "LaB6_SQ.dat")).toBe(false);
+    expect(looksLikePdf(sq, "SQUID_run.dat")).toBe(false); // "SQ" inside a word
+  });
   it("does not fire on a plain 2θ powder pattern", () => {
     expect(looksLikePdf("10.0 1234\n10.1 1250\n", "scan.xy")).toBe(false);
   });
@@ -100,6 +115,16 @@ describe("classifyReducedKind", () => {
     expect(classifyReducedKind("outputtype = fq\n1 0.5", "x.dat")).toBe("fq");
     expect(classifyReducedKind("#L Q S(Q)\n1 1.02", "x.dat")).toBe("sq");
     expect(classifyReducedKind("#L r G(r)\n1 0.02", "x.dat")).toBe("gr");
+  });
+  it("a .fq whose tail sits FLAT at 1 is S(Q) (RMCProfile StoG writes S(Q) to .fq); a real or mis-normalized F(Q) stays fq", () => {
+    const sRows = Array.from({ length: 400 }, (_, i) => [0.5 + 0.05 * i, 1 + 0.3 * Math.sin(2.5 * (0.5 + 0.05 * i)) / (0.5 + 0.05 * i)]);
+    expect(classifyReducedKind("", "scale.fq", sRows)).toBe("sq");
+    const fRows = sRows.map(([qq, ss]) => [qq!, qq! * (ss! - 1)]);
+    expect(classifyReducedKind("", "scale.fq", fRows)).toBe("fq");
+    // F(Q) of an S(Q) normalized 4 % high: Q·0.04 ramps from ≈0.6 to ≈0.8 across the tail.
+    const ramp = sRows.map(([qq, ss]) => [qq!, qq! * (ss! + 0.04 - 1)]);
+    expect(classifyReducedKind("", "scale.fq", ramp)).toBe("fq");
+    expect(classifyReducedKind("", "x.fq")).toBe("fq"); // no rows: extension decides
   });
   it("baseline heuristic: y ≈ 1 at high Q reads as S(Q)", () => {
     const rows = Array.from({ length: 40 }, (_, i) => [i * 0.5, 1 + 0.02 * Math.sin(i)]);
@@ -176,6 +201,61 @@ describe("S(Q)/F(Q) auto-transform to G(r)", () => {
     expect(p.sourceKind).toBe("gr");
     expect(p.points).toHaveLength(3);
     expect(p.points[0]).toEqual({ r: 0.01, gObs: 0.5 });
+  });
+});
+
+describe("S(Q) with an error column — retained, transformed, σ propagated", () => {
+  const Q = Array.from({ length: 900 }, (_, k) => 0.6 + 0.025 * k); // 0.6 … 23.075
+  const S = Q.map((x) => 1 + (0.5 * Math.sin(2.7 * x)) / (2.7 * x) * Math.exp(-0.006 * x * x));
+  const SIG = Q.map((x) => 0.003 + 0.0002 * x);
+  const fmt = (cols: (number[] | readonly number[])[]): string =>
+    Q.map((_, k) => cols.map((c) => c[k]!.toPrecision(12)).join(" ")).join("\n");
+
+  it("Mantid `# X Y E`: keeps the whole file, transforms it, and puts the exactly-propagated σ_G on every point", () => {
+    const p = parsePdfData(`# X Y E\n${fmt([Q, S, SIG])}\n`, { filename: "PG3_SQ.dat" });
+    expect(p.sourceKind).toBe("sq");
+    expect(p.reciprocal!.kind).toBe("sq");
+    expect(p.reciprocal!.q).toHaveLength(Q.length);
+    expect(p.reciprocal!.sigma).toHaveLength(Q.length);
+    expect(p.transform).toEqual({ qmin: p.reciprocal!.q[0], qmax: p.reciprocal!.q[Q.length - 1], modification: "none", lowQ: "none" });
+    const rq = p.reciprocal!.q;
+    const expected = sineTransformSigma(sineTransformOperator(rq), sigmaFFromSigmaS(rq, p.reciprocal!.sigma!), p.points.map((pt) => pt.r));
+    p.points.forEach((pt, i) => expect(pt.sigma).toBe(expected[i]));
+    // Values are the same operator's: the error column changes nothing about G.
+    const noSig = parsePdfData(`# X Y\n${fmt([Q, S])}\n`, { filename: "PG3_SQ.dat" });
+    expect(noSig.points.map((pt) => pt.gObs)).toEqual(p.points.map((pt) => pt.gObs));
+  });
+
+  it("PDFgetN `#L Q S(Q) dQ dS(Q)`: σ comes from dS by label, not from the dQ column", () => {
+    const dQ = Q.map(() => 0.0125);
+    const p = parsePdfData(`#L Q S(Q) dQ dS(Q)\n${fmt([Q, S, dQ, SIG])}\n`, { filename: "x.sq" });
+    expect(p.reciprocal!.sigma![10]).toBeCloseTo(SIG[10]!, 12);
+    // Columns re-ordered: the label still finds them.
+    const q2 = parsePdfData(`#L Q dS(Q) S(Q)\n${fmt([Q, SIG, S])}\n`, { filename: "x.sq" });
+    expect(q2.reciprocal!.y[10]).toBeCloseTo(S[10]!, 12);
+    expect(q2.reciprocal!.sigma![10]).toBeCloseTo(SIG[10]!, 12);
+  });
+
+  it("an all-zero error column means NO errors (Mantid writes one), not exact data", () => {
+    const p = parsePdfData(`# X Y E\n${fmt([Q, S, Q.map(() => 0)])}\n`, { filename: "x.sq" });
+    expect(p.reciprocal!.sigma).toBeUndefined();
+    expect(p.points[100]!.sigma).toBeUndefined();
+  });
+
+  it("unsorted rows with a duplicate Q are sorted and de-duplicated before the transform", () => {
+    const rows = fmt([Q, S, SIG]).split("\n");
+    const shuffled = [rows[5]!, ...rows.slice(0, 5), ...rows.slice(6), rows[7]!].join("\n");
+    const a = parsePdfData(`# X Y E\n${shuffled}\n`, { filename: "x.sq" });
+    const b = parsePdfData(`# X Y E\n${rows.join("\n")}\n`, { filename: "x.sq" });
+    expect(a.reciprocal!.q).toEqual(b.reciprocal!.q);
+    expect(a.points).toEqual(b.points);
+  });
+
+  it("a header window holding < 2 nodes falls back to the data's own extent instead of failing", () => {
+    const p = parsePdfData(`qmin = 40\nqmax = 45\n#### start data\n${fmt([Q, S])}\n`, { filename: "x.sq" });
+    expect(p.transform!.qmin).toBe(p.reciprocal!.q[0]);
+    const direct = sineTransform(sineTransformOperator(p.reciprocal!.q), fOfQFromSOfQ(p.reciprocal!.q, p.reciprocal!.y), defaultTransformGrid()).g;
+    expect(p.points.map((pt) => pt.gObs)).toEqual(Array.from(direct));
   });
 });
 
