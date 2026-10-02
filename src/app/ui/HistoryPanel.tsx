@@ -126,8 +126,8 @@ function StepRow({ step, current, branches, onGoTo, onRename }: {
 
 /**
  * A step as the list shows it: kind glyph, name (if given), description, wR.
- * The header's brief "landed on" label after back / forward uses it too, so
- * the two always read the same. `children` are tags after the description.
+ * The header's current-step label, left of the arrows, uses it too, so the
+ * two always read the same. `children` are tags after the description.
  */
 export function StepText({ step, current = false, children }: {
   readonly step: HistoryStep;
