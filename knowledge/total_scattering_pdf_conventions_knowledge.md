@@ -44,7 +44,17 @@ G(r) = (2/π) ∫ F(Q) sin(Qr) dQ                             (the transform we 
 
 Import behavior: `.sq`/`.fq` (or header `outputtype`/`#L` labels, or an
 S(Q)-baseline≈1 heuristic) are sine-transformed to G(r) at load, with the
-data's own Q window recorded as the model's termination Qmax.
+data's own Q window recorded as the model's termination Qmax. The ORIGINAL
+S(Q)/F(Q) — and its error column (Mantid `E`, PDFgetN `dS(Q)`), when present —
+is retained on the pattern (`PdfPattern.reciprocal`), and σ_G(r) is propagated
+onto every G(r) point (§5). Mantid S(Q) exports named for their content
+(`*_SQ.dat`, `*SofQ*`) route here when their ordinate also settles flat at 1.
+
+⚠ **StoG writes S(Q) to `.fq`.** RMCProfile's StoG names its S(Q) output
+`scale.fq`. Q[S−1] oscillates about 0 at high Q and cannot settle FLAT at 1,
+so a `.fq` whose tail does is read as S(Q) (`classifyReducedKind`). Its
+`*_rmc.fq` holds S(Q) − 1 (Keen's F for ⟨b̄⟩² = 1) — neither S nor Q[S−1];
+convert to S(Q) before loading.
 
 ⚠ **Naming collision:** Keen 2001's own "F(Q)" is NOT Q[S−1] — his F(Q) is an
 interference function carrying scattering-length units (barn-like), related by
@@ -101,7 +111,87 @@ Practical rules:
   comparable against a package that keeps Q-dependent normalization in r-space.
 ```
 
-## 5. Boxcar (sliding-window) refinement — how to read one
+## 5. S(Q) → G(r): the transform, its uncertainty, and "independent points"
+
+`core/totalscattering/fourier.ts` (operator) + `grErrors.ts` (diagnostics).
+ONE linear operator produces the values, σ and covariance, so they cannot
+disagree about the quadrature:
+
+```text
+G(r) = (2/π) ∫_{Qmin}^{Qmax} F(Q) M(Q) sin(Qr) dQ          PDFgetX3 Eq. (3) (M ≡ 1)
+     ≈ Σ_k c_k F_k sin(Q_k r) [+ G_low(r)],   c_k = (2/π) w_k M(Q_k)
+w_k  composite-trapezoid weights on the MEASURED nodes (non-uniform allowed);
+     the rule of pystog and StoG (golden-tested to ~1e-13)
+M(Q) 1 (default — what the model's sinc termination assumes), or
+     Lorch: sin(πQ/Qmax)/(πQ/Qmax), Qmax = last integrated node
+G_low optional (StoG/pystog "omitted low-Q correction"): S(Q) linear from
+     S(0) = 0 to the first measured S_0; closed form, series at small Q_0·r
+```
+
+Uncertainty — exact, because the operator is linear (JCGM 102:2011 §6.2.1.3,
+Eq. 3: U_y = C U_x Cᵀ), for INDEPENDENT σ_S per Q point:
+
+```text
+σ_F(Q)          = Q·σ_S(Q)                                   (Q is exact)
+Cov[G(r),G(r')] = Σ_k c_k² σ_F,k² sin(Q_k r) sin(Q_k r')     [+ node-0 low-Q term]
+                = ½[P(r − r') − P(r + r')],   P(x) = Σ_k c_k² σ_F,k² cos(Q_k x)
+```
+
+The second line is a product-to-sum identity: a Toeplitz part (stationary
+noise autocorrelation) minus a Hankel part (the odd reflection at r = 0). It
+makes the full n×n covariance O(n_Q·n) on a uniform r grid.
+
+What follows from it (derived here, each pinned by a test — not quoted from a
+paper):
+
+```text
+- σ_G(0) = 0, σ_G ∝ r for r ≪ π/Qmax, then a plateau √(½P(0)).
+- Neighboring points on a typical 0.01 Å grid are ~98 % correlated
+  (Δr ≪ π/Qmax ≈ 0.12 Å at Qmax 26): the grid is ~12× oversampled.
+- Stationary correlation at spacing Δ, continuum, Q grid from 0, u = Qmax·Δ:
+    white F noise (σ_F const)          ρ = sin u / u           → 0 at Δ = mπ/Qmax
+    white S noise (σ_F = Q·σ_S)        ρ = 3[(u²−2)sin u + 2u cos u]/u³
+                                                                → −6/π² ≈ −0.61 at Δ = π/Qmax
+  So Nyquist-spaced points are uncorrelated ONLY for white F(Q) noise
+  (exactly so on a discrete grid: DST-I orthogonality). Real σ_S tends to grow
+  with Q, which pushes ρ(π/Qmax) further negative (−0.75 measured for
+  σ_S ∝ 1 + Q/8 on FeCoSn 199 K).
+- Independent points in a window: the sampling-theorem count
+  (r_max − r_min)·Qmax/π (Farrow et al. 2011), and the participation ratio
+  N*_ef = (Σλ)²/Σλ² of the correlation matrix (Bretherton et al. 1999, Eq. 3),
+  = n²/‖R‖_F². White F: N*_ef ≈ the Nyquist count. White S: ≈ 5/9 of it
+  ((∫x²)²/∫x⁴ for a Q²-weighted spectrum) — fewer independent points than
+  the Nyquist count assumes.
+```
+
+Practical rules:
+
+- **The fit still uses uniform weights.** σ_G is displayed (±σ ribbon on G(r),
+  the S(Q) tab) and available to the Bayesian likelihood, but `1/σ²` on an
+  oversampled, correlated grid would over-count information. The full
+  covariance (`sineTransformCovariance`) is the ingredient for a generalized
+  least-squares or correlated likelihood; Toby & Billinge (2004) describe the
+  PDF variance–covariance matrix as offering optimal least-squares weighting.
+  Not wired into the refinement yet.
+- **A file's own dG column is displayed as written.** Check its provenance.
+  Mantid's `PDFFourierTransform2` (source read 2026-10-02,
+  `convertFromLittleGRMinus1`) scales G(r) VALUES by 4πρ₀·r but their ERRORS
+  by r only, so a dG(r) written by that path is off by the factor 4πρ₀
+  (≈ 0.6–1.3). Prefer loading the S(Q) with errors and propagating here.
+- **pystog's dG differs slightly, by design.** It integrates the variance with
+  its own trapezoid (endpoint weight ½ΔQ² instead of the exact ¼ΔQ²) and leaves
+  the low-Q extrapolation's error out. The golden test reconciles both
+  differences exactly.
+- **A Lorch-modified G(r) needs a matched model termination.** The model's
+  band-limit (`pdf/termination.ts`) is the unmodified sinc, so the load path
+  never applies Lorch. A Lorch-transformed G(r) must not be fitted until the
+  termination kernel (Qmax/2π²)[Si(π + Qmax·x) + Si(π − Qmax·x)] is
+  implemented.
+- **σ_S is the statistical error only.** Background, normalization and
+  Compton/Placzek systematics are not in it, and they usually dominate at
+  low r.
+
+## 6. Boxcar (sliding-window) refinement — how to read one
 
 ```text
 - What it is: refit the SAME model inside a fixed-width r-window slid across
@@ -137,7 +227,7 @@ Practical rules:
   5 Å box at r = 45 Å still enumerates every pair out to ~51 Å.
 ```
 
-## 6. References
+## 7. References
 
 Canonical, DOI-linked entries live in [`../docs/REFERENCES.md`](../docs/REFERENCES.md)
 (section "Real-space total scattering — PDF & mPDF").
@@ -152,3 +242,16 @@ Canonical, DOI-linked entries live in [`../docs/REFERENCES.md`](../docs/REFERENC
   doi:[10.1107/S0021889813005190](https://doi.org/10.1107/S0021889813005190).
 - Toby & Billinge, *Acta Cryst.* **A60**, 315–317 (2004) — correlated G(r) errors.
   doi:[10.1107/S0108767304011754](https://doi.org/10.1107/S0108767304011754).
+- Farrow, Shaw, Kim, Juhás & Billinge, *Phys. Rev. B* **84**, 134105 (2011) —
+  Nyquist sampling Δr = π/Qmax for PDF refinement.
+  doi:[10.1103/PhysRevB.84.134105](https://doi.org/10.1103/PhysRevB.84.134105).
+- Lorch, *J. Phys. C* **2**, 229–237 (1969) — the modification function.
+  doi:[10.1088/0022-3719/2/2/305](https://doi.org/10.1088/0022-3719/2/2/305).
+- JCGM 102:2011 (GUM Supplement 2), §6.2.1.3 Eq. (3) — U_y = C U_x Cᵀ for a
+  linear multivariate model.
+- Bretherton et al., *J. Climate* **12**, 1990–2009 (1999) — the participation
+  ratio N*_ef. doi:[10.1175/1520-0442(1999)012<1990:TENOSD>2.0.CO;2](https://doi.org/10.1175/1520-0442(1999)012%3C1990:TENOSD%3E2.0.CO;2).
+- Tucker, Keen, Dove, Goodwin & Hui, *J. Phys.: Condens. Matter* **19**, 335218
+  (2007) — RMCProfile, which ships StoG.
+  doi:[10.1088/0953-8984/19/33/335218](https://doi.org/10.1088/0953-8984/19/33/335218).
+- pystog (ORNL) — https://github.com/neutrons/pystog — the transform golden.

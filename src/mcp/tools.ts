@@ -14,7 +14,7 @@
  */
 
 import type { StructureModel } from "@/core/crystal/types";
-import type { PdfPattern, PowderPattern } from "@/core/diffraction/types";
+import type { PdfPattern, PowderPattern, SineTransformRecord } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { isMomentParameterKind, type LinearRestraint, type ParameterBinding, type RefinementParameter, type RefinementResult } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
@@ -1010,6 +1010,7 @@ export function parse_pdf_data(args: { text: string; filename?: string; signal?:
     points: number; rMin: number; rMax: number; rStep?: number;
     scatteringType: string; qmax?: number; qdamp?: number; composition?: string;
     dscale?: number; fitrmin?: number; fitrmax?: number;
+    sourceKind?: string; sigma?: string; transform?: SineTransformRecord;
   };
 } {
   // PDFgui .fgr fit exports first: the generic reader's column heuristics
@@ -1054,6 +1055,14 @@ export function parse_pdf_data(args: { text: string; filename?: string; signal?:
       ...(pattern.qmax !== undefined ? { qmax: pattern.qmax } : {}),
       ...(pattern.qdamp !== undefined ? { qdamp: pattern.qdamp } : {}),
       ...(pattern.composition ? { composition: pattern.composition } : {}),
+      // Where the per-point σ came from — propagated exactly from an S(Q)/F(Q)
+      // error column, the file's own dG column, or nowhere. The fit uses
+      // uniform weights either way (correlated G(r) errors).
+      ...(pattern.sourceKind ? { sourceKind: pattern.sourceKind } : {}),
+      sigma: pattern.points.every((p) => p.sigma !== undefined)
+        ? pattern.transform ? "propagated from the S(Q) error column" : "from the file's dG column"
+        : "none",
+      ...(pattern.transform ? { transform: pattern.transform } : {}),
     },
   };
 }

@@ -61,6 +61,7 @@ import { applyParameters } from "@/core/workflow/apply";
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
+import { ReciprocalPanel } from "@/app/ui/ReciprocalPanel";
 import { BoxcarPanel, stepIndexFor, type BoxcarPlan, type BoxcarRun, type BoxcarSeries } from "@/app/ui/BoxcarPanel";
 import { boxcarPlanIssue, boxcarScannedMax, boxcarWindows, type BoxcarDirection } from "@/core/workflow/pdfBoxcar";
 
@@ -281,7 +282,19 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   const [live, setLive] = useState<number[] | null>(null);
   // Plot-card view: the fit, the refined 3D structure (per phase), the
   // subgroup tree, the Bayesian posterior, or the boxcar (r-resolved) scan.
-  const [viewTab, setViewTab] = useState<"fit" | "model3d" | "subgroups" | "posterior" | "boxcar">("fit");
+  const [viewTab, setViewTab] = useState<"fit" | "reciprocal" | "model3d" | "subgroups" | "posterior" | "boxcar">("fit");
+  // The S(Q) tab exists only for a pattern transformed from Q-space data; a
+  // later G(r) load must not strand the page on a view it no longer offers.
+  const hasReciprocal = pattern.reciprocal !== undefined;
+  useEffect(() => {
+    if (!hasReciprocal && viewTab === "reciprocal") setViewTab("fit");
+  }, [hasReciprocal, viewTab]);
+  // ±σ ribbon on G(r): the σ propagated from S(Q), or the file's own dG column.
+  const gSigma = useMemo(
+    () => (pattern.points.length > 0 && pattern.points.every((p) => p.sigma !== undefined && Number.isFinite(p.sigma)) ? pattern.points.map((p) => p.sigma!) : null),
+    [pattern],
+  );
+  const [showGSigma, setShowGSigma] = useState(true);
   // Posterior sampling state: the last run's result plus the exact request it
   // sampled (Continue must re-pose the IDENTICAL problem or the chain's resume
   // token would silently target a different posterior).
@@ -1227,6 +1240,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         `${probeLabel} · r ${rFirst.toFixed(2)}–${rLast.toFixed(2)} Å · ${pattern.points.length} pts` +
         (pattern.qmax !== undefined ? ` · Qmax ${pattern.qmax.toFixed(1)} Å⁻¹` : "") +
         (pattern.sourceKind === "sq" ? " · from S(Q)" : pattern.sourceKind === "fq" ? " · from F(Q)" : "") +
+        (pattern.reciprocal?.sigma ? " ± σ" : "") +
         (pattern.composition ? ` · ${pattern.composition}` : ""),
     },
   ];
@@ -1351,7 +1365,9 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
             <span style={uppercaseLabel}>
               {viewTab === "fit"
                 ? "PDF pattern — G(r)"
-                : viewTab === "model3d"
+                : viewTab === "reciprocal"
+                  ? "Reduced data — S(Q) the G(r) was transformed from"
+                  : viewTab === "model3d"
                   ? "Crystal structure — unit cell"
                   : viewTab === "posterior"
                     ? "Bayesian posterior — free parameters"
@@ -1373,6 +1389,19 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
               </span>
             )}
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, rowGap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {viewTab === "fit" && gSigma && (
+                <label
+                  style={{ display: "flex", gap: 5, alignItems: "center", fontSize: fz.micro, color: color.secondary, cursor: "pointer" }}
+                  title={
+                    pattern.transform
+                      ? "±1σ ribbon: σ_G(r) propagated exactly from the S(Q) error column through the sine transform. Neighboring points are correlated — see the S(Q) tab."
+                      : "±1σ ribbon from the file's dG(r) column, as the reduction wrote it."
+                  }
+                >
+                  <input type="checkbox" checked={showGSigma} onChange={(e) => setShowGSigma(e.target.checked)} style={{ accentColor: color.primary }} />
+                  ±σ
+                </label>
+              )}
               {viewTab === "fit" && canOverlay && (
                 <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: fz.micro, color: color.secondary, cursor: "pointer" }} title={multiPhase ? "Overlay each phase's G(r) contribution — they sum exactly to the calc curve" : "Overlay the element-pair (Faber–Ziman) partial PDFs — they sum exactly to the calc curve"}>
                   <input type="checkbox" checked={showPartials} onChange={(e) => setShowPartials(e.target.checked)} style={{ accentColor: color.primary }} />
@@ -1395,6 +1424,9 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
               <SegmentedToggle
                 options={[
                   { id: "fit", label: "Refinement", title: "Observed vs calculated G(r)" },
+                  ...(hasReciprocal
+                    ? [{ id: "reciprocal" as const, label: "S(Q)", title: "The S(Q)/F(Q) this G(r) was transformed from, with its ±σ error ribbon, and what that error becomes in G(r) over the fit window" }]
+                    : []),
                   { id: "model3d", label: "3D Model", title: "3D crystal-structure model" },
                   { id: "subgroups", label: "Subgroups", title: "Group–subgroup tree — pick a target subgroup to activate the distortion modes it permits" },
                   { id: "posterior", label: "Posterior", title: "Bayesian posterior of the free parameters (ensemble MCMC) — credible intervals, convergence diagnostics, and the posterior-vs-esd check" },
@@ -1417,6 +1449,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                 onFitRangeChange={setFitRange}
                 focusFitToken={focusFitToken}
                 {...(overlays ? { overlays } : {})}
+                {...(gSigma && showGSigma ? { obsSigma: gSigma, obsSigmaLabel: pattern.transform ? "±σ propagated" : "±σ (file)" } : {})}
               />
               <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: color.secondary }}>
                 Drag across the plot to zoom, blue handles to set the fit window. Qdamp/Qbroad are instrument constants — hold them fixed once calibrated on a standard.
@@ -1430,6 +1463,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
                 </div>
               )}
             </>
+          ) : viewTab === "reciprocal" ? (
+            <ReciprocalPanel pattern={pattern} fitRange={fitRange} />
           ) : viewTab === "model3d" ? (
             <>
               {multiPhase && (

@@ -754,9 +754,10 @@ export function App(): JSX.Element {
           setPdfDataset(parsed);
           setStep(0);
           setDetection(null);
+          const errs = parsed.reciprocal?.sigma ? ", its errors propagated to σ_G(r) — see the S(Q) tab" : "";
           const provenance =
-            parsed.sourceKind === "sq" ? " (S(Q) → G(r) transformed at load)" :
-            parsed.sourceKind === "fq" ? " (F(Q) → G(r) transformed at load)" :
+            parsed.sourceKind === "sq" ? ` (S(Q) → G(r) transformed at load${errs})` :
+            parsed.sourceKind === "fq" ? ` (F(Q) → G(r) transformed at load${errs})` :
             parsed.sourceKind === "fgr" ? " (PDFgui fit export: Gobs = Gcalc + Gdiff)" : "";
           requestStep("load", `Loaded ${file.name}`, true);
           setMessage(

@@ -86,11 +86,47 @@ export interface PdfPoint {
   /** Observed reduced PDF G(r) (Å⁻²). May be negative — G(r) oscillates about 0. */
   readonly gObs: number;
   /**
-   * Standard uncertainty on `gObs`, when the reduction wrote one. Informational:
-   * G(r) points are strongly correlated (finite-Q sine transform), so the fit
-   * uses uniform weights and Rw, not `1/σ²` (see PDF_MPDF_ROADMAP §8).
+   * Standard uncertainty on `gObs`: the reduction's own dG column, or — for a
+   * pattern transformed here from S(Q)/F(Q) with errors — σ_G(r) propagated
+   * exactly through the sine transform (`totalscattering/fourier.ts`).
+   * Informational: G(r) points are strongly correlated (finite-Q sine
+   * transform), so the fit uses uniform weights and Rw, not `1/σ²` (see
+   * PDF_MPDF_ROADMAP §8). The full covariance is available from the retained
+   * {@link PdfPattern.reciprocal} data.
    */
   readonly sigma?: number;
+}
+
+/**
+ * Reduced reciprocal-space data — the S(Q) or F(Q) a G(r) was transformed
+ * from, retained verbatim (the whole file, not just the transform window) so
+ * the error budget can be re-propagated and the transform redone with other
+ * settings. Plain arrays: it is saved in project files.
+ */
+export interface ReciprocalSpaceData {
+  /** "sq" = S(Q), dimensionless, → 1 at high Q; "fq" = F(Q) = Q·[S(Q) − 1] (Å⁻¹). */
+  readonly kind: "sq" | "fq";
+  /** Momentum transfer Q (Å⁻¹), strictly ascending. */
+  readonly q: readonly number[];
+  /** S(Q) or F(Q) at each Q, per `kind`. */
+  readonly y: readonly number[];
+  /**
+   * Standard uncertainty of `y`, when the reduction wrote one (Mantid `E`,
+   * PDFgetN `dS(Q)`). Treated as statistically INDEPENDENT between Q points —
+   * the assumption under which σ_G(r) and Cov[G] are propagated.
+   */
+  readonly sigma?: readonly number[];
+}
+
+/** How a G(r) was produced from {@link ReciprocalSpaceData} (provenance). */
+export interface SineTransformRecord {
+  /** First and last Q node actually integrated (Å⁻¹). */
+  readonly qmin: number;
+  readonly qmax: number;
+  /** Modification function applied to F(Q): none, or Lorch (1969). */
+  readonly modification: "none" | "lorch";
+  /** Treatment of the unmeasured 0 → Qmin region: omitted, or S(Q) linear to S(0) = 0 (StoG). */
+  readonly lowQ: "none" | "linear";
 }
 
 /**
@@ -131,6 +167,13 @@ export interface PdfPattern {
    * the UI and reports; absent means "gr".
    */
   readonly sourceKind?: "gr" | "sq" | "fq" | "fgr" | "fgr-diff";
+  /**
+   * The S(Q)/F(Q) the points were transformed from (sourceKind "sq"/"fq"),
+   * with its error column when the file had one. Absent for a G(r) file.
+   */
+  readonly reciprocal?: ReciprocalSpaceData;
+  /** How `points` were produced from `reciprocal` (present with it). */
+  readonly transform?: SineTransformRecord;
 }
 
 /** Any diffraction dataset the engine can refine against. */

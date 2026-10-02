@@ -292,7 +292,55 @@ and the build plan in [`PDF_MPDF_ROADMAP.md`](./PDF_MPDF_ROADMAP.md).
   doi:[10.1107/S0108767304011754](https://doi.org/10.1107/S0108767304011754). Why
   point-to-point correlation in G(r) inflates naive esds — the basis for the PDF
   uncertainty caveat in [`LIMITATIONS.md`](./LIMITATIONS.md) and
-  [`REFINEMENT_ENGINE.md`](./REFINEMENT_ENGINE.md).
+  [`REFINEMENT_ENGINE.md`](./REFINEMENT_ENGINE.md). Its abstract describes
+  computing the PDF's variance–covariance matrix from the intensity uncertainties
+  as the optimal least-squares weighting; that matrix is now computed exactly
+  (`sineTransformCovariance`) though not yet used as a fit weight. →
+  [`totalscattering/fourier.ts`](../src/core/totalscattering/fourier.ts).
+- **S(Q) → G(r) uncertainty propagation (the law)** — JCGM 102:2011,
+  *Evaluation of measurement data — Supplement 2 to the "Guide to the expression
+  of uncertainty in measurement" — Extension to any number of output
+  quantities*, §6.2.1.3, Eq. (3): U_y = C_x U_x C_xᵀ, exact for a linear model
+  ([BIPM PDF](https://www.bipm.org/documents/20126/2071204/JCGM_102_2011_E.pdf);
+  scalar form JCGM 100:2008 §5.2.2, Eq. 13). The sine transform is linear in
+  S(Q), so σ_G(r) and Cov[G] are exact rather than linearized. Precedent for
+  propagating counting statistics through every PDF-reduction step: Qiu, X.,
+  Thompson, J. W. & Billinge, S. J. L. (2004), *J. Appl. Cryst.* **37**, 678,
+  doi:[10.1107/S0021889804011744](https://doi.org/10.1107/S0021889804011744)
+  (PDFgetX2). Error sources of a PDF: Toby, B. H. & Egami, T. (1992), "Accuracy
+  of pair distribution function analysis applied to crystalline and
+  non-crystalline materials," *Acta Cryst.* **A48**, 336–346,
+  doi:[10.1107/S0108767391011327](https://doi.org/10.1107/S0108767391011327). →
+  [`totalscattering/fourier.ts`](../src/core/totalscattering/fourier.ts).
+- **Modification function** — Lorch, E. (1969). "Neutron diffraction by
+  germania, silica and radiation-damaged silica glasses." *J. Phys. C: Solid
+  State Phys.* **2**, 229–237.
+  doi:[10.1088/0022-3719/2/2/305](https://doi.org/10.1088/0022-3719/2/2/305). The
+  form used, M(Q) = sin(πQ/Qmax)/(πQ/Qmax), is the one implemented by Mantid's
+  `PDFFourierTransform` and pystog (the paper's own expression was not
+  inspected). Engine option only — the load path does not apply it. →
+  [`totalscattering/fourier.ts`](../src/core/totalscattering/fourier.ts).
+- **Independent points in G(r)** — Farrow, C. L., Shaw, M., Kim, H., Juhás, P. &
+  Billinge, S. J. L. (2011). "Nyquist-Shannon sampling theorem applied to
+  refinements of the atomic pair distribution function." *Phys. Rev. B* **84**,
+  134105. doi:[10.1103/PhysRevB.84.134105](https://doi.org/10.1103/PhysRevB.84.134105)
+  (Δr_N = π/Qmax; the Nyquist count); Bretherton, C. S., Widmann, M., Dymnikov,
+  V. P., Wallace, J. M. & Bladé, I. (1999). "The effective number of spatial
+  degrees of freedom of a time-varying field." *J. Climate* **12**, 1990–2009.
+  doi:[10.1175/1520-0442(1999)012<1990:TENOSD>2.0.CO;2](https://doi.org/10.1175/1520-0442(1999)012%3C1990:TENOSD%3E2.0.CO;2)
+  (Eq. 3, the participation ratio N*_ef = (Σλ)²/Σλ², applied to the G(r)
+  correlation matrix). → [`totalscattering/grErrors.ts`](../src/core/totalscattering/grErrors.ts).
+- **External goldens for the transform** — **pystog** (M. McDonnell, ORNL;
+  https://github.com/neutrons/pystog, https://pystog.readthedocs.io), the Python
+  port of StoG: committed fixture of G(r) AND propagated dG(r) for four option
+  sets ([`pystogGolden.test.ts`](../src/core/totalscattering/pystogGolden.test.ts),
+  generator [`gen_pystog_golden.py`](../scripts/gen_pystog_golden.py)). **StoG**,
+  distributed with RMCProfile — Tucker, M. G., Keen, D. A., Dove, M. T.,
+  Goodwin, A. L. & Hui, Q. (2007). "RMCProfile: reverse Monte Carlo for
+  polycrystalline materials." *J. Phys.: Condens. Matter* **19**, 335218.
+  doi:[10.1088/0953-8984/19/33/335218](https://doi.org/10.1088/0953-8984/19/33/335218)
+  — real-data gate on FeCoSn 199 K (data-gated,
+  [`stogGolden.test.ts`](../src/core/totalscattering/stogGolden.test.ts)).
 - **Magnetic diffuse-scattering refinement (context, not implemented)** —
   Paddison, J. A. M., Ross Stewart, J. & Goodwin, A. L. (2013). "SPINVERT: a
   program for refinement of paramagnetic diffuse scattering data." *J. Phys.:

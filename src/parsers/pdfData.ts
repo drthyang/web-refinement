@@ -21,8 +21,8 @@
  * Pure `string → PdfPattern`; no DOM, no side effects.
  */
 
-import type { PdfPattern, PdfPoint, PdfScatteringType } from "@/core/diffraction/types";
-import { fOfQFromSOfQ, gOfRFromFOfQ, defaultTransformGrid } from "@/core/totalscattering/fourier";
+import type { PdfPattern, PdfPoint, PdfScatteringType, ReciprocalSpaceData } from "@/core/diffraction/types";
+import { defaultTransformGrid, transformReciprocal } from "@/core/totalscattering/fourier";
 
 export interface ParsePdfOptions {
   /** Display name; defaults to the filename or "PDF pattern". */
@@ -53,16 +53,18 @@ function detectScatteringType(header: string): PdfScatteringType {
 }
 
 /**
- * Column indices for r, G, and (optional) dG, from a `#L`/`#l` label line when
- * present, else positional defaults resolved against the observed column count.
+ * Column indices for the abscissa (r or Q), the ordinate (G, S or F) and its
+ * optional uncertainty (dG, dS or dF), from a `#L`/`#l` label line when
+ * present (`#L r G(r) dr dG(r)`, PDFgetN's `#L Q S(Q) dQ dS(Q)`), else
+ * positional defaults resolved against the observed column count.
  */
 function resolveColumns(labelLine: string | undefined, ncol: number): { r: number; g: number; sigma: number } {
   if (labelLine) {
     const toks = labelLine.replace(/^#\s*l\b/i, "").trim().split(/\s+/);
     const find = (re: RegExp) => toks.findIndex((t) => re.test(t));
-    const r = find(/^r(\(|$|\b)/i);
-    const g = find(/^g/i);
-    const sigma = find(/^dg/i); // dG(r); the dr column (r-uncertainty) is ignored
+    const r = find(/^[rq](\(|$|\b)/i);
+    const g = find(/^[gsf]/i);
+    const sigma = find(/^d[gsf]/i); // dG/dS/dF; the dr/dQ abscissa-uncertainty column is ignored
     if (r >= 0 && g >= 0) return { r, g, sigma };
   }
   // Positional: r, G, [dr, dG] (4-col Mantid) or r, G, [dG] (3-col) or r, G.
@@ -84,7 +86,10 @@ export type ReducedKind = "gr" | "sq" | "fq";
 export function classifyReducedKind(text: string, filename = "", rows?: readonly (readonly number[])[]): ReducedKind {
   const ext = filename.match(/\.(gr|sgr|sq|fq)$/i)?.[1]?.toLowerCase();
   if (ext === "sq") return "sq";
-  if (ext === "fq") return "fq";
+  // RMCProfile's StoG writes its S(Q) to `.fq` files. Q·[S(Q) − 1] oscillates
+  // about 0 at high Q and cannot settle FLAT at 1, so a `.fq` whose tail does
+  // is S(Q) — misreading it as Q[S−1] would multiply the whole signal by Q.
+  if (ext === "fq") return rows && flatUnitTail(rows) ? "sq" : "fq";
   if (ext === "gr" || ext === "sgr") return "gr";
   const head = text.slice(0, 1200);
   const out = head.match(/outputtype\s*=\s*(gr|sq|fq)/i)?.[1]?.toLowerCase();
@@ -101,9 +106,44 @@ export function classifyReducedKind(text: string, filename = "", rows?: readonly
   return "gr";
 }
 
+/**
+ * The last quarter of the ordinate column sits flat at 1: both halves of it
+ * average within 0.15 of 1 and within 0.05 of each other. The flatness test
+ * keeps a mis-normalized F(Q) (which ramps linearly with Q) from passing.
+ */
+function flatUnitTail(rows: readonly (readonly number[])[]): boolean {
+  if (rows.length <= 8) return false;
+  const tail = rows.slice(Math.floor(rows.length * 0.75));
+  const half = Math.floor(tail.length / 2);
+  const mean = (xs: readonly (readonly number[])[]): number => xs.reduce((s, r) => s + (r[1] ?? 0), 0) / xs.length;
+  const a = mean(tail.slice(0, half));
+  const b = mean(tail.slice(half));
+  return Math.abs(a - 1) < 0.15 && Math.abs(b - 1) < 0.15 && Math.abs(a - b) < 0.05;
+}
+
+/** An S(Q) export named for its content: `PG3_55526_SQ.dat`, `sample_SofQ.txt`, `nom.s_of_q`. */
+const SQ_NAME = /(^|[^a-z])(s_?of_?q|sq)([^a-z]|$)/i;
+
+/** Numeric rows (≥ 2 columns) of a text table, for content checks. */
+function numericRows(text: string): number[][] {
+  const rows: number[][] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const t = raw.trim();
+    if (t === "" || /^[#!]/.test(t)) continue;
+    const nums = t.split(/[\s,]+/).map(Number);
+    if (nums.length >= 2 && nums.every(Number.isFinite)) rows.push(nums);
+  }
+  return rows;
+}
+
 /** True if `text`/`filename` looks like a reduced-PDF file (for format routing). */
 export function looksLikePdf(text: string, filename = ""): boolean {
   if (/\.(gr|sgr|sq|fq)$/i.test(filename)) return true;
+  // Mantid/ADDIE S(Q) exports (`# X Y E`, `.dat`) carry no PDF header at all:
+  // route them by a name that SAYS S(Q) and an ordinate that settles flat at 1
+  // — both, so neither a powder file called "SQ" nor a stray baseline-1 table
+  // is captured.
+  if (SQ_NAME.test(filename.replace(/\.[^.]+$/, "")) && flatUnitTail(numericRows(text))) return true;
   const head = text.slice(0, 800);
   return (
     /diffpy\.pdfgetx/i.test(head) ||
@@ -113,6 +153,24 @@ export function looksLikePdf(text: string, filename = ""): boolean {
     /#\s*l\s+q\b.*\b[sf]\s*\(\s*q/i.test(head) || // S(Q)/F(Q) column labels
     /g\(\s*å?\s*\$?\^?\{?-?2/i.test(head) // G(Å^-2) ordinate label
   );
+}
+
+/**
+ * The parsed Q-space rows as {@link ReciprocalSpaceData}: sorted by Q with
+ * duplicate Q dropped (the transform needs a strictly ascending grid), and the
+ * error column kept only when it is a usable one — every value finite and
+ * ≥ 0 and at least one positive (Mantid writes an all-zero E column when it has
+ * no errors, which is "no information", not "exact data").
+ */
+function reciprocalFromPoints(kind: "sq" | "fq", points: readonly PdfPoint[]): ReciprocalSpaceData {
+  const sorted = [...points].sort((a, b) => a.r - b.r);
+  const kept: PdfPoint[] = [];
+  for (const p of sorted) if (kept.length === 0 || p.r > kept[kept.length - 1]!.r) kept.push(p);
+  const q = kept.map((p) => p.r);
+  const y = kept.map((p) => p.gObs);
+  const sig = kept.map((p) => p.sigma);
+  const usable = sig.every((v) => v !== undefined && Number.isFinite(v) && v >= 0) && sig.some((v) => v! > 0);
+  return usable ? { kind, q, y, sigma: sig as number[] } : { kind, q, y };
 }
 
 /** Parse a reduced-PDF file into a {@link PdfPattern}. Never throws on data rows. */
@@ -181,22 +239,30 @@ export function parsePdfData(text: string, opts: ParsePdfOptions = {}): PdfPatte
   // entry point is uniform — any reduced file lands on a fittable G(r). The
   // data's own Q window becomes the model's termination Qmax (header bounds,
   // when present, win over the raw extent — PDFgetX3 files can carry data past
-  // the qmax it would itself transform with).
+  // the qmax it would itself transform with). The ORIGINAL S(Q)/F(Q) — with its
+  // error column, when the reduction wrote one — is retained on the pattern, and
+  // σ_G(r) is propagated exactly through the same operator (fourier.ts).
   const kind = classifyReducedKind(text, opts.filename ?? "", rows);
   if (kind !== "gr" && points.length >= 8) {
-    const qmaxEff = meta["qmax"] ?? points[points.length - 1]!.r;
+    const reciprocal = reciprocalFromPoints(kind, points);
+    const qLast = reciprocal.q[reciprocal.q.length - 1]!;
+    const qmaxEff = meta["qmax"] ?? qLast;
     const qminEff = meta["qmin"] ?? 0;
-    const inWindow = points.filter((p) => p.r >= qminEff && p.r <= qmaxEff);
-    const q = inWindow.map((p) => p.r);
-    const y = inWindow.map((p) => p.gObs);
-    const f = kind === "sq" ? fOfQFromSOfQ(q, y) : Float64Array.from(y);
     const rGrid = defaultTransformGrid();
-    const g = gOfRFromFOfQ(q, f, rGrid);
+    // A header window holding fewer than two nodes is a broken header, not a
+    // reason to refuse the file: fall back to the data's own extent.
+    let t: ReturnType<typeof transformReciprocal>;
+    try {
+      t = transformReciprocal(reciprocal, rGrid, { qmin: qminEff, qmax: qmaxEff });
+    } catch {
+      t = transformReciprocal(reciprocal, rGrid);
+    }
+    const sigma = t.sigma;
     return {
       id,
       name,
       scatteringType,
-      points: rGrid.map((r, i) => ({ r, gObs: g[i]! })),
+      points: rGrid.map((r, i) => (sigma ? { r, gObs: t.g[i]!, sigma: sigma[i]! } : { r, gObs: t.g[i]! })),
       qmax: qmaxEff,
       ...(qminEff > 0 ? { qmin: qminEff } : {}),
       ...(meta["qdamp"] !== undefined ? { qdamp: meta["qdamp"] } : {}),
@@ -204,6 +270,8 @@ export function parsePdfData(text: string, opts: ParsePdfOptions = {}): PdfPatte
       rstep: 0.01,
       ...(composition ? { composition } : {}),
       sourceKind: kind,
+      reciprocal,
+      transform: { qmin: t.op.qmin, qmax: t.op.qmax, modification: t.op.modification, lowQ: t.op.lowQ },
     };
   }
 
