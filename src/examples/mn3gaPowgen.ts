@@ -51,22 +51,27 @@ export interface Mn3GaPowgenExample {
   readonly pattern: PowderPattern;
   readonly instrument: InstrumentParameters;
   /** Converged parameter values (id → value) from refining scale + background +
-   *  lattice over the strong-signal TOF range (wR ≈ 3.9 %). Applied on load so the
-   *  demo opens on a finished refinement rather than the raw starting model. */
+   *  lattice inside `fitRange`. Applied on load so the demo opens on a finished
+   *  refinement rather than the raw starting model. */
   readonly refinedParams: Record<string, number>;
+  /** The refinement window the demo opens with (TOF, µs). */
+  readonly fitRange: { readonly min: number; readonly max: number };
 }
 
-// Snapshot of a converged two-phase refinement (SCALE + BACKGROUND + LATTICE
-// free; profile/ADP/positions/occupancy fixed). Keyed by parameter id so it is
+// TOF window, d ≈ 0.41–5.03 Å at this difC.
+const FIT_RANGE = { min: 9349.424134934858, max: 113673.10659380186 };
+
+// Snapshot of a converged two-phase refinement inside FIT_RANGE (wR ≈ 4.0 %;
+// SCALE + BACKGROUND + LATTICE free; profile/ADP/positions/occupancy fixed). Keyed by parameter id so it is
 // applied after the spec is (deterministically) rebuilt from the model.
 const REFINED_PARAMS: Record<string, number> = {
-  p0_scale: 1.3581250516797663,
-  bkg0: 46.07211585524351,
-  bkg1: -5.6413634577977545,
-  bkg2: -3.1873300394262327,
-  bkg3: -8.947195857624507,
-  p0_cell_a: 5.419642863882049,
-  p0_cell_c: 4.373657235070733,
+  p0_scale: 1.3659027552210306,
+  bkg0: 35.77178325199655,
+  bkg1: -25.616674079674553,
+  bkg2: -16.147669950270995,
+  bkg3: -15.571626557441206,
+  p0_cell_a: 5.419644061314016,
+  p0_cell_c: 4.373657231376886,
   tof_difC: 22585.8,
   tof_difA: 0,
   tof_difB: 0,
@@ -83,8 +88,8 @@ const REFINED_PARAMS: Record<string, number> = {
   p0_occ_Mn1: 0.978,
   p0_occ_Ga1: 1.005,
   mustrainIso: 572.7488942595868,
-  p1_scale: 0.09721247471169062,
-  p1_cell_a: 4.456140831798685,
+  p1_scale: 0.09771006047217336,
+  p1_cell_a: 4.456099693361676,
   p1_B_Mn1: 0.6558506545847267,
   p1_B_O1: 1.556512316996298,
   p1_occ_Mn1: 1,
@@ -104,6 +109,6 @@ export function mn3gaPowgenExample(): Mn3GaPowgenExample {
     xUnit: "tof",
     radiation: { kind: "neutron-tof" },
   });
-  cached = { structure, extraPhases: [mno], pattern, instrument: { kind: "tof", difC: DIF_C }, refinedParams: REFINED_PARAMS };
+  cached = { structure, extraPhases: [mno], pattern, instrument: { kind: "tof", difC: DIF_C }, refinedParams: REFINED_PARAMS, fitRange: FIT_RANGE };
   return cached;
 }

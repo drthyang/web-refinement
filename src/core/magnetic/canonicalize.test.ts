@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { UnitCell } from "@/core/crystal/types";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { RefinementDiagnostics, RefinementParameter } from "@/core/refinement/types";
-import { globalMomentSign, canonicalizeMomentValues, momentDegeneracies } from "@/core/magnetic/canonicalize";
+import { globalMomentSign, canonicalizeMomentValues, momentDegeneracies, momentKickFloor } from "@/core/magnetic/canonicalize";
 
 const cubic: UnitCell = { a: 5, b: 5, c: 5, alpha: 90, beta: 90, gamma: 90 };
 
@@ -86,7 +86,7 @@ describe("momentDegeneracies", () => {
     highCorrelations: [],
     maxLambda: 1e-3,
     atBounds: [],
-    maxParameterShift: 0,
+    maxShiftOverEsd: 0,
     ...over,
   });
 
@@ -139,5 +139,26 @@ describe("momentDegeneracies", () => {
     const nuclearOnly: RefinementParameter[] = [{ id: "scale", label: "scale", kind: "scale", value: 1, initialValue: 1, fixed: false }];
     const out = momentDegeneracies(diag({ singularParameterIds: ["scale"] }), nuclearOnly);
     expect(out).toEqual([]);
+  });
+});
+
+describe("momentKickFloor", () => {
+  const p = (id: string, kind: RefinementParameter["kind"], value: number): RefinementParameter =>
+    ({ id, label: id, kind, value, initialValue: value, fixed: false });
+  const params = [p("scale", "scale", 40), p("m1", "momentMode", -2.5), p("m2", "momentMode", 0)];
+
+  it("kicks every moment mode — a zero one too — by the largest moment amplitude", () => {
+    const floor = momentKickFloor(params);
+    expect(floor(params[1]!)).toBe(2.5);
+    expect(floor(params[2]!)).toBe(2.5);
+  });
+
+  it("gives non-moment parameters no floor", () => {
+    expect(momentKickFloor(params)(params[0]!)).toBeUndefined();
+  });
+
+  it("gives no floor when every moment starts at 0", () => {
+    const zero = [p("m1", "momentMode", 0)];
+    expect(momentKickFloor(zero)(zero[0]!)).toBeUndefined();
   });
 });

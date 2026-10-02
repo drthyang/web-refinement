@@ -6,8 +6,10 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { color, mono, radius, shadow, space } from "@/app/theme";
+import { color, fz, mono, radius, shadow, space } from "@/app/theme";
 import type { DemoId } from "@/app/demos";
+import type { HistoryBinding } from "@/app/historyBinding";
+import { HistoryIcon, HistoryPanel, StepArrow, StepText } from "@/app/ui/HistoryPanel";
 
 /** Display face for the MATERIA wordmark — geometric, loaded in index.html. */
 const display = '"Space Grotesk", "IBM Plex Sans", system-ui, sans-serif';
@@ -71,12 +73,18 @@ interface Props {
    * (e.g. in tests) leaves the badge a read-only capability indicator.
    */
   readonly gpu?: { readonly enabled: boolean; readonly onChange: (on: boolean) => void };
+  /**
+   * The step history (absent while nothing is loaded): back / forward and a
+   * History ▾ menu listing the steps. It lives in the header, not on the page,
+   * so the parameter list keeps the whole right column.
+   */
+  readonly history?: HistoryBinding;
 }
 
 /** File-picker filter for project files (any .json is accepted; the reader decides). */
 const PROJECT_ACCEPT = ".materia.json,.json,application/json";
 
-export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo, onOpenProject, onSaveProject, gpu }: Props): JSX.Element {
+export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo, onOpenProject, onSaveProject, gpu, history }: Props): JSX.Element {
   return (
     <header className="wb-header" style={headerBar}>
       <div className="wb-header-brand" style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
@@ -122,7 +130,10 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
           }))}
         />
       </nav>
-      <div className="wb-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
+      {history && <CurrentStep binding={history} />}
+      {/* Positioned: the History popover hangs from this row's right end. */}
+      <div className="wb-header-actions" style={{ position: "relative", marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
+        {history && <HistoryMenu binding={history} />}
         {onOpenProject && <ProjectMenu onOpenProject={onOpenProject} {...(onSaveProject ? { onSaveProject } : {})} />}
         {demos && demos.length > 0 && onLoadDemo && (
           <DemosMenu demos={demos} activeDemo={activeDemo} onLoadDemo={onLoadDemo} onExitDemo={onExitDemo} />
@@ -361,6 +372,109 @@ function TechniqueChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | 
   );
 }
 
+/**
+ * The current step, in the list's own words (StepText), just left of the back /
+ * forward arrows: where a back / forward (the arrows or ⌘Z / ⇧⌘Z) or a new
+ * step left you. Its slot takes the header row's free space without ever
+ * wrapping the row, and the label hides where that space is too narrow to
+ * read, and below 1180px with the arrows (`wb-step-slot`, workbench.css).
+ */
+function CurrentStep({ binding }: { binding: HistoryBinding }): JSX.Element | null {
+  const step = binding.history?.steps.find((s) => s.id === binding.history?.current);
+  if (!step) return null;
+  return (
+    <div className="wb-step-slot">
+      {/* Keyed on the step, so each new current step slides in. */}
+      <span key={step.id} className="wb-step-current" style={currentChip} role="status">
+        <StepText step={step} current />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Back / forward and "History ▾". The popover anchors to the actions row (the
+ * wrapper below is not positioned), so its right edge sits on the page's
+ * content edge, in line with the cards under it. It stays open while you click
+ * through steps, so you can compare them on the plot; a click outside or Esc
+ * closes it.
+ */
+function HistoryMenu({ binding }: { binding: HistoryBinding }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const n = binding.history?.steps.length ?? 0;
+  return (
+    // display: contents — the three controls are items of the actions row, so
+    // they share its gap; the div stays in the DOM for the outside-click test.
+    <div ref={ref} style={{ display: "contents" }}>
+      <span className="wb-history-nav" style={navPair}>
+        <NavButton onClick={binding.back} title="Back one step (⌘Z / Ctrl+Z)"><StepArrow dir="back" /></NavButton>
+        <NavButton onClick={binding.forward} title="Forward one step (⇧⌘Z / Ctrl+Shift+Z)" divider><StepArrow dir="forward" /></NavButton>
+      </span>
+      <ActionButton onClick={() => setOpen((o) => !o)} active={open} ariaLabel="History" title={`History: ${n} step${n === 1 ? "" : "s"} — every refinement, load and model change. Click a step to go back to it.`}>
+        {/* On a tablet in landscape the label gives way to the icon (workbench.css). */}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <HistoryIcon className="wb-history-icon" />
+          <span className="wb-history-label">History</span>
+          ▾
+        </span>
+      </ActionButton>
+      {open && (
+        <div className="wb-history-popover" style={historyPopover}>
+          <HistoryPanel binding={binding} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One half of the back / forward pair: an icon button, stretched to the menu buttons' height. */
+function NavButton({ children, onClick, title, divider }: { children: React.ReactNode; onClick: (() => void) | undefined; title: string; divider?: boolean }): JSX.Element {
+  const [hover, setHover] = useState(false);
+  const enabled = onClick !== undefined;
+  const lit = hover && enabled;
+  return (
+    <button
+      type="button"
+      className="wb-header-action"
+      disabled={!enabled}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={title}
+      aria-label={title}
+      style={{
+        border: "none",
+        ...(divider ? { borderLeft: `1px solid ${color.control}` } : {}),
+        background: lit ? color.primaryTintBg : "transparent",
+        color: !enabled ? color.faintest : lit ? color.primary : color.ink,
+        display: "flex",
+        alignItems: "center",
+        padding: "0 12px",
+        cursor: enabled ? "pointer" : "default",
+        transition: "color 120ms, background 120ms",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 /** "Demos ▾": one bundled, converged example per technique. */
 function DemosMenu({ demos, activeDemo, onLoadDemo, onExitDemo }: {
   demos: readonly { readonly id: DemoId; readonly label: string }[];
@@ -452,7 +566,7 @@ function MenuFileItem({ children, accept, onFile }: { children: React.ReactNode;
   );
 }
 
-function ActionButton({ children, onClick, active }: { children: React.ReactNode; onClick: () => void; active?: boolean }): JSX.Element {
+function ActionButton({ children, onClick, active, title, ariaLabel }: { children: React.ReactNode; onClick: () => void; active?: boolean; title?: string; ariaLabel?: string }): JSX.Element {
   const [hover, setHover] = useState(false);
   const lit = hover || active;
   return (
@@ -461,6 +575,8 @@ function ActionButton({ children, onClick, active }: { children: React.ReactNode
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      {...(title ? { title } : {})}
+      {...(ariaLabel ? { "aria-label": ariaLabel } : {})}
       style={{
         border: `1px solid ${lit ? color.primaryTintBorder : color.control}`,
         background: lit ? color.primaryTintBg : color.surface,
@@ -539,6 +655,53 @@ const menu: CSSProperties = {
   border: `1px solid ${color.border}`,
   borderRadius: radius.button,
   boxShadow: "0 10px 28px rgba(25,23,20,0.14)",
+};
+
+/** Back / forward: two icon buttons in one outlined pill, the menu buttons' height. */
+const navPair: CSSProperties = {
+  display: "inline-flex",
+  border: `1px solid ${color.control}`,
+  borderRadius: radius.button,
+  background: color.surface,
+  overflow: "hidden",
+};
+
+/**
+ * The current step's label: at the right end of its slot, 8px from the arrows,
+ * up to 320px and cut with an ellipsis when the slot is narrower. It slides in
+ * with the `wb-step-current` animation (workbench.css).
+ */
+const currentChip: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+  minWidth: 0,
+  maxWidth: 320,
+  marginRight: 8,
+  padding: "5px 10px",
+  fontSize: fz.small,
+  lineHeight: 1.25,
+  whiteSpace: "nowrap",
+  color: color.ink,
+  background: color.surface,
+  border: `1px solid ${color.border}`,
+  borderRadius: radius.button,
+  boxShadow: "0 4px 14px rgba(25,23,20,0.10)",
+};
+
+/**
+ * The History popover: the menu's look, wider, and as tall as the steps need up
+ * to a cap — the list scrolls inside (HistoryPanel). Right-aligned to the actions
+ * row's end, which is the content edge; never wider than the content column.
+ */
+const historyPopover: CSSProperties = {
+  ...menu,
+  padding: 0,
+  width: "min(440px, calc(100vw / var(--ui-zoom) - 2 * (var(--wb-pad) + var(--wb-safe-x))))",
+  maxHeight: "min(640px, calc(75vh / var(--ui-zoom)))",
+  display: "flex",
+  flexDirection: "column",
+  overflow: "hidden",
 };
 
 const headerBar: CSSProperties = {

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { RefinementParameter } from "@/core/refinement/types";
 import { refine, type RefinementProblem } from "@/core/refinement/engine";
 import { parseTie, resolveTies, applyEqualValueGroups } from "@/core/refinement/constraints";
+import { noisyPeakProblem } from "@/testSupport/noisyPeak";
 
 describe("refinement engine (Levenberg–Marquardt)", () => {
   it("recovers a linear scale factor from synthetic data", () => {
@@ -250,7 +251,7 @@ describe("refinement engine (Levenberg–Marquardt)", () => {
   });
 });
 
-describe("diagnostics: bound-active parameters and shift", () => {
+describe("diagnostics: bound-active parameters", () => {
   const model = [1, 2, 3, 4, 5];
   const problemFor = (obs: number[], scale: Partial<RefinementParameter>): RefinementProblem => ({
     parameters: [
@@ -288,20 +289,49 @@ describe("diagnostics: bound-active parameters and shift", () => {
     expect(result.diagnostics?.atBounds).toEqual([]);
   });
 
-  it("reports a finite, settled max parameter shift at convergence", () => {
-    const result = refine(problemFor(model.map((m) => 2.5 * m), {}));
-    const shift = result.diagnostics?.maxParameterShift;
-    expect(shift).toBeDefined();
-    expect(Number.isFinite(shift!)).toBe(true);
-    expect(shift!).toBeGreaterThanOrEqual(0);
-    expect(shift!).toBeLessThan(1); // parameters have stopped moving
+});
+
+describe("diagnostics: shift/esd of the last step", () => {
+  it("measures the last accepted step against the reported esds", () => {
+    // A damped search covers a fraction of the way per step, so the third
+    // step is still large. Cutting the same trajectory one iteration earlier
+    // gives the values that step started from.
+    const problem = noisyPeakProblem({ start: 0.01 });
+    const opts = { lambda: 10, convergenceTolerance: 0 };
+    const before = refine(problem, { ...opts, maxIterations: 2 });
+    const after = refine(problem, { ...opts, maxIterations: 3 });
+    const shift = (id: string) => Math.abs(after.parameters[id]! - before.parameters[id]!) / after.esd[id]!;
+    const d = after.diagnostics!;
+    expect(d.maxShiftParameterId).toBe("pos");
+    expect(d.maxShiftOverEsd).toBeGreaterThan(1);
+    expect(d.maxShiftOverEsd).toBeCloseTo(shift("pos"), 10);
+    expect(shift("height")).toBeLessThanOrEqual(d.maxShiftOverEsd);
   });
 
-  it("can converge on parameter shift alone (shiftTolerance)", () => {
-    // A generous shiftTolerance lets the fit stop as soon as the step is tiny.
-    const result = refine(problemFor(model.map((m) => 2.5 * m), {}), { shiftTolerance: 0.1 });
+  it("reports 0 for an exact fit, whose residual and esds are round-off", () => {
+    const result = refine(noisyPeakProblem({ start: 0.05, noise: false }));
+    expect(result.agreement.rWeighted!).toBeLessThan(1e-12);
+    expect(result.diagnostics?.maxShiftOverEsd).toBe(0);
+    expect(result.diagnostics?.maxShiftParameterId).toBeUndefined();
+  });
+
+  it("can converge on shift/esd alone (shiftTolerance)", () => {
+    // With the χ² test off, the fit otherwise runs until no downhill step is
+    // left; the shift test stops it once every step is under 0.05 esd.
+    const problem = noisyPeakProblem({ start: 0.05 });
+    const full = refine(problem, { convergenceTolerance: 0 });
+    const early = refine(problem, { convergenceTolerance: 0, shiftTolerance: 0.05 });
+    expect(early.status).toBe("converged");
+    expect(early.history.length).toBeLessThan(full.history.length);
+    for (const id of ["height", "pos"]) {
+      expect(Math.abs(early.parameters[id]! - full.parameters[id]!)).toBeLessThan(0.05 * full.esd[id]!);
+    }
+  });
+
+  it("never stops a noise-free fit on shift/esd, whose esds shrink with every step", () => {
+    const result = refine(noisyPeakProblem({ start: 0.05, noise: false }), { convergenceTolerance: 0, shiftTolerance: 0.1 });
     expect(result.status).toBe("converged");
-    expect(result.parameters.scale).toBeCloseTo(2.5, 4);
+    expect(Math.abs(result.parameters.pos!)).toBeLessThan(1e-12);
   });
 });
 

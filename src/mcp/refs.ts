@@ -97,10 +97,20 @@ export class RefStore {
   }
 }
 
-/** Replace every ref inside `value` by a private copy of what it points at. */
+/**
+ * Replace every ref inside `value` by a private copy of what it points at.
+ * Inside a list, a ref to a list of records is spliced in, so
+ * [{"ref": "#4/parameters"}, {"ref": "#9/parameters"}] joins two parameter
+ * sets. A ref to anything else — a structure, a k-vector — stays one item.
+ */
 export function resolveRefs(value: unknown, store: RefStore): unknown {
   if (isRef(value)) return structuredClone(store.get(value.ref));
-  if (Array.isArray(value)) return value.map((v) => resolveRefs(v, store));
+  if (Array.isArray(value)) {
+    return value.flatMap((v) => {
+      const r = resolveRefs(v, store);
+      return isRef(v) && Array.isArray(r) && r.every(isPlainObject) ? r : [r];
+    });
+  }
   if (isPlainObject(value)) {
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolveRefs(v, store)]));
   }

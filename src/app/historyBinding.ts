@@ -2,8 +2,8 @@
  * What an engine needs from the shell's step history (core/project/history.ts):
  * the tree to show, and the calls that record and move through it. The shell
  * owns the history; every engine (powder, single crystal, PDF) gets this one
- * binding, records steps at its own committed actions, and shows the History
- * card from it.
+ * binding and records steps at its own committed actions. The header's History
+ * menu shows the tree from the same binding.
  */
 
 import type { ProjectHistory, StepKind } from "@/core/project/history";

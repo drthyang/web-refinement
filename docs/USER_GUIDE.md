@@ -138,22 +138,29 @@ exists it reads **Escape min ↻**: a few restarts around the fit, for when
 
 ### Go back to an earlier step
 
-The **History** card under the parameters lists the steps of the session:
-each refinement, each load, each magnetic-model change and each reset. Changes
-made since the last step (freed parameters, edited values, settings) become an
-**Edit** step when the next refinement starts.
+**History ▾** in the header lists the steps of the session: each refinement,
+each load, each magnetic-model change and each reset. Changes made since the
+last step (freed parameters, edited values, settings) become an **Edit** step
+when the next refinement starts. The newest step is at the top, with its wR,
+and a sparkline shows wR along the path. The parameters keep the whole right
+column.
 
-- Click a step to go back to it. Nothing is lost: if you then refine, the new
-  steps form a branch, and **other branches** lists the old ones.
-- ⌘Z / Ctrl+Z steps back and ⇧⌘Z / Ctrl+Shift+Z steps forward, except inside a
-  text field.
+- Click a step to go back to it. The list stays open, so you can click through
+  steps and compare them on the plot. Click outside it or press Esc to close
+  it. Nothing is lost: if you then refine, the new steps form a branch, and
+  **other branches**, below the steps, lists the old ones.
+- The circular arrows beside **History ▾** step back and forward. So do ⌘Z /
+  Ctrl+Z and ⇧⌘Z / Ctrl+Shift+Z, except inside a text field. The current step
+  shows to the left of the arrows, as the list words it, where the header has
+  room. Below 1180 px wide the arrows move into the History list, and on a
+  tablet in landscape the menu shows as a clock icon.
 - ✎ names a step, such as "before ADPs".
 - The history is saved with the project. Between saves it is kept in the
   browser. After a reload, the start page offers to restore the last session.
 - **Other branches** lists where each old branch ends; from there, back and
   forward walk along it.
 
-The single-crystal and PDF pages have the same card. There, adopting a boxcar
+The single-crystal and PDF pages have the same menu. There, adopting a boxcar
 box, applying distortion modes or a subgroup, and handing over a spin model or
 magnetic model are steps too. Loading a new dataset starts a new history.
 
@@ -248,6 +255,8 @@ the **allowed** row.
    group on the refinement page.
 4. Click **Refine** to fit the nuclear and magnetic models together, with one
    shared scale. **Prefit ↻** and **Escape min ↻** then also search the moments.
+   Prefit kicks every moment on the scale of the largest one, so a sublattice
+   an earlier fit switched off can turn back on.
 
 **Show on refinement pattern** puts the candidate on the refinement page with
 its moments held at the amplitudes shown here. It joins the calculated pattern,
@@ -412,10 +421,10 @@ Never judge a fit by its R value alone. The definitions are in
   jump to the peak.
 - **Normal probability**: a straight line with slope 1 and intercept 0 means
   both the model and the uncertainties are right.
-- **Result:**, in the panel footer, gives the status and cycles. A note may
-  follow: **SVD dropped** (undetermined combinations, whose esds mean nothing),
-  **High correlation:** (consider fixing one) or **At bound:**.
-  **Refinement history** lists χ² and wR per cycle.
+- **Result**, in the panel footer, gives the status and cycles on one line,
+  with ⚠ when there is a note. Click it to open the notes and χ² and wR per
+  cycle. A note is **SVD dropped** (undetermined combinations, whose esds mean
+  nothing), **High correlation:** (consider fixing one) or **At bound:**.
 - **Largest outliers · (Fo²−Fc²)/σ**, on the single-crystal page, lists the
   worst reflections.
 - **Bond lengths**, in any 3D model, labels the bonds. **View** with a, b or c

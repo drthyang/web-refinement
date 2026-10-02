@@ -98,9 +98,11 @@ where `r_i = √w_i · (y_obs,i − y_calc,i)` and `J_ij = ∂r_i/∂p_j`.
   weight, so the normal matrix stays well-conditioned.
 - **Convergence.** A fit converges when the relative change in χ² falls below
   `convergenceTolerance` (default 1e-4). An optional `shiftTolerance`, off by
-  default, also stops it once the largest relative shift falls below that value.
-  If no downhill step exists, the fit counts as converged when the gradient is
-  near zero, and as stalled otherwise.
+  default, also stops it once every shift on a step is below that fraction of
+  its esd (conventionally 0.01–0.1). Those esds come from the step's own normal
+  matrix. A noise-free fit never meets the shift test, because its esds shrink
+  with the residual. If no downhill step exists, the fit counts as converged
+  when the gradient is near zero, and as stalled otherwise.
 
 ## Analytic derivatives
 
@@ -188,8 +190,18 @@ diagnostics:
   threshold (default 0.95).
 - `conditionNumber` and `maxLambda`: numerical health indicators for the final
   Hessian and the LM search.
-- `atBounds` and `maxParameterShift`: parameters resting on a bound, and the
-  largest relative shift of the last accepted step.
+- `atBounds`: parameters resting on a bound.
+- `maxShiftOverEsd` and `maxShiftParameterId`: the largest |Δp_j|/esd_j of the
+  last accepted step, and the parameter it belongs to. This is the
+  crystallographic convergence measure: below about 0.1, every parameter has
+  settled. Dividing by the esd, not by |p_j|, keeps it meaningful for
+  parameters that refine near 0, such as position offsets. It is 0 for an exact
+  fit (wR < 1e-6), whose esds are round-off.
+
+The χ² test alone bounds the last shift/esd only by about
+√(`convergenceTolerance`·N). So a long pattern can stop with a parameter still
+moving by a sizeable fraction of its esd, or more. `assess_refinement` notes a
+last shift/esd above 0.1 and warns above 1.
 
 ## Posterior sampling
 

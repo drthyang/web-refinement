@@ -16,7 +16,7 @@
 import type { StructureModel } from "@/core/crystal/types";
 import type { PdfPattern, PowderPattern } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
-import type { LinearRestraint, ParameterBinding, RefinementParameter, RefinementResult } from "@/core/refinement/types";
+import { isMomentParameterKind, type LinearRestraint, type ParameterBinding, type RefinementParameter, type RefinementResult } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { MagneticModel } from "@/core/magnetic/types";
 import { parseMagneticCif } from "@/parsers/cif";
@@ -65,6 +65,7 @@ import { buildDistortionModes, buildSymmetryModes } from "@/core/crystal/distort
 import { refine, refineParallel } from "@/core/refinement/engine";
 import { refineSequentialAsync } from "@/core/refinement/sequential";
 import { refineMultiStart } from "@/core/refinement/multiStart";
+import { canonicalizeMomentValues, momentDegeneracies, momentKickFloor, type MomentDegeneracy } from "@/core/magnetic/canonicalize";
 import {
   boxcarPlanIssue,
   boxcarScannedMax,
@@ -643,6 +644,13 @@ export function build_magnetic_model(args: {
  * can collapse the scale against exploding moments (the scale·|m|² valley;
  * both golden datasets showed it). Returns the result, the refined magnetic
  * model, and the separated nuclear/magnetic component curves.
+ *
+ * `restarts` adds the moment search the app's Magnetic prefit runs: the
+ * magnetic intensity is quadratic in the moments, so a moment partition has
+ * several local minima and one LM run lands in the nearest. The moments are
+ * restarted from kicked starts with the nuclear scaffold frozen, the best one
+ * seeds the joint solve, and the global ±m sign is canonicalized; poorly
+ * determined moment directions come back in `multiStart.degeneracies`.
  */
 export async function refine_magnetic_powder(args: {
   structure: StructureModel;
@@ -653,6 +661,8 @@ export async function refine_magnetic_powder(args: {
   profile: PowderProfile;
   staged?: boolean;
   maxIterations?: number;
+  restarts?: number;
+  seed?: number;
 }): Promise<{
   result: RefinementResult;
   parameters: RefinementParameter[];
@@ -660,6 +670,7 @@ export async function refine_magnetic_powder(args: {
   observationCount: number;
   components: { x: number[]; yObs: number[]; yNuclear: number[]; yMagnetic: number[]; yCalc: number[] };
   parallel: { workers: number } | null;
+  multiStart?: { restartsRun: number; bestStartIndex: number; improved: boolean; costByStart: number[]; degeneracies: MomentDegeneracy[] };
 }> {
   const prof = { shape: args.profile.shape, ...(args.profile.eta !== undefined ? { eta: args.profile.eta } : {}) };
   const maxIterations = args.maxIterations ?? 25;
@@ -690,7 +701,30 @@ export async function refine_magnetic_powder(args: {
       params = params.map((p) => ({ ...p, value: r1.parameters[p.id] ?? p.value }));
     }
 
-    const result = await solve(params, { maxIterations });
+    const isMoment = (p: RefinementParameter): boolean => isMomentParameterKind(p.kind);
+    let search: Awaited<ReturnType<typeof refineMultiStart>> | null = null;
+    if ((args.restarts ?? 0) > 0 && params.some((p) => isMoment(p) && !p.fixed && !p.expression)) {
+      // Moment-only restarts on the frozen nuclear scaffold. Kicks are µ_B-scale:
+      // m = 0 is a stationary point an unkicked LM never leaves, and a mode the
+      // baseline switched off must be able to turn back on (momentKickFloor).
+      const frozen = params.map((p) => (!isMoment(p) && !p.fixed && !p.expression ? { ...p, fixed: true } : { ...p }));
+      search = await refineMultiStart(frozen, async (start) => {
+        const r = await solve([...start], { maxIterations });
+        return { parameters: start.map((p) => ({ ...p, value: r.parameters[p.id] ?? p.value })), final: r };
+      }, {
+        restarts: args.restarts!, escapeSigma: 6, relFraction: 1, shouldPerturb: isMoment, minKick: momentKickFloor(frozen),
+        ...(args.seed !== undefined ? { seed: args.seed } : {}),
+      });
+      const best = new Map(search.parameters.map((p) => [p.id, p.value]));
+      params = params.map((p) => (isMoment(p) && best.has(p.id) ? { ...p, value: best.get(p.id)! } : p));
+    }
+
+    const joint = await solve(params, { maxIterations });
+    // One ±m twin, deterministically — and only when a search asked for it, so a
+    // plain call reproduces exactly what it always has.
+    const result: RefinementResult = search
+      ? { ...joint, parameters: canonicalizeMomentValues(joint.parameters, applyMagneticMoments(args.magnetic, args.bindings, joint.parameters), args.structure.cell, params) }
+      : joint;
     const refined = params.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value }));
     const refinedMagnetic = applyMagneticMoments(args.magnetic, args.bindings, Object.fromEntries(refined.map((p) => [p.id, p.value])));
     const c = magneticPowderComponents(args.structure, refinedMagnetic, args.pattern, refined, args.bindings, prof);
@@ -702,6 +736,12 @@ export async function refine_magnetic_powder(args: {
       observationCount: excluded.reduce((n, ex) => n + (ex ? 0 : 1), 0),
       components: { x: c.x, yObs: c.yObs, yNuclear: c.yNuclear, yMagnetic: c.yMagnetic, yCalc: c.yCalc },
       parallel: pool ? { workers: pool.size } : null,
+      ...(search ? {
+        multiStart: {
+          restartsRun: search.restartsRun, bestStartIndex: search.bestStartIndex, improved: search.improved,
+          costByStart: [...search.costByStart], degeneracies: momentDegeneracies(joint.diagnostics, params),
+        },
+      } : {}),
     };
   } finally {
     await pool?.dispose();
