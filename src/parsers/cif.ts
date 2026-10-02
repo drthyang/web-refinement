@@ -14,6 +14,7 @@ import { composeOperations, operationKey, parseMagneticSymmetryOperation, parseS
 import { IDENTITY3 } from "@/core/math/mat3";
 import { completeSpaceGroup, SpaceGroupSettingError } from "@/core/crystal/spaceGroups";
 import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
+import { elementFromLetters } from "@/core/crystal/elements";
 
 /** Strip the parenthetical esd and parse: "5.41317(8)" → 5.41317. */
 export function parseCifNumber(raw: string): number {
@@ -38,10 +39,39 @@ function parseCifNumberOr(raw: string | undefined, fallback: number): number {
   return parseCifNumber(t);
 }
 
-/** Element symbol from a CIF type symbol, dropping oxidation/charge: "Mn2+" → "Mn". */
-function elementFromType(type: string): string {
-  const m = type.match(/^[A-Z][a-z]?/);
-  return m ? m[0] : type;
+/**
+ * Element and formal charge from a CIF atom-type symbol: "Fe3+" and "Fe+3" →
+ * Fe, +3; "O2-" → O, −2; "Na+" → Na, +1; "FE" → Fe. The charge becomes the
+ * site's oxidation state (it selects the magnetic ⟨j0⟩ ion) instead of being
+ * dropped. A non-integer charge ("Fe2.5+") is no tabulated oxidation state and
+ * is left unset. A symbol whose letters are not an element ("Wat", "OH-") is an
+ * error rather than a guess.
+ */
+export function parseTypeSymbol(type: string): { element: string; oxidationState?: number } {
+  const t = type.trim();
+  const m = /^([A-Za-z]{1,2})(?![A-Za-z])(.*)$/.exec(t);
+  const element = m ? elementFromLetters(m[1]!) : undefined;
+  if (!m || element === undefined || element.length !== m[1]!.length) {
+    throw new Error(`CIF: atom type symbol "${type}" is not an element symbol`);
+  }
+  const rest = m[2]!.trim();
+  const charge = /^(\d+(?:\.\d+)?)?([+-])$/.exec(rest) ?? /^([+-])(\d+(?:\.\d+)?)?$/.exec(rest);
+  if (!charge) return { element };
+  const signFirst = charge[1] === "+" || charge[1] === "-";
+  const sign = (signFirst ? charge[1] : charge[2]) === "-" ? -1 : 1;
+  const magnitude = Number((signFirst ? charge[2] : charge[1]) ?? "1");
+  return Number.isInteger(magnitude) && magnitude !== 0 ? { element, oxidationState: sign * magnitude } : { element };
+}
+
+/**
+ * Element from an atom-site label, used only when the CIF has no type symbol:
+ * the leading letters, case-insensitive, two-letter symbol first — "FE1" → Fe,
+ * "CA1" → Ca, "C12" → C, "OW1" → O.
+ */
+function elementFromLabel(label: string): string {
+  const element = elementFromLetters(label);
+  if (element === undefined) throw new Error(`CIF: no _atom_site_type_symbol and label "${label}" names no element`);
+  return element;
 }
 
 function tokenizeLine(line: string): string[] {
@@ -282,7 +312,10 @@ function parseSites(loops: Loop[]): AtomSite[] {
     const bIsoRead = iB >= 0 ? parseCifNumberOr(row[iB], NaN) : NaN;
     const bIso = !Number.isNaN(uIso) ? EIGHT_PI_SQUARED * uIso : !Number.isNaN(bIsoRead) ? bIsoRead : 0;
     const position: Vec3 = [parseCifNumber(row[iX]!), parseCifNumber(row[iY]!), parseCifNumber(row[iZ]!)];
-    const element = iType >= 0 ? elementFromType(row[iType]!) : elementFromType(row[iLabel]!);
+    // A `?`/`.` type symbol is as good as none: fall back to the label.
+    const typeText = iType >= 0 ? cifText(row[iType]) : undefined;
+    const typed = typeText !== undefined ? parseTypeSymbol(typeText) : { element: elementFromLabel(row[iLabel] ?? "") };
+    const element = typed.element;
     const label = iLabel >= 0 ? row[iLabel]! : element;
     const adpType = iAdpType >= 0 ? row[iAdpType]?.toLowerCase() : undefined;
     const adp = adpType === "uani" && anisoAdps.has(label)
@@ -291,6 +324,7 @@ function parseSites(loops: Loop[]): AtomSite[] {
     const site: AtomSite = {
       label,
       element,
+      ...(typed.oxidationState !== undefined ? { oxidationState: typed.oxidationState } : {}),
       position,
       occupancy: iOcc >= 0 ? parseCifNumberOr(row[iOcc], 1) : 1,
       adp,

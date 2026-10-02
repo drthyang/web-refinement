@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { StructureModel } from "@/core/crystal/types";
-import { parseCif, parseCifNumber } from "@/parsers/cif";
+import { parseCif, parseCifNumber, parseTypeSymbol } from "@/parsers/cif";
+import { siteIonId } from "@/core/magnetic/magneticIons";
 import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { siteMultiplicity } from "@/core/crystal/symmetry";
@@ -377,5 +378,56 @@ describe("parseCif — multi-block + quirky ADP fields (NiTe2O5 regression)", ()
 describe("parseCifNumber null markers", () => {
   it("still throws on genuinely malformed numbers", () => {
     expect(() => parseCifNumber("abc")).toThrow();
+  });
+});
+
+describe("atom types: charges kept, labels resolved case-insensitively", () => {
+  const atoms = (header: string, rows: string): string => `data_x
+_cell_length_a 5
+_cell_length_b 5
+_cell_length_c 5
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_symmetry_space_group_name_H-M 'P 1'
+loop_
+${header}
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+${rows}
+`;
+
+  it("keeps the charge of a type symbol as the oxidation state", () => {
+    expect(parseTypeSymbol("Fe3+")).toEqual({ element: "Fe", oxidationState: 3 });
+    expect(parseTypeSymbol("Fe+3")).toEqual({ element: "Fe", oxidationState: 3 });
+    expect(parseTypeSymbol("O2-")).toEqual({ element: "O", oxidationState: -2 });
+    expect(parseTypeSymbol("O-2")).toEqual({ element: "O", oxidationState: -2 });
+    expect(parseTypeSymbol("Na+")).toEqual({ element: "Na", oxidationState: 1 });
+    expect(parseTypeSymbol("Cl-")).toEqual({ element: "Cl", oxidationState: -1 });
+    expect(parseTypeSymbol("Mn")).toEqual({ element: "Mn" });
+    expect(parseTypeSymbol("FE")).toEqual({ element: "Fe" });
+    expect(parseTypeSymbol("D")).toEqual({ element: "D" });
+    // A fractional charge is no tabulated oxidation state.
+    expect(parseTypeSymbol("Fe2.5+")).toEqual({ element: "Fe" });
+    // Not an element: an error, not a guess ("Wat" used to become "Wa").
+    expect(() => parseTypeSymbol("Wat")).toThrow(/not an element symbol/);
+    expect(() => parseTypeSymbol("OH-")).toThrow(/not an element symbol/);
+  });
+
+  it("puts the oxidation state on the site, where it picks the magnetic ion", () => {
+    const model = parseCif(atoms("_atom_site_label\n_atom_site_type_symbol", "Fe1 Fe3+ 0 0 0\nO1 O2- 0.5 0.5 0.5\nMn1 Mn 0.25 0.25 0.25"));
+    expect(model.sites.map((x) => [x.element, x.oxidationState])).toEqual([["Fe", 3], ["O", -2], ["Mn", undefined]]);
+    expect(siteIonId(model.sites[0]!)).toBe("Fe3"); // was "Fe2": the 3+ was stripped
+  });
+
+  it("resolves upper-case labels to two-letter elements when there is no type symbol", () => {
+    const model = parseCif(atoms("_atom_site_label", "FE1 0 0 0\nCA1 0.5 0 0\nC12 0 0.5 0\nOW1 0 0 0.5\nCa2 0.5 0.5 0\nD1 0.5 0 0.5"));
+    expect(model.sites.map((x) => x.element)).toEqual(["Fe", "Ca", "C", "O", "Ca", "D"]);
+  });
+
+  it("falls back to the label when the type symbol is the CIF null '?'", () => {
+    const model = parseCif(atoms("_atom_site_label\n_atom_site_type_symbol", "SR1 ? 0 0 0"));
+    expect(model.sites[0]!.element).toBe("Sr");
   });
 });

@@ -62,9 +62,10 @@ export interface AtomSite {
    */
   readonly isotope?: number;
   /**
-   * Formal oxidation state. Used to pick the magnetic ⟨j0⟩/⟨j2⟩ ion; the X-ray
-   * form factors are neutral-atom Cromer–Mann only (no ionic species yet), so
-   * this does not affect X-ray scattering today.
+   * Formal oxidation state, e.g. +3 from a CIF type symbol "Fe3+". Used to pick
+   * the magnetic ⟨j0⟩/⟨j2⟩ ion; the X-ray form factors are neutral-atom
+   * Cromer–Mann only (no ionic species yet), so this does not affect X-ray
+   * scattering today.
    */
   readonly oxidationState?: number;
   /** Fractional coordinates [x, y, z] in the crystallographic basis. */
