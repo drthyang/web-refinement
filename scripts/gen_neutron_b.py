@@ -1,48 +1,50 @@
 #!/usr/bin/env python3
 """Generate `src/core/scattering/neutronData.ts` — bound coherent neutron
-scattering lengths b (fm) — for the full periodic table.
+scattering lengths b (fm), complex, for the natural elements and the isotopes.
 
-Source of truth: V. F. Sears, *International Tables for Crystallography* Vol. C,
-§4.4.4 (bound coherent scattering lengths). Machine-readable via the Sears
-table redistributed in the `Dans_Diffraction` package
-(`data/neutron_isotope_scattering_lengths_sears.dat`); only the real part of the
-bound coherent length for each *natural* element is used.
+Evaluation: V. F. Sears, "Neutron scattering lengths and cross sections",
+*Neutron News* 3(3), 26-37 (1992), as entered by NIST in the NCNR table
+https://www.ncnr.nist.gov/resources/n-lengths/list.html (gemmi, Mantid and
+cctbx carry transcriptions of the same page). It is NOT the later ITC Vol. C
+§4.4.4 edition (Dans_Diffraction's `neutron_isotope_scattering_lengths_sears.dat`,
+which this table used to be built from: it carries In = 2.08 fm — the In
+σ_coh in barn — and stores the imaginary part with inconsistent signs), and NOT
+Rauch & Waschkowski (2003) plus newer measurements (GSAS-II's `AtmBlens`,
+periodictable), which differ for e.g. Au (7.90 vs 7.63 fm).
 
-GSAS-II override. GSAS-II (which this workbench is validated against, see
-neutronSfValidation.test.ts) uses the slightly earlier Sears (1992) *Neutron
-News* 3, 26 compilation, which differs from the ITC edition for a few elements.
-Those values are pinned in {@link GSAS2_OVERRIDES} so the emitted table
-reproduces GSAS-II exactly for the validation elements while filling the rest of
-the periodic table from the ITC/Sears source.
+Input. The NIST page carries per-request tokens, so it cannot be pinned by URL.
+The generator therefore pins the extracted data table: one line per `<tr>` of
+the page's `<table border=4>`, cells separated by tabs, tags removed (so
+`5.74-1.483<i>i</i>` reads `5.74-1.483i`). Pass either the saved HTML page (it
+is normalized here exactly like that) or the normalized table itself, e.g.
+ScatterPlan's `data-sources/snapshots/nist-sears1992.tsv`. The normalized table
+must match NIST_TABLE_SHA256 below; a NIST revision fails loudly and must be
+reviewed and re-pinned.
 
-Usage:
-    pip download --no-deps Dans_Diffraction -d /tmp/dd
-    unzip -o /tmp/dd/dans_diffraction-*.whl -d /tmp/dd/x
-    python3 scripts/gen_neutron_b.py \
-        /tmp/dd/x/Dans_Diffraction/data/neutron_isotope_scattering_lengths_sears.dat \
-        src/core/scattering/neutronData.ts
+    python3 scripts/gen_neutron_b.py nist-sears1992.tsv src/core/scattering/neutronData.ts
 
-Every element with a real, tabulated b is emitted, in atomic-number order, plus
-deuterium (D) from the ²H isotope row. Elements with no bound coherent value in
-the source (e.g. Tc and the trans-uranics past the table) are simply absent.
+Output, stored exactly as printed (b = b′ − i·b″, so `im` = −b″ ≤ 0 for an
+absorbing nucleus; the crystallographic amplitude is the conjugate, applied in
+neutron.ts):
+  * NEUTRON_B           — every element row that prints a value, plus D (²H).
+                          Pu and Cm print none (each isotope differs: ²³⁸Pu
+                          14.1, ²³⁹Pu 7.7, ²⁴⁰Pu 3.5 fm), so they are absent and
+                          a site needs an explicit isotope.
+  * NEUTRON_B_ISOTOPES  — every isotope row that prints a value, keyed "238Pu".
+Rows whose b_c is printed as "---" are skipped. Uncertainties in parentheses
+("3.26(3)", "6.(1.)") are dropped.
 """
 
 from __future__ import annotations
 
+import hashlib
+import math
 import re
 import sys
 
-# Sears (1992) Neutron News values used by GSAS-II where they differ from the
-# ITC edition — preserved verbatim so the neutron structure factor keeps
-# matching GSAS-II's .lst output.  {element: b (fm)}.
-GSAS2_OVERRIDES: dict[str, float] = {
-    "Ti": -3.438,
-    "Mn": -3.73,
-    "Zn": 5.68,
-    "Au": 7.9,
-}
+NIST_TABLE_SHA256 = "dcf8ea74603ceb3ed1ef56ef5017596a7d5bc581fc08f44c1d1c1b21025de914"
 
-# Atomic number for ordering the output (1-based index).
+# Atomic number, for ordering the output.
 ELEMENTS = [
     "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al", "Si",
     "P", "S", "Cl", "Ar", "K", "Ca", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co",
@@ -55,74 +57,171 @@ ELEMENTS = [
 ]
 Z_OF = {sym: i + 1 for i, sym in enumerate(ELEMENTS)}
 
+ROW_NAME = re.compile(r"^(\d*)([A-Z][a-z]?)$")
+# b′ with an optional "−b″i" (Sears prints every imaginary part with a minus).
+B_VALUE = re.compile(r"^(-?\d+\.?\d*)(?:(-)(\d+\.?\d*)i)?$")
 
-def parse(path: str) -> tuple[dict[str, float], float | None]:
-    """Return ({element: real b (fm)} for natural elements, deuterium b)."""
-    natural: dict[str, float] = {}
-    deuterium: float | None = None
-    for line in open(path):
-        if line.startswith("#") or not line.strip():
+
+def normalize_html(html: str) -> str:
+    """The page's data table as one tab-separated line per row (see docstring)."""
+    start = html.find("<table border=4>")
+    end = html.find("</table>", start)
+    if start < 0 or end < 0:
+        sys.exit("NIST page: data table not found")
+    lines = []
+    for row in re.split(r"<tr>", html[start:end], flags=re.I):
+        if not re.search(r"<td", row, flags=re.I):
             continue
-        parts = [p.strip() for p in line.split(",")]
-        name, real_b = parts[0], float(parts[1])
-        if name == "2-H":
-            deuterium = real_b
-            continue
-        if "-" in name:  # other isotope rows, e.g. "1-H", "235-U"
-            continue
-        natural[name] = real_b
-    return natural, deuterium
+        cells = re.split(r"<td>", row, flags=re.I)[1:]
+        cells = [re.sub(r"\s+", " ", re.sub(r"<[^>]*>", "", c).replace("&nbsp;", " ")).strip() for c in cells]
+        lines.append("\t".join(cells))
+    return "\n".join(lines) + "\n"
+
+
+def parse_b(cell: str) -> tuple[float, float] | None:
+    """'5.30-0.213i' → (5.30, −0.213); '3.26(3)' → (3.26, 0); '---' → None."""
+    if cell == "---":
+        return None
+    m = B_VALUE.match(re.sub(r"\([^)]*\)", "", cell))
+    if not m:
+        sys.exit(f"cannot parse b_c '{cell}'")
+    re_part = float(m.group(1))
+    im_part = -float(m.group(3)) if m.group(2) else 0.0
+    return re_part, im_part
+
+
+def half_ulp(printed: str) -> float:
+    """Half a unit in the last printed digit of a number like '4.871' or '6.'."""
+    digits = re.sub(r"\([^)]*\)", "", printed)
+    frac = digits.split(".")[1] if "." in digits else ""
+    return 0.5 * 10.0 ** -len(frac)
+
+
+def sigma_consistent(bc: str, sigma_coh: str, b: tuple[float, float]) -> bool:
+    """σ_coh = 4π|b|²/100 (b in fm, σ in barn) within the printed precision of both."""
+    sigma = float(re.sub(r"\([^)]*\)", "", sigma_coh))
+    re_part = bc.split("-")[0] if not bc.startswith("-") else "-" + bc[1:].split("-")[0]
+    db = half_ulp(re_part.lstrip("-"))
+    mod = math.hypot(*b)
+    lo = 4 * math.pi * max(mod - db, 0) ** 2 / 100
+    hi = 4 * math.pi * (mod + db) ** 2 / 100
+    ds = half_ulp(sigma_coh)
+    return lo <= sigma + ds and sigma - ds <= hi
 
 
 def num(x: float) -> str:
-    return f"{x:g}"
+    s = repr(x)
+    return s[:-2] if s.endswith(".0") else s
+
+
+def entry(b: tuple[float, float]) -> str:
+    return f"{{ re: {num(b[0])}, im: {num(b[1] or 0.0)} }}"
 
 
 def main() -> None:
     if len(sys.argv) != 3:
         sys.exit(__doc__)
-    natural, deuterium = parse(sys.argv[1])
+    raw = open(sys.argv[1], encoding="utf-8").read()
+    table = normalize_html(raw) if "<table" in raw.lower() else raw
+    got = hashlib.sha256(table.encode("utf-8")).hexdigest()
+    if got != NIST_TABLE_SHA256:
+        sys.exit(f"NIST table SHA-256 {got} does not match the pinned {NIST_TABLE_SHA256}")
 
-    table: dict[str, float] = {}
-    for sym, b in natural.items():
-        if sym in Z_OF:
-            table[sym] = b
-    # Apply the GSAS-II overrides (must all correspond to real elements).
-    for sym, b in GSAS2_OVERRIDES.items():
-        assert sym in table, f"override element {sym} not in source table"
-        table[sym] = b
+    elements: dict[str, tuple[float, float]] = {}
+    radioactive: dict[str, str] = {}  # element row printing a half-life → half-life
+    isotopes: dict[str, tuple[float, float]] = {}
+    isotope_only: dict[str, list[int]] = {}
+    sigma_mismatch: list[str] = []
+    for line in table.splitlines():
+        cells = line.split("\t")
+        if len(cells) != 8:
+            sys.exit(f"expected 8 cells, got {len(cells)}: {line!r}")
+        name, conc, bc, _binc, sigma_coh = cells[:5]
+        m = ROW_NAME.match(name)
+        if not m or m.group(2) not in Z_OF:
+            sys.exit(f"unexpected row name '{name}'")
+        mass, sym = m.group(1), m.group(2)
+        b = parse_b(bc)
+        if b is not None and sigma_coh not in ("---", "") and not sigma_consistent(bc, sigma_coh, b):
+            sigma_mismatch.append(f"{name} (b={bc}, σ_coh={sigma_coh})")
+        if mass:
+            if b is not None:
+                isotopes[f"{mass}{sym}"] = b
+                isotope_only.setdefault(sym, []).append(int(mass))
+            continue
+        if b is None:
+            continue
+        elements[sym] = b
+        if conc.startswith("("):
+            radioactive[sym] = conc.strip("()")
 
-    ordered = sorted(table, key=lambda s: Z_OF[s])
-    assert len(ordered) >= 85, f"expected ≥85 elements, got {len(ordered)}"
+    if "2H" not in isotopes:
+        sys.exit("²H row missing")
+    isotope_only = {s: v for s, v in isotope_only.items() if s not in elements}
+    if sorted(isotope_only) != ["Cm", "Pu"]:
+        sys.exit(f"unexpected isotope-only elements {sorted(isotope_only)} — review the table")
 
-    lines = [f'  {sym}: {num(table[sym])},' for sym in ordered]
-    if deuterium is not None:
-        # Deuterium keyed as "D" right after hydrogen, matching CIF usage.
-        lines.insert(1, f'  D: {num(deuterium)},')
+    ordered = sorted(elements, key=lambda s: Z_OF[s])
+    element_lines = []
+    for sym in ordered:
+        note = f"  // radioactive: one value, t½ {radioactive[sym]}" if sym in radioactive else ""
+        element_lines.append(f"  {sym}: {entry(elements[sym])},{note}")
+        if sym == "H":
+            element_lines.append(f"  D: {entry(isotopes['2H'])},  // ²H")
+
+    def iso_key(k: str) -> tuple[int, int]:
+        m = re.match(r"(\d+)([A-Z][a-z]?)", k)
+        assert m
+        return Z_OF[m.group(2)], int(m.group(1))
+
+    isotope_lines = [f'  "{k}": {entry(isotopes[k])},' for k in sorted(isotopes, key=iso_key)]
+    only = ", ".join(f"{s} ({', '.join(str(a) for a in sorted(v))})" for s, v in sorted(isotope_only.items()))
 
     header = f"""/**
  * Bound coherent neutron scattering lengths b (fm) — GENERATED FILE, do not
- * edit by hand.
+ * edit by hand. Regenerate with scripts/gen_neutron_b.py.
  *
- * Values from V. F. Sears, *International Tables for Crystallography* Vol. C,
- * §4.4.4, via the Sears table redistributed in the `Dans_Diffraction` package
- * (real part of the bound coherent length, natural-abundance elements). A few
- * elements (Ti, Mn, Zn, Au) are pinned to GSAS-II's Sears (1992) *Neutron News*
- * values so the neutron structure factor keeps matching GSAS-II output — see
- * neutronSfValidation.test.ts and scripts/gen_neutron_b.py. Deuterium (D) is
- * the ²H isotope value.
+ * Evaluation: V. F. Sears, *Neutron News* 3(3), 26–37 (1992), as entered in the
+ * NIST NCNR table "Neutron scattering lengths and cross sections" (extracted
+ * table pinned by SHA-256 {NIST_TABLE_SHA256[:16]}… in the generator). Not the
+ * later ITC Vol. C §4.4.4 edition, and not Rauch & Waschkowski (2003), which
+ * GSAS-II's AtmBlens uses (e.g. Au 7.90 there vs 7.63 fm here).
  *
- * Covers {len(ordered)} natural elements (+ D), keyed by element symbol.
+ * Values are stored exactly as Sears prints them, b = b′ − i·b″: `im` is −b″,
+ * negative for an absorbing nucleus (B, Cd, In, Sm, Eu, Gd, Dy, …). The amplitude
+ * in the crystallographic structure factor F = Σ a·exp(+2πi h·x) is the
+ * conjugate b′ + i·b″ — see neutron.ts, which applies it.
+ *
+ * {len(ordered)} elements (+ D = ²H) in NEUTRON_B, {len(isotopes)} isotopes in NEUTRON_B_ISOTOPES.
+ * Sears prints no element value for these, so a site needs an explicit isotope:
+ *   {only}.
+ * Elements marked "radioactive" have no natural isotopic composition: Sears
+ * gives one value, for the isotope with the half-life shown.
  */
 
-/** Element symbol → bound coherent scattering length (fm). */
-export const NEUTRON_B: Readonly<Record<string, number>> = {{
+/** b = b′ − i·b″ in fm, as printed by Sears (1992): `im` = −b″ ≤ 0. */
+export interface BoundCoherentLength {{
+  readonly re: number;
+  readonly im: number;
+}}
+
+/** Element symbol (natural isotopic composition; D = ²H) → b (fm). */
+export const NEUTRON_B: Readonly<Record<string, BoundCoherentLength>> = {{
 """
     with open(sys.argv[2], "w") as fh:
         fh.write(header)
-        fh.write("\n".join(lines))
+        fh.write("\n".join(element_lines))
+        fh.write("\n};\n\n")
+        fh.write('/** Isotope, keyed mass number + symbol ("238Pu") → b (fm). */\n')
+        fh.write("export const NEUTRON_B_ISOTOPES: Readonly<Record<string, BoundCoherentLength>> = {\n")
+        fh.write("\n".join(isotope_lines))
         fh.write("\n};\n")
-    print(f"wrote {sys.argv[2]}: {len(ordered)} elements (+ D)")
+    print(f"wrote {sys.argv[2]}: {len(ordered)} elements (+ D), {len(isotopes)} isotopes")
+    print(f"isotope-only elements: {only}")
+    if sigma_mismatch:
+        print("σ_coh ≠ 4π|b|²/100 (as printed; informational):")
+        for s in sigma_mismatch:
+            print(f"  {s}")
 
 
 if __name__ == "__main__":

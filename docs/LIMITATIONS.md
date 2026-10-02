@@ -148,8 +148,8 @@ approximate, however plausible its output looks.
 ## Scattering tables
 
 **Supported**
-- Neutron coherent scattering lengths: 92 entries (Sears, *International Tables*
-  Vol. C), with GSAS-II's values pinned for the elements used in validation.
+- Neutron coherent scattering lengths: Sears (1992) *Neutron News* via NIST,
+  89 elements + D and 247 isotopes. Pu and Cm need an explicit isotope.
 - X-ray form factors: Cromer–Mann coefficients for 98 neutral atoms H–Cf
   (Vol. C), each checked to give f(0) = Z.
 - Magnetic form factors: ⟨j0⟩ for 97 ions and ⟨j2⟩ for 95 (Vol. C). The

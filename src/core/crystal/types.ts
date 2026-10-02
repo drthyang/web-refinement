@@ -56,8 +56,9 @@ export interface AtomSite {
   readonly element: string;
   /**
    * Optional isotope mass number for neutron scattering, e.g. 2 for D or 57 for
-   * ⁵⁷Fe. Currently only deuterium (H, mass 2) is isotope-resolved; other
-   * isotopes fall back to natural-abundance b (see neutron.ts).
+   * ⁵⁷Fe. Every isotope Sears (1992) tabulates is resolved; an untabulated one
+   * is an error, never a silent fall-back to the natural value. Pu and Cm have
+   * no natural-abundance value and require it (see neutron.ts).
    */
   readonly isotope?: number;
   /**

@@ -1,36 +1,74 @@
 /**
  * Bound coherent neutron scattering lengths b (fm).
  *
- * Values ({@link NEUTRON_B}) come from the generated {@link ./neutronData}
- * table (Sears, ITC Vol. C §4.4.4, full periodic table; Ti/Mn/Zn/Au pinned to
- * GSAS-II's Sears 1992 values — see that file and scripts/gen_neutron_b.py).
- * The elements in the GSAS-II validation data match the values GSAS-II prints
- * in its .lst output (fm): Mn −3.73, O 5.80, Ga 7.29 (Mn₃Ga/MnO); Sn 6.23,
- * Co 2.49, Fe 9.45 (FeCoSn). See neutronSfValidation.test.ts. This file holds
- * only the lookup logic.
+ * Values ({@link NEUTRON_B}, {@link NEUTRON_B_ISOTOPES}) come from the generated
+ * {@link ./neutronData} table: Sears (1992) *Neutron News* 3(3) 26–37, as entered
+ * by NIST — see that file and scripts/gen_neutron_b.py. MATERIA uses that one
+ * evaluation for every element, with no per-element overrides. The elements in
+ * the GSAS-II validation data print the same values in its .lst output (fm):
+ * Mn −3.73, O 5.80, Ga 7.29 (Mn₃Ga/MnO); Sn 6.23, Co 2.49, Fe 9.45 (FeCoSn).
+ * See neutronSfValidation.test.ts. This file holds only the lookup logic.
  */
 
 import type { ScatteringTable } from "@/core/scattering/types";
-import { NEUTRON_B } from "@/core/scattering/neutronData";
+import { NEUTRON_B, NEUTRON_B_ISOTOPES, type BoundCoherentLength } from "@/core/scattering/neutronData";
 
-export { NEUTRON_B };
+export { NEUTRON_B, NEUTRON_B_ISOTOPES };
+export type { BoundCoherentLength };
+
+/** Mass numbers tabulated for an element, e.g. [238, 239, 240, 242] for Pu. */
+export function tabulatedIsotopes(element: string): number[] {
+  const out: number[] = [];
+  for (const key of Object.keys(NEUTRON_B_ISOTOPES)) {
+    const m = /^(\d+)([A-Z][a-z]?)$/.exec(key);
+    if (m && m[2] === element) out.push(Number(m[1]));
+  }
+  return out;
+}
 
 /**
- * Bound coherent scattering length (fm), optionally for a specific isotope.
- * Only **deuterium** (H with mass number 2 → the tabulated `D`) is
- * isotope-resolved today — it is the dominant isotope case in neutron work
- * (H/D contrast), and natural H and D differ in sign and magnitude (−3.739 vs
- * +6.671 fm), so ignoring it would badly corrupt |F|². Any other `isotope`
- * falls back to the natural-abundance value (the table is keyed by element;
- * per-isotope lengths are a future addition).
+ * Bound coherent scattering length b = b′ − i·b″ (fm) exactly as Sears prints it,
+ * for the natural element or, when `isotope` (a mass number) is given, for that
+ * isotope. `D` is ²H, and H with isotope 2 is the same entry.
+ *
+ * Throws, naming the element, when nothing is tabulated: an unknown element, an
+ * isotope Sears does not list, or an element with no natural-abundance value.
+ * Pu and Cm are the latter — their isotopes differ widely (²³⁸Pu 14.1, ²³⁹Pu
+ * 7.7, ²⁴⁰Pu 3.5 fm), so the site must name its isotope.
  */
-export function neutronScatteringLength(element: string, isotope?: number): number {
-  const key = element === "H" && isotope === 2 ? "D" : element;
-  const b = NEUTRON_B[key];
+export function boundCoherentLength(element: string, isotope?: number): BoundCoherentLength {
+  if (element === "D" && (isotope === undefined || isotope === 2)) return NEUTRON_B.D!;
+  if (isotope !== undefined) {
+    const b = NEUTRON_B_ISOTOPES[`${isotope}${element}`];
+    if (b === undefined) {
+      const known = tabulatedIsotopes(element);
+      throw new Error(
+        `No neutron scattering length for isotope ${isotope}${element}` +
+          (known.length > 0 ? ` (Sears 1992 lists ${element} ${known.join(", ")})` : ""),
+      );
+    }
+    return b;
+  }
+  const b = NEUTRON_B[element];
   if (b === undefined) {
+    const known = tabulatedIsotopes(element);
+    if (known.length > 0) {
+      throw new Error(
+        `${element} has no natural-abundance neutron scattering length; set the site's isotope ` +
+          `(Sears 1992 lists ${element} ${known.join(", ")})`,
+      );
+    }
     throw new Error(`No neutron scattering length for element "${element}"`);
   }
   return b;
+}
+
+/**
+ * Real part b′ of the bound coherent scattering length (fm). The imaginary
+ * (absorption) part of B, Cd, In, Sm, Eu, Gd and Dy is not applied here.
+ */
+export function neutronScatteringLength(element: string, isotope?: number): number {
+  return boundCoherentLength(element, isotope).re;
 }
 
 export const neutronTable: ScatteringTable = {
