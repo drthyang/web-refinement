@@ -23,4 +23,12 @@ export interface HistoryBinding {
   /** Present when there is a step to go back / forward to. */
   readonly back?: () => void;
   readonly forward?: () => void;
+  /** Where the last back / forward (buttons or ⌘Z / ⇧⌘Z) landed; null before any. */
+  readonly moved: StepMove | null;
+}
+
+/** One back / forward move. `n` counts the moves, so landing on the same step twice still reads as two. */
+export interface StepMove {
+  readonly stepId: string;
+  readonly n: number;
 }

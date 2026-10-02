@@ -150,9 +150,10 @@ column.
   it. Nothing is lost: if you then refine, the new steps form a branch, and
   **other branches**, below the steps, lists the old ones.
 - The circular arrows beside **History ▾** step back and forward. So do ⌘Z /
-  Ctrl+Z and ⇧⌘Z / Ctrl+Shift+Z, except inside a text field. Below 1180 px wide
-  the arrows move into the History list, and on a tablet in landscape the menu
-  shows as a clock icon.
+  Ctrl+Z and ⇧⌘Z / Ctrl+Shift+Z, except inside a text field. The step you land
+  on shows for 3 seconds to the left of the arrows, as the list words it.
+  Below 1180 px wide the arrows move into the History list, and on a tablet in
+  landscape the menu shows as a clock icon.
 - ✎ names a step, such as "before ADPs".
 - The history is saved with the project. Between saves it is kept in the
   browser. After a reload, the start page offers to restore the last session.
