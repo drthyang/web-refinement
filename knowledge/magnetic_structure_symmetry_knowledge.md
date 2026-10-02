@@ -28,7 +28,7 @@ Neutrons scatter from the magnetization via the magnetic interaction vector. Two
    direction ambiguities (§9).
 
 2. The magnetic form factor f_m(Q) FALLS OFF with Q (unlike a point nucleus):
-     dipole approximation:  f_m(Q) = <j0>(s) + (1 - 2/g) <j2>(s),   s = sinθ/λ
+     dipole approximation:  f_m(Q) = <j0>(s) + (2/g - 1) <j2>(s),   s = sinθ/λ
    so magnetic intensity is concentrated at low Q / high d-spacing.
 ```
 

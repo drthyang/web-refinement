@@ -122,7 +122,7 @@ S\***, and this is load-bearing (§5).
 
 **Form factor.** Both existing paths call `table.j0` (spin-only). Incommensurate helices are
 overwhelmingly rare-earth systems where the orbital ⟨j2⟩ term is large — for Ho³⁺/Er³⁺ (g ≈ 1.25)
-the dipole coefficient (1 − 2/g) ≈ −0.6 across the whole d range, absorbed into the refined
+the dipole coefficient (2/g − 1) ≈ +0.6 across the whole d range, absorbed into the refined
 amplitude as a bias. `magneticFormFactorDipole` is already implemented in
 `scattering/magnetic.ts` and unused. Add `formFactorModel: "spin-only" | "dipole"` (+ Landé g) to
 the coefficient, defaulting to dipole for lanthanides, and apply the same fix to the real-moment

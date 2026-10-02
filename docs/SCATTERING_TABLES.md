@@ -49,8 +49,12 @@ For moments with an orbital contribution (Landé `g ≠ 2`) — most real magnet
 refinements — the **dipole approximation** is required:
 
 ```
-f(s) ≈ ⟨j0⟩(s) + (1 − 2/g)·⟨j2⟩(s)
+f(s) ≈ ⟨j0⟩(s) + (2/g − 1)·⟨j2⟩(s)
 ```
+
+This is Lovesey (1984) eq. 11.110. The spin part of the moment carries ⟨j0⟩ and
+the orbital part carries ⟨j0⟩ + ⟨j2⟩. The ⟨j2⟩ weight is therefore the orbital
+fraction of the moment, μ_L/μ = (2 − g)/g, which is positive for g < 2.
 
 `⟨j2⟩` carries an `s²` prefactor, so it vanishes at `s = 0` and the total form
 factor is still 1 there. The functions exist, but no calculation calls them yet:
@@ -68,7 +72,8 @@ Both ⟨j0⟩ and ⟨j2⟩ cover the full ITC-C ion set, so the tables are ready
 The generated coefficients are guarded by
 [`scattering.test.ts`](../src/core/scattering/scattering.test.ts): ⟨j0⟩(0) = 1 for
 a spread of 3d/rare-earth/actinide ions, ⟨j2⟩(0) = 0, the dipole term reduces to
-⟨j0⟩ at `g = 2`, and an **external reference lock** against `periodictable`'s
+⟨j0⟩ at `g = 2`, Tb³⁺ (g = 3/2) gives f = 0.499 at Q = 5 Å⁻¹ with the
+Lovesey/Mantid sign, and an **external reference lock** against `periodictable`'s
 Fe²⁺ doctest (`M_Q([0, 0.1, 0.2]) = [1, 0.99935, 0.99741]`), which pins both the
 coefficients and the `s = sinθ/λ` convention.
 

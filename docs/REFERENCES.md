@@ -114,6 +114,9 @@ Web resources accessed **2026-07-08**; DOIs verified against Crossref **2026-07-
   Lovesey, S. W., *Theory of Neutron Scattering from Condensed Matter*, Vol. 2.
   → [`magnetic/structureFactor.ts`](../src/core/magnetic/structureFactor.ts),
   [`magnetic/moment.ts`](../src/core/magnetic/moment.ts).
+- **Dipole magnetic form factor** f = ⟨j0⟩ + (2/g − 1)·⟨j2⟩ — Lovesey, Vol. 2
+  (1984), eq. 11.110; the same sign as Mantid's `MagneticIon.cpp`.
+  → [`scattering/magnetic.ts`](../src/core/scattering/magnetic.ts).
 - **Peak-width (Caglioti)** FWHM² = U tan²θ + V tanθ + W — Caglioti, G.,
   Paoletti, A. & Ricci, F. P. (1958). *Nucl. Instrum.* **3**, 223.
 - **Thompson–Cox–Hastings pseudo-Voigt** (Voigt FWHM combination + η polynomial)
