@@ -86,7 +86,7 @@ describe("momentDegeneracies", () => {
     highCorrelations: [],
     maxLambda: 1e-3,
     atBounds: [],
-    maxParameterShift: 0,
+    maxShiftOverEsd: 0,
     ...over,
   });
 

@@ -56,7 +56,7 @@ const DEFAULT_OPTIONS: RefinementOptions = {
   maxIterations: 20,
   convergenceTolerance: 1e-4,
   // Shift-based convergence is opt-in: 0 disables it, leaving the χ² test as the
-  // sole stopping rule (unchanged default behavior). The relative-shift metric is
+  // sole stopping rule (unchanged default behavior). The shift/esd metric is
   // always *reported* in diagnostics regardless.
   shiftTolerance: 0,
   lambda: 1e-3,
@@ -433,6 +433,44 @@ function normalizedPseudoInverse(
   return { covarianceBase, diagnostics };
 }
 
+/**
+ * Weighted residual below which a fit counts as exact. No measurement is
+ * precise to a part per million, so such a fit is to noise-free (simulated)
+ * data: its residual, and every esd scaled from it, is round-off.
+ */
+const EXACT_FIT_RWP = 1e-6;
+
+/** esd_j = √(C_jj · χ²_red); 0 for a dropped (dead or singular) direction. */
+function esdsFrom(covarianceBase: Matrix, reducedChi: number): number[] {
+  return covarianceBase.map((row, j) => {
+    const variance = row[j]! * reducedChi;
+    return variance > 0 ? Math.sqrt(variance) : 0;
+  });
+}
+
+/**
+ * Largest shift/esd of a step, max_j |Δp_j| / σ_j — the crystallographic
+ * convergence measure (settled when below ~0.1). Dividing by the esd, not by
+ * |p_j|, keeps it meaningful for parameters that refine near zero, such as
+ * atom-position offsets. A parameter with esd 0 (a dropped direction, already
+ * reported in `singularParameterIds`) has no scale to compare against and is
+ * skipped. `index` is −1 when no parameter qualifies.
+ */
+function maxShiftOverEsd(step: readonly number[], esd: readonly number[]): { value: number; index: number } {
+  let value = 0;
+  let index = -1;
+  for (let j = 0; j < step.length; j++) {
+    const s = esd[j]!;
+    if (!(s > 0)) continue;
+    const ratio = Math.abs(step[j]!) / s;
+    if (ratio > value) {
+      value = ratio;
+      index = j;
+    }
+  }
+  return { value, index };
+}
+
 function highCorrelations(
   covariance: Matrix,
   ids: readonly string[],
@@ -489,11 +527,16 @@ function* refineCore(
   let freeValues = freeParams.map((p) => p.value);
   let lambda = opts.lambda ?? 1e-3;
   let maxLambda = lambda;
-  // Largest *relative* parameter shift on the most recent accepted step,
-  // max_j |Δp_j| / (|p_j| + tiny) — genuinely scale-invariant (a ~1e-10 scale and
-  // a ~10 cell length compare equally), used for the reported diagnostic and the
-  // opt-in shift-based convergence test.
-  let lastMaxRelShift = Infinity;
+  // Per-parameter shift Δp of the most recent accepted step, measured against
+  // the esds for the reported shift/esd diagnostic and the opt-in shift-based
+  // convergence test.
+  let lastStep: number[] | undefined;
+  // Degrees of freedom use the number of *contributing* observations (positive
+  // weight), not the raw array length — masked/excluded points must not inflate
+  // N, or the reduced χ² and every ESD derived from it come out optimistic.
+  let nUsed = 0;
+  for (let i = 0; i < problem.weights.length; i++) if (problem.weights[i]! > 0) nUsed++;
+  const dof = Math.max(nUsed - n, 1);
 
   const withChi = (yCalc: Float64Array): { yCalc: Float64Array; chi: number } => ({
     yCalc,
@@ -582,14 +625,8 @@ function* refineCore(
 
       // Reject non-finite objectives (overflow/NaN) as well as uphill steps.
       if (Number.isFinite(trialEval.chi) && trialEval.chi < current.chi) {
-        // Relative shift of this accepted step (computed against the pre-step
-        // values, before we overwrite them below).
-        let ms = 0;
-        for (let j = 0; j < trial.length; j++) {
-          const rel = Math.abs(trial[j]! - freeValues[j]!) / (Math.abs(trial[j]!) + 1e-30);
-          if (rel > ms) ms = rel;
-        }
-        lastMaxRelShift = ms;
+        // The step actually taken, after clamping, against the pre-step values.
+        lastStep = trial.map((v, j) => v - freeValues[j]!);
         freeValues = trial;
         current = trialEval;
         lambda = Math.max(lambda / 3, 1e-12);
@@ -625,11 +662,16 @@ function* refineCore(
     }
     // Dual convergence: also stop when the parameters have effectively stopped
     // moving, even if χ² is still creeping down a shallow valley (the classic
-    // correlated-parameter case). Disabled when shiftTolerance is 0.
+    // correlated-parameter case). Disabled when shiftTolerance is 0. The esds
+    // are this iteration's, by the same recipe as the final ones below: the
+    // normal matrix the step was solved from, scaled by the post-step χ²_red.
     const shiftTol = opts.shiftTolerance ?? 0;
-    if (shiftTol > 0 && lastMaxRelShift < shiftTol) {
-      status = "converged";
-      break;
+    if (shiftTol > 0 && lastStep) {
+      const { covarianceBase: stepCovariance } = normalizedPseudoInverse(jtj, opts.svdTolerance ?? 1e-6, floors);
+      if (maxShiftOverEsd(lastStep, esdsFrom(stepCovariance, current.chi / dof)).value < shiftTol) {
+        status = "converged";
+        break;
+      }
     }
   }
 
@@ -638,12 +680,6 @@ function* refineCore(
   // robust crystallographic least-squares pattern used by GSAS-II: keep stable
   // directions, drop near-null ones, and report the troublemakers.
   const esd: Record<string, number> = {};
-  // Degrees of freedom use the number of *contributing* observations (positive
-  // weight), not the raw array length — masked/excluded points must not inflate
-  // N, or the reduced χ² and every ESD derived from it come out optimistic.
-  let nUsed = 0;
-  for (let i = 0; i < problem.weights.length; i++) if (problem.weights[i]! > 0) nUsed++;
-  const dof = Math.max(nUsed - n, 1);
   const reducedChi = current.chi / dof;
   const finalResiduals = weightedResiduals(problem.observations, current.yCalc, problem.weights);
   const { sets: finalSets, plan: finalPlan } = jacobianPlan(problem, freeParams, freeValues, useAnalytic);
@@ -655,11 +691,18 @@ function* refineCore(
     opts.svdTolerance ?? 1e-6,
     finalFloors,
   );
-  const covariance = covarianceBase.map((row) => row.map((v) => v * reducedChi));
-  for (let j = 0; j < n; j++) {
-    const variance = covariance[j]![j]!;
-    esd[freeIds[j]!] = variance > 0 ? Math.sqrt(variance) : 0;
-  }
+  const esds = esdsFrom(covarianceBase, reducedChi);
+  for (let j = 0; j < n; j++) esd[freeIds[j]!] = esds[j]!;
+  const agreement: AgreementFactors = computeAgreementFactors(
+    problem.observations,
+    current.yCalc,
+    problem.weights,
+    n,
+  );
+  // The last accepted step against the esds reported with it — unless the fit
+  // is exact, where both are round-off and their ratio means nothing.
+  const exactFit = agreement.rWeighted !== undefined && agreement.rWeighted < EXACT_FIT_RWP;
+  const lastShift = lastStep && !exactFit ? maxShiftOverEsd(lastStep, esds) : { value: 0, index: -1 };
   const singularParameterIds = Array.from(new Set([
     ...covDiagnostics.droppedIndices.map((i) => freeIds[i]).filter((id): id is string => id !== undefined),
     ...solveDropped,
@@ -676,16 +719,11 @@ function* refineCore(
     ),
     maxLambda,
     atBounds: boundActiveParameters(freeParams, freeValues),
-    maxParameterShift: Number.isFinite(lastMaxRelShift) ? lastMaxRelShift : 0,
+    maxShiftOverEsd: lastShift.value,
+    ...(lastShift.index >= 0 ? { maxShiftParameterId: freeIds[lastShift.index]! } : {}),
   };
 
   const finalValues = valuesRecord(problem.parameters, freeIds, freeValues);
-  const agreement: AgreementFactors = computeAgreementFactors(
-    problem.observations,
-    current.yCalc,
-    problem.weights,
-    n,
-  );
 
   return {
     status,

@@ -250,8 +250,7 @@ phase" was precisely the *unrefinable* quantity for a one-arm structure.)
 
 **Amplitude+phase is a derived, read-only report**, computed from the refined (Re, Im) pair. The
 engine has no periodic-parameter support: `clamp` hard-clamps (a phase optimum across the branch
-cut would rail at ±π forever), the relative-shift metric explodes near 0, and the FD step |φ|·1e-5
-is dimensionally wrong. Making it refinable is a separate engine change, not a UI toggle.
+cut would rail at ±π forever), and the FD step |φ|·1e-5 is dimensionally wrong. Making it refinable is a separate engine change, not a UI toggle.
 
 `fourierMode` is **non-linear**: S is linear in the pair amplitudes (which is why that
 parameterization conditions better than |S|,φ), but the observable |M_⊥|² is quadratic. It must

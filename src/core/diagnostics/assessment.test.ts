@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { assessRefinement, suggestNextSteps } from "@/core/diagnostics/assessment";
 import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
+import { refine, type RefinementProblem } from "@/core/refinement/engine";
+import { noisyPeakProblem } from "@/testSupport/noisyPeak";
 
 function param(id: string, kind: RefinementParameter["kind"], value: number, extra: Partial<RefinementParameter> = {}): RefinementParameter {
   return { id, label: id, kind, value, initialValue: value, fixed: false, ...extra };
@@ -62,7 +64,7 @@ describe("assessRefinement — findings", () => {
       result: result({
         diagnostics: {
           svdZeroCount: 0, singularParameterIds: [], conditionNumber: 100, maxLambda: 1,
-          atBounds: [], maxParameterShift: 0,
+          atBounds: [], maxShiftOverEsd: 0,
           highCorrelations: [{ parameterIdA: "scale", parameterIdB: "bkg0", coefficient: 0.98 }],
         },
       }),
@@ -79,7 +81,7 @@ describe("assessRefinement — findings", () => {
       result: result({
         diagnostics: {
           svdZeroCount: 0, singularParameterIds: [], conditionNumber: 100, maxLambda: 1,
-          highCorrelations: [], maxParameterShift: 0,
+          highCorrelations: [], maxShiftOverEsd: 0,
           atBounds: [{ parameterId: "Fe1_B", bound: "min", value: 0 }],
         },
       }),
@@ -120,6 +122,65 @@ describe("assessRefinement — findings", () => {
     const f = a.findings.find((x) => x.category === "residual");
     expect(f).toBeDefined();
     expect(f?.detail).toMatch(/impurity|phase|magnetic/i);
+  });
+});
+
+describe("assessRefinement — convergence (shift/esd)", () => {
+  const assessFit = (problem: RefinementProblem, r: RefinementResult) =>
+    assessRefinement({
+      result: r,
+      parameters: problem.parameters.map((p) => ({ ...p, value: r.parameters[p.id] ?? p.value })),
+      observationCount: problem.observations.length,
+    });
+  const convergence = (a: ReturnType<typeof assessRefinement>) => a.findings.filter((f) => f.category === "convergence");
+
+  it("does not flag a converged fit whose position offset refined to ~0", () => {
+    // Positions refine as offsets from the starting coordinates, so they end
+    // near 0. The old relative shift |Δp|/|p| exploded there and warned on
+    // every such fit; against the esd the last step is negligible.
+    const problem = noisyPeakProblem({ start: 0.01 });
+    const r = refine(problem);
+    expect(r.status).toBe("converged");
+    expect(Math.abs(r.parameters.pos!)).toBeLessThan(1e-4 * r.esd.pos!);
+    expect(r.diagnostics!.maxShiftOverEsd).toBeLessThan(0.1);
+    expect(convergence(assessFit(problem, r))).toEqual([]);
+  });
+
+  it("warns when the fit stopped on χ² while a parameter was still moving", () => {
+    // Heavy damping covers a fraction of the way per step, and a loose χ²
+    // tolerance then stops the search with the offset still esds from its
+    // optimum (exactly 0 for this problem).
+    const problem = noisyPeakProblem({ start: 0.015 });
+    const r = refine(problem, { lambda: 10, convergenceTolerance: 0.1 });
+    expect(r.status).toBe("converged");
+    expect(Math.abs(r.parameters.pos!)).toBeGreaterThan(3 * r.esd.pos!);
+    const [f] = convergence(assessFit(problem, r));
+    expect(f?.severity).toBe("warning");
+    expect(f?.parameterIds).toEqual(["pos"]);
+    expect(f?.summary).toMatch(/peak offset was still moving/);
+    expect(f?.evidence?.maxShiftOverEsd).toBeGreaterThan(1);
+  });
+
+  it("notes, without counting it as an issue, a last shift between 0.1 and 1 esd", () => {
+    const diagnostics = {
+      svdZeroCount: 0, singularParameterIds: [], conditionNumber: 100, maxLambda: 1e-3,
+      highCorrelations: [], atBounds: [],
+    };
+    const params = [param("bkg0", "background", 10)];
+    const settled = assessRefinement({
+      result: result({ diagnostics: { ...diagnostics, maxShiftOverEsd: 0.08, maxShiftParameterId: "bkg0" } }),
+      parameters: params,
+      observationCount: 4000,
+    });
+    expect(convergence(settled)).toEqual([]);
+    const unsettled = assessRefinement({
+      result: result({ diagnostics: { ...diagnostics, maxShiftOverEsd: 0.4, maxShiftParameterId: "bkg0" } }),
+      parameters: params,
+      observationCount: 4000,
+    });
+    expect(convergence(unsettled).map((f) => f.severity)).toEqual(["note"]);
+    expect(convergence(unsettled)[0]?.parameterIds).toEqual(["bkg0"]);
+    expect(unsettled.summary).toMatch(/no issues flagged/);
   });
 });
 
