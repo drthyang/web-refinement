@@ -138,24 +138,28 @@ exists it reads **Escape min ↻**: a few restarts around the fit, for when
 
 ### Go back to an earlier step
 
-The **History** card under the parameters lists the steps of the session:
-each refinement, each load, each magnetic-model change and each reset. Changes
-made since the last step (freed parameters, edited values, settings) become an
-**Edit** step when the next refinement starts. The newest step is at the top,
-with its wR. The card keeps one small height; scroll it for older steps.
+**History ▾** in the header lists the steps of the session: each refinement,
+each load, each magnetic-model change and each reset. Changes made since the
+last step (freed parameters, edited values, settings) become an **Edit** step
+when the next refinement starts. The newest step is at the top, with its wR,
+and a sparkline shows wR along the path. The parameters keep the whole right
+column.
 
-- Click a step to go back to it. Nothing is lost: if you then refine, the new
-  steps form a branch, and **other branches**, below the steps, lists the old
-  ones.
-- ⌘Z / Ctrl+Z steps back and ⇧⌘Z / Ctrl+Shift+Z steps forward, except inside a
-  text field.
+- Click a step to go back to it. The list stays open, so you can click through
+  steps and compare them on the plot. Click outside it or press Esc to close
+  it. Nothing is lost: if you then refine, the new steps form a branch, and
+  **other branches**, below the steps, lists the old ones.
+- The circular arrows beside **History ▾** step back and forward. So do ⌘Z /
+  Ctrl+Z and ⇧⌘Z / Ctrl+Shift+Z, except inside a text field. Below 1180 px wide
+  the arrows move into the History list, and on a tablet in landscape the menu
+  shows as a clock icon.
 - ✎ names a step, such as "before ADPs".
 - The history is saved with the project. Between saves it is kept in the
   browser. After a reload, the start page offers to restore the last session.
 - **Other branches** lists where each old branch ends; from there, back and
   forward walk along it.
 
-The single-crystal and PDF pages have the same card. There, adopting a boxcar
+The single-crystal and PDF pages have the same menu. There, adopting a boxcar
 box, applying distortion modes or a subgroup, and handing over a spin model or
 magnetic model are steps too. Loading a new dataset starts a new history.
 

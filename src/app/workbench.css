@@ -240,10 +240,10 @@ html {
     grid-column: auto;
     min-height: clamp(var(--wb-plot-min-h), 62vw, 640px);
   }
-  /* The parameter card (first in the right column) takes its natural height:
+  /* The parameter card (the right column) takes its natural height:
      collapsed groups are short, and an open one should not scroll inside a
      card inside a scrolling page. */
-  .wb-work2 > :last-child > :first-child {
+  .wb-work2 > :last-child {
     height: auto !important;
   }
 }
@@ -429,7 +429,7 @@ html {
  * overrides what must respond to the viewport, hence the !important.
  *
  * Up to 900px (iPad mini / Air in portrait, phones) the bar has two rows: the
- * brand and the three menus, then the navigation chips with the GPU chip. Left
+ * brand and the menus, then the navigation chips with the GPU chip. Left
  * to wrap on its own it put the menus alone on a second row (or orphaned the
  * divider at the end of the first). The brand block's wrappers dissolve
  * (display: contents) so its pieces can be ordered into those rows. */
@@ -456,6 +456,11 @@ html {
     order: 1;
     margin-left: 0 !important;
   }
+  /* Four menus beside the brand: the buttons tighten so the row holds down to
+     701px (back / forward are in the History popover below 1180px). */
+  .wb-header-action {
+    padding: 8px 12px !important;
+  }
   .wb-header-nav {
     order: 2;
     flex: 1 1 auto;
@@ -464,10 +469,10 @@ html {
     order: 3;
   }
 }
-/* Tablet landscape / small laptop band: one row, which fits once the
- * sample-form indicator (Powder | Crystal — the technique chip and the data card
- * say the same) and the divider make room. */
-@media (min-width: 901px) and (max-width: 1180px) {
+/* Laptop and tablet-landscape band: one row, which fits once the sample-form
+ * indicator (Powder | Crystal — the technique chip and the data card say the
+ * same) and the divider make room for the History controls. */
+@media (min-width: 901px) and (max-width: 1380px) {
   .wb-header {
     gap: 12px 16px !important;
   }
@@ -476,9 +481,35 @@ html {
     display: none !important;
   }
 }
+/* Below 1180px back / forward move from the header into the History popover
+ * (⌘Z / ⇧⌘Z still work). */
+@media (max-width: 1180px) {
+  .wb-history-nav {
+    display: none !important;
+  }
+  .wb-history-nav-inline {
+    display: inline-flex !important;
+  }
+}
+/* Down to iPad landscape (1024px) the row still holds: History shows as its
+ * icon and the menu buttons tighten. */
+@media (min-width: 901px) and (max-width: 1180px) {
+  .wb-history-label {
+    display: none !important;
+  }
+  .wb-history-icon {
+    display: block !important;
+  }
+  .wb-header-action {
+    padding: 8px 10px !important;
+  }
+}
 
 /* Phones: tighter still. The sample-form indicator and the beta pill drop out —
- * the technique chip and the beta bar right below carry the same facts. */
+ * the technique chip and the beta bar right below carry the same facts. The
+ * four menus take a row of their own under the brand (they do not fit beside
+ * it), so that row ends on the content edge and the History popover, which
+ * hangs from its right end, spans the column. */
 @media (max-width: 700px) {
   .wb-header {
     padding: max(10px, env(safe-area-inset-top, 0px)) var(--wb-edge) 10px !important;
@@ -510,6 +541,10 @@ html {
   .wb-header-actions {
     gap: 6px !important;
     flex-wrap: nowrap !important;
+    flex: 1 0 100%;
+  }
+  .wb-history-keys {
+    display: none;
   }
   .wb-header-action {
     padding: 6px 10px !important;
@@ -529,7 +564,7 @@ html {
 }
 
 /* Narrowest phones (iPhone 16e / SE width and below): the wordmark's second
- * line goes, which keeps the brand and three menus on one row. */
+ * line goes, and the menu buttons tighten so all four fit one row. */
 @media (max-width: 400px) {
   .wb-header-sub {
     display: none !important;
@@ -563,6 +598,12 @@ html {
     padding: 6px 12px !important;
     font-size: 12.5px !important;
   }
+  /* The beta pill that pushes the menus right (≤900px) is hidden here, so the
+     menus push themselves: they end on the content edge, and so does the
+     History popover that hangs from them. */
+  .wb-header-actions {
+    margin-left: auto !important;
+  }
 }
 
 /* Ultra-narrow (phones in portrait): the version chip is noise. */
@@ -570,6 +611,13 @@ html {
   .wb-version-chip {
     display: none !important;
   }
+}
+
+/* Back / forward inside the History popover, and the History button's icon:
+ * shown only where the header is too narrow for the full set (see above). */
+.wb-history-nav-inline,
+.wb-history-icon {
+  display: none;
 }
 
 /* ---- Plot-card view switchers (Refinement | Validation | …) ---------------

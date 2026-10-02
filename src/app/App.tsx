@@ -1055,6 +1055,7 @@ export function App(): JSX.Element {
         onOpenProject={onOpenProject}
         {...(hasContent ? { onSaveProject } : {})}
         gpu={{ enabled: gpuEnabled, onChange: setGpu }}
+        {...(hasContent ? { history: stepHistory } : {})}
       />
       {notice && (
         <div role="alert" style={noticeBar}>

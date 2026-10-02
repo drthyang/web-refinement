@@ -1,25 +1,24 @@
 /**
- * The step history card: the path from the first step to the current one,
- * newest first, with each step's wR, the other branches, and back / forward.
+ * The step history list, shown in the header's History menu: the path from the
+ * first step to the current one, newest first, with each step's wR, the other
+ * branches, and a wR sparkline.
  *
  * Clicking a step goes back to it. That never loses work: the shell records
  * the live state first when it differs from the current step, and every step
  * stays in the tree (see core/project/history.ts).
  *
- * The card has one fixed, compact height whatever the number of steps: the
- * list scrolls inside it, so the parameter panel above keeps its room and does
- * not jump as steps accrue.
+ * It lives in the header rather than as a card on the page so the parameter
+ * list keeps the whole right column. The list takes the popover's height and
+ * scrolls inside it.
  */
 
 import { useEffect, useMemo, useRef, type CSSProperties } from "react";
 import { childrenOf, lineage, type HistoryStep } from "@/core/project/history";
 import type { HistoryBinding } from "@/app/historyBinding";
-import { card, color, fz, mono, radius, space, uppercaseLabel } from "@/app/theme";
+import { color, fz, mono, radius, space, uppercaseLabel } from "@/app/theme";
 
 /** One step row: one line of small text plus the row button's padding. */
-const ROW_H = "calc(var(--fz-small) * 1.25 + 8px)";
-/** Rows in view. The half row shows there is more to scroll to. */
-const VISIBLE_ROWS = 3.5;
+const ROW_H = "calc(var(--fz-small) * 1.25 + 10px)";
 
 const KIND_GLYPH: Readonly<Record<HistoryStep["kind"], string>> = {
   load: "↧", open: "↧", edit: "✎", settings: "⚙", refine: "▶", magnetic: "M",
@@ -47,7 +46,7 @@ export function HistoryPanel({ binding }: { readonly binding: HistoryBinding }):
     return (
       <section style={panel} aria-label="Step history">
         <div style={header}><span style={uppercaseLabel}>History</span></div>
-        <p style={emptyNote}>Each refinement, load and model change becomes a step here. Click a step to go back to it.</p>
+        <p style={emptyNote}>Each refinement, load and model change becomes a step here.</p>
       </section>
     );
   }
@@ -60,8 +59,12 @@ export function HistoryPanel({ binding }: { readonly binding: HistoryBinding }):
         <span style={countNote}>{history.steps.length} step{history.steps.length === 1 ? "" : "s"}</span>
         <span style={{ flex: 1 }} />
         <Sparkline steps={path} />
-        <button type="button" style={navButton} disabled={!onBack} onClick={onBack} title="Back one step (⌘Z / Ctrl+Z)">↶</button>
-        <button type="button" style={navButton} disabled={!onForward} onClick={onForward} title="Forward one step (⇧⌘Z / Ctrl+Shift+Z)">↷</button>
+        {/* The header shows back / forward beside the menu button; below
+            1180px, where those two hide to keep the header on one row, they are here. */}
+        <span className="wb-history-nav-inline" style={{ gap: 4 }}>
+          <button type="button" style={navButton} disabled={!onBack} onClick={onBack} title="Back one step" aria-label="Back one step"><StepArrow dir="back" /></button>
+          <button type="button" style={navButton} disabled={!onForward} onClick={onForward} title="Forward one step" aria-label="Forward one step"><StepArrow dir="forward" /></button>
+        </span>
       </div>
       <div ref={scroller} style={scrollArea}>
         <ol style={list}>
@@ -81,6 +84,9 @@ export function HistoryPanel({ binding }: { readonly binding: HistoryBinding }):
           </>
         )}
       </div>
+      <p style={hint}>
+        Click a step to go back to it · ✎ names it<span className="wb-history-keys"> · ⌘Z / ⇧⌘Z step back / forward</span>
+      </p>
     </section>
   );
 }
@@ -122,11 +128,42 @@ function StepRow({ step, current, branches, onGoTo, onRename }: {
   );
 }
 
+// The step icons share one drawing: a circle of radius 5.5 open at the top
+// left, with a solid head at twelve o'clock pointing back (counter-clockwise).
+// Text glyphs (↶ ↷) render as lopsided hooks in most fonts, hence SVG.
+const ARC = "M9 3.05a5.5 5.5 0 1 1-4.89 1.56";
+const HEAD = "M10.2 0.9 6.6 3.05 10.2 5.2z";
+
+/** Back / forward: the counter-clockwise arrow, mirrored for forward. */
+export function StepArrow({ dir, size = 15 }: { readonly dir: "back" | "forward"; readonly size?: number }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" style={{ display: "block", ...(dir === "forward" ? { transform: "scaleX(-1)" } : {}) }} {...iconStroke}>
+      <path d={ARC} />
+      <path d={HEAD} fill="currentColor" strokeWidth={1} />
+    </svg>
+  );
+}
+
+/** The History menu's icon: the back arrow around a clock's hands. */
+export function HistoryIcon({ size = 15, className }: { readonly size?: number; readonly className?: string }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...(className ? { className } : {})} {...iconStroke}>
+      <path d={ARC} />
+      <path d={HEAD} fill="currentColor" strokeWidth={1} />
+      <path d="M8 5.9v2.8l1.9 1.2" />
+    </svg>
+  );
+}
+
+const iconStroke = {
+  fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true,
+} as const;
+
 /** wR along the current path — the refinement's progress at a glance, in the header. */
 function Sparkline({ steps }: { readonly steps: readonly HistoryStep[] }): JSX.Element | null {
   const pts = steps.filter((s) => s.summary.wR !== undefined).map((s) => s.summary.wR!);
   if (pts.length < 2) return null;
-  const w = 88;
+  const w = 120;
   const h = 18;
   const lo = Math.min(...pts);
   const hi = Math.max(...pts);
@@ -145,14 +182,15 @@ function Sparkline({ steps }: { readonly steps: readonly HistoryStep[] }): JSX.E
   );
 }
 
-// Below the parameter panel in the right column: a fixed height (header plus
-// VISIBLE_ROWS rows) that never grows, so the parameters keep the column.
-const panel: CSSProperties = { ...card, padding: space.inset, flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 };
-// minHeight = the nav buttons, so the empty card (no buttons) is as tall as a full one.
-const header: CSSProperties = { display: "flex", alignItems: "center", gap: 8, minHeight: 24 };
-const scrollArea: CSSProperties = { height: `calc(${ROW_H} * ${VISIBLE_ROWS})`, overflowY: "auto" };
+// The popover (a flex column) caps the height; the panel shrinks into it and
+// only the list scrolls, so the header and the hint stay put.
+const panel: CSSProperties = { padding: space.inset, display: "flex", flexDirection: "column", gap: 6, flex: "1 1 auto", minHeight: 0 };
+// minHeight = the nav buttons, so the header keeps its height when they hide.
+const header: CSSProperties = { display: "flex", alignItems: "center", gap: 8, minHeight: 24, flexShrink: 0 };
+const scrollArea: CSSProperties = { flex: "1 1 auto", minHeight: ROW_H, overflowY: "auto", margin: "0 -4px", padding: "0 4px" };
 const countNote: CSSProperties = { fontSize: fz.micro, color: color.faint };
-const emptyNote: CSSProperties = { ...scrollArea, margin: 0, fontSize: fz.small, color: color.secondary, lineHeight: 1.45 };
+const emptyNote: CSSProperties = { margin: 0, fontSize: fz.small, color: color.secondary, lineHeight: 1.45 };
+const hint: CSSProperties = { margin: 0, flexShrink: 0, fontSize: fz.micro, color: color.faint, lineHeight: 1.4, borderTop: `1px solid ${color.border}`, paddingTop: 6 };
 const list: CSSProperties = { listStyle: "none", margin: 0, padding: 0 };
 const row: CSSProperties = { display: "flex", alignItems: "center", height: ROW_H, borderRadius: radius.small };
 const rowCurrent: CSSProperties = { background: color.primaryTintBg };
@@ -165,9 +203,11 @@ const labelText: CSSProperties = { flex: 1, minWidth: 0, overflow: "hidden", tex
 const wrChip: CSSProperties = { fontFamily: mono, fontSize: fz.micro, color: color.secondary, flexShrink: 0 };
 const timeText: CSSProperties = { fontFamily: mono, fontSize: fz.micro, color: color.faint, flexShrink: 0 };
 const tag: CSSProperties = { marginLeft: 6, fontSize: fz.micro, color: color.faint, border: `1px solid ${color.border}`, borderRadius: radius.chip, padding: "0 4px" };
+// Tablets and phones only (see .wb-history-nav-inline): a finger-sized width.
 const navButton: CSSProperties = {
   border: `1px solid ${color.control}`, background: color.surface, borderRadius: radius.small,
-  width: 26, height: 24, cursor: "pointer", fontSize: fz.small, color: color.ink, padding: 0,
+  width: 36, height: 28, cursor: "pointer", color: color.ink, padding: 0,
+  display: "flex", alignItems: "center", justifyContent: "center",
 };
 const renameButton: CSSProperties = { border: "none", background: "transparent", color: color.faintest, cursor: "pointer", fontSize: fz.micro, padding: "0 6px" };
 const branchHeading: CSSProperties = { fontSize: fz.micro, color: color.secondary, padding: "6px 6px 2px", borderTop: `1px solid ${color.border}`, marginTop: 4 };

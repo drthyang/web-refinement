@@ -18,7 +18,6 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { downloadText, downloadBlob } from "@/app/download";
-import { HistoryPanel } from "@/app/ui/HistoryPanel";
 import type { HistoryBinding } from "@/app/historyBinding";
 import { refinementBundle, type RefinementBundleOptions } from "@/core/export/bundle";
 import { zipStore } from "@/core/export/zip";
@@ -1531,9 +1530,9 @@ export function PowderWorkbench({
                   </>
                 )}
               </div>
-              {/* The right column: parameters above, the step history below. */}
-              {/* min-height comes from `.wb-work2 > *` (0 wide, a floor when stacked). */}
-              <div style={{ display: "flex", flexDirection: "column", gap: space.gap }}>
+              {/* The right column is the parameter card alone: the step history
+                  is the header's History menu, so a long parameter list keeps
+                  the whole column. */}
               <ParameterPanel
                 params={powderParams}
                 esd={powderResult?.esd}
@@ -1590,8 +1589,6 @@ export function PowderWorkbench({
                   ),
                 }}
               />
-              {stepHistory && <HistoryPanel binding={stepHistory} />}
-              </div>
             </div>
           </>
         );
