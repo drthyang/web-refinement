@@ -12,7 +12,7 @@ import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import type { Vec3 } from "@/core/math/types";
 import { composeOperations, operationKey, parseMagneticSymmetryOperation, parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { IDENTITY3 } from "@/core/math/mat3";
-import { completeSpaceGroup } from "@/core/crystal/spaceGroups";
+import { completeSpaceGroup, SpaceGroupSettingError } from "@/core/crystal/spaceGroups";
 import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
 
 /** Strip the parenthetical esd and parse: "5.41317(8)" → 5.41317. */
@@ -156,7 +156,17 @@ function parseCell(items: Map<string, string>): UnitCell {
   };
 }
 
-function parseSpaceGroup(items: Map<string, string>, loops: Loop[], cell?: UnitCell): SpaceGroup {
+/** Options for reading a CIF. */
+export interface CifParseOptions {
+  /**
+   * The setting to use when the CIF gives no symmetry operations and its
+   * symbol/number fits more than one setting — the extended symbol of one of
+   * the candidates a {@link SpaceGroupSettingError} lists (e.g. "F d -3 m:2").
+   */
+  readonly spaceGroupSetting?: string;
+}
+
+function parseSpaceGroup(items: Map<string, string>, loops: Loop[], cell?: UnitCell, setting?: string): SpaceGroup {
   const symLoop = findLoop(loops, (h) =>
     h.some((k) => k.includes("space_group_symop_operation_xyz") || k.includes("symmetry_equiv_pos_as_xyz")),
   );
@@ -169,27 +179,40 @@ function parseSpaceGroup(items: Map<string, string>, loops: Loop[], cell?: UnitC
       })
     : [];
 
-  const hm = (items.get("_symmetry_space_group_name_h-m") ?? items.get("_space_group_name_h-m_alt"))
-    ?.replace(/^['"]|['"]$/g, "");
-  const numRaw = items.get("_symmetry_int_tables_number") ?? items.get("_space_group_it_number");
-  const number = numRaw !== undefined ? parseInt(numRaw, 10) : undefined;
+  const hm = cifText(items.get("_symmetry_space_group_name_h-m") ?? items.get("_space_group_name_h-m_alt"));
+  const hall = cifText(items.get("_symmetry_space_group_name_hall") ?? items.get("_space_group_name_hall"));
+  const numText = cifText(items.get("_symmetry_int_tables_number") ?? items.get("_space_group_it_number"));
+  const number = numText !== undefined ? parseInt(numText, 10) : undefined;
 
-  // Resolve the full operation list: close an explicit (possibly generating-
-  // subset) symop loop, or — when the CIF gives only the H-M name / IT number
-  // (common for standard settings) — build it from the built-in table. Falls
-  // back to P1 only when the group is genuinely unresolvable, so a symbol-only
-  // header no longer silently collapses to identity (which broke |F|²).
-  const completed = completeSpaceGroup(
-    {
-      operations: explicitOps,
-      ...(hm !== undefined ? { hermannMauguin: hm } : {}),
-      ...(number !== undefined ? { number } : {}),
-    },
-    cell,
-  );
-  return completed.operations.length > 0
-    ? completed
-    : { ...completed, operations: [parseSymmetryOperation("x,y,z")] };
+  // Explicit operations (closed, with the centring the lattice letter implies)
+  // are authoritative. Without them the setting is built from the table of all
+  // 564 settings, which throws for an unknown, contradictory or ambiguous
+  // description — e.g. "F d -3 m" alone, which may be origin choice 1 or 2.
+  // There is no P1 fallback: expanding an asymmetric unit in P1 is silently
+  // wrong.
+  try {
+    return completeSpaceGroup(
+      {
+        operations: explicitOps,
+        ...(hm !== undefined ? { hermannMauguin: hm } : {}),
+        ...(number !== undefined && !Number.isNaN(number) ? { number } : {}),
+      },
+      cell,
+      { ...(hall !== undefined ? { hall } : {}), ...(setting !== undefined ? { setting } : {}) },
+    );
+  } catch (e) {
+    if (e instanceof SpaceGroupSettingError) {
+      throw new SpaceGroupSettingError(`CIF space group: ${e.message}`, e.candidates);
+    }
+    throw e;
+  }
+}
+
+/** A CIF text value with surrounding quotes removed; undefined for absent,
+ *  empty, `?` (unknown) and `.` (inapplicable). */
+function cifText(raw: string | undefined): string | undefined {
+  const t = raw?.trim().replace(/^['"]|['"]$/g, "").trim();
+  return t === undefined || t === "" || t === "?" || t === "." ? undefined : t;
 }
 
 function parseAnisotropicAdps(loops: Loop[]): Map<string, DisplacementParameters> {
@@ -277,8 +300,12 @@ function parseSites(loops: Loop[]): AtomSite[] {
   });
 }
 
-/** Parse a CIF string into a StructureModel. */
-export function parseCif(text: string, id = "structure"): StructureModel {
+/**
+ * Parse a CIF string into a StructureModel. Throws a SpaceGroupSettingError
+ * when the CIF gives no symmetry operations and its symbol/number is unknown or
+ * fits several settings; `options.spaceGroupSetting` picks one of the latter.
+ */
+export function parseCif(text: string, id = "structure", options: CifParseOptions = {}): StructureModel {
   const { items, loops } = parseCifBlocks(text);
   const name = items.get("_pd_phase_name")?.replace(/^["']|["']$/g, "") ?? "structure";
   const cell = parseCell(items);
@@ -286,7 +313,7 @@ export function parseCif(text: string, id = "structure"): StructureModel {
     id,
     name,
     cell,
-    spaceGroup: parseSpaceGroup(items, loops, cell),
+    spaceGroup: parseSpaceGroup(items, loops, cell, options.spaceGroupSetting),
     sites: parseSites(loops),
   };
 }
@@ -386,7 +413,7 @@ export interface MagneticCifResult {
  * structure's space group is set to the magnetic operations (spatial parts);
  * time-reversal flags are retained on each operation.
  */
-export function parseMagneticCif(text: string, id = "structure"): MagneticCifResult {
+export function parseMagneticCif(text: string, id = "structure", options: CifParseOptions = {}): MagneticCifResult {
   const { items, loops } = parseCifBlocks(text);
   const name = items.get("_pd_phase_name")?.replace(/^["']|["']$/g, "") ?? "structure";
   const magSg = parseMagneticSpaceGroup(items, loops);
@@ -395,7 +422,7 @@ export function parseMagneticCif(text: string, id = "structure"): MagneticCifRes
     id,
     name,
     cell,
-    spaceGroup: magSg ?? parseSpaceGroup(items, loops, cell),
+    spaceGroup: magSg ?? parseSpaceGroup(items, loops, cell, options.spaceGroupSetting),
     sites: parseSites(loops),
   };
   const moments = parseMoments(loops);

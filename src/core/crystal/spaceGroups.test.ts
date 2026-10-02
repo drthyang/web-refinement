@@ -3,10 +3,17 @@ import {
   buildSpaceGroup,
   completeSpaceGroup,
   expandGenerators,
+  extendedSymbol,
   isKnownSpaceGroup,
   knownSpaceGroups,
   latticeCenteringTranslations,
+  resolveSpaceGroupSetting,
+  SpaceGroupSettingError,
+  spaceGroupFromSetting,
+  spaceGroupSettings,
 } from "@/core/crystal/spaceGroups";
+import { SPACE_GROUP_DATA } from "@/core/crystal/spaceGroupData";
+import { transformSpaceGroup } from "@/core/crystal/settings";
 import {
   composeOperations,
   isReflectionAbsent,
@@ -138,9 +145,18 @@ describe("completeSpaceGroup — integration hook", () => {
     expect(completed).toBe(full);
   });
 
-  it("returns an unknown symbol-only group unchanged rather than throwing", () => {
+  it("throws for an unknown symbol-only group instead of returning it without operations", () => {
     const unknown: SpaceGroup = { hermannMauguin: "Fddd-nonstandard", operations: [] };
-    expect(completeSpaceGroup(unknown)).toBe(unknown);
+    expect(() => completeSpaceGroup(unknown)).toThrow(SpaceGroupSettingError);
+  });
+
+  it("throws when there is no space-group information at all", () => {
+    expect(() => completeSpaceGroup({ operations: [] })).toThrow(/No space-group information/);
+  });
+
+  it("uses a Hall symbol to pick the setting", () => {
+    const sg = completeSpaceGroup({ hermannMauguin: "F d -3 m", operations: [] }, undefined, { hall: "-F 4vw 2vw 3" });
+    expect(sg.hermannMauguin).toBe("F d -3 m:2");
   });
 });
 
@@ -246,19 +262,19 @@ describe("full 230-group table (generated from gemmi, validated independently)",
     expect(knownSpaceGroups()).toHaveLength(230);
   });
 
-  it("every group's operations form a valid crystallographic point group", () => {
+  it("every setting's operations form a valid crystallographic point group", () => {
     // A strong, gemmi-independent check: the rotation parts of a real space group
     // must classify as one of the 32 crystallographic point groups.
-    for (let n = 1; n <= 230; n++) {
-      const sg = buildSpaceGroup(n);
-      expect(sg.operations.length, `SG${n}`).toBeGreaterThan(0);
-      expect(classifyPointGroup(sg.operations).symbol, `SG${n} point group`).not.toBeNull();
+    for (const e of SPACE_GROUP_DATA) {
+      const sg = spaceGroupFromSetting(e);
+      expect(sg.operations.length, extendedSymbol(e)).toBeGreaterThan(0);
+      expect(classifyPointGroup(sg.operations).symbol, `${extendedSymbol(e)} point group`).not.toBeNull();
     }
   });
 
   it("closure holds for a sample across all seven crystal systems", () => {
-    for (const n of [1, 2, 14, 19, 62, 88, 123, 141, 148, 166, 176, 194, 221, 227, 230]) {
-      expect(isClosed(buildSpaceGroup(n)), `SG${n}`).toBe(true);
+    for (const id of [1, 2, 14, 19, 62, "I 41/a:2", 123, "I 41/a m d:1", "R -3:H", "R -3 m:R", 176, 194, 221, "F d -3 m:2", 230]) {
+      expect(isClosed(buildSpaceGroup(id)), `SG${id}`).toBe(true);
     }
   });
 
@@ -268,7 +284,18 @@ describe("full 230-group table (generated from gemmi, validated independently)",
       [148, 18], [166, 36], [176, 12], [191, 24], [194, 24], [221, 48],
       [225, 192], [227, 192], [229, 96], [230, 96],
     ];
-    for (const [n, mult] of ita) expect(buildSpaceGroup(n).operations.length, `SG${n}`).toBe(mult);
+    // Per primitive cell, every setting of a number has the same order; the
+    // count per conventional cell scales with its centring (R in rhombohedral
+    // axes is primitive, "A 1" / "F 1" are centred settings of P1).
+    const centrings = (ops: readonly string[]): number =>
+      ops.map(parseSymmetryOperation).filter((o) => operationKey({ ...o, translation: [0, 0, 0] }) === operationKey(parseSymmetryOperation("x,y,z"))).length;
+    for (const [n, mult] of ita) {
+      const ref = SPACE_GROUP_DATA.find((x) => x.number === n && x.reference)!;
+      expect(ref.ops.length, extendedSymbol(ref)).toBe(mult);
+      for (const e of SPACE_GROUP_DATA.filter((x) => x.number === n)) {
+        expect(e.ops.length / centrings(e.ops), extendedSymbol(e)).toBe(mult / centrings(ref.ops));
+      }
+    }
   });
 
   it("buildSpaceGroup(194) reproduces the demo's parsed P6₃/mmc operations exactly", () => {
@@ -280,10 +307,122 @@ describe("full 230-group table (generated from gemmi, validated independently)",
     expect(buildSpaceGroup("Fm-3m").number).toBe(225);
     expect(buildSpaceGroup("Fm3m").number).toBe(225);
     expect(buildSpaceGroup("Pnma").number).toBe(62);
-    expect(buildSpaceGroup("Fd-3m").number).toBe(227);
+    expect(buildSpaceGroup("Fd-3m:2").number).toBe(227);
     expect(buildSpaceGroup("P63/mmc").number).toBe(194);
     // "P3" (143) and "P-3" (147) must not collide via bar-dropping.
     expect(buildSpaceGroup("P3").number).toBe(143);
     expect(buildSpaceGroup("P-3").number).toBe(147);
+  });
+});
+
+describe("all 564 gemmi settings, resolved without guessing", () => {
+  const hexCell = { a: 5, b: 5, c: 12, alpha: 90, beta: 90, gamma: 120 };
+  const rhombCell = { a: 5, b: 5, c: 5, alpha: 60, beta: 60, gamma: 60 };
+
+  it("holds every setting once, with exactly one reference setting per number", () => {
+    expect(SPACE_GROUP_DATA).toHaveLength(564);
+    expect(spaceGroupSettings()).toHaveLength(564);
+    const refs = SPACE_GROUP_DATA.filter((e) => e.reference).map((e) => e.number);
+    expect(refs).toEqual(Array.from({ length: 230 }, (_, i) => i + 1));
+    // One Hall symbol per distinct operation set. Four pairs of entries are two
+    // spellings of one setting (the e-glide groups: "A b a m" = "A c a m",
+    // "C c c a:1" = "C c c b:1", …) and share both.
+    const keys = new Set(SPACE_GROUP_DATA.map((e) => [...new Set(e.ops.map(parseSymmetryOperation).map(operationKey))].sort().join("|")));
+    const halls = new Set(SPACE_GROUP_DATA.map((e) => e.hall));
+    expect(keys.size).toBe(560);
+    expect(halls.size).toBe(560);
+    expect(resolveSpaceGroupSetting({ hermannMauguin: "A c a m" }).ops).toEqual(resolveSpaceGroupSetting({ hermannMauguin: "A b a m" }).ops);
+    // An alias spelling with its (shared) Hall symbol is consistent, and the
+    // Hall symbol alone is not ambiguous.
+    for (const hm of ["A c a m", "A b a m"]) {
+      expect(resolveSpaceGroupSetting({ hermannMauguin: hm, hall: "-A 2 2ab" }).hm).toBe(hm);
+    }
+    expect(resolveSpaceGroupSetting({ hall: "-A 2 2ab" }).number).toBe(64);
+  });
+
+  it("every setting is closed", () => {
+    for (const e of SPACE_GROUP_DATA) expect(isClosed(spaceGroupFromSetting(e)), extendedSymbol(e)).toBe(true);
+  });
+
+  it("the reference setting of Fd-3m is origin choice 2; the two origins differ by (1/8,1/8,1/8)", () => {
+    const o1 = buildSpaceGroup("F d -3 m:1");
+    const o2 = buildSpaceGroup("F d -3 m:2");
+    expect(o2.hermannMauguin).toBe("F d -3 m:2");
+    expect(SPACE_GROUP_DATA.find((e) => e.number === 227 && e.reference)!.ext).toBe("2");
+    expect(keySet(o1)).not.toEqual(keySet(o2));
+    // ITA: origin choice 2 (at −3m) lies at (1/8,1/8,1/8) of the origin-1 frame,
+    // so x₂ = x₁ − (1/8,1/8,1/8): 16c moves from (1/8,1/8,1/8) to (0,0,0).
+    expect(keySet(transformSpaceGroup(o1, [[1, 0, 0], [0, 1, 0], [0, 0, 1]], [1 / 8, 1 / 8, 1 / 8]))).toEqual(keySet(o2));
+    // Diamond Si in origin-2 coordinates, 8a (1/8,1/8,1/8): 8 atoms with the
+    // origin-2 operations, 16 (the origin-1 16c orbit) with the wrong origin.
+    expect(siteMultiplicity(o2.operations, [1 / 8, 1 / 8, 1 / 8])).toBe(8);
+    expect(siteMultiplicity(o1.operations, [1 / 8, 1 / 8, 1 / 8])).toBe(16);
+  });
+
+  it("an H-M symbol or number shared by two origin choices is an error listing both", () => {
+    for (const id of ["Fd-3m", "F d -3 m", 227, "P4/nmm", 129, "Pnnn", "I41/amd"] as const) {
+      let err: unknown;
+      try {
+        buildSpaceGroup(id);
+      } catch (e) {
+        err = e;
+      }
+      expect(err, String(id)).toBeInstanceOf(SpaceGroupSettingError);
+      const c = (err as SpaceGroupSettingError).candidates.map((x) => x.description).sort();
+      expect(c, String(id)).toEqual(["origin choice 1", "origin choice 2"]);
+      expect((err as Error).message).toMatch(/ambiguous/);
+    }
+  });
+
+  it("explicit setting suffixes pick one: ':1'/':2', ICSD 'S'/'Z', '(origin choice 2)'", () => {
+    expect(buildSpaceGroup("Fd-3m:1").hermannMauguin).toBe("F d -3 m:1");
+    expect(buildSpaceGroup("F d -3 m :2").hermannMauguin).toBe("F d -3 m:2");
+    expect(buildSpaceGroup("F d -3 m Z").hermannMauguin).toBe("F d -3 m:2");
+    expect(buildSpaceGroup("F d -3 m S").hermannMauguin).toBe("F d -3 m:1");
+    expect(buildSpaceGroup("P 4/n m m (origin choice 2)").hermannMauguin).toBe("P 4/n m m:2");
+    expect(buildSpaceGroup("R -3 m H").hermannMauguin).toBe("R -3 m:H");
+    expect(buildSpaceGroup("R -3 m:R").hermannMauguin).toBe("R -3 m:R");
+    // A suffix the group does not have is unknown, not ignored.
+    expect(() => buildSpaceGroup("P 21/c:2")).toThrow(SpaceGroupSettingError);
+  });
+
+  it("hexagonal vs rhombohedral axes are decided by the cell, or are an error without one", () => {
+    expect(() => buildSpaceGroup("R-3m")).toThrow(/ambiguous.*hexagonal axes.*rhombohedral axes/);
+    expect(() => buildSpaceGroup(166)).toThrow(SpaceGroupSettingError);
+    expect(buildSpaceGroup("R-3m", hexCell).hermannMauguin).toBe("R -3 m:H");
+    expect(buildSpaceGroup("R-3m", rhombCell).hermannMauguin).toBe("R -3 m:R");
+    expect(buildSpaceGroup(166, hexCell).operations).toHaveLength(36);
+    expect(buildSpaceGroup(166, rhombCell).operations).toHaveLength(12);
+    expect(() => buildSpaceGroup("R-3m", { a: 5, b: 6, c: 7, alpha: 90, beta: 90, gamma: 90 })).toThrow(/neither hexagonal/);
+  });
+
+  it("a number alone means the standard setting where ITA has only one", () => {
+    expect(buildSpaceGroup(14).hermannMauguin).toBe("P 1 21/c 1");
+    expect(buildSpaceGroup(62).hermannMauguin).toBe("P n m a");
+    // Non-standard settings resolve by their own symbol.
+    expect(buildSpaceGroup("P 1 21/n 1").number).toBe(14);
+    expect(buildSpaceGroup("P21/n").hermannMauguin).toBe("P 1 21/n 1");
+    expect(buildSpaceGroup("P 1 1 21/b").hermannMauguin).toBe("P 1 1 21/b");
+    expect(buildSpaceGroup("Pbnm").number).toBe(62);
+    expect(keySet(buildSpaceGroup("Pbnm"))).not.toEqual(keySet(buildSpaceGroup("Pnma")));
+  });
+
+  it("a Hall symbol names one setting; one that contradicts the symbol or number is an error", () => {
+    expect(extendedSymbol(resolveSpaceGroupSetting({ hall: "-F 4vw 2vw 3" }))).toBe("F d -3 m:2");
+    expect(extendedSymbol(resolveSpaceGroupSetting({ hall: "F 4d 2 3 -1d" }))).toBe("F d -3 m:1");
+    expect(extendedSymbol(resolveSpaceGroupSetting({ hall: "  -p 2ybc " }))).toBe("P 1 21/c 1");
+    expect(extendedSymbol(resolveSpaceGroupSetting({ hall: "-F 4vw 2vw 3", hermannMauguin: "Fd-3m", number: 227 }))).toBe("F d -3 m:2");
+    expect(() => resolveSpaceGroupSetting({ hall: "-F 4vw 2vw 3", hermannMauguin: "F d -3 m:1" })).toThrow(/contradicts/);
+    expect(() => resolveSpaceGroupSetting({ hall: "-F 4vw 2vw 3", number: 225 })).toThrow(/contradicts/);
+    expect(() => resolveSpaceGroupSetting({ hermannMauguin: "Pnma", number: 14 })).toThrow(/contradicts/);
+    expect(() => resolveSpaceGroupSetting({ hall: "P 7 q" })).toThrow(/not one of the 560 tabulated/);
+  });
+
+  it("a monoclinic symbol must fit the cell's oblique angle", () => {
+    const cUnique = { a: 5, b: 6, c: 7, alpha: 90, beta: 90, gamma: 104 };
+    expect(() => buildSpaceGroup("P21/c", cUnique)).toThrow(/unique axis b.*γ = 104/);
+    expect(() => buildSpaceGroup(14, cUnique)).toThrow(SpaceGroupSettingError);
+    expect(buildSpaceGroup("P 1 1 21/b", cUnique).number).toBe(14);
+    expect(buildSpaceGroup("P21/c", { ...cUnique, beta: 104, gamma: 90 }).number).toBe(14);
   });
 });

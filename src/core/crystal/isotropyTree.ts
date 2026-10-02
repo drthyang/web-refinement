@@ -13,7 +13,7 @@
  *    parameters for free: distinct OP directions of one irrep get their
  *    distinct isotropy subgroups (P4mm vs Amm2 vs R3m for a T1u vector);
  *  - `identifySubgroup`: name the subgroup — exact operation-set match against
- *    the generated 230-group table, retried over the 24 proper axis-permutation
+ *    the generated table of all 564 settings, retried over the 24 proper axis-permutation
  *    settings; honest fallback to point group + index when no match is found
  *    (origin-shifted settings are a later addition);
  *  - `realizeSubgroup`: re-express the parent structure in the subgroup
@@ -34,7 +34,8 @@ import type { Mat3, Vec3 } from "@/core/math/types";
 import type { StructureModel, SymmetryOperation, AtomSite } from "@/core/crystal/types";
 import { applyOperation, equivalentPositions, parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { classifyPointGroup } from "@/core/crystal/pointGroup";
-import { SPACE_GROUP_DATA } from "@/core/crystal/spaceGroupData";
+import { SPACE_GROUP_DATA, type SpaceGroupData } from "@/core/crystal/spaceGroupData";
+import { extendedSymbol } from "@/core/crystal/spaceGroups";
 import { transformOperation } from "@/core/crystal/settings";
 import { orthogonalizationMatrix } from "@/core/crystal/unitCell";
 import { mulVec, determinant } from "@/core/math/mat3";
@@ -218,9 +219,23 @@ function properCubicRotations(): Mat3[] {
   return out;
 }
 
+/** Canonical op-set keys of the table's settings with `nOps` operations,
+ *  reference settings first — computed once per order. */
+const tableKeyCache = new Map<number, { e: SpaceGroupData; key: string }[]>();
+function tableKeysWithOrder(nOps: number): { e: SpaceGroupData; key: string }[] {
+  let list = tableKeyCache.get(nOps);
+  if (!list) {
+    list = SPACE_GROUP_DATA.filter((e) => e.ops.length === nOps)
+      .sort((a, b) => Number(b.reference) - Number(a.reference))
+      .map((e) => ({ e, key: opSetKey(e.ops.map(parseSymmetryOperation)) }));
+    tableKeyCache.set(nOps, list);
+  }
+  return list;
+}
+
 /**
  * Name a subgroup operation set: exact op-set match against the generated
- * 230-group table (standard settings), retried across the 24 proper
+ * table of all 564 settings, retried across the 24 proper
  * axis-permutation changes of basis. Falls back to the point group + index —
  * origin-shifted settings are not searched yet (honest degradation, reported
  * via `method`).
@@ -233,24 +248,24 @@ export function identifySubgroup(
   const parentPg = classifyPointGroup(parentOps);
   const index = pg.order > 0 ? Math.round(parentPg.order / pg.order) : 0;
 
-  // Prefilter table entries by op count; compare canonical op-set keys.
+  // Prefilter table entries by op count; compare canonical op-set keys. The
+  // table holds every tabulated setting (both origin choices, H/R axes,
+  // monoclinic/orthorhombic settings), reference settings first so a permuted
+  // match names the standard setting when one fits.
   const nOps = new Set(subOps.map(opKey)).size;
-  const entries = SPACE_GROUP_DATA.filter((e) => e.ops.length === nOps).map((e) => ({
-    e,
-    key: opSetKey(e.ops.map(parseSymmetryOperation)),
-  }));
+  const entries = tableKeysWithOrder(nOps);
 
   const direct = opSetKey(subOps);
   for (const { e, key } of entries) {
     if (key === direct) {
-      return { number: e.number, hermannMauguin: e.hm, pointGroup: pg.symbol, index, method: "direct" };
+      return { number: e.number, hermannMauguin: extendedSymbol(e), pointGroup: pg.symbol, index, method: "direct" };
     }
   }
   for (const P of properCubicRotations()) {
     const transformed = opSetKey(subOps.map((op) => transformOperation(op, P)));
     for (const { e, key } of entries) {
       if (key === transformed) {
-        return { number: e.number, hermannMauguin: e.hm, pointGroup: pg.symbol, index, method: "permuted-setting" };
+        return { number: e.number, hermannMauguin: extendedSymbol(e), pointGroup: pg.symbol, index, method: "permuted-setting" };
       }
     }
   }

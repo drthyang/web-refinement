@@ -152,8 +152,9 @@ Constraints are only as good as the operation list behind them, and F2 makes
 that list complete.
 
 **Done**
-- ✅ **F2.1 Space-group tables:** all 230 groups, generated from gemmi, with
-  computed point groups and site symmetries ([`spaceGroupData.ts`](../src/core/crystal/spaceGroupData.ts)).
+- ✅ **F2.1 Space-group tables:** all 230 groups in all 564 gemmi settings,
+  with computed point groups and site symmetries; an ambiguous symbol is an
+  error, never a guess ([`spaceGroupData.ts`](../src/core/crystal/spaceGroupData.ts)).
 - ✅ **F2.2 Systematic absences:** from the operations, with centring added to
   primitive-only CIFs ([`spaceGroups.ts`](../src/core/crystal/spaceGroups.ts)).
 - ✅ **F2.3 One constraint method:** positions, ADPs, moments and the cell share
@@ -168,8 +169,9 @@ that list complete.
 **Validation gate**
 - ✅ Wyckoff letters and special-position constraints match International
   Tables for the curated groups ([`wyckoff.test.ts`](../src/core/crystal/wyckoff.test.ts)).
-- ✅ All 230 groups classify as point groups; closure holds on a sample of all
-  seven crystal systems ([`spaceGroups.test.ts`](../src/core/crystal/spaceGroups.test.ts)).
+- ✅ All 564 settings classify as point groups and are closed; the two
+  Fd-3m origins differ by the ITA shift (1/8,1/8,1/8)
+  ([`spaceGroups.test.ts`](../src/core/crystal/spaceGroups.test.ts)).
 
 **Tools:** `analyze_site_symmetry`.
 

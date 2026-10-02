@@ -60,10 +60,16 @@ An operation is an affine map on fractional coordinates,
 `x' = rotation·x + translation (mod 1)`, plus the Jones–Faithful `xyz` string for
 CIF round-tripping. A `SpaceGroup` is, minimally, a **list of operations** — which
 is exactly what a CIF `_symmetry_equiv_pos_as_xyz` loop provides — with optional
-IT number and Hermann–Mauguin symbol as metadata. All 230 groups are also built
-in, in their standard settings: `buildSpaceGroup(number | symbol)` returns the
-operation list, and `completeSpaceGroup` closes a partial list read from a CIF
-([`crystal/spaceGroups.ts`](../src/core/crystal/spaceGroups.ts)).
+IT number and Hermann–Mauguin symbol as metadata. All 564 settings gemmi
+tabulates are also built in (both origin choices, hexagonal and rhombohedral
+axes, the monoclinic and orthorhombic settings): `buildSpaceGroup(number |
+symbol)` returns the operation list, and `completeSpaceGroup` closes a partial
+list read from a CIF ([`crystal/spaceGroups.ts`](../src/core/crystal/spaceGroups.ts)).
+The setting is never guessed. A symbol or number that fits several settings
+("F d -3 m", origin choice 1 or 2) needs explicit operations, a Hall symbol, a
+suffix ("F d -3 m:2", ICSD "Z"), the cell (H vs R axes only) or the user's
+choice, and is a `SpaceGroupSettingError` otherwise; so is an unknown symbol.
+Tabulated symbols carry the suffix (`hermannMauguin: "F d -3 m:2"`).
 
 ### `StructureModel`
 `id + name + cell + spaceGroup + sites`. The asymmetric unit is stored; the full

@@ -122,8 +122,15 @@ approximate, however plausible its output looks.
 ## Symmetry
 
 **Supported**
-- All 230 space groups in their standard settings, plus the operation list read
-  from a CIF. Systematic absences are generated from the operations.
+- All 230 space groups in all 564 settings gemmi tabulates (both origin
+  choices, H and R axes, monoclinic and orthorhombic settings), plus the
+  operation list read from a CIF. Systematic absences are generated from the
+  operations.
+- The setting is never guessed. A CIF without operations whose symbol or number
+  fits several settings (e.g. "F d -3 m") must say which — a Hall symbol, a
+  suffix ("F d -3 m:2", ICSD "Z"), or the user's choice when loading; the cell
+  decides H vs R axes. An unknown symbol, or no symmetry at all, is an error,
+  not P1.
 - Magnetic subgroup candidates carry standard BNS/OG labels from a bundled
   ISO-MAG table (types I and III). A setting search also names candidates
   written in other settings: axis permutations, origin shifts, orthohexagonal

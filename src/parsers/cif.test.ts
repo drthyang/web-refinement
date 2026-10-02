@@ -4,6 +4,7 @@ import { parseCif, parseCifNumber } from "@/parsers/cif";
 import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { siteMultiplicity } from "@/core/crystal/symmetry";
+import { buildSpaceGroup, SpaceGroupSettingError } from "@/core/crystal/spaceGroups";
 import { dataExists, readData } from "@/testSupport/data";
 
 const HEX_600K = "Mn3GaHexagonal_structure_600K_Final.cif";
@@ -146,15 +147,16 @@ loop_
     expect(model.spaceGroup.operations).toHaveLength(24);
   });
 
-  it("still falls back to P1 for an unknown symbol", () => {
-    const model = parseCif(`data_x
-_cell_length_a  10
-_cell_length_b  10
-_cell_length_c  10
-_cell_angle_alpha  90
-_cell_angle_beta   90
-_cell_angle_gamma  90
-_symmetry_space_group_name_H-M  "Zz 99 9"
+  const cifWith = (symmetry: string, cell = "10 10 10 90 90 90", atoms = "Al Al1 0 0 0 1.0"): string => {
+    const [a, b, c, al, be, ga] = cell.split(" ");
+    return `data_x
+_cell_length_a  ${a}
+_cell_length_b  ${b}
+_cell_length_c  ${c}
+_cell_angle_alpha  ${al}
+_cell_angle_beta   ${be}
+_cell_angle_gamma  ${ga}
+${symmetry}
 loop_
   _atom_site_type_symbol
   _atom_site_label
@@ -162,9 +164,78 @@ loop_
   _atom_site_fract_y
   _atom_site_fract_z
   _atom_site_occupancy
-  Al Al1 0 0 0 1.0
-`);
-    expect(model.spaceGroup.operations).toHaveLength(1);
+  ${atoms}
+`;
+  };
+
+  it("rejects an unknown symbol instead of falling back to P1", () => {
+    expect(() => parseCif(cifWith(`_symmetry_space_group_name_H-M  "Zz 99 9"`))).toThrow(/CIF space group: Unknown space group "Zz 99 9"/);
+  });
+
+  it("rejects a CIF with no space-group information at all", () => {
+    expect(() => parseCif(cifWith(""))).toThrow(/No space-group information/);
+  });
+
+  it("rejects 'F d -3 m' without operations: origin choice 1 or 2 must be stated", () => {
+    let err: unknown;
+    try {
+      parseCif(cifWith(`_symmetry_space_group_name_H-M  'F d -3 m'`, "5.431 5.431 5.431 90 90 90", "Si Si1 0.125 0.125 0.125 1.0"));
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(SpaceGroupSettingError);
+    expect((err as SpaceGroupSettingError).candidates.map((c) => c.symbol)).toEqual(["F d -3 m:1", "F d -3 m:2"]);
+    // A number alone is just as ambiguous.
+    expect(() => parseCif(cifWith(`_space_group_IT_number  227`))).toThrow(SpaceGroupSettingError);
+  });
+
+  it("expands origin-2 coordinates correctly when the setting is explicit", () => {
+    const si = "Si Si1 0.125 0.125 0.125 1.0";
+    for (const symmetry of [
+      `_symmetry_space_group_name_H-M  'F d -3 m:2'`,
+      `_symmetry_space_group_name_H-M  'F d -3 m Z'`, // ICSD
+      `_space_group_name_H-M_alt  'F d -3 m'
+_space_group_name_Hall  '-F 4vw 2vw 3'`,
+    ]) {
+      const model = parseCif(cifWith(symmetry, "5.431 5.431 5.431 90 90 90", si));
+      expect(model.spaceGroup.hermannMauguin, symmetry).toBe("F d -3 m:2");
+      expect(siteMultiplicity(model.spaceGroup.operations, model.sites[0]!.position), symmetry).toBe(8);
+    }
+    // Explicit operations stay authoritative and need no symbol at all.
+    const ops = buildSpaceGroup("F d -3 m:2").operations.map((o) => `  '${o.xyz}'`).join("\n");
+    const withOps = parseCif(cifWith(`_symmetry_space_group_name_H-M  'F d -3 m'\nloop_\n  _symmetry_equiv_pos_as_xyz\n${ops}`, "5.431 5.431 5.431 90 90 90", si));
+    expect(siteMultiplicity(withOps.spaceGroup.operations, withOps.sites[0]!.position)).toBe(8);
+  });
+
+  it("takes the user's choice among the settings an ambiguous symbol fits", () => {
+    const text = cifWith(`_symmetry_space_group_name_H-M  'F d -3 m'`, "5.431 5.431 5.431 90 90 90", "Si Si1 0.125 0.125 0.125 1.0");
+    const o2 = parseCif(text, "si", { spaceGroupSetting: "F d -3 m:2" });
+    expect(o2.spaceGroup.hermannMauguin).toBe("F d -3 m:2");
+    expect(siteMultiplicity(o2.spaceGroup.operations, o2.sites[0]!.position)).toBe(8);
+    expect(parseCif(text, "si", { spaceGroupSetting: "F d -3 m:1" }).spaceGroup.hermannMauguin).toBe("F d -3 m:1");
+    // A choice the CIF's symbol does not fit is refused.
+    expect(() => parseCif(text, "si", { spaceGroupSetting: "F m -3 m" })).toThrow(/not one the space group fits/);
+  });
+
+  it("decides hexagonal vs rhombohedral axes of an R group from the cell", () => {
+    const hex = parseCif(cifWith(`_symmetry_space_group_name_H-M  'R -3 m'`, "4.9 4.9 12.1 90 90 120"));
+    expect(hex.spaceGroup.hermannMauguin).toBe("R -3 m:H");
+    expect(hex.spaceGroup.operations).toHaveLength(36);
+    const rh = parseCif(cifWith(`_symmetry_space_group_name_H-M  'R -3 m'`, "5.2 5.2 5.2 57 57 57"));
+    expect(rh.spaceGroup.hermannMauguin).toBe("R -3 m:R");
+    expect(rh.spaceGroup.operations).toHaveLength(12);
+  });
+
+  it("rejects a Hall symbol or number that contradicts the H-M symbol", () => {
+    expect(() => parseCif(cifWith(`_symmetry_space_group_name_H-M  'F d -3 m:1'\n_symmetry_space_group_name_Hall  '-F 4vw 2vw 3'`))).toThrow(/contradicts/);
+    expect(() => parseCif(cifWith(`_symmetry_space_group_name_H-M  'P n m a'\n_symmetry_Int_Tables_number  14`))).toThrow(/contradicts/);
+  });
+
+  it("resolves a non-standard setting by its own symbol, not by its number", () => {
+    // Previously the number won and "P 1 21/n 1" was built as P 1 21/c 1.
+    const model = parseCif(cifWith(`_symmetry_space_group_name_H-M  'P 1 21/n 1'\n_symmetry_Int_Tables_number  14`, "5 6 7 90 101 90"));
+    expect(model.spaceGroup.hermannMauguin).toBe("P 1 21/n 1");
+    expect(model.spaceGroup.operations.map((o) => o.xyz)).toContain("-x+1/2,y+1/2,-z+1/2");
   });
 });
 

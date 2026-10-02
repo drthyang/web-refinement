@@ -17,11 +17,10 @@
  * generators here (rotation = I, translation = the centring vector), so an
  * F-centred group is just its point-group cosets × the four centring cosets.
  *
- * Scope. This module seeds a small, individually verified table (triclinic
- * through cubic, including the F-4̄3m of the bundled GaNb₄Se₈ data). Full
- * 230-group coverage, Wyckoff-position enumeration, and setting/origin transforms
- * are later F2 increments; the closure engine and the table format here are what
- * they build on.
+ * Scope. The generated table holds all 564 settings gemmi tabulates (every
+ * number in every ITA setting: origin choices, H/R axes, monoclinic and
+ * orthorhombic settings). {@link resolveSpaceGroupSetting} maps a number,
+ * symbol or Hall symbol to exactly one of them, or throws.
  */
 
 import type { SpaceGroup, SymmetryOperation, UnitCell } from "@/core/crystal/types";
@@ -85,64 +84,328 @@ export function expandGenerators(
   return [...byKey.values()];
 }
 
+// ── Settings table and strict resolution ───────────────────────────────────
+//
+// SPACE_GROUP_DATA holds every setting gemmi tabulates (564): both origin
+// choices of the 24 groups that have two, hexagonal and rhombohedral axes of
+// the 7 R groups, the monoclinic unique-axis/cell choices, the orthorhombic
+// axis permutations. A symbol or number that fits several settings is NEVER
+// resolved by picking one: "F d -3 m" with origin-2 coordinates expanded with
+// origin-1 operations is a silently wrong structure. It resolves only from
+// explicit information — a setting suffix (":2", ICSD's "Z"), a Hall symbol, or
+// the cell (hexagonal vs rhombohedral axes) — and is an error otherwise.
+
+/** Extended Hermann–Mauguin symbol of a setting: "F d -3 m:2", "R -3 m:H", or
+ *  the plain symbol when the setting has no suffix. */
+export function extendedSymbol(entry: SpaceGroupData): string {
+  return entry.ext ? `${entry.hm}:${entry.ext}` : entry.hm;
+}
+
+/** One tabulated setting, as offered to a user who has to choose. */
+export interface SpaceGroupSettingInfo {
+  readonly number: number;
+  /** Extended H-M symbol, e.g. "F d -3 m:2". Resolves to exactly this setting. */
+  readonly symbol: string;
+  readonly hall: string;
+  /** What distinguishes it, e.g. "origin choice 2", "hexagonal axes". */
+  readonly description: string;
+}
+
+/**
+ * A space group that cannot be resolved to exactly one setting: unknown,
+ * contradictory, or ambiguous. `candidates` lists the settings the input fits
+ * (empty unless the input was ambiguous), so a caller can let the user choose.
+ */
+export class SpaceGroupSettingError extends Error {
+  readonly candidates: readonly SpaceGroupSettingInfo[];
+  constructor(message: string, candidates: readonly SpaceGroupSettingInfo[] = []) {
+    super(message);
+    this.name = "SpaceGroupSettingError";
+    this.candidates = candidates;
+  }
+}
+
+function describeSetting(entry: SpaceGroupData): string {
+  switch (entry.ext) {
+    case "1": return "origin choice 1";
+    case "2": return "origin choice 2";
+    case "H": return "hexagonal axes";
+    case "R": return "rhombohedral axes";
+    default: return entry.reference ? "standard setting" : "non-standard setting";
+  }
+}
+
+function settingInfo(entry: SpaceGroupData): SpaceGroupSettingInfo {
+  return { number: entry.number, symbol: extendedSymbol(entry), hall: entry.hall, description: describeSetting(entry) };
+}
+
 /** Normalize a symbol for lookup: drop whitespace, lowercase. */
 function normalizeSymbol(symbol: string): string {
   return symbol.replace(/\s+/g, "").toLowerCase();
 }
-/** Compact a full H-M symbol by dropping the "1" axis placeholders (so the full
- *  monoclinic "P 1 21/c 1" also answers to the common short "P21/c"). */
-function compactSymbol(hm: string): string {
-  return hm.split(/\s+/).filter((t) => t !== "1").join("");
+/** Normalize a Hall symbol: its tokens are space-separated and only the lattice
+ *  letter is upper case, so collapsing whitespace and lowercasing is lossless. */
+function normalizeHall(hall: string): string {
+  return hall.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-const BY_NUMBER = new Map<number, SpaceGroupData>(SPACE_GROUP_DATA.map((e) => [e.number, e]));
-const BY_SYMBOL = new Map<string, SpaceGroupData>();
-function addSymbol(key: string, data: SpaceGroupData): void {
-  if (key && !BY_SYMBOL.has(key)) BY_SYMBOL.set(key, data); // first wins → no alias clobbers a canonical symbol
+function addTo<K>(map: Map<K, SpaceGroupData[]>, key: K, entry: SpaceGroupData): void {
+  const list = map.get(key);
+  if (!list) map.set(key, [entry]);
+  else if (!list.includes(entry)) list.push(entry);
 }
-// Exact spellings first, then bar-dropped fallbacks (e.g. "Fm3m" for "Fm-3m"),
-// added only where they do not collide with a canonical symbol (so "P3"/"P-3"
-// stay distinct).
+
+const BY_NUMBER = new Map<number, SpaceGroupData[]>();
+// Four pairs of entries are two spellings of one setting (the e-glide groups:
+// "A b a m" = "A c a m", …) and share a Hall symbol, so a Hall symbol maps to
+// a list; entries with the same Hall symbol are the same setting.
+const BY_HALL = new Map<string, SpaceGroupData[]>();
+// Full and short spellings ("P 1 21/c 1", "P21/c", "P1121/a"), then bar-dropped
+// fallbacks ("Fm3m") consulted only when no canonical spelling matches, so
+// "P3" and "P-3" stay distinct.
+const BY_SYMBOL = new Map<string, SpaceGroupData[]>();
+const BY_BARLESS = new Map<string, SpaceGroupData[]>();
 for (const e of SPACE_GROUP_DATA) {
-  addSymbol(normalizeSymbol(e.hm), e);
-  addSymbol(normalizeSymbol(compactSymbol(e.hm)), e);
-}
-for (const e of SPACE_GROUP_DATA) {
-  addSymbol(normalizeSymbol(e.hm).replace(/-/g, ""), e);
-  addSymbol(normalizeSymbol(compactSymbol(e.hm)).replace(/-/g, ""), e);
-}
-
-function lookupEntry(id: number | string): SpaceGroupData | undefined {
-  if (typeof id === "number") return BY_NUMBER.get(id);
-  const n = normalizeSymbol(id);
-  return BY_SYMBOL.get(n) ?? BY_SYMBOL.get(n.replace(/-/g, ""));
+  addTo(BY_NUMBER, e.number, e);
+  addTo(BY_HALL, normalizeHall(e.hall), e);
+  for (const spelling of [e.hm, e.short]) {
+    addTo(BY_SYMBOL, normalizeSymbol(spelling), e);
+    addTo(BY_BARLESS, normalizeSymbol(spelling).replace(/-/g, ""), e);
+  }
 }
 
-/** True if the space group (by number or symbol) is in the built-in table. */
+const SUFFIX_TOKEN: Readonly<Record<string, string>> = { S: "1", Z: "2", H: "H", R: "R" };
+
+/**
+ * Split an explicit setting off a symbol: "F d -3 m:2", "R -3 m :H", ICSD's
+ * trailing "Z"/"S" (origin choice 2/1) and "H"/"R", or "(origin choice 2)".
+ */
+function splitSettingSuffix(symbol: string): { base: string; ext?: string } {
+  const s = symbol.trim();
+  let m = /\(\s*origin\s+choice\s*([12])\s*\)$/i.exec(s);
+  if (m) return { base: s.slice(0, m.index), ext: m[1]! };
+  m = /\(\s*(hexagonal|rhombohedral)\s+(axes|setting)\s*\)$/i.exec(s);
+  if (m) return { base: s.slice(0, m.index), ext: m[1]!.toLowerCase() === "hexagonal" ? "H" : "R" };
+  m = /\s*:\s*([12HhRr])$/.exec(s);
+  if (m) return { base: s.slice(0, m.index), ext: m[1]!.toUpperCase() };
+  // A trailing upper-case S/Z/H/R token can never be part of an H-M symbol
+  // (only the leading lattice letter is upper case).
+  m = /\s+([SZHR])$/.exec(s);
+  if (m && s.slice(0, m.index).trim().includes(" ")) return { base: s.slice(0, m.index), ext: SUFFIX_TOKEN[m[1]!]! };
+  return { base: s };
+}
+
+/** Every setting a Hermann–Mauguin symbol (with or without suffix) names. */
+function settingsForSymbol(symbol: string): SpaceGroupData[] {
+  const { base, ext } = splitSettingSuffix(symbol);
+  const key = normalizeSymbol(base);
+  const all = BY_SYMBOL.get(key) ?? BY_BARLESS.get(key.replace(/-/g, "")) ?? [];
+  return ext === undefined ? all : all.filter((e) => e.ext === ext);
+}
+
+/** The settings a bare IT number names: the reference setting and any setting
+ *  sharing its symbol (the other origin choice, or the other axes for R). A
+ *  number alone otherwise means the standard setting, e.g. 14 → P 1 21/c 1. */
+function settingsForNumber(n: number): SpaceGroupData[] {
+  const all = BY_NUMBER.get(n) ?? [];
+  const ref = all.find((e) => e.reference);
+  return ref ? all.filter((e) => e.hm === ref.hm) : [];
+}
+
+const isNear = (x: number, y: number, tol: number): boolean => Math.abs(x - y) <= tol;
+const sameLength = (x: number, y: number): boolean => Math.abs(x - y) <= 2e-3 * Math.max(x, y);
+function isHexagonalCell(c: UnitCell): boolean {
+  return sameLength(c.a, c.b) && isNear(c.alpha, 90, 0.1) && isNear(c.beta, 90, 0.1) && isNear(c.gamma, 120, 0.1);
+}
+function isRhombohedralCell(c: UnitCell): boolean {
+  return sameLength(c.a, c.b) && sameLength(c.b, c.c) && isNear(c.alpha, c.beta, 0.1) && isNear(c.beta, c.gamma, 0.1);
+}
+
+/** Hexagonal vs rhombohedral axes are decided by the cell; nothing else is. */
+function narrowByCell(pool: SpaceGroupData[], cell: UnitCell | undefined): SpaceGroupData[] {
+  if (!cell || !pool.every((e) => e.ext === "H" || e.ext === "R")) return pool;
+  const want = isHexagonalCell(cell) ? "H" : isRhombohedralCell(cell) ? "R" : null;
+  const narrowed = want ? pool.filter((e) => e.ext === want) : [];
+  return narrowed.length > 0 ? narrowed : pool;
+}
+
+/**
+ * A monoclinic setting fixes which cell angle may differ from 90°; a symbol or
+ * number that names the unique-axis-b setting does not describe a cell whose
+ * oblique angle is γ. Checked so "P 21/c" with a c-unique cell is an error, not
+ * a silently mis-expanded structure.
+ */
+function checkMonoclinicCell(entry: SpaceGroupData, cell: UnitCell | undefined): void {
+  if (!cell || entry.number < 3 || entry.number > 15) return;
+  const op = entry.ops.map(parseSymmetryOperation).find((o) => {
+    const d = [o.rotation[0][0], o.rotation[1][1], o.rotation[2][2]];
+    return d.some((x) => x === 1) && d.some((x) => x === -1);
+  });
+  if (!op) return;
+  const d = [op.rotation[0][0], op.rotation[1][1], op.rotation[2][2]];
+  const ones = d.filter((x) => x === 1).length;
+  const unique = ones === 1 ? d.indexOf(1) : d.indexOf(-1); // 2-fold: the +1; mirror: the −1
+  const angles = [cell.alpha, cell.beta, cell.gamma];
+  const oblique = angles.map((x, i) => (Math.abs(x - 90) > 0.1 ? i : -1)).filter((i) => i >= 0);
+  if (oblique.length === 1 && oblique[0] !== unique) {
+    const axis = "abc"[unique]!;
+    const angle = ["α", "β", "γ"][oblique[0]!]!;
+    throw new SpaceGroupSettingError(
+      `${extendedSymbol(entry)} has unique axis ${axis}, but the cell's oblique angle is ${angle} = ${angles[oblique[0]!]!}°. ` +
+        `Give the symmetry operations, a Hall symbol, or the full H-M symbol of the setting.`,
+    );
+  }
+}
+
+/** What the caller knows about a space group: any of number, symbol, Hall. */
+export interface SpaceGroupSpec {
+  readonly number?: number;
+  readonly hermannMauguin?: string;
+  readonly hall?: string;
+  /**
+   * The user's choice among the settings an ambiguous description fits — the
+   * extended symbol of one of `SpaceGroupSettingError.candidates`, e.g.
+   * "F d -3 m:2". It must be one of the settings the rest of the spec fits.
+   */
+  readonly setting?: string;
+}
+
+/**
+ * Resolve a space-group description to exactly one tabulated setting, or
+ * throw a {@link SpaceGroupSettingError}. Nothing is guessed:
+ *  - A Hall symbol names one setting. One not in the table is an error.
+ *  - An H-M symbol names every setting that spells it that way; a suffix
+ *    (":1"/":2"/":H"/":R", ICSD "S"/"Z"/"H"/"R", "(origin choice 2)") picks one.
+ *  - A number alone names its standard setting, or — for the 24 groups with
+ *    two origins and the 7 R groups — both standard descriptions.
+ *  - Hall, symbol and number must agree; a contradiction is an error.
+ *  - Hexagonal vs rhombohedral axes are decided by the cell when given. Two
+ *    origin choices are never decided: that needs operations, a Hall symbol,
+ *    a suffix, or the user's choice (`error.candidates`).
+ */
+export function resolveSpaceGroupSetting(spec: SpaceGroupSpec, cell?: UnitCell): SpaceGroupData {
+  const hall = spec.hall?.trim() || undefined;
+  const hm = spec.hermannMauguin?.trim() || undefined;
+  let pool: SpaceGroupData[] | null = null;
+  if (hall !== undefined) {
+    const entries = BY_HALL.get(normalizeHall(hall));
+    if (!entries) {
+      throw new SpaceGroupSettingError(
+        `Hall symbol "${hall}" is not one of the ${BY_HALL.size} tabulated settings; give the symmetry operations instead.`,
+      );
+    }
+    pool = entries;
+  }
+  if (hm !== undefined) {
+    const named = settingsForSymbol(hm);
+    if (named.length === 0) {
+      // An unrecognized spelling does not override a Hall symbol that resolved.
+      if (pool === null) {
+        throw new SpaceGroupSettingError(
+          `Unknown space group "${hm}". Expected a Hermann–Mauguin symbol (e.g. "P 21/c", "F d -3 m:2"), a Hall symbol, or the symmetry operations.`,
+        );
+      }
+    } else if (pool !== null) {
+      const agreed: SpaceGroupData[] = pool.filter((e) => named.includes(e));
+      if (agreed.length === 0) {
+        throw new SpaceGroupSettingError(
+          `Hall symbol "${hall}" (${extendedSymbol(pool[0]!)}) contradicts the H-M symbol "${hm}".`,
+        );
+      }
+      pool = agreed;
+    } else {
+      pool = named;
+    }
+  }
+  if (spec.number !== undefined) {
+    if (!Number.isInteger(spec.number) || spec.number < 1 || spec.number > 230) {
+      throw new SpaceGroupSettingError(`Unknown space group number ${spec.number}; expected 1–230.`);
+    }
+    if (pool !== null) {
+      const agreed: SpaceGroupData[] = pool.filter((e) => e.number === spec.number);
+      if (agreed.length === 0) {
+        throw new SpaceGroupSettingError(
+          `Space group number ${spec.number} contradicts ${hall !== undefined ? `Hall symbol "${hall}"` : `"${hm}"`} (No. ${pool[0]!.number}).`,
+        );
+      }
+      pool = agreed;
+    } else {
+      pool = settingsForNumber(spec.number);
+    }
+  }
+  if (pool === null) {
+    throw new SpaceGroupSettingError(
+      "No space-group information: no symmetry operations, Hermann–Mauguin symbol, Hall symbol or IT number.",
+    );
+  }
+  pool = narrowByCell(pool, cell);
+  // Two spellings of one setting are not an ambiguity.
+  pool = pool.filter((e, i) => pool!.findIndex((f) => f.hall === e.hall) === i);
+  if (spec.setting !== undefined) {
+    const want = normalizeSymbol(spec.setting);
+    const chosen = pool.filter((e) => normalizeSymbol(extendedSymbol(e)) === want);
+    if (chosen.length === 0) {
+      throw new SpaceGroupSettingError(
+        `The chosen setting "${spec.setting}" is not one the space group fits (${pool.map(extendedSymbol).join(", ")}).`,
+        pool.length > 1 ? pool.map(settingInfo) : [],
+      );
+    }
+    pool = chosen;
+  }
+  if (pool.length > 1) {
+    const what = hm !== undefined ? `"${hm}"` : `No. ${spec.number}`;
+    const options = pool.map((e) => `${extendedSymbol(e)} (${describeSetting(e)})`).join(", ");
+    const hint = pool.every((e) => e.ext === "H" || e.ext === "R")
+      ? " The cell is neither hexagonal (a = b, γ = 120°) nor rhombohedral (a = b = c, α = β = γ)."
+      : "";
+    throw new SpaceGroupSettingError(
+      `Space group ${what} is ambiguous: it fits ${options}.${hint} Give the symmetry operations, a Hall symbol, or a setting suffix such as "${extendedSymbol(pool[pool.length - 1]!)}".`,
+      pool.map(settingInfo),
+    );
+  }
+  const entry = pool[0]!;
+  checkMonoclinicCell(entry, cell);
+  return entry;
+}
+
+/** The {@link SpaceGroup} for one tabulated setting. */
+export function spaceGroupFromSetting(entry: SpaceGroupData): SpaceGroup {
+  return {
+    number: entry.number,
+    hermannMauguin: extendedSymbol(entry),
+    operations: entry.ops.map(parseSymmetryOperation),
+  };
+}
+
+/** True if the number or symbol names at least one tabulated setting
+ *  (an ambiguous symbol such as "Fd-3m" counts as known). */
 export function isKnownSpaceGroup(id: number | string): boolean {
-  return lookupEntry(id) !== undefined;
+  if (typeof id === "number") return (BY_NUMBER.get(id)?.length ?? 0) > 0;
+  return settingsForSymbol(id).length > 0;
 }
 
-/** The built-in table as `{ number, hermannMauguin }` (for pickers/discovery). */
+/** The reference setting of each of the 230 groups as `{ number,
+ *  hermannMauguin }` (for pickers/discovery). */
 export function knownSpaceGroups(): { number: number; hermannMauguin: string }[] {
-  return SPACE_GROUP_DATA.map((e) => ({ number: e.number, hermannMauguin: e.hm }));
+  return SPACE_GROUP_DATA.filter((e) => e.reference).map((e) => ({ number: e.number, hermannMauguin: extendedSymbol(e) }));
+}
+
+/** Every tabulated setting (564). */
+export function spaceGroupSettings(): SpaceGroupSettingInfo[] {
+  return SPACE_GROUP_DATA.map(settingInfo);
 }
 
 /**
  * Build a {@link SpaceGroup} from an International Tables number or a
- * Hermann–Mauguin symbol, using the generated 230-group table (standard
- * settings). Throws if the symbol/number is not recognized.
+ * Hermann–Mauguin symbol (optionally with a setting suffix, e.g. "F d -3 m:2"),
+ * using the generated table of all 564 settings. Throws a
+ * {@link SpaceGroupSettingError} if the input is unknown or names more than one
+ * setting (pass `cell` to let it decide hexagonal vs rhombohedral axes).
  */
-export function buildSpaceGroup(id: number | string): SpaceGroup {
-  const entry = lookupEntry(id);
-  if (!entry) {
-    throw new Error(`Unknown space group "${id}". Expected an IT number 1–230 or a standard Hermann–Mauguin symbol.`);
-  }
-  return {
-    number: entry.number,
-    hermannMauguin: entry.hm,
-    operations: entry.ops.map(parseSymmetryOperation),
-  };
+export function buildSpaceGroup(id: number | string, cell?: UnitCell): SpaceGroup {
+  return spaceGroupFromSetting(
+    resolveSpaceGroupSetting(typeof id === "number" ? { number: id } : { hermannMauguin: id }, cell),
+  );
 }
 
 /**
@@ -201,13 +464,20 @@ function rhombohedralHexCenteringOps(hermannMauguin: string, cell: UnitCell): Sy
  *   implied by the Hermann–Mauguin lattice letter (a CIF may list only the
  *   primitive general positions, or only a generating subset). Returns the input
  *   unchanged when already complete, so the original objects/ordering are kept.
- * - If it has no operations but a known number/symbol, build from the table.
- * - Otherwise return it untouched.
- *
- * This never throws: an unknown symbol-only group is returned as-is. It is the
- * safe integration hook for the CIF parser and the structure builders.
+ *   Explicit operations are authoritative: they fix the setting.
+ * - Otherwise build it from the setting table via
+ *   {@link resolveSpaceGroupSetting} (number, symbol, optional Hall symbol, and
+ *   the cell for hexagonal vs rhombohedral axes, and `options.setting` — the
+ *   user's choice among the candidates of an ambiguous description). That THROWS a
+ *   {@link SpaceGroupSettingError} for an unknown or ambiguous description, or
+ *   for none at all — a structure is never silently expanded in P1 or in a
+ *   guessed origin.
  */
-export function completeSpaceGroup(sg: SpaceGroup, cell?: UnitCell): SpaceGroup {
+export function completeSpaceGroup(
+  sg: SpaceGroup,
+  cell?: UnitCell,
+  options: { readonly hall?: string; readonly setting?: string } = {},
+): SpaceGroup {
   if (sg.operations.length > 0) {
     const centering = sg.hermannMauguin
       ? [
@@ -218,16 +488,15 @@ export function completeSpaceGroup(sg: SpaceGroup, cell?: UnitCell): SpaceGroup 
     const closed = expandGenerators([...sg.operations, ...centering]);
     return closed.length === sg.operations.length ? sg : { ...sg, operations: closed };
   }
-  const id = sg.number ?? sg.hermannMauguin;
-  if (id !== undefined && isKnownSpaceGroup(id)) {
-    const built = buildSpaceGroup(id);
-    const number = sg.number ?? built.number;
-    const hermannMauguin = sg.hermannMauguin ?? built.hermannMauguin;
-    return {
-      operations: built.operations,
-      ...(number !== undefined ? { number } : {}),
-      ...(hermannMauguin !== undefined ? { hermannMauguin } : {}),
-    };
-  }
-  return sg;
+  return spaceGroupFromSetting(
+    resolveSpaceGroupSetting(
+      {
+        ...(sg.number !== undefined ? { number: sg.number } : {}),
+        ...(sg.hermannMauguin !== undefined ? { hermannMauguin: sg.hermannMauguin } : {}),
+        ...(options.hall !== undefined ? { hall: options.hall } : {}),
+        ...(options.setting !== undefined ? { setting: options.setting } : {}),
+      },
+      cell,
+    ),
+  );
 }
