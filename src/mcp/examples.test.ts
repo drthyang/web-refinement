@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMateriaServer } from "@/mcp/host";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { MN3GA_CIF } from "@/examples/mn3ga";
 import { MNO_CIF } from "@/examples/mn3gaPowgen";
 import { GATA4SE8_CIF, GATA4SE8_GR } from "@/examples/gata4se8PdfData";
@@ -148,24 +148,43 @@ describe("examples/mcp files", () => {
   });
 });
 
+/** Per example, and so per call: the client's default request timeout is 60 s. */
+const EXAMPLE_TIMEOUT = 300_000;
+
 describe("worked examples, replayed through an MCP client", () => {
-  let client: Client;
+  // The server is the bundle `npm run mcp` serves, in its own process over
+  // stdio, as a client runs it. In process, the in-memory transport never
+  // yields, so a whole example ran as one blocking stretch on the vitest
+  // worker (~64 s and ~88 s on a CI runner) and tripped vitest's fixed 60 s
+  // worker RPC timeout ("Timeout calling onTaskUpdate") with every test green.
+  let client: Client | undefined;
+  let tmp = "";
+  let serverLog = "";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function call(name: string, args: Record<string, unknown>): Promise<any> {
-    const r = await client.callTool({ name, arguments: args });
+    const r = await client!.callTool({ name, arguments: args }, undefined, { timeout: EXAMPLE_TIMEOUT });
     const text = (r.content as { text: string }[])[0]!.text;
     if (r.isError) throw new Error(`${name}: ${text}`);
     return JSON.parse(text);
   }
 
   beforeAll(async () => {
-    const server = createMateriaServer({ roots: [REPO] });
-    const [a, b] = InMemoryTransport.createLinkedPair();
+    tmp = mkdtempSync(join(tmpdir(), "materia-examples-"));
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [resolve(REPO, "scripts/build-mcp.mjs"), "--serve", "--outfile", join(tmp, "mcp-server.mjs")],
+      env: { MATERIA_ROOTS: REPO },
+      stderr: "pipe",
+    });
+    transport.stderr?.on("data", (chunk: Buffer) => { serverLog += chunk.toString(); });
     client = new Client({ name: "examples-test", version: "0" });
-    await Promise.all([server.connect(a), client.connect(b)]);
+    await client.connect(transport).catch((e: Error) => { throw new Error(`${e.message}\nserver stderr:\n${serverLog}`); });
+  }, 60_000);
+  afterAll(async () => {
+    await client?.close();
+    rmSync(tmp, { recursive: true, force: true });
   });
-  afterAll(async () => { await client.close(); });
 
   it("Example 1 — look at a structure before any data", async () => {
     const s = await call("parse_structure", { path: "examples/mcp/mn3ga.cif" });
@@ -241,7 +260,7 @@ describe("worked examples, replayed through an MCP client", () => {
       const f = found.moments.find((x) => x.siteLabel === t.siteLabel)!;
       t.components.forEach((c, j) => expect(Math.abs(sign * f.components[j]! - c), `${t.siteLabel}[${j}]`).toBeLessThan(0.1));
     }
-  }, 300_000);
+  }, EXAMPLE_TIMEOUT);
 
   it("Example 4 — a PDF fit block by block, then local vs average", async () => {
     const s = await call("parse_structure", { path: "examples/mcp/gata4se8.cif" });
@@ -293,5 +312,5 @@ describe("worked examples, replayed through an MCP client", () => {
       const down = [...track(await scan("down"), "U_Se2_0")].reverse();
       down.forEach((v, i) => expect(Math.abs(v - se2[i]!)).toBeLessThan(1e-4));
     }
-  }, 300_000);
+  }, EXAMPLE_TIMEOUT);
 });

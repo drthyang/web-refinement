@@ -10,6 +10,10 @@
  * `--serve` starts the server right after building, so an MCP client
  * (`.mcp.json`) always runs the current source. Everything here logs to
  * stderr: with `--serve`, stdout is the JSON-RPC channel.
+ *
+ * `--outfile <path>` writes the bundle elsewhere. The examples test uses it so
+ * it never replaces the dist/mcp-server.mjs a running server's evaluator
+ * workers re-execute.
  */
 
 import { build } from "esbuild";
@@ -17,7 +21,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const outfile = resolve(root, "dist/mcp-server.mjs");
+const at = process.argv.indexOf("--outfile");
+const outfile = at > 0 && process.argv[at + 1] ? resolve(process.argv[at + 1]) : resolve(root, "dist/mcp-server.mjs");
 
 await build({
   entryPoints: [resolve(root, "src/mcp/server.ts")],
@@ -32,6 +37,6 @@ await build({
   logLevel: "warning",
 });
 
-console.error("built dist/mcp-server.mjs");
+console.error(`built ${outfile}`);
 
 if (process.argv.includes("--serve")) await import(pathToFileURL(outfile).href);
