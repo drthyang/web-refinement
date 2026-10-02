@@ -116,7 +116,7 @@ are missing (P6).
 | # | Scope | Decision | Status |
 | --- | --- | --- | --- |
 | 1 | Data reduction, the work of PDFgetX3 and PDFgetN | Consume reduced G(r); defer reduction to Track PR | ✅ import · ⬜ reduction |
-| 2 | Correlated G(r) errors | Uniform weights; relative esds; count points on the Nyquist grid Δr = π/Qmax | ✅ weights · ⬜ Nyquist |
+| 2 | Correlated G(r) errors | Uniform weights; relative esds; count points on the Nyquist grid Δr = π/Qmax | ✅ weights · ✅ σ_G, Cov[G] and independent-point counts (S(Q) tab) · ⬜ esds rescaled to them |
 | 3 | Qmax termination ripples, distinct from Qdamp | Model both; extend the grid by 6·(2π/Qmax) before trimming | ✅ |
 | 4 | Qdamp and Qbroad are instrument constants | Calibrate on a standard (Ni, Si, LaB₆), then fix | ✅ |
 | 5 | δ1/δ2 and sratio/rcut model the same motion; δ1 and δ2 correlate strongly | Free one family, usually one δ | ✅ warns |
@@ -138,8 +138,9 @@ Paths are under `src/`. Nothing in `src/core` imports React.
 | `core/pdf/forwardModel.ts` | G_calc(r): pair sum, peak widths, −4πρ₀r baseline, Qdamp and sphere envelopes |
 | `core/pdf/termination.ts` | Qmax band limit by direct convolution with the sampled sinc kernel |
 | `core/pdf/partials.ts`, `core/pdf/gradients.ts` | Element-pair partials; G(r) with analytic ∂G/∂p in one pass |
-| `core/totalscattering/weights.ts`, `grErrors.ts` | ⟨b⟩, ⟨b²⟩ and ρ₀, with b = Z for X-rays; σ_G(r) from S(Q) errors, with no production caller |
-| `core/totalscattering/fourier.ts` | S(Q) or F(Q) → G(r) when a file loads |
+| `core/totalscattering/weights.ts` | ⟨b⟩, ⟨b²⟩ and ρ₀, with b = Z for X-rays |
+| `core/totalscattering/fourier.ts` | The S(Q)/F(Q) → G(r) operator: values, exact σ_G(r) and full covariance from one set of trapezoid coefficients; Lorch and low-Q options |
+| `core/totalscattering/grErrors.ts` | What the propagated error means: noise correlation, Nyquist and effective independent-point counts |
 | `core/magnetic/mpdf.ts` | Frandsen spin-pair kernel and ⟨j0⟩ envelope |
 | `core/crystal/cellExpansion.ts` | `expandSpinField`, the magnetic box |
 | `core/math/fft.ts` | Deterministic FFT convolution |
@@ -150,7 +151,7 @@ Paths are under `src/`. Nothing in `src/core` imports React.
 | `core/pdf/pdffit2Golden.ts`, `core/magnetic/mpdfGolden.ts`, `core/magnetic/mnoGolden.ts` | Committed reference curves |
 | `parsers/pdfData.ts`, `parsers/fgrData.ts` | `.gr`, `.sq` and `.fq`; PDFgui `.fgr` fits |
 | `workers/protocol.ts`, `workers/runPowder.ts` | The `pdf` and `mpdf` evaluator specs |
-| `app/PdfWorkbench.tsx`, `app/ui/PosteriorPanel.tsx`, `app/ui/BoxcarPanel.tsx` | The PDF page and its views |
+| `app/PdfWorkbench.tsx`, `app/ui/PosteriorPanel.tsx`, `app/ui/BoxcarPanel.tsx`, `app/ui/ReciprocalPanel.tsx` | The PDF page and its views (S(Q) ± σ in the last) |
 
 **Planned but not built:** `core/pdf/peakWidth.ts`, folded into the enumerator
 and forward model; `core/totalscattering/reduction.ts` and
@@ -191,6 +192,11 @@ validation gate.
 - `PdfPattern`, and `.gr`, `.sq` and `.fq` files in the PDFgetX3 and Mantid
   dialects, checked on real NSLS-II 28-ID and POWGEN files. S(Q) and F(Q) become
   G(r) on load.
+- The original S(Q)/F(Q) is kept on the pattern with its error column
+  (`reciprocal`, saved in project files). σ_G(r) is propagated exactly onto every
+  point, and the page shows S(Q)/F(Q) and G(r) with ±σ ribbons. External
+  gates: pystog (committed) and RMCProfile StoG on real FeCoSn 199 K data
+  (data-gated). See the knowledge base, §5.
 - PDFgui `.fgr` fits. `parse_pdf_data` can also take a fit's difference curve,
   the experimental mPDF of a nuclear fit.
 - Format detection, the signed-y plot, the PDF page, and a `pdf` workspace in
@@ -354,6 +360,17 @@ through the boxcar sweep — is planned in
   `ScatteringTable` returns one real number, so its interface must grow.
 - **Incommensurate mPDF** ⬜. Helices and spin-density waves need the
   `fourierMoment.ts` route.
+- **Track FT — refine a G(r) transformed here from S(Q)** 🚧. The engine is
+  ready: `transformReciprocal` re-transforms the retained S(Q) with any Q window,
+  Lorch modification or StoG low-Q extrapolation, and returns σ_G(r) and the
+  full covariance. Still to do:
+  1. a UI to re-transform with chosen Qmin/Qmax/r grid ⬜;
+  2. a Lorch-matched termination kernel in `pdf/termination.ts`,
+     (Qmax/2π²)[Si(π + Qmax·x) + Si(π − Qmax·x)], before any Lorch-transformed
+     G(r) is fitted ⬜;
+  3. a covariance-weighted (generalized least-squares) residual or likelihood.
+     The covariance is rank-deficient on an oversampled grid, so it needs a
+     truncated pseudo-inverse or a Nyquist-grid fit ⬜.
 
 ### Out of scope
 
@@ -458,7 +475,9 @@ Each rule came from a failed or missing gate, and each still guides new work.
   1. independent Gaussian residuals ✅
   2. a fitted or marginalized noise scale, the default ✅
   3. a simple correlated-residual model ⬜
-  4. a covariance propagated from the F(Q) reduction, the full fix ⬜
+  4. a covariance propagated from the F(Q) reduction, the full fix 🚧 — the
+     covariance is computed exactly (`sineTransformCovariance`) for data loaded
+     as S(Q) with errors; the likelihood does not use it yet
 - **No √yObs weights.** The shared observation path defaults to σ = √yObs and
   skips yObs ≤ 0, and neither suits G(r). The PDF problem uses uniform weights
   and keeps negative points.
