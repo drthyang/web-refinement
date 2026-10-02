@@ -29,10 +29,21 @@ neutron.ts):
   * NEUTRON_B           — every element row that prints a value, plus D (²H).
                           Pu and Cm print none (each isotope differs: ²³⁸Pu
                           14.1, ²³⁹Pu 7.7, ²⁴⁰Pu 3.5 fm), so they are absent and
-                          a site needs an explicit isotope.
+                          a site needs an explicit isotope. So is Am: see
+                          ELEMENT_ROW_IS_ISOTOPE.
   * NEUTRON_B_ISOTOPES  — every isotope row that prints a value, keyed "238Pu".
 Rows whose b_c is printed as "---" are skipped. Uncertainties in parentheses
 ("3.26(3)", "6.(1.)") are dropped.
+
+Two deliberate departures from the table, each guarded so that a NIST revision
+fails loudly instead of being silently overridden:
+  * CORRECTIONS — Hf: NIST enters b = 7.7 fm, but its own σ_coh = 7.6 b needs
+    |b| = 7.77 fm (4π·7.7²/100 = 7.45 b), and the ITC Vol. C edition and Rauch
+    & Waschkowski (2003) both give 7.77. Read as an entry error; 7.77 is used.
+  * ELEMENT_ROW_IS_ISOTOPE — Am: the element row carries a half-life (7.37E3 a,
+    i.e. ²⁴³Am), so its 8.3 fm is one isotope's value. The common ²⁴¹Am is not
+    tabulated, so the value is emitted as "243Am" only and an Am site must name
+    its isotope, as for Pu and Cm.
 """
 
 from __future__ import annotations
@@ -43,6 +54,19 @@ import re
 import sys
 
 NIST_TABLE_SHA256 = "dcf8ea74603ceb3ed1ef56ef5017596a7d5bc581fc08f44c1d1c1b21025de914"
+
+# {element: (value as entered by NIST, corrected b′, reason)}. The correction
+# applies only while NIST still prints the value given here.
+CORRECTIONS: dict[str, tuple[str, float, str]] = {
+    "Hf": ("7.7", 7.77, "NIST entry 7.7 contradicts its σ_coh 7.6 b; 7.77 (ITC, Rauch 2003) fits it"),
+}
+
+# {element: (mass number, half-life the element row must print)} — element rows
+# whose value belongs to one radioactive isotope that is not the one usually
+# meant, emitted as that isotope only.
+ELEMENT_ROW_IS_ISOTOPE: dict[str, tuple[int, str]] = {
+    "Am": (243, "7.37E3 a"),
+}
 
 # Atomic number, for ordering the output.
 ELEMENTS = [
@@ -151,6 +175,23 @@ def main() -> None:
             continue
         if b is None:
             continue
+        if sym in CORRECTIONS:
+            printed, corrected, _why = CORRECTIONS[sym]
+            if bc != printed:
+                sys.exit(f"{sym}: NIST now prints b = {bc}, not {printed} — review CORRECTIONS")
+            b = (corrected, b[1])
+            if not sigma_consistent(str(corrected), sigma_coh, b):
+                sys.exit(f"{sym}: corrected b = {corrected} does not fit σ_coh = {sigma_coh}")
+            sigma_mismatch[:] = [x for x in sigma_mismatch if not x.startswith(f"{sym} ")]
+        if sym in ELEMENT_ROW_IS_ISOTOPE:
+            mass_number, half_life = ELEMENT_ROW_IS_ISOTOPE[sym]
+            if conc.strip("()") != half_life:
+                sys.exit(f"{sym}: element row prints {conc}, expected the half-life {half_life} of {mass_number}{sym}")
+            if f"{mass_number}{sym}" in isotopes:
+                sys.exit(f"{mass_number}{sym} is tabulated separately — review ELEMENT_ROW_IS_ISOTOPE")
+            isotopes[f"{mass_number}{sym}"] = b
+            isotope_only.setdefault(sym, []).append(mass_number)
+            continue
         elements[sym] = b
         if conc.startswith("("):
             radioactive[sym] = conc.strip("()")
@@ -158,13 +199,15 @@ def main() -> None:
     if "2H" not in isotopes:
         sys.exit("²H row missing")
     isotope_only = {s: v for s, v in isotope_only.items() if s not in elements}
-    if sorted(isotope_only) != ["Cm", "Pu"]:
+    if sorted(isotope_only) != ["Am", "Cm", "Pu"]:
         sys.exit(f"unexpected isotope-only elements {sorted(isotope_only)} — review the table")
 
     ordered = sorted(elements, key=lambda s: Z_OF[s])
     element_lines = []
     for sym in ordered:
         note = f"  // radioactive: one value, t½ {radioactive[sym]}" if sym in radioactive else ""
+        if sym in CORRECTIONS:
+            note = f"  // NIST enters {CORRECTIONS[sym][0]}; corrected, see the generator"
         element_lines.append(f"  {sym}: {entry(elements[sym])},{note}")
         if sym == "H":
             element_lines.append(f"  D: {entry(isotopes['2H'])},  // ²H")
@@ -193,10 +236,12 @@ def main() -> None:
  * conjugate b′ + i·b″ — see neutron.ts, which applies it.
  *
  * {len(ordered)} elements (+ D = ²H) in NEUTRON_B, {len(isotopes)} isotopes in NEUTRON_B_ISOTOPES.
- * Sears prints no element value for these, so a site needs an explicit isotope:
+ * These have no element value, so a site needs an explicit isotope:
  *   {only}.
+ * (Sears prints none for Pu and Cm; its Am row is the ²⁴³Am value, t½ 7.37E3 a.)
  * Elements marked "radioactive" have no natural isotopic composition: Sears
- * gives one value, for the isotope with the half-life shown.
+ * gives one value, for the isotope with the half-life shown. Hf is 7.77, not
+ * NIST's 7.7, which contradicts its own σ_coh (see scripts/gen_neutron_b.py).
  */
 
 /** b = b′ − i·b″ in fm, as printed by Sears (1992): `im` = −b″ ≤ 0. */

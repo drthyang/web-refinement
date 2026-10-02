@@ -13,11 +13,13 @@
  * in the crystallographic structure factor F = Σ a·exp(+2πi h·x) is the
  * conjugate b′ + i·b″ — see neutron.ts, which applies it.
  *
- * 89 elements (+ D = ²H) in NEUTRON_B, 247 isotopes in NEUTRON_B_ISOTOPES.
- * Sears prints no element value for these, so a site needs an explicit isotope:
- *   Cm (244, 246, 248), Pu (238, 239, 240, 242).
+ * 88 elements (+ D = ²H) in NEUTRON_B, 248 isotopes in NEUTRON_B_ISOTOPES.
+ * These have no element value, so a site needs an explicit isotope:
+ *   Am (243), Cm (244, 246, 248), Pu (238, 239, 240, 242).
+ * (Sears prints none for Pu and Cm; its Am row is the ²⁴³Am value, t½ 7.37E3 a.)
  * Elements marked "radioactive" have no natural isotopic composition: Sears
- * gives one value, for the isotope with the half-life shown.
+ * gives one value, for the isotope with the half-life shown. Hf is 7.77, not
+ * NIST's 7.7, which contradicts its own σ_coh (see scripts/gen_neutron_b.py).
  */
 
 /** b = b′ − i·b″ in fm, as printed by Sears (1992): `im` = −b″ ≤ 0. */
@@ -100,7 +102,7 @@ export const NEUTRON_B: Readonly<Record<string, BoundCoherentLength>> = {
   Tm: { re: 7.07, im: 0 },
   Yb: { re: 12.43, im: 0 },
   Lu: { re: 7.21, im: 0 },
-  Hf: { re: 7.7, im: 0 },
+  Hf: { re: 7.77, im: 0 },  // NIST enters 7.7; corrected, see the generator
   Ta: { re: 6.91, im: 0 },
   W: { re: 4.86, im: 0 },
   Re: { re: 9.2, im: 0 },
@@ -117,7 +119,6 @@ export const NEUTRON_B: Readonly<Record<string, BoundCoherentLength>> = {
   Pa: { re: 9.1, im: 0 },  // radioactive: one value, t½ 3.28E4 a
   U: { re: 8.417, im: 0 },
   Np: { re: 10.55, im: 0 },  // radioactive: one value, t½ 2.14E6 a
-  Am: { re: 8.3, im: 0 },  // radioactive: one value, t½ 7.37E3 a
 };
 
 /** Isotope, keyed mass number + symbol ("238Pu") → b (fm). */
@@ -366,6 +367,7 @@ export const NEUTRON_B_ISOTOPES: Readonly<Record<string, BoundCoherentLength>> =
   "239Pu": { re: 7.7, im: 0 },
   "240Pu": { re: 3.5, im: 0 },
   "242Pu": { re: 8.1, im: 0 },
+  "243Am": { re: 8.3, im: 0 },
   "244Cm": { re: 9.5, im: 0 },
   "246Cm": { re: 9.3, im: 0 },
   "248Cm": { re: 7.7, im: 0 },

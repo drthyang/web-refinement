@@ -49,16 +49,20 @@ describe("neutron scattering lengths (Sears 1992, via NIST)", () => {
     expect(bRe("Ag")).toBeCloseTo(5.922, 3);
     expect(bRe("U")).toBeCloseTo(8.417, 3);
   });
-  it("is the Neutron News 1992 evaluation, with no per-element overrides", () => {
+  it("is the Neutron News 1992 evaluation, without GSAS-II's per-element pins", () => {
     // Ti, Mn, Zn: Sears (1992), which the ITC Vol. C edition revises
     // (−3.37, −3.75, 5.6). Au: Sears (1992) 7.63, not the 7.90 of Rauch &
-    // Waschkowski (2003) that GSAS-II's AtmBlens carries. Hf: 7.7 as entered
-    // by NIST (the ITC edition prints 7.77).
+    // Waschkowski (2003) that GSAS-II's AtmBlens carries.
     expect(bRe("Ti")).toBe(-3.438);
     expect(bRe("Mn")).toBe(-3.73);
     expect(bRe("Zn")).toBe(5.68);
     expect(bRe("Au")).toBe(7.63);
-    expect(bRe("Hf")).toBe(7.7);
+  });
+  it("Hf is 7.77: NIST's 7.7 contradicts its own σ_coh = 7.6 b", () => {
+    // 4π·7.7²/100 = 7.45 b; 4π·7.77²/100 = 7.59 b. The ITC edition and Rauch
+    // (2003) both give 7.77, so 7.7 is read as an entry error.
+    expect(bRe("Hf")).toBe(7.77);
+    expect((4 * Math.PI * 7.77 ** 2) / 100).toBeCloseTo(NEUTRON_CROSS_SECTIONS.Hf!.coherent, 1);
   });
   it("In is 4.065 − 0.0539i fm (2.08 is In's σ_coh in barn, not b)", () => {
     expect(boundCoherentLength("In")).toEqual({ re: 4.065, im: -0.0539 });
@@ -76,8 +80,9 @@ describe("neutron scattering lengths (Sears 1992, via NIST)", () => {
     }
   });
   it("agrees with the tabulated σ_coh = 4π|b|²/100 (catches a b/σ mix-up like In)", () => {
-    // Sears' own printed b and σ_coh disagree beyond rounding for Xe, Eu and Hf.
-    const printedInconsistency = new Set(["Xe", "Eu", "Hf"]);
+    // Sears' own printed b and σ_coh disagree beyond rounding for Xe and Eu
+    // (Hf's 7.7 did too; it is corrected to 7.77, which fits).
+    const printedInconsistency = new Set(["Xe", "Eu"]);
     let checked = 0;
     for (const [el, xs] of Object.entries(NEUTRON_CROSS_SECTIONS)) {
       const b = NEUTRON_B[el];
@@ -88,9 +93,15 @@ describe("neutron scattering lengths (Sears 1992, via NIST)", () => {
     }
     expect(checked).toBeGreaterThan(70);
   });
-  it("Pu and Cm need an explicit isotope; Sears gives no element value", () => {
+  it("Pu, Cm and Am need an explicit isotope", () => {
+    // Sears gives no element value for Pu and Cm; its Am row carries ²⁴³Am's
+    // half-life (7.37E3 a), so it is the ²⁴³Am value, not ²⁴¹Am's.
     expect(NEUTRON_B.Pu).toBeUndefined();
     expect(NEUTRON_B.Cm).toBeUndefined();
+    expect(NEUTRON_B.Am).toBeUndefined();
+    expect(() => bRe("Am")).toThrow(/Am has no natural-abundance.*isotope.*Am 243/);
+    expect(bRe("Am", 243)).toBe(8.3);
+    expect(() => bRe("Am", 241)).toThrow(/241Am/);
     expect(() => bRe("Pu")).toThrow(/isotope.*238, 239, 240, 242/);
     expect(() => bRe("Cm")).toThrow(/isotope.*244, 246, 248/);
     expect(bRe("Pu", 238)).toBe(14.1);

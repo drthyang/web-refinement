@@ -4,7 +4,8 @@
  * Values ({@link NEUTRON_B}, {@link NEUTRON_B_ISOTOPES}) come from the generated
  * {@link ./neutronData} table: Sears (1992) *Neutron News* 3(3) 26–37, as entered
  * by NIST — see that file and scripts/gen_neutron_b.py. MATERIA uses that one
- * evaluation for every element, with no per-element overrides. The elements in
+ * evaluation for every element; the only departure is Hf (7.77, not NIST's 7.7,
+ * which contradicts its own σ_coh). The elements in
  * the GSAS-II validation data print the same values in its .lst output (fm):
  * Mn −3.73, O 5.80, Ga 7.29 (Mn₃Ga/MnO); Sn 6.23, Co 2.49, Fe 9.45 (FeCoSn).
  * See neutronSfValidation.test.ts. This file holds only the lookup logic.
@@ -35,7 +36,8 @@ export function tabulatedIsotopes(element: string): number[] {
  * Throws, naming the element, when nothing is tabulated: an unknown element, an
  * isotope Sears does not list, or an element with no natural-abundance value.
  * Pu and Cm are the latter — their isotopes differ widely (²³⁸Pu 14.1, ²³⁹Pu
- * 7.7, ²⁴⁰Pu 3.5 fm), so the site must name its isotope.
+ * 7.7, ²⁴⁰Pu 3.5 fm), so the site must name its isotope. So is Am: Sears'
+ * only Am value is ²⁴³Am's, tabulated as that isotope.
  */
 export function boundCoherentLength(element: string, isotope?: number): BoundCoherentLength {
   if (element === "D" && (isotope === undefined || isotope === 2)) return NEUTRON_B.D!;

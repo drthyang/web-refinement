@@ -12,7 +12,7 @@ The scattering variable throughout is `s = sinθ/λ = 1/(2d)` (Å⁻¹).
 
 | Table | File | Form | Coverage | Source |
 |---|---|---|---|---|
-| **Neutron** `b` | [`neutronData.ts`](../src/core/scattering/neutronData.ts) | Constant bound coherent length `b = b′ − i·b″` (fm), s-independent, complex for absorbers | **89 elements + D, 247 isotopes** (Pu and Cm by isotope only) | Sears (1992) *Neutron News*, as entered by NIST; one evaluation, no overrides |
+| **Neutron** `b` | [`neutronData.ts`](../src/core/scattering/neutronData.ts) | Constant bound coherent length `b = b′ − i·b″` (fm), s-independent, complex for absorbers | **88 elements + D, 248 isotopes** (Pu, Cm and Am by isotope only) | Sears (1992) *Neutron News*, as entered by NIST; one evaluation (Hf corrected to 7.77) |
 | **X-ray** `f(s)` | [`cromerMannData.ts`](../src/core/scattering/cromerMannData.ts) | 4-Gaussian Cromer–Mann `Σ aᵢe^{−bᵢs²} + c` | **98 neutral atoms** (H–Cf) | International Tables Vol. C Table 6.1.1.4 (DABAX `f0_InterTables`, checked row by row against cctbx `it1992`); f(0)=Z verified per row |
 | **Magnetic** ⟨j0⟩ | [`magneticFormFactorData.ts`](../src/core/scattering/magneticFormFactorData.ts) | `A e^{−a s²} + B e^{−b s²} + C e^{−c s²} + D`, normalized to 1 at s=0 | **97 ions** (3d Sc–Cu, 4d Y–Pd, rare earths Ce–Yb, actinides U–Am, all common valences) | ITC-C Vol. C §4.4.5 (Brown), via the public-domain CrysFML table in `periodictable` |
 | **Magnetic** ⟨j2⟩ | [`magneticFormFactorData.ts`](../src/core/scattering/magneticFormFactorData.ts) | `(A e^{−a s²} + … + D)·s²`, → 0 at s=0 | **95 ions** (every ⟨j0⟩ ion except O¹⁺ and Pr³⁺) | same |
@@ -25,7 +25,9 @@ the sibling module (`neutron.ts`, `xray.ts`, `magnetic.ts`):
   the NIST table of Sears (1992), pinned by SHA-256 of its extracted rows, and
   emits every element and isotope that prints a value, complex parts included.
   Pu and Cm print no element value (their isotopes differ by up to 10 fm), so a
-  Pu or Cm site must name its isotope.
+  Pu or Cm site must name its isotope. Am's row is the ²⁴³Am value (its
+  half-life is printed), so it is emitted as ²⁴³Am and an Am site must name
+  its isotope too. Hf is corrected from NIST's 7.7 to 7.77 (below).
 - X-ray — [`scripts/gen_xray_ff.py`](../scripts/gen_xray_ff.py). All neutral
   atoms from the ITC-C Cromer–Mann parametrization. Two pinned transcriptions
   are read (DABAX `f0_InterTables.dat` and cctbx `it1992.cpp`); every row must
@@ -114,7 +116,8 @@ tables below). Web resources accessed **2026-07-08**.
 - **Evaluation used:** Sears, V. F. (1992). "Neutron scattering lengths and
   cross sections." *Neutron News* **3**(3), 26–37.
   doi:[10.1080/10448639208218770](https://doi.org/10.1080/10448639208218770)
-  — the one evaluation for every element; there are no per-element overrides.
+  — the one evaluation for every element. The single correction is Hf (below);
+  GSAS-II's per-element pins are gone.
 - **Redistribution actually imported:** the NIST Center for Neutron Research
   table "Neutron scattering lengths and cross sections"
   (<https://www.ncnr.nist.gov/resources/n-lengths/list.html>), NIST's manual
@@ -139,8 +142,13 @@ tables below). Web resources accessed **2026-07-08**.
 - The GSAS-II validation elements (Mn, O, Ga, Sn, Co, Fe) print the same values
   in its `.lst` output.
 - **Known inconsistencies in the printed table:** b and σ_coh = 4π|b|²/100
-  disagree beyond rounding for Sn, Xe, Eu and Hf (Hf's σ_coh = 7.6 b implies
-  7.77 fm, the ITC-edition value). The values are used as printed.
+  disagree beyond rounding for Sn, Xe, Eu and Hf. Sn, Xe and Eu are used as
+  printed. Hf is corrected: NIST's 7.7 fm gives 7.45 b against its σ_coh of
+  7.6 b, while 7.77 fm (the ITC edition and Rauch 2003) fits, so 7.7 is read as
+  an entry error. The generator applies this only while NIST still prints 7.7.
+- **Am:** the table's Am row carries a half-life of 7.37E3 a, i.e. it is the
+  ²⁴³Am value; the common ²⁴¹Am is not tabulated. It is emitted as "243Am", and
+  an Am site must set its isotope.
 
 ### X-ray form factors (`xray.ts`)
 
