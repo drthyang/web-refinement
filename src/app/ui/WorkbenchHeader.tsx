@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { color, fz, mono, radius, shadow, space } from "@/app/theme";
 import type { DemoId } from "@/app/demos";
-import type { HistoryBinding, StepMove } from "@/app/historyBinding";
+import type { HistoryBinding } from "@/app/historyBinding";
 import { HistoryIcon, HistoryPanel, StepArrow, StepText } from "@/app/ui/HistoryPanel";
 
 /** Display face for the MATERIA wordmark — geometric, loaded in index.html. */
@@ -130,6 +130,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
           }))}
         />
       </nav>
+      {history && <CurrentStep binding={history} />}
       {/* Positioned: the History popover hangs from this row's right end. */}
       <div className="wb-header-actions" style={{ position: "relative", marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
         {history && <HistoryMenu binding={history} />}
@@ -371,8 +372,25 @@ function TechniqueChips({ technique }: { technique: "rietveld" | "pdf" | "sc" | 
   );
 }
 
-/** How long the step a back / forward landed on stays beside the arrows. */
-const LANDED_MS = 3000;
+/**
+ * The current step, in the list's own words (StepText), just left of the back /
+ * forward arrows: where a back / forward (the arrows or ⌘Z / ⇧⌘Z) or a new
+ * step left you. Its slot takes the header row's free space without ever
+ * wrapping the row, and the label hides where that space is too narrow to
+ * read, and below 1180px with the arrows (`wb-step-slot`, workbench.css).
+ */
+function CurrentStep({ binding }: { binding: HistoryBinding }): JSX.Element | null {
+  const step = binding.history?.steps.find((s) => s.id === binding.history?.current);
+  if (!step) return null;
+  return (
+    <div className="wb-step-slot">
+      {/* Keyed on the step, so each new current step slides in. */}
+      <span key={step.id} className="wb-step-current" style={currentChip} role="status">
+        <StepText step={step} current />
+      </span>
+    </div>
+  );
+}
 
 /**
  * Back / forward and "History ▾". The popover anchors to the actions row (the
@@ -380,25 +398,10 @@ const LANDED_MS = 3000;
  * content edge, in line with the cards under it. It stays open while you click
  * through steps, so you can compare them on the plot; a click outside or Esc
  * closes it.
- *
- * After a back / forward (the arrows or ⌘Z / ⇧⌘Z) the step it landed on shows
- * for a moment left of the arrows, in the list's own words (StepText).
  */
 function HistoryMenu({ binding }: { binding: HistoryBinding }): JSX.Element {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const { moved } = binding;
-  const [landed, setLanded] = useState<StepMove | null>(null);
-  // A move made before this menu mounted (it remounts after a new load) is old news.
-  const seen = useRef(moved?.n);
-  useEffect(() => {
-    if (!moved || moved.n === seen.current) return;
-    seen.current = moved.n;
-    setLanded(moved);
-    const t = setTimeout(() => setLanded(null), LANDED_MS);
-    return () => clearTimeout(t);
-  }, [moved]);
-  const landedStep = landed ? binding.history?.steps.find((s) => s.id === landed.stepId) : undefined;
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent): void => {
@@ -419,17 +422,9 @@ function HistoryMenu({ binding }: { binding: HistoryBinding }): JSX.Element {
     // display: contents — the three controls are items of the actions row, so
     // they share its gap; the div stays in the DOM for the outside-click test.
     <div ref={ref} style={{ display: "contents" }}>
-      <span className="wb-history-nav" style={{ position: "relative", display: "inline-flex" }}>
-        {landed && landedStep && (
-          // Keyed on the move, so each one restarts the fade.
-          <span key={landed.n} className="wb-step-landed" style={landedChip} role="status">
-            <StepText step={landedStep} current />
-          </span>
-        )}
-        <span style={navPair}>
-          <NavButton onClick={binding.back} title="Back one step (⌘Z / Ctrl+Z)"><StepArrow dir="back" /></NavButton>
-          <NavButton onClick={binding.forward} title="Forward one step (⇧⌘Z / Ctrl+Shift+Z)" divider><StepArrow dir="forward" /></NavButton>
-        </span>
+      <span className="wb-history-nav" style={navPair}>
+        <NavButton onClick={binding.back} title="Back one step (⌘Z / Ctrl+Z)"><StepArrow dir="back" /></NavButton>
+        <NavButton onClick={binding.forward} title="Forward one step (⇧⌘Z / Ctrl+Shift+Z)" divider><StepArrow dir="forward" /></NavButton>
       </span>
       <ActionButton onClick={() => setOpen((o) => !o)} active={open} ariaLabel="History" title={`History: ${n} step${n === 1 ? "" : "s"} — every refinement, load and model change. Click a step to go back to it.`}>
         {/* On a tablet in landscape the label gives way to the icon (workbench.css). */}
@@ -672,19 +667,17 @@ const navPair: CSSProperties = {
 };
 
 /**
- * The step a back / forward landed on, left of the arrows. It floats (absolute)
- * so it never reflows the header, and lets clicks through to whatever it covers
- * on a narrow window. The fade is the `wb-step-landed` animation (workbench.css).
+ * The current step's label: at the right end of its slot, 8px from the arrows,
+ * up to 320px and cut with an ellipsis when the slot is narrower. It slides in
+ * with the `wb-step-current` animation (workbench.css).
  */
-const landedChip: CSSProperties = {
-  position: "absolute",
-  right: "calc(100% + 8px)",
-  top: "50%",
-  zIndex: 30,
+const currentChip: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 7,
+  minWidth: 0,
   maxWidth: 320,
+  marginRight: 8,
   padding: "5px 10px",
   fontSize: fz.small,
   lineHeight: 1.25,
@@ -694,7 +687,6 @@ const landedChip: CSSProperties = {
   border: `1px solid ${color.border}`,
   borderRadius: radius.button,
   boxShadow: "0 4px 14px rgba(25,23,20,0.10)",
-  pointerEvents: "none",
 };
 
 /**
