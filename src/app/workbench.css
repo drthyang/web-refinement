@@ -613,6 +613,25 @@ html {
   }
 }
 
+/* The step a back / forward landed on (header, left of the arrows): in, held,
+ * out over 3s — the header removes it at the end (LANDED_MS). It keeps its
+ * vertical centring in `transform`; the slide uses `translate`. */
+@keyframes wb-step-landed {
+  0% { opacity: 0; translate: 6px 0; }
+  6% { opacity: 1; translate: 0 0; }
+  82% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.wb-step-landed {
+  transform: translateY(-50%);
+  animation: wb-step-landed 3s ease both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-step-landed {
+    animation: none;
+  }
+}
+
 /* Back / forward inside the History popover, and the History button's icon:
  * shown only where the header is too narrow for the full set (see above). */
 .wb-history-nav-inline,

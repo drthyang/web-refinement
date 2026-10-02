@@ -19,7 +19,7 @@ import { TECHNIQUE_LABEL, type PdfWorkspace, type ProjectFile, type SingleCrysta
 import { looksLikeProjectFile, parseProject, projectFileName, restoreHistoryStep, serializeProject } from "@/core/project/io";
 import { moveTo, recordStep, redoTarget, renameStep, undoTarget, type ProjectHistory, type Snapshot, type StepKind } from "@/core/project/history";
 import { clearAutosave, readAutosave, writeAutosave, type AutosaveEntry } from "@/app/autosave";
-import type { HistoryBinding } from "@/app/historyBinding";
+import type { HistoryBinding, StepMove } from "@/app/historyBinding";
 import { defaultProjectTitle, projectFileFor, sessionFromPowderWorkspace, type PowderViewState } from "@/app/projectIo";
 import { downloadText } from "@/app/download";
 import type { MagneticModel } from "@/core/magnetic/types";
@@ -215,6 +215,8 @@ export function App(): JSX.Element {
   // Step history (core/project/history.ts): a tree of snapshots of the session.
   const [history, setHistory] = useState<ProjectHistory | null>(null);
   const [stepRequest, setStepRequest] = useState<StepRequest | null>(null);
+  // The step the last back / forward landed on, for the header's brief label.
+  const [moved, setMoved] = useState<StepMove | null>(null);
   // The previous session found in browser storage, offered on the landing view.
   const [autosaveOffer, setAutosaveOffer] = useState<AutosaveEntry | null>(null);
   // A user-facing problem from the last project open. The app has no status
@@ -294,20 +296,29 @@ export function App(): JSX.Element {
     }, 0);
   }, [stepRequest]);
 
-  /** Go back (or forward) to a step: restored as opening its project would, history kept. */
-  function goToStep(id: string): void {
-    if (!history) return;
+  /**
+   * Go back (or forward) to a step: restored as opening its project would,
+   * history kept. False when the step could not be restored.
+   */
+  function goToStep(id: string): boolean {
+    if (!history) return false;
     let snap: Snapshot;
     try {
       snap = restoreHistoryStep(history, id);
     } catch (e) {
       setNotice(`Could not go back to that step — ${e instanceof Error ? e.message : String(e)}`);
-      return;
+      return false;
     }
     const withLive = recordNow("edit") ?? history; // unrecorded changes become a step first
     setHistory(moveTo(withLive, id));
     applyWorkspace(snap.structures, snap.workspace);
     setMessage(`Went to step ${id}.`);
+    return true;
+  }
+
+  /** Back / forward (buttons or ⌘Z / ⇧⌘Z): go, and tell the header where it landed. */
+  function stepTo(id: string): void {
+    if (goToStep(id)) setMoved((m) => ({ stepId: id, n: (m?.n ?? 0) + 1 }));
   }
 
   /** Back: the parent step — or, with unrecorded changes, the current step itself. */
@@ -316,12 +327,12 @@ export function App(): JSX.Element {
     const snap = liveSnapshot();
     const dirty = snap !== null && recordStep(history, { ...snap, kind: "edit" }) !== history;
     const target = dirty ? history.current : undoTarget(history);
-    if (target) goToStep(target);
+    if (target) stepTo(target);
   }
 
   function stepForward(): void {
     const target = history ? redoTarget(history) : undefined;
-    if (target) goToStep(target);
+    if (target) stepTo(target);
   }
 
   function onRenameStep(id: string, name: string): void {
@@ -333,8 +344,9 @@ export function App(): JSX.Element {
     history,
     recordNow,
     requestStep,
-    goTo: goToStep,
+    goTo: (id) => void goToStep(id),
     rename: onRenameStep,
+    moved,
     ...(history && undoTarget(history) ? { back: stepBack } : {}),
     ...(history && redoTarget(history) ? { forward: stepForward } : {}),
   };

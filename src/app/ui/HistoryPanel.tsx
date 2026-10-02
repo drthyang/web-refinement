@@ -12,7 +12,7 @@
  * scrolls inside it.
  */
 
-import { useEffect, useMemo, useRef, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { childrenOf, lineage, type HistoryStep } from "@/core/project/history";
 import type { HistoryBinding } from "@/app/historyBinding";
 import { color, fz, mono, radius, space, uppercaseLabel } from "@/app/theme";
@@ -113,18 +113,37 @@ function StepRow({ step, current, branches, onGoTo, onRename }: {
         title={current ? "The current step" : `Go back to this step (${step.id}, ${new Date(step.at).toLocaleString()})`}
         aria-current={current ? "step" : undefined}
       >
-        <span style={{ ...glyph, color: current ? color.primary : color.faint }} aria-hidden>{KIND_GLYPH[step.kind]}</span>
-        <span style={labelText}>
-          {step.name && <b style={{ marginRight: 5 }}>{step.name}</b>}
-          <span style={{ color: step.name ? color.secondary : color.ink }}>{step.label}</span>
+        <StepText step={step} current={current}>
           {step.actor === "agent" && <span style={tag}>agent</span>}
           {branches > 0 && <span style={tag} title={`${branches} other branch${branches === 1 ? "" : "es"} start here`}>⑂{branches}</span>}
-        </span>
-        {step.summary.wR !== undefined && <span style={wrChip}>{(100 * step.summary.wR).toFixed(2)}%</span>}
+        </StepText>
         <span style={timeText}>{time}</span>
       </button>
       <button type="button" style={renameButton} onClick={rename} title="Name this step">✎</button>
     </li>
+  );
+}
+
+/**
+ * A step as the list shows it: kind glyph, name (if given), description, wR.
+ * The header's brief "landed on" label after back / forward uses it too, so
+ * the two always read the same. `children` are tags after the description.
+ */
+export function StepText({ step, current = false, children }: {
+  readonly step: HistoryStep;
+  readonly current?: boolean;
+  readonly children?: ReactNode;
+}): JSX.Element {
+  return (
+    <>
+      <span style={{ ...glyph, color: current ? color.primary : color.faint }} aria-hidden>{KIND_GLYPH[step.kind]}</span>
+      <span style={labelText}>
+        {step.name && <b style={{ marginRight: 5 }}>{step.name}</b>}
+        <span style={{ color: step.name ? color.secondary : color.ink }}>{step.label}</span>
+        {children}
+      </span>
+      {step.summary.wR !== undefined && <span style={wrChip}>{(100 * step.summary.wR).toFixed(2)}%</span>}
+    </>
   );
 }
 
