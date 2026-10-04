@@ -24,7 +24,9 @@ describe("instrumentToInstprm", () => {
     expect(out).toContain("Lam:0.1665");
     expect(out).toContain("Polariz.:0.84");
     expect(out).toContain("Source:");
-    expect(out).toContain("W:1.2");
+    // The model holds FWHM² (loader ×8 ln2); the file holds GSAS-II σ² again.
+    const w = Number(out.match(/^W:(.*)$/m)![1]);
+    expect(w).toBeCloseTo(1.2 / (8 * Math.log(2)), 10);
   });
 
   it("writes a CW neutron (PNC) file without X-ray-only keys", () => {

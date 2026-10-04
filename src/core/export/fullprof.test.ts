@@ -57,13 +57,17 @@ describe("structureToPcr", () => {
     expect(pcr).toMatch(/4\.445000\s+4\.445000\s+4\.445000\s+90\.000000\s+90\.000000\s+90\.000000/);
   });
 
-  it("converts an anisotropic ADP to an equivalent B_iso", () => {
+  it("writes an anisotropic ADP as FullProf betas (N_t = 2, Biso 0)", () => {
     const aniso = structureToPcr({
       ...structure,
       sites: [{ label: "Fe1", element: "Fe", position: [0, 0, 0], occupancy: 1, adp: { kind: "anisotropic", uAniso: [0.01, 0.01, 0.01, 0, 0, 0] } }],
     });
-    // U_eq = 0.01 → B_iso = 8π²·0.01 ≈ 0.7896.
-    expect(aniso).toMatch(/Fe1\s+Fe\s+0\.00000\s+0\.00000\s+0\.00000\s+0\.78957/);
+    expect(aniso).toMatch(/Fe1\s+Fe\s+0\.00000\s+0\.00000\s+0\.00000\s+0\.00000\s+1\.00000\s+0\s+0\s+2/);
+    // β11 = 2π²·a*²·U11 = 2π²·0.01/4.445² ≈ 0.009990.
+    const rows = aniso.split("\n");
+    const betas = rows[rows.findIndex((l) => l.startsWith("Fe1")) + 2]!.trim().split(/\s+/).map(Number);
+    expect(betas[0]).toBeCloseTo((2 * Math.PI ** 2 * 0.01) / 4.445 ** 2, 5);
+    expect(betas[3]).toBe(0);
   });
 });
 

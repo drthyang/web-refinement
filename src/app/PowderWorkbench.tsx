@@ -1133,6 +1133,11 @@ export function PowderWorkbench({
       params: withEsd,
       bindings: pBindings,
       otherPhaseIds: session.extraPhases.map((ph) => ph.id),
+      // Every phase, the background basis and the fit range travel too, so the
+      // other program starts from the whole refined model, not just phase 0.
+      phases: session.extraPhases,
+      ...(session.powderProfile.backgroundType !== undefined ? { backgroundType: session.powderProfile.backgroundType } : {}),
+      ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
       ...(instrumentLoaded ? { instrument } : {}),
       ...(refinement ? { refinement } : {}),
       // The user's original files, retained verbatim on load — bundled as-is so

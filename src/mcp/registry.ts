@@ -537,7 +537,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "export_bundle",
     title: "Export cross-check bundle (FullProf / GSAS-II)",
-    description: "Write a refinement as the files another program needs to re-run it — the external cross-check. `target: \"fullprof\"` gives a .pcr + data + README; `\"gsas2\"` gives a CIF + .instprm + data + a GSASIIscriptable build_gpx.py + README. The structure goes out at its REFINED values, applied from `parameters`; pass `result` for the esds and agreement factors in the CIF. Pass the original instrument file as `rawInstrument`: GSAS-II then uses your .instprm verbatim, not a regenerated one that loses detail. In the .pcr, scale, background and the constant-wavelength peak shape are starting values, to free in FullProf before comparing. One phase per bundle. Returns `files` (name + text).",
+    description: "Write a refinement as the files another program needs to re-run it — the external cross-check. `target: \"fullprof\"` gives a .pcr (every phase) + XYDATA/.int data + README; `\"gsas2\"` gives one CIF per phase + .instprm + data + a GSASIIscriptable build_gpx.py (sets fit limits + background) + README. Everything goes out at its REFINED values, applied from `parameters`: structures, zero, peak shape, TOF calibration, preferred orientation, the background curve (pass `backgroundType` if not Chebyshev) and `fitRange`. Pass `result` for the esds and agreement factors in the CIF, and `extraPhases` to include the other phases of a multi-phase fit. Pass the original instrument file as `rawInstrument`: a single-bank GSAS-II .instprm is then patched with the refined profile (all other lines kept) and shipped with the untouched original. Scale factors do not transfer between programs — refine them first. Returns `files` (name + text).",
     inputSchema: {
       target: z.enum(["fullprof", "gsas2"]),
       structure: anyObj.describe("StructureModel as parsed — the refined values come from `parameters`"),
@@ -547,7 +547,9 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
       bindings: anyArr,
       result: anyObj.optional().describe("RefinementResult from the refine call: esds + agreement for the CIF"),
       instrument: anyObj.optional(),
-      extraPhases: anyArr.optional().describe("The other phases of a multi-phase fit; their bindings are left out"),
+      extraPhases: anyArr.optional().describe("The other phases of a multi-phase fit (as loaded) — exported at their refined values"),
+      backgroundType: z.enum(["chebyshev", "cosine", "powerSeries", "linInterpolate", "logInterpolate", "polynomial"]).optional().describe("Background basis the refinement used (default chebyshev)"),
+      fitRange: z.object({ min: z.number().optional(), max: z.number().optional() }).optional().describe("Fit window used — written as FullProf excluded regions / GSAS-II limits"),
       rawInstrument: z.object({ name: z.string(), text: z.string() }).optional().describe("The original instrument file, shipped verbatim"),
       rawData: z.object({ name: z.string(), text: z.string() }).optional().describe("The original data file, shipped verbatim"),
       name: z.string().optional().describe("Base file name (default: the structure name)"),

@@ -76,6 +76,7 @@ import type { SingleCrystalDataset } from "@/core/diffraction/types";
 import { parseFullProfInt, looksLikeFullProfInt } from "@/parsers/fullprofInt";
 import { writeFullProfInt } from "@/core/export/fullprofInt";
 import { refinementBundle, type BundleTarget } from "@/core/export/bundle";
+import type { BackgroundType } from "@/core/diffraction/background";
 import type { CifRefinementMeta } from "@/core/export/cif";
 import { parseHklRows } from "@/parsers/hkl";
 import { isCifReflectionLoop, parseFcf, parseShelxHkl } from "@/parsers/shelxHkl";
@@ -1900,6 +1901,8 @@ export function export_bundle(args: {
   rawInstrument?: { name: string; text: string };
   rawData?: { name: string; text: string };
   name?: string;
+  backgroundType?: BackgroundType;
+  fitRange?: { min?: number; max?: number };
 }): { target: BundleTarget; files: { name: string; text: string }[] } {
   const data = args.pattern ?? args.dataset;
   if (!data || (args.pattern && args.dataset)) {
@@ -1918,6 +1921,9 @@ export function export_bundle(args: {
     params,
     bindings: args.bindings,
     otherPhaseIds: (args.extraPhases ?? []).map((s) => s.id),
+    phases: args.extraPhases ?? [],
+    ...(args.backgroundType ? { backgroundType: args.backgroundType } : {}),
+    ...(args.fitRange ? { fitRange: args.fitRange } : {}),
     ...(args.name ? { name: args.name } : {}),
     ...(args.instrument ? { instrument: args.instrument } : {}),
     ...(refinement ? { refinement } : {}),
