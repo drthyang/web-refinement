@@ -183,7 +183,7 @@ export interface TofSeed {
   readonly beta1?: number;
   readonly betaQ?: number;
   /**
-   * σ² = σ₀ + σ₁·d² + σ₂·d⁴ + σ_q/d² (Gaussian variance, µs² — GSAS-II
+   * σ² = σ₀ + σ₁·d² + σ₂·d⁴ + σ_q·d (Gaussian variance, µs² — GSAS-II
    * sig-0/-1/-2/-q). Individual terms may be negative in a real calibration
    * (e.g. POWGEN sig-0 ≈ −41, sig-1 ≈ −569); only the sum must stay positive.
    */
