@@ -112,7 +112,8 @@ const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", w
 
 /** Parse a CIF/mCIF into a structure (and magnetic model, when present). A
  *  CIF without symmetry operations whose space group fits several settings is
- *  an error naming them; `spaceGroupSetting` picks one. */
+ *  an error naming them; `spaceGroupSetting` picks one. A CIF with no symmetry
+ *  at all needs `spaceGroupSetting: "P 1"`. */
 export function parse_structure(args: { cif: string; id?: string; spaceGroupSetting?: string }): { structure: StructureModel; magnetic: MagneticModel | null } {
   const { structure, magnetic } = parseMagneticCif(
     args.cif,

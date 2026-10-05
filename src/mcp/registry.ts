@@ -63,11 +63,11 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "parse_structure",
     title: "Parse structure (CIF/mCIF)",
-    description: "Parse CIF/mCIF text into a StructureModel (cell, sites, space group) and any magnetic model. The entry point: feed its `structure` to build_refinement / interpret_structure. The setting is never guessed: a CIF with no symmetry operations whose symbol or number fits several settings (e.g. \"F d -3 m\", origin choice 1 or 2) is an error listing them — pass the right one as `spaceGroupSetting`.",
+    description: "Parse CIF/mCIF text into a StructureModel (cell, sites, space group) and any magnetic model. The entry point: feed its `structure` to build_refinement / interpret_structure. The setting is never guessed: a CIF with no symmetry operations whose symbol or number fits several settings (e.g. \"F d -3 m\", origin choice 1 or 2) is an error listing them — pass the right one as `spaceGroupSetting`. A CIF with no symmetry at all is an error too; pass \"P 1\" only if it lists every atom in the cell (diffpy writes such files).",
     inputSchema: {
       cif: z.string().describe("CIF or mCIF file text"),
       id: z.string().optional(),
-      spaceGroupSetting: z.string().optional().describe("Extended H-M symbol of the setting, e.g. \"F d -3 m:2\" or \"R -3 m:H\"; only used when the CIF lists no symmetry operations"),
+      spaceGroupSetting: z.string().optional().describe("Extended H-M symbol of the setting, e.g. \"F d -3 m:2\" or \"R -3 m:H\", or \"P 1\" for a CIF with no symmetry whose atom list is the whole cell; only used when the CIF lists no symmetry operations"),
     },
     fileInput: { text: "cif" },
     handler: tools.parse_structure,

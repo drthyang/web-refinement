@@ -26,9 +26,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { dataExists, readData } from "@/testSupport/data";
-import { readMcifMomentLoop } from "@/testSupport/mn3snMcif";
+import { readMcifMomentLoop, readMcifStructure } from "@/testSupport/mn3snMcif";
 import { parseFgr, fgrToPattern, type FgrFit } from "@/parsers/fgrData";
-import { parseCif, parseMagneticCif } from "@/parsers/cif";
+import { parseCif } from "@/parsers/cif";
 import { buildPdfSpec, buildPdfProblem } from "@/core/workflow/pdf";
 import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
 import {
@@ -163,7 +163,7 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF golden (POWGEN, local-on
   it("B: mPDF from the externally refined mCIF moments matches the measured Gdiff", () => {
     const g = loadGolden();
     const fgr = loadFgr(g);
-    const { structure } = parseMagneticCif(readData(`${DIR}/${g.mcif}`), "mn3sn-mag");
+    const structure = readMcifStructure(readData(`${DIR}/${g.mcif}`), "mn3sn-mag");
     const moments = readMcifMomentLoop(readData(`${DIR}/${g.mcif}`));
     expect(moments.size).toBe(12);
 
@@ -241,7 +241,7 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF golden (POWGEN, local-on
     const fx = JSON.parse(readData(POINTWISE)) as PointwiseFixture;
 
     // Spins exactly as in Test B: mCIF crystal-axis components → Cartesian μB.
-    const { structure } = parseMagneticCif(readData(`${DIR}/${g.mcif}`), "mn3sn-mag");
+    const structure = readMcifStructure(readData(`${DIR}/${g.mcif}`), "mn3sn-mag");
     const moments = readMcifMomentLoop(readData(`${DIR}/${g.mcif}`));
     const spins: MpdfSpin[] = structure.sites
       .filter((s) => moments.has(s.label))

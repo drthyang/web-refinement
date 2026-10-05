@@ -224,7 +224,7 @@ export function App(): JSX.Element {
   const [notice, setNotice] = useState<string | null>(null);
   // When a CIF names a space group that fits several settings (e.g. "F d -3 m",
   // origin choice 1 or 2) and lists no operations, the user picks one here —
-  // the setting is never guessed.
+  // the setting is never guessed. A CIF with no symmetry at all is offered P 1.
   const [settingChoice, setSettingChoice] = useState<{
     readonly candidates: readonly SpaceGroupSettingInfo[];
     readonly pick: (symbol: string) => void;
@@ -387,13 +387,14 @@ export function App(): JSX.Element {
   }, []);
 
   /** Show a CIF that could not be read — and, when its space group fits
-   *  several settings, offer them so the user can choose and retry. */
+   *  several settings, offer them so the user can choose and retry. A file
+   *  with no symmetry at all gets one offer: P 1, its atoms as the whole cell. */
   function reportCifError(prefix: string, e: unknown, retry: (setting: string) => void): void {
     const text = `${prefix}: ${e instanceof Error ? e.message : String(e)}`;
     setMessage(text);
     setNotice(text);
     setSettingChoice(
-      e instanceof SpaceGroupSettingError && e.candidates.length > 1
+      e instanceof SpaceGroupSettingError && e.candidates.length > 0
         ? { candidates: e.candidates, pick: (symbol) => { setNotice(null); setSettingChoice(null); retry(symbol); } }
         : null,
     );
