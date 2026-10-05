@@ -9,8 +9,10 @@ import {
   latticeCenteringTranslations,
   resolveSpaceGroupSetting,
   SpaceGroupSettingError,
+  settingForOperations,
   spaceGroupFromSetting,
   spaceGroupSettings,
+  spaceGroupSymbol,
 } from "@/core/crystal/spaceGroups";
 import { SPACE_GROUP_DATA } from "@/core/crystal/spaceGroupData";
 import { transformSpaceGroup } from "@/core/crystal/settings";
@@ -424,5 +426,24 @@ describe("all 564 gemmi settings, resolved without guessing", () => {
     expect(() => buildSpaceGroup(14, cUnique)).toThrow(SpaceGroupSettingError);
     expect(buildSpaceGroup("P 1 1 21/b", cUnique).number).toBe(14);
     expect(buildSpaceGroup("P21/c", { ...cUnique, beta: 104, gamma: 90 }).number).toBe(14);
+  });
+});
+
+describe("naming a structure from its operations alone", () => {
+  it("identifies every tabulated setting from its own operations, in any order", () => {
+    for (const e of SPACE_GROUP_DATA) {
+      const ops = e.ops.map(parseSymmetryOperation).reverse();
+      expect(settingForOperations(ops)?.hall, extendedSymbol(e)).toBe(e.hall);
+    }
+  });
+
+  it("names a symbol-less group by its setting, and an origin-shifted one not at all", () => {
+    const fd3m2 = buildSpaceGroup("F d -3 m:2");
+    expect(spaceGroupSymbol({ operations: fd3m2.operations })).toBe("F d -3 m:2");
+    expect(spaceGroupSymbol({ hermannMauguin: "Fd-3m:2", operations: fd3m2.operations })).toBe("Fd-3m:2");
+    // P -1 with its centre at (1/4, 0, 0) is no tabulated setting.
+    const shifted = ["x,y,z", "-x+1/2,-y,-z"].map(parseSymmetryOperation);
+    expect(settingForOperations(shifted)).toBeUndefined();
+    expect(spaceGroupSymbol({ operations: shifted })).toBeUndefined();
   });
 });

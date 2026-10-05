@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { StructureModel } from "@/core/crystal/types";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { structureToPcr } from "@/core/export/fullprof";
+import { buildSpaceGroup } from "@/core/crystal/spaceGroups";
 
 const identity = parseSymmetryOperation("x,y,z");
 const structure: StructureModel = {
@@ -150,5 +151,22 @@ describe("structureToPcr — TOF", () => {
     expect(bb[3]).toBeCloseTo(0.031, 4); // beta0
     expect(bb[4]).toBeCloseTo(2.1, 4); // alph1
     expect(bb[5]).toBeCloseTo(5.5, 4); // beta1
+  });
+});
+
+describe("structureToPcr — space-group symbol of a phase read without one", () => {
+  const symbolLine = (pcr: string): string => pcr.split("\n").find((l) => l.includes("<--Space group symbol"))!.trim();
+
+  it("names the setting its operations are (it was written as P 1)", () => {
+    const ops = buildSpaceGroup("P 1 21/n 1").operations;
+    const pcr = structureToPcr({ ...structure, spaceGroup: { operations: ops } });
+    expect(symbolLine(pcr)).toMatch(/^P 1 21\/n 1\s+<--Space group symbol$/);
+  });
+
+  it("refuses operations that no symbol reproduces", () => {
+    const shifted = ["x,y,z", "-x+1/2,-y,-z"].map(parseSymmetryOperation);
+    expect(() => structureToPcr({ ...structure, spaceGroup: { operations: shifted } })).toThrow(
+      /FullProf export: phase "MnO" has 2 symmetry operations, no space-group symbol/,
+    );
   });
 });
