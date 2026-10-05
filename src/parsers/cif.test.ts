@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { StructureModel } from "@/core/crystal/types";
-import { parseCif, parseCifNumber, parseTypeSymbol } from "@/parsers/cif";
+import { parseCif, parseCifNumber, parseMagneticCif, parseTypeSymbol } from "@/parsers/cif";
 import { siteIonId } from "@/core/magnetic/magneticIons";
 import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
 import { cellVolume } from "@/core/crystal/unitCell";
@@ -372,6 +372,144 @@ describe("parseCif — multi-block + quirky ADP fields (NiTe2O5 regression)", ()
       expect(te1.adp.uAniso[2]).toBeCloseTo(0.0069, 4);
     }
     expect(model.sites.every((s) => s.adp.kind === "anisotropic")).toBe(true);
+  });
+});
+
+describe("CIF 1.1 syntax: loops and text fields are read as tokens, not lines", () => {
+  const CELL = `data_x
+_cell_length_a 5
+_cell_length_b 6
+_cell_length_c 7
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+`;
+  const ATOM_TAGS = `loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+`;
+
+  it("keeps reading a loop past a blank line or a comment (atoms after it used to be dropped)", () => {
+    const model = parseCif(`${CELL}_symmetry_space_group_name_H-M 'P 1'
+${ATOM_TAGS}Fe1 Fe 0 0 0
+
+# oxygen
+O1 O 0.5 0.5 0.5   # mid-line comment
+`);
+    expect(model.sites.map((s) => [s.label, s.element, s.position])).toEqual([
+      ["Fe1", "Fe", [0, 0, 0]],
+      ["O1", "O", [0.5, 0.5, 0.5]],
+    ]);
+  });
+
+  it("reads a row wrapped over two lines as one row", () => {
+    const model = parseCif(`${CELL}_symmetry_space_group_name_H-M 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_adp_type
+_atom_site_U_iso_or_equiv
+Fe1 Fe 0.1 0.2 0.3
+    Uani 0.01
+O1 O 0.5 0.5 0.5 Uiso 0.02
+loop_
+_atom_site_aniso_label
+_atom_site_aniso_U_11
+_atom_site_aniso_U_22
+_atom_site_aniso_U_33
+_atom_site_aniso_U_12
+_atom_site_aniso_U_13
+_atom_site_aniso_U_23
+Fe1 0.011 0.012 0.013
+    0.001 0.002 0.003
+`);
+    expect(model.sites).toHaveLength(2);
+    const fe = model.sites[0]!;
+    expect(fe.position).toEqual([0.1, 0.2, 0.3]);
+    expect(fe.adp).toEqual({ kind: "anisotropic", uAniso: [0.011, 0.012, 0.013, 0.001, 0.002, 0.003] });
+    expect(model.sites[1]!.adp).toEqual({ kind: "isotropic", bIso: EIGHT_PI_SQUARED * 0.02 });
+  });
+
+  it("reads every operation when several share a line (P -1 was read as P 1)", () => {
+    const model = parseCif(`${CELL}_symmetry_space_group_name_H-M 'P -1'
+loop_
+_symmetry_equiv_pos_as_xyz
+'x, y, z' '-x, -y, -z'
+${ATOM_TAGS}Fe1 Fe 0.1 0.2 0.3
+`);
+    expect(model.spaceGroup.operations.map((o) => o.xyz)).toEqual(buildSpaceGroup("P -1").operations.map((o) => o.xyz));
+  });
+
+  it("treats a semicolon text field as one value, even when it holds tags, loop_ or data_", () => {
+    const model = parseCif(`${CELL}_symmetry_space_group_name_H-M 'P 1'
+_publ_section_comment
+;
+Compared with the earlier report:
+_cell_length_a 9.99
+loop_
+_atom_site_label
+data_old
+;
+${ATOM_TAGS}Fe1 Fe 0 0 0
+`);
+    expect(model.cell.a).toBe(5); // not 9.99 from the text
+    expect(model.sites.map((s) => s.label)).toEqual(["Fe1"]);
+  });
+
+  it("reads a value on the line after its tag, and an unquoted multi-word symbol", () => {
+    const nextLine = parseCif(`${CELL}_symmetry_space_group_name_H-M
+'P -1'
+${ATOM_TAGS}Fe1 Fe 0.1 0.2 0.3
+`);
+    expect(nextLine.spaceGroup.hermannMauguin).toBe("P -1");
+    // Not valid CIF, but common: the words after the tag on its line are the value.
+    const unquoted = parseCif(`${CELL}_symmetry_space_group_name_H-M P 1 21/c 1
+${ATOM_TAGS}Fe1 Fe 0.1 0.2 0.3
+`.replace("_cell_angle_beta 90", "_cell_angle_beta 100"));
+    expect(unquoted.spaceGroup.hermannMauguin).toBe("P 1 21/c 1");
+    expect(unquoted.spaceGroup.operations).toHaveLength(4);
+  });
+
+  it("still reads MAGNDATA rows that carry an untagged moment column (one row per line)", () => {
+    const { structure, magnetic } = parseMagneticCif(`${CELL}_space_group_magn.name_BNS "P-1'"
+loop_
+_space_group_symop_magn_operation.id
+_space_group_symop_magn_operation.xyz
+1 x,y,z,+1 mx,my,mz
+2 -x,-y,-z,-1 -mx,-my,-mz
+${ATOM_TAGS}Mn1 Mn 0.1 0.2 0.3
+loop_
+_atom_site_moment.label
+_atom_site_moment.crystalaxis_x
+_atom_site_moment.crystalaxis_y
+_atom_site_moment.crystalaxis_z
+Mn1 1.5 0 0
+`);
+    expect(structure.spaceGroup.operations.map((o) => [o.xyz, o.timeReversal])).toEqual([
+      ["x,y,z", 1],
+      ["-x,-y,-z", -1],
+    ]);
+    expect(magnetic?.moments[0]?.components).toEqual([1.5, 0, 0]);
+  });
+
+  it("skips any whitespace between tokens, including a byte-order mark", () => {
+    const model = parseCif(`\uFEFF${CELL}_symmetry_space_group_name_H-M\u00A0'P 1'\n${ATOM_TAGS}Fe1\fFe 0 0 0\n`);
+    expect(model.sites.map((s) => [s.label, s.element])).toEqual([["Fe1", "Fe"]]);
+  });
+
+  it("rejects a loop whose values do not fill its rows instead of shifting columns", () => {
+    const short = `${CELL}_symmetry_space_group_name_H-M 'P 1'
+${ATOM_TAGS}Fe1 Fe 0 0 0
+O1 O 0.5 0.5
+`;
+    expect(() => parseCif(short)).toThrow(/_atom_site_label .*9 values .*rows of 5 columns/);
+    expect(() => parseCif(`${CELL}_publ_section_comment\n;\nnever closed\n`)).toThrow(/never closed/);
   });
 });
 

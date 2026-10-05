@@ -384,7 +384,9 @@ Conventions are pinned in
 ## Input and output
 
 **Supported: input**
-- Structures: CIF and mCIF.
+- Structures: CIF and mCIF, read as CIF 1.1 tokens: text fields, comments, and
+  loop rows that wrap or share a line. A loop whose values do not fill its rows
+  is an error.
 - Powder patterns: two- or three-column text (x y [σ]), the GSAS-II CSV export,
   ILL powder files, and GSAS standard histograms (`.gsa`, `.gss`, `.fxye`).
 - Instrument files: GSAS-II `.instprm`, classic GSAS `.prm`, and FullProf `.irf`
@@ -412,6 +414,8 @@ Conventions are pinned in
   `CONST` bank needs its unit set by hand.
 
 **Not yet**
+- CIF: DDLm-style dotted names for the cell and atom sites
+  (`_cell.length_a`), and the esds of input values (they are dropped).
 - `.pcr` export for single-crystal and multi-phase refinements.
 - Bond-length and angle tables in the report.
 - Saving and opening projects through the agent tools.

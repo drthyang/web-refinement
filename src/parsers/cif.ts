@@ -1,10 +1,9 @@
 /**
- * Minimal CIF parser sufficient for GSAS-II-exported structure CIFs: unit cell,
- * space-group symmetry operations, and atom sites. Handles the esd-in-
- * parentheses notation (e.g. "5.41317(8)") and quoted values.
- *
- * Not a general CIF reader: it assumes one data row per line inside loops, which
- * holds for the files this workbench consumes. Unknown items are ignored.
+ * CIF reader for structures: unit cell, space-group symmetry operations, and
+ * atom sites. Reads CIF 1.1 syntax as a token stream — comments, quoted
+ * strings, semicolon text fields, values on the line after their tag, loop rows
+ * that wrap or share a line — and the esd-in-parentheses notation (e.g.
+ * "5.41317(8)", the esd is dropped). Unknown items are ignored.
  */
 
 import type { AtomSite, DisplacementParameters, SpaceGroup, StructureModel, SymmetryOperation, UnitCell } from "@/core/crystal/types";
@@ -74,19 +73,123 @@ function elementFromLabel(label: string): string {
   return element;
 }
 
-function tokenizeLine(line: string): string[] {
-  const tokens: string[] = [];
-  const re = /'([^']*)'|"([^"]*)"|(\S+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(line)) !== null) {
-    tokens.push(m[1] ?? m[2] ?? m[3] ?? "");
+/** One CIF token. `quoted` marks a quoted string or a semicolon text field:
+ *  always a value, never a tag, a reserved word or the null `?`/`.`. */
+interface CifToken {
+  readonly text: string;
+  readonly quoted: boolean;
+  /** 1-based line the token starts on. */
+  readonly line: number;
+}
+
+/** Split one line (no text field) into tokens. A comment starts with `#` at a
+ *  token boundary. A quoted string ends at its quote followed by whitespace or
+ *  the end of the line, so 'O'Brien' is one value; an unterminated quote is
+ *  read as a bare word. */
+function tokenizeLine(line: string, lineNo: number, out: CifToken[]): void {
+  let i = 0;
+  while (i < line.length) {
+    const c = line[i]!;
+    if (/\s/.test(c)) {
+      i++; // any whitespace, including a byte-order mark
+      continue;
+    }
+    if (c === "#") return;
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < line.length && !(line[j] === c && (j + 1 === line.length || /\s/.test(line[j + 1]!)))) j++;
+      if (j < line.length) {
+        out.push({ text: line.slice(i + 1, j), quoted: true, line: lineNo });
+        i = j + 1;
+        continue;
+      }
+    }
+    let j = i;
+    while (j < line.length && !/\s/.test(line[j]!)) j++;
+    out.push({ text: line.slice(i, j), quoted: false, line: lineNo });
+    i = j;
+  }
+}
+
+/**
+ * CIF 1.1 tokens. A line starting with `;` opens a text field that runs to the
+ * next line starting with `;`; its lines are one value, so a `_tag`, `loop_` or
+ * `data_` inside it is text, not syntax.
+ */
+function tokenizeCif(text: string): CifToken[] {
+  const lines = text.split(/\r\n|\r|\n/);
+  const tokens: CifToken[] = [];
+  for (let n = 0; n < lines.length; n++) {
+    const line = lines[n]!;
+    if (!line.startsWith(";")) {
+      tokenizeLine(line, n + 1, tokens);
+      continue;
+    }
+    const body = [line.slice(1)];
+    let end = n + 1;
+    while (end < lines.length && !lines[end]!.startsWith(";")) body.push(lines[end++]!);
+    if (end === lines.length) throw new Error(`CIF line ${n + 1}: the text field opened by ";" is never closed`);
+    tokens.push({ text: body.join("\n").trim(), quoted: true, line: n + 1 });
+    tokenizeLine(lines[end]!.slice(1), end + 1, tokens);
+    n = end;
   }
   return tokens;
 }
 
+/** The reserved word a token is (`data_<name>` → "data_"), if any. */
+function reservedWord(t: CifToken): string | undefined {
+  if (t.quoted) return undefined;
+  const lower = t.text.toLowerCase();
+  if (lower.startsWith("data_")) return "data_";
+  if (lower.startsWith("save_")) return "save_";
+  return lower === "loop_" || lower === "global_" || lower === "stop_" ? lower : undefined;
+}
+
+const isTag = (t: CifToken): boolean => !t.quoted && t.text.startsWith("_");
+
 interface Loop {
   readonly headers: string[];
   readonly rows: string[][];
+  /** Set when the values do not fill whole rows; reading the loop throws it. */
+  readonly malformed?: string;
+}
+
+/**
+ * Rows of a loop. CIF puts rows anywhere — wrapped over lines, several to a
+ * line — so the values are cut into rows of `headers.length`. One exception
+ * keeps a non-conformant layout readable as before: when every line holds the
+ * same number of values, more than one row's worth but not a whole number of
+ * rows (MAGNDATA's `1 x,y,z,+1 mx,my,mz` under two tags), each line is a row
+ * and the extra values are ignored. Values that cannot be cut into rows mark
+ * the loop malformed instead of shifting every later column.
+ */
+function loopRows(headers: string[], values: CifToken[]): Pick<Loop, "rows" | "malformed"> {
+  const n = headers.length;
+  if (values.length === 0) return { rows: [] };
+  const perLine: string[][] = [];
+  let last = -1;
+  for (const v of values) {
+    if (v.line !== last) perLine.push([]);
+    perLine[perLine.length - 1]!.push(v.text);
+    last = v.line;
+  }
+  const width = perLine[0]!.length;
+  const uniform = perLine.every((r) => r.length === width);
+  if (n > 0 && uniform && width > n && width % n !== 0) return { rows: perLine };
+  // Every line short by the same count, and not a clean wrap of a row over
+  // several lines: a column is missing, so cutting rows would misalign them.
+  const missingColumn = uniform && width < n && n % width !== 0;
+  if (n > 0 && !missingColumn && values.length % n === 0) {
+    const rows: string[][] = [];
+    for (let i = 0; i < values.length; i += n) rows.push(values.slice(i, i + n).map((v) => v.text));
+    return { rows };
+  }
+  return {
+    rows: [],
+    malformed:
+      `CIF loop ${headers[0] ?? "(no tags)"} (line ${values[0]!.line}): ${values.length} values ` +
+      `in lines of ${[...new Set(perLine.map((r) => r.length))].join("/")} do not fill rows of ${n} columns`,
+  };
 }
 
 interface ParsedCif {
@@ -109,16 +212,13 @@ function parseCifBlocks(text: string): ParsedCif {
     if (items.size > 0 || loops.length > 0) blocks.push({ items, loops });
   };
 
-  const lines = text.split(/\r?\n/);
+  const tokens = tokenizeCif(text);
+  const isValue = (t: CifToken | undefined): t is CifToken => t !== undefined && !isTag(t) && reservedWord(t) === undefined;
   let i = 0;
-  while (i < lines.length) {
-    const raw = lines[i]!;
-    const line = raw.trim();
-    if (line === "" || line.startsWith("#")) {
-      i++;
-      continue;
-    }
-    if (line.toLowerCase().startsWith("data_")) {
+  while (i < tokens.length) {
+    const t = tokens[i]!;
+    const word = reservedWord(t);
+    if (word === "data_") {
       // New data block — start fresh so blocks never merge.
       flush();
       items = new Map<string, string>();
@@ -126,35 +226,32 @@ function parseCifBlocks(text: string): ParsedCif {
       i++;
       continue;
     }
-    if (line.toLowerCase() === "loop_") {
+    if (word === "loop_") {
       i++;
       const headers: string[] = [];
-      while (i < lines.length && lines[i]!.trim().startsWith("_")) {
-        headers.push(lines[i]!.trim().split(/\s+/)[0]!);
-        i++;
-      }
-      const rows: string[][] = [];
-      while (i < lines.length) {
-        const rl = lines[i]!.trim();
-        if (rl === "" || rl.startsWith("_") || rl.startsWith("#") || rl.toLowerCase() === "loop_" || rl.toLowerCase().startsWith("data_")) {
-          break;
-        }
-        rows.push(tokenizeLine(rl));
-        i++;
-      }
-      loops.push({ headers, rows });
+      while (i < tokens.length && isTag(tokens[i]!)) headers.push(tokens[i++]!.text);
+      const values: CifToken[] = [];
+      while (isValue(tokens[i])) values.push(tokens[i++]!);
+      loops.push({ headers, ...loopRows(headers, values) });
       continue;
     }
-    if (line.startsWith("_")) {
-      const tokens = tokenizeLine(line);
-      const key = tokens[0]!.toLowerCase();
-      if (tokens.length >= 2) {
-        items.set(key, tokens.slice(1).join(" "));
-      }
+    if (isTag(t)) {
+      const key = t.text.toLowerCase();
+      const value = tokens[i + 1];
       i++;
+      if (isValue(value)) {
+        // Further bare words on the value's line belong to it: a common
+        // non-conformant spelling is `_symmetry_space_group_name_H-M P 21/c`.
+        let text = value.text;
+        i++;
+        while (!value.quoted && isValue(tokens[i]) && !tokens[i]!.quoted && tokens[i]!.line === value.line) {
+          text += ` ${tokens[i++]!.text}`;
+        }
+        items.set(key, text);
+      }
       continue;
     }
-    i++;
+    i++; // global_, save_, stop_, or a stray value
   }
   flush();
 
@@ -166,8 +263,12 @@ function parseCifBlocks(text: string): ParsedCif {
   return blocks.find(hasAtoms) ?? blocks[0]!;
 }
 
+/** The first loop whose tags satisfy `predicate`; throws if that loop's values
+ *  do not fill whole rows, rather than reading misaligned columns. */
 function findLoop(loops: Loop[], predicate: (headers: string[]) => boolean): Loop | undefined {
-  return loops.find((l) => predicate(l.headers.map((h) => h.toLowerCase())));
+  const loop = loops.find((l) => predicate(l.headers.map((h) => h.toLowerCase())));
+  if (loop?.malformed) throw new Error(loop.malformed);
+  return loop;
 }
 
 function parseCell(items: Map<string, string>): UnitCell {
