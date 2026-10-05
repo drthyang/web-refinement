@@ -104,12 +104,12 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "check_cell_symmetry",
     title: "Check cell & space group (Le Bail gate)",
-    description: "The gate BEFORE refining a structure: does the cell index every peak, and does the data respect the space group's systematic absences? A Le Bail fit refines the cell from peak positions alone (free intensities); then every leftover peak must sit on a reflection and every forbidden reflection must carry no intensity (≥ `significance` σ counts). `unindexedPeaks` mean a wrong cell or lattice, or a missing phase — pass known impurities as `extraPhases`. `absences.violated` means the group is too symmetric (a centring or glide the crystal lacks). `absences.untestable` lists forbidden reflections too close to an allowed one to judge. Only d ≥ `dMin` (0.7 Å) is read. It cannot catch a too-LARGE cell (a supercell indexes anything) or a group with too FEW absences — read `limits`. `passed` and `cell` (the Le Bail cell) are the result.",
+    description: "The gate BEFORE refining a structure: does the cell index every peak, and does the data respect the space group's systematic absences? A Le Bail fit refines the cell from peak positions alone (free intensities), with back-to-back-exponential peaks that widen with d on time-of-flight data; then every leftover peak must sit on a reflection and every forbidden reflection must carry no intensity (≥ `significance` σ counts). `unindexedPeaks` mean a wrong cell or lattice, or a missing phase — pass known impurities as `extraPhases`. `absences.violated` means the group is too symmetric (a centring or glide the crystal lacks). `absences.untestable` lists forbidden reflections too close to an allowed one to judge. Only d ≥ `dMin` (0.7 Å) is read. It cannot catch a too-LARGE cell (a supercell indexes anything) or a group with too FEW absences — read `limits`. `passed` and `cell` (the Le Bail cell) are the result.",
     inputSchema: {
       structure: anyObj.describe("StructureModel: its cell and space group are what is checked"),
       pattern: anyObj.describe("PowderPattern from parse_powder_data"),
       instrument: anyObj.optional().describe("InstrumentParameters; required for time-of-flight data (difC)"),
-      extraPhases: anyArr.optional().describe("Phases known to be present (impurities): their reflections index peaks too"),
+      extraPhases: anyArr.optional().describe("Phases known to be present (impurities): fitted alongside, each with its own expansion (±3 %) and peak width, and their reflections index peaks too"),
       fitRange: z.object({ min: z.number(), max: z.number() }).optional().describe("Window on the pattern's own axis"),
       dMin: z.number().positive().optional().describe("Smallest d-spacing read, Å (default 0.7)"),
       significance: z.number().positive().optional().describe("Leftover height, in σ, that counts as observed intensity (default 5)"),

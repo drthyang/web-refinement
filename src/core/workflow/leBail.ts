@@ -7,16 +7,19 @@
  *
  * Iteration (Le Bail 1988): with a current set of intensities I_k, the observed
  * intensity assigned to reflection k is
- *   I_k^obs = Σ_i [ I_k · Ω(i,k) / y_i^calc ] · y_i^obs,
- * where Ω(i,k) is reflection k's (area-normalized) profile at point i. Repeating
- * this converges to a self-consistent partition of the pattern.
+ *   I_k^obs = Σ_i [ I_k · Ω(i,k) / (y_i^calc − b_i) ] · (y_i^obs − b_i),
+ * where Ω(i,k) is reflection k's (area-normalized) profile at point i and b_i
+ * the background. Repeating this converges to a self-consistent partition of
+ * the pattern; an isolated peak gets its whole net area in one cycle. (Dividing
+ * by the gross y_i^calc instead grew each intensity only by the peak-to-
+ * background ratio per cycle, so weak reflections never reached their size.)
  */
 
 import type { UnitCell, SpaceGroup } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { braggTheta } from "@/core/crystal/unitCell";
-import { gaussian, pseudoVoigt, supportTaper, type PeakShape } from "@/core/diffraction/profile";
+import { gaussian, pseudoVoigt, supportTaper, tofBackToBack, type PeakShape, type TofShape } from "@/core/diffraction/profile";
 
 export interface LeBailReflection {
   readonly h: number;
@@ -35,15 +38,65 @@ export interface TofCalibration {
   readonly zero: number;
 }
 
+/**
+ * Back-to-back-exponential TOF peak coefficients (GSAS-II form, µs): rising
+ * edge α = alpha/d, falling edge β = beta0 + beta1/d⁴ + betaQ/d², Gaussian
+ * variance σ² = sig0 + sig1·d² + sig2·d⁴ + sigQ·d. The widths grow with d, as
+ * real TOF resolution does.
+ */
+export interface LeBailTofProfile {
+  readonly alpha: number;
+  readonly beta0: number;
+  readonly beta1?: number;
+  readonly betaQ?: number;
+  readonly sig0?: number;
+  readonly sig1: number;
+  readonly sig2?: number;
+  readonly sigQ?: number;
+}
+
+/** Another phase whose reflections share the pattern (an impurity). */
+export interface LeBailPhase {
+  readonly cell: UnitCell;
+  readonly spaceGroup: SpaceGroup;
+  /** Its own peak broadening: the Gaussian σ (TOF) or the FWHM (constant
+   *  wavelength) times this factor. Default 1. */
+  readonly widthScale?: number;
+}
+
 export interface LeBailOptions {
   readonly fwhm: number;
   readonly shape?: PeakShape;
   readonly eta?: number;
   readonly cycles?: number;
-  readonly background?: number;
+  /** Flat, or one value per pattern point. */
+  readonly background?: number | readonly number[];
   /** Required for a TOF (`xUnit === "tof"`) pattern: without it a reflection's
    *  d-spacing cannot be mapped to a time-of-flight position. */
   readonly tof?: TofCalibration;
+  /** With `shape: "tof"` on a TOF pattern: each reflection gets the
+   *  back-to-back-exponential peak these coefficients give at its d, in place
+   *  of the single `fwhm`. */
+  readonly tofProfile?: LeBailTofProfile;
+  /** Impurity phases, extracted together with the main one. */
+  readonly extraPhases?: readonly LeBailPhase[];
+}
+
+const FWHM_PER_SIGMA = 2 * Math.sqrt(2 * Math.LN2);
+
+/** The back-to-back-exponential coefficients at d. */
+export function tofShapeAt(d: number, p: LeBailTofProfile): TofShape {
+  const alpha = Math.max(p.alpha / d, 1e-9);
+  const beta = Math.max(p.beta0 + (p.beta1 ?? 0) / (d * d * d * d) + (p.betaQ ?? 0) / (d * d), 1e-9);
+  const sig2 = Math.max((p.sig0 ?? 0) + p.sig1 * d * d + (p.sig2 ?? 0) * d * d * d * d + (p.sigQ ?? 0) * d, 1e-6);
+  return { alpha, beta, sigma: Math.sqrt(sig2) };
+}
+
+/** A TOF peak's full width at half maximum (µs), near enough for windows: the
+ *  Gaussian FWHM plus each exponential edge's half-height length. */
+export function tofFwhmAt(d: number, p: LeBailTofProfile): number {
+  const s = tofShapeAt(d, p);
+  return FWHM_PER_SIGMA * s.sigma + Math.LN2 / s.alpha + Math.LN2 / s.beta;
 }
 
 /** Position of a d-spacing on the pattern's own axis (NaN when it cannot be placed). */
@@ -92,9 +145,45 @@ export function dRange(pattern: PowderPattern, tof?: TofCalibration): { dMin: nu
 
 export interface LeBailResult {
   readonly reflections: LeBailReflection[];
+  /** Each extra phase's reflections, in `extraPhases` order. */
+  readonly extraReflections: LeBailReflection[][];
   readonly x: number[];
   readonly yObs: number[];
   readonly yCalc: number[];
+}
+
+/** Indices i with |x_i − center| ≤ half, ascending. A binary search on a
+ *  monotonic grid; a full scan otherwise. */
+function window(x: readonly number[], center: number, half: number, monotonic: 1 | -1 | 0): number[] {
+  const out: number[] = [];
+  const n = x.length;
+  if (monotonic === 0) {
+    for (let i = 0; i < n; i++) if (Math.abs(x[i]! - center) <= half) out.push(i);
+    return out;
+  }
+  // First index whose x is past the window's leading edge.
+  const edge = monotonic === 1 ? center - half : center + half;
+  let lo = 0;
+  let hi = n;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (monotonic === 1 ? x[mid]! < edge : x[mid]! > edge) lo = mid + 1;
+    else hi = mid;
+  }
+  for (let i = lo; i < n && Math.abs(x[i]! - center) <= half * (1 + 1e-12) + 1e-12; i++) {
+    if (Math.abs(x[i]! - center) <= half) out.push(i);
+  }
+  return out;
+}
+
+function monotonicity(x: readonly number[]): 1 | -1 | 0 {
+  let up = true;
+  let down = true;
+  for (let i = 1; i < x.length; i++) {
+    if (x[i]! < x[i - 1]!) up = false;
+    if (x[i]! > x[i - 1]!) down = false;
+  }
+  return up ? 1 : down ? -1 : 0;
 }
 
 export function leBailExtract(
@@ -104,47 +193,77 @@ export function leBailExtract(
   options: LeBailOptions,
 ): LeBailResult {
   const { dMin, dMax } = dRange(pattern, options.tof);
-  const reflections = generateReflections(cell, spaceGroup, dMin, dMax);
+  const phases: LeBailPhase[] = [{ cell, spaceGroup }, ...(options.extraPhases ?? [])];
+  const perPhase = phases.map((ph) => generateReflections(ph.cell, ph.spaceGroup, dMin, dMax));
+  const reflections = perPhase.flat();
+  const phaseOf = perPhase.flatMap((list, p) => list.map(() => p));
   const shape = options.shape ?? "gaussian";
   const eta = options.eta ?? 0.5;
   const fwhm = Math.max(options.fwhm, 1e-4);
-  const bkg = options.background ?? 0;
+  const bkgOpt = options.background ?? 0;
+  const bkgAt = (i: number): number => (typeof bkgOpt === "number" ? bkgOpt : bkgOpt[i] ?? 0);
   const cycles = options.cycles ?? 8;
+  const tofProfile = shape === "tof" && pattern.xUnit === "tof" && options.tof ? options.tofProfile : undefined;
 
   const centers = reflections.map((r) => dToX(pattern, r.d, options.tof));
   const valid = reflections.map((_, i) => Number.isFinite(centers[i]!));
   const x = pattern.points.map((p) => p.x);
   const yObs = pattern.points.map((p) => p.yObs);
+  const order = monotonicity(x);
 
-  const support = 12 * fwhm;
-  // Faded to zero at the support edge: the cell prefit refines fwhm and the
-  // cell by finite differences, and a hard cutoff made yCalc (and each norm_k)
-  // jump whenever a point crossed a moving edge.
-  const rawShape = (xi: number, center: number): number =>
-    (shape === "gaussian" ? gaussian(xi, center, fwhm) : pseudoVoigt(xi, center, fwhm, eta)) *
-    supportTaper(Math.abs(xi - center), support);
+  // Faded to zero at the support edge: the cell prefit refines the widths and
+  // the cell by finite differences, and a hard cutoff made yCalc (and each
+  // norm_k) jump whenever a point crossed a moving edge.
+  const profileOf = (k: number): { support: number; at: (xi: number) => number } => {
+    const center = centers[k]!;
+    const scale = phases[phaseOf[k]!]!.widthScale ?? 1;
+    if (tofProfile) {
+      const s0 = tofShapeAt(reflections[k]!.d, tofProfile);
+      const s = scale === 1 ? s0 : { ...s0, sigma: s0.sigma * scale };
+      // The long β tail sets the reach: e^-8 of the peak at 8 decay lengths.
+      const support = 8 * (FWHM_PER_SIGMA * s.sigma + 1 / s.alpha + 1 / s.beta);
+      return { support, at: (xi) => tofBackToBack(xi - center, s) * supportTaper(Math.abs(xi - center), support) };
+    }
+    const w = fwhm * scale;
+    const support = 12 * w;
+    return {
+      support,
+      at: (xi) => (shape === "gaussian" ? gaussian(xi, center, w) : pseudoVoigt(xi, center, w, eta)) * supportTaper(Math.abs(xi - center), support),
+    };
+  };
 
   // Point-sum-normalized profile Ω_ik (Σ_i Ω_ik = 1) so that the Le Bail
   // partition conserves counts and the reconstruction matches the data
-  // regardless of the grid spacing. norm_k = Σ_i shape(x_i, center_k).
-  const norm = centers.map((center, k) => {
-    if (!valid[k]) return 1;
+  // regardless of the grid spacing. Each reflection's points and Ω values are
+  // computed once; the cycles then touch only those.
+  const support: number[][] = [];
+  const omega: number[][] = [];
+  for (let k = 0; k < reflections.length; k++) {
+    if (!valid[k]) {
+      support.push([]);
+      omega.push([]);
+      continue;
+    }
+    const prof = profileOf(k);
+    const idx = window(x, centers[k]!, prof.support, order);
+    const raw = idx.map((i) => prof.at(x[i]!));
     let s = 0;
-    for (const xi of x) if (Math.abs(xi - center) <= support) s += rawShape(xi, center);
-    return s > 0 ? s : 1;
-  });
-  const omega = (xi: number, k: number): number => rawShape(xi, centers[k]!) / norm[k]!;
+    for (const v of raw) s += v;
+    const norm = s > 0 ? s : 1;
+    support.push(idx);
+    omega.push(raw.map((v) => v / norm));
+  }
 
-  const computeYCalc = (): number[] =>
-    x.map((xi) => {
-      let sum = bkg;
-      for (let k = 0; k < reflections.length; k++) {
-        if (!valid[k]) continue;
-        if (Math.abs(xi - centers[k]!) > support) continue;
-        sum += intensity[k]! * omega(xi, k);
-      }
-      return sum;
-    });
+  const computeYCalc = (): number[] => {
+    const y = x.map((_, i) => bkgAt(i));
+    for (let k = 0; k < reflections.length; k++) {
+      const idx = support[k]!;
+      const om = omega[k]!;
+      const ik = intensity[k]!;
+      for (let j = 0; j < idx.length; j++) y[idx[j]!]! += ik * om[j]!;
+    }
+    return y;
+  };
 
   // Initialize all reflection intensities equal.
   let intensity = reflections.map(() => 1);
@@ -154,13 +273,14 @@ export function leBailExtract(
     const next = intensity.slice();
     for (let k = 0; k < reflections.length; k++) {
       if (!valid[k]) continue;
+      const idx = support[k]!;
+      const om = omega[k]!;
       let acc = 0;
-      for (let i = 0; i < x.length; i++) {
-        const xi = x[i]!;
-        if (Math.abs(xi - centers[k]!) > support) continue;
-        const yc = yCalc[i]!;
-        if (yc <= 1e-12) continue;
-        acc += (intensity[k]! * omega(xi, k) / yc) * (yObs[i]! - bkg);
+      for (let j = 0; j < idx.length; j++) {
+        const i = idx[j]!;
+        const peaks = yCalc[i]! - bkgAt(i);
+        if (peaks <= 1e-12) continue;
+        acc += (intensity[k]! * om[j]! / peaks) * (yObs[i]! - bkgAt(i));
       }
       next[k] = Math.max(acc, 0);
     }
@@ -169,9 +289,16 @@ export function leBailExtract(
 
   const yCalcFinal = computeYCalc();
 
-  const extracted: LeBailReflection[] = reflections
-    .map((r, i) => ({ h: r.h, k: r.k, l: r.l, d: r.d, center: centers[i]!, intensity: intensity[i]! }))
+  const all: (LeBailReflection & { phase: number })[] = reflections
+    .map((r, i) => ({ h: r.h, k: r.k, l: r.l, d: r.d, center: centers[i]!, intensity: intensity[i]!, phase: phaseOf[i]! }))
     .filter((_, i) => valid[i]);
+  const strip = ({ phase: _phase, ...r }: LeBailReflection & { phase: number }): LeBailReflection => r;
 
-  return { reflections: extracted, x, yObs, yCalc: yCalcFinal };
+  return {
+    reflections: all.filter((r) => r.phase === 0).map(strip),
+    extraReflections: phases.slice(1).map((_, p) => all.filter((r) => r.phase === p + 1).map(strip)),
+    x,
+    yObs,
+    yCalc: yCalcFinal,
+  };
 }
