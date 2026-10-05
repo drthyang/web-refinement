@@ -57,6 +57,52 @@ describe("assessRefinement — findings", () => {
     const f = a.findings.find((x) => x.category === "physical");
     expect(f?.severity).toBe("critical");
     expect(f?.parameterIds).toEqual(["Fe1_B"]);
+    expect(f?.summary).toMatch(/Fe1_B refined negative/);
+    expect(f?.evidence?.origin).toBe("refined");
+  });
+
+  it("words a held negative B_iso as an input value, not a refinement result", () => {
+    const a = assessRefinement({
+      result: result(),
+      parameters: [param("Fe1_B", "bIso", -0.3, { fixed: true })],
+      observationCount: 4000,
+    });
+    const f = a.findings.find((x) => x.category === "physical");
+    expect(f?.severity).toBe("critical");
+    expect(f?.summary).toMatch(/Fe1_B is held at -0\.3000/);
+    expect(f?.summary).not.toMatch(/refined/);
+    expect(f?.detail).toMatch(/starting structure or CIF/);
+    expect(f?.detail).not.toMatch(/absorbs an error/);
+    expect(f?.evidence?.origin).toBe("input");
+  });
+
+  it("flags a freed occupancy outside [0, 1] and points at the scale correlation", () => {
+    const a = assessRefinement({
+      result: result(),
+      parameters: [param("occ_Ga1", "occupancy", 1.005)],
+      observationCount: 4000,
+    });
+    const f = a.findings.find((x) => x.category === "physical");
+    expect(f?.severity).toBe("warning");
+    expect(f?.summary).toBe("occ_Ga1 refined to 1.0050, outside [0, 1].");
+    expect(f?.detail).toMatch(/scale\/occupancy correlation/);
+    expect(f?.evidence?.origin).toBe("refined");
+  });
+
+  it("words a held occupancy outside [0, 1] as an input value, with no correlation blame", () => {
+    // The Mn₃Ga 30 K CIF carries Ga1 occupancy 1.005; it stays held in a
+    // scale/background/cell/profile refinement.
+    const a = assessRefinement({
+      result: result(),
+      parameters: [param("occ_Ga1", "occupancy", 1.005, { fixed: true })],
+      observationCount: 4000,
+    });
+    const f = a.findings.find((x) => x.category === "physical");
+    expect(f?.severity).toBe("warning");
+    expect(f?.summary).toBe("occ_Ga1 is held at 1.0050, outside [0, 1].");
+    expect(f?.detail).toMatch(/starting structure or CIF/);
+    expect(f?.detail).not.toMatch(/correlation/);
+    expect(f?.evidence?.origin).toBe("input");
   });
 
   it("gives a physical reason for a known dangerous correlation (scale ↔ background)", () => {
@@ -189,6 +235,15 @@ describe("suggestNextSteps", () => {
     const a = assessRefinement({ result: result(), parameters: [param("Fe1_B", "bIso", -0.3)], observationCount: 4000 });
     const steps = suggestNextSteps(a);
     expect(steps[0]?.addresses).toContain("physical");
+    expect(steps[0]?.action).toMatch(/trace the upstream cause/);
+  });
+
+  it("for a held unphysical value, points at the starting structure instead of the fit", () => {
+    const a = assessRefinement({ result: result(), parameters: [param("Fe1_B", "bIso", -0.3, { fixed: true })], observationCount: 4000 });
+    const steps = suggestNextSteps(a);
+    expect(steps[0]?.addresses).toContain("physical");
+    expect(steps[0]?.action).toMatch(/Correct Fe1_B in the starting structure/);
+    expect(steps[0]?.action).not.toMatch(/upstream cause/);
   });
 
   it("on a clean, good fit points at validation rather than more refinement", () => {
