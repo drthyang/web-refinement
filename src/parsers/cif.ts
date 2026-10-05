@@ -582,7 +582,10 @@ export function parseMagneticCif(text: string, id = "structure", options: CifPar
     spaceGroup: magSg ?? parseSpaceGroup(items, loops, cell, options.spaceGroupSetting),
     sites: parseSites(items, loops),
   };
-  const moments = parseMoments(loops);
+  // Moments are only used with the BNS operations below, so a file without
+  // them never has its moment loop read. diffpy's explicit-P1 mCIFs declare a
+  // symmform column that no row fills; their structure reads, as before.
+  const moments = magSg ? parseMoments(loops) : [];
   // Carry the BNS operations on the magnetic model: the structure factor then
   // expands each moment over the magnetic group with position deduplication.
   // Without them it falls back to the legacy no-dedup expansion, which

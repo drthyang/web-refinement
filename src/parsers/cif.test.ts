@@ -189,6 +189,26 @@ loop_
     expect(parseMagneticCif(text, "ni", { spaceGroupSetting: "P 1" }).structure.spaceGroup.number).toBe(1);
   });
 
+  it("reads a diffpy mCIF as P 1 although its moment loop leaves symmform unfilled", () => {
+    // diffpy declares five moment columns and writes four values per row.
+    // Without BNS operations no magnetic model is built, so that loop is
+    // never read and cannot fail the file.
+    const moments = `loop_
+  _atom_site_moment.label
+  _atom_site_moment.crystalaxis_x
+  _atom_site_moment.crystalaxis_y
+  _atom_site_moment.crystalaxis_z
+  _atom_site_moment.symmform
+  Ni1  0.5  0.0  0.0
+  Ni2 -0.5  0.0  0.0
+`;
+    const text = cifWith("", "4 4 4 90 90 90", "Ni Ni1 0 0 0 1.0\n  Ni Ni2 0.5 0.5 0 1.0") + moments;
+    const { structure, magnetic } = parseMagneticCif(text, "ni", { spaceGroupSetting: "P 1" });
+    expect(structure.spaceGroup.number).toBe(1);
+    expect(structure.sites).toHaveLength(2);
+    expect(magnetic).toBeNull();
+  });
+
   it("rejects 'F d -3 m' without operations: origin choice 1 or 2 must be stated", () => {
     let err: unknown;
     try {
