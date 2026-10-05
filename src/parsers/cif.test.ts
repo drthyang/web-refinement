@@ -173,8 +173,22 @@ loop_
     expect(() => parseCif(cifWith(`_symmetry_space_group_name_H-M  "Zz 99 9"`))).toThrow(/CIF space group: Unknown space group "Zz 99 9"/);
   });
 
-  it("rejects a CIF with no space-group information at all", () => {
-    expect(() => parseCif(cifWith(""))).toThrow(/No space-group information/);
+  it("reads a CIF with no symmetry at all as P 1 (the CIF default x,y,z) and says so", () => {
+    const warnings: string[] = [];
+    const model = parseCif(cifWith("", undefined, "Al Al1 0 0 0 1.0\n  Al Al2 0.5 0.5 0 1.0"), "p1", { onWarning: (w) => warnings.push(w) });
+    expect(model.spaceGroup.number).toBe(1);
+    expect(model.spaceGroup.operations.map((o) => o.xyz)).toEqual(["x,y,z"]);
+    expect(model.sites).toHaveLength(2);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/read as P 1/);
+    // `?` and `.` are no symmetry either; a file that does carry symmetry warns nothing.
+    expect(parseCif(cifWith(`_symmetry_space_group_name_H-M  ?`)).spaceGroup.number).toBe(1);
+    const quiet: string[] = [];
+    parseCif(cifWith(`_symmetry_space_group_name_H-M  'P 1'`), "p1", { onWarning: (w) => quiet.push(w) });
+    expect(quiet).toEqual([]);
+    // A symbol, number or setting the reader cannot resolve stays an error, not P 1.
+    expect(() => parseCif(cifWith(`_symmetry_Int_Tables_number  x`))).toThrow(/No space-group information/);
+    expect(() => parseCif(cifWith(""), "p1", { spaceGroupSetting: "F d -3 m:2" })).toThrow(/No space-group information/);
   });
 
   it("rejects 'F d -3 m' without operations: origin choice 1 or 2 must be stated", () => {

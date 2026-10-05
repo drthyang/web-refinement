@@ -1083,7 +1083,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   async function onLoadParentCif(file: File): Promise<void> {
     try {
       const text = await file.text();
-      const parent = parseCif(text, `parent-${Date.now().toString(36)}`);
+      const parent = parseCif(text, `parent-${Date.now().toString(36)}`, { onWarning: (w) => console.warn(`[status] parent CIF: ${w}`) });
       const set = buildDistortionModes(parent, structure);
       if (set.modes.length === 0) {
         console.error("[status] distortion modes: no child site could be paired with the parent structure — check that both CIFs share the same lattice/setting.");

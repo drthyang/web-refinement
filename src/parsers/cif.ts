@@ -12,7 +12,7 @@ import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import type { Vec3 } from "@/core/math/types";
 import { composeOperations, operationKey, parseMagneticSymmetryOperation, parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { IDENTITY3 } from "@/core/math/mat3";
-import { completeSpaceGroup, SpaceGroupSettingError } from "@/core/crystal/spaceGroups";
+import { buildSpaceGroup, completeSpaceGroup, SpaceGroupSettingError } from "@/core/crystal/spaceGroups";
 import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
 import { elementFromLetters } from "@/core/crystal/elements";
 
@@ -194,9 +194,15 @@ export interface CifParseOptions {
    * the candidates a {@link SpaceGroupSettingError} lists (e.g. "F d -3 m:2").
    */
   readonly spaceGroupSetting?: string;
+  /**
+   * Receives what the reader assumed on the file's behalf. Today that is one
+   * case: a CIF with no symmetry at all is read as P 1 (see parseSpaceGroup).
+   */
+  readonly onWarning?: (message: string) => void;
 }
 
-function parseSpaceGroup(items: Map<string, string>, loops: Loop[], cell?: UnitCell, setting?: string): SpaceGroup {
+function parseSpaceGroup(items: Map<string, string>, loops: Loop[], cell: UnitCell | undefined, options: CifParseOptions): SpaceGroup {
+  const setting = options.spaceGroupSetting;
   const symLoop = findLoop(loops, (h) =>
     h.some((k) => k.includes("space_group_symop_operation_xyz") || k.includes("symmetry_equiv_pos_as_xyz")),
   );
@@ -214,12 +220,25 @@ function parseSpaceGroup(items: Map<string, string>, loops: Loop[], cell?: UnitC
   const numText = cifText(items.get("_symmetry_int_tables_number") ?? items.get("_space_group_it_number"));
   const number = numText !== undefined ? parseInt(numText, 10) : undefined;
 
+  // No symmetry at all — no operations, symbol, Hall symbol or number — is P 1:
+  // the CIF core dictionary's default for _space_group_symop_operation_xyz and
+  // _symmetry_equiv_pos_as_xyz is x,y,z. P1-expanded exports (diffpy.mpdf's
+  // mCIFs) are written this way. An asymmetric unit stripped of its symmetry
+  // would read the same, so the caller is told.
+  if (explicitOps.length === 0 && hm === undefined && hall === undefined && numText === undefined && setting === undefined) {
+    options.onWarning?.(
+      "CIF space group: the file gives no symmetry operations, Hermann–Mauguin symbol, Hall symbol or IT number, " +
+        "so it is read as P 1 (the CIF default operation x,y,z). If its atoms are an asymmetric unit, add the space group to the file.",
+    );
+    return buildSpaceGroup(1);
+  }
+
   // Explicit operations (closed, with the centring the lattice letter implies)
   // are authoritative. Without them the setting is built from the table of all
   // 564 settings, which throws for an unknown, contradictory or ambiguous
   // description — e.g. "F d -3 m" alone, which may be origin choice 1 or 2.
-  // There is no P1 fallback: expanding an asymmetric unit in P1 is silently
-  // wrong.
+  // There is no P1 fallback for those: the file names a group, and expanding
+  // its asymmetric unit in P1 is silently wrong.
   try {
     return completeSpaceGroup(
       {
@@ -338,6 +357,8 @@ function parseSites(loops: Loop[]): AtomSite[] {
  * Parse a CIF string into a StructureModel. Throws a SpaceGroupSettingError
  * when the CIF gives no symmetry operations and its symbol/number is unknown or
  * fits several settings; `options.spaceGroupSetting` picks one of the latter.
+ * A CIF with no symmetry at all is read as P 1 and reported to
+ * `options.onWarning`.
  */
 export function parseCif(text: string, id = "structure", options: CifParseOptions = {}): StructureModel {
   const { items, loops } = parseCifBlocks(text);
@@ -347,7 +368,7 @@ export function parseCif(text: string, id = "structure", options: CifParseOption
     id,
     name,
     cell,
-    spaceGroup: parseSpaceGroup(items, loops, cell, options.spaceGroupSetting),
+    spaceGroup: parseSpaceGroup(items, loops, cell, options),
     sites: parseSites(loops),
   };
 }
@@ -456,7 +477,7 @@ export function parseMagneticCif(text: string, id = "structure", options: CifPar
     id,
     name,
     cell,
-    spaceGroup: magSg ?? parseSpaceGroup(items, loops, cell, options.spaceGroupSetting),
+    spaceGroup: magSg ?? parseSpaceGroup(items, loops, cell, options),
     sites: parseSites(loops),
   };
   const moments = parseMoments(loops);
