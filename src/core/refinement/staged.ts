@@ -30,24 +30,29 @@ export interface RefinementStage {
 /** Per-stage record of what ran and how it ended. */
 export interface StageResult {
   readonly name: string;
-  /** Ids of the parameters free during this stage (cumulative). */
+  /** Ids of the parameters free in `result`'s run (cumulative). */
   readonly freeIds: readonly string[];
+  /** The run the stage kept — or, for a rejected stage, the run that failed. */
   readonly result: RefinementResult;
 
   /** Present when the controller rejected this stage: its newly-freed
    *  parameters were re-fixed and every value reverted to the pre-stage
    *  state before continuing with the next stage. */
   readonly rejected?: { readonly reason: string };
-  /** Newly-freed parameters the controller re-fixed (kept the stage,
-   *  reverted just these to their pre-stage values). */
+  /** Newly-freed parameters the controller re-fixed at their pre-stage
+   *  values; the stage was re-run without them and that run kept. */
   readonly refixed?: readonly { readonly id: string; readonly reason: string }[];
+  /** Newly-freed parameters in a singular direction that stayed free because
+   *  re-fixing them cost fit: degenerate only to first order, at this point. */
+  readonly keptDegenerate?: readonly { readonly id: string; readonly reason: string }[];
 }
 
 export interface StagedRefinementResult {
   /** Parameter objects with their final refined values and esds. */
   readonly parameters: RefinementParameter[];
   readonly stages: StageResult[];
-  /** The last stage's result (full co-refinement); undefined if no stage ran. */
+  /** The last accepted stage's result — the run that produced `parameters`;
+   *  undefined if no stage ran. */
   readonly final?: RefinementResult;
 }
 
@@ -63,12 +68,23 @@ export interface StagedRefinementResult {
  * PARAMETER-level refixing (keep the stage, re-fix the culprit at its
  * pre-stage value) for solver-proven pathologies of individual newly-freed
  * parameters: a singular direction, or a near-perfect correlation. One weak
- * parameter must not discard its well-behaved siblings' gains.
+ * parameter must not discard its well-behaved siblings' gains. The stage is
+ * then RE-RUN from its pre-stage values without the culprits, and that run is
+ * the one kept: the values carried forward are always ones a fit produced.
+ *
+ * A singular direction is a combination the data cannot see, so re-fixing one
+ * member removes it: of k mutually degenerate newcomers, k − 1 are re-fixed
+ * and one stays free. Re-fixing a member the data cannot see costs no fit; a
+ * re-run that fits worse shows the degeneracy holds only to first order at
+ * the current point (symmetry-equivalent sites refined independently, from
+ * equal starting values) — those newcomers then stay free, in the run that
+ * had them free.
  */
 export interface StageGuardOptions {
   /** Master switch. Default true. */
   readonly enabled?: boolean;
-  /** Max tolerated relative wR increase vs the last accepted stage. Default 1e-3. */
+  /** Max tolerated relative wR increase vs the last accepted stage — and what
+   *  re-fixing a degenerate newcomer may cost before it stays free. Default 1e-3. */
   readonly maxWrIncrease?: number;
   /** Reject the stage when a previously-free parameter's esd grows by ≥ this
    *  factor after the addition. Default 5. */
@@ -77,26 +93,41 @@ export interface StageGuardOptions {
   readonly maxCorrelation?: number;
 }
 
+type Refix = { readonly id: string; readonly reason: string };
+
 interface StageGuardVerdict {
   /** Reject the whole stage (revert values, re-fix its additions). */
   readonly stageReason: string | null;
-  /** Individual newly-freed parameters to re-fix while keeping the stage. */
-  readonly refix: { readonly id: string; readonly reason: string }[];
+  /** The fewest newcomers whose re-fixing removes the singular directions. */
+  readonly singular: Refix[];
+  /** Newcomers in a near-perfect correlation outside those directions. */
+  readonly correlated: Refix[];
 }
 
+/** Component (of a unit null direction) below which a parameter does not
+ *  take part in it. */
+const PARTICIPATION = 1e-2;
+
+/** A wR this small is an exact fit to noise-free data, whose differences are
+ *  round-off (the engine's exact-fit threshold). */
+const EXACT_FIT_RWP = 1e-6;
+
+const pct = (wr: number | undefined): string => (wr === undefined ? "?" : `${(100 * wr).toFixed(3)}%`);
+
 function stageGuardVerdict(
-  prev: { wr: number | undefined; esd: ReadonlyMap<string, number>; singular: ReadonlySet<string> },
+  prev: { wr: number | undefined; esd: ReadonlyMap<string, number> },
   result: RefinementResult,
   previouslyFree: readonly string[],
-  newlyFreed: readonly string[],
+  newcomers: readonly string[],
+  keptFree: ReadonlySet<string>,
   guards: StageGuardOptions,
 ): StageGuardVerdict {
-  if (guards.enabled === false) return { stageReason: null, refix: [] };
+  if (guards.enabled === false) return { stageReason: null, singular: [], correlated: [] };
 
   const wr = result.agreement.rWeighted;
   const maxInc = guards.maxWrIncrease ?? 1e-3;
   if (prev.wr !== undefined && wr !== undefined && wr > prev.wr * (1 + maxInc) + 1e-12) {
-    return { stageReason: `wR worsened: ${(100 * prev.wr).toFixed(3)}% → ${(100 * wr).toFixed(3)}%`, refix: [] };
+    return { stageReason: `wR worsened: ${pct(prev.wr)} → ${pct(wr)}`, singular: [], correlated: [] };
   }
   const maxInfl = guards.maxEsdInflation ?? 5;
   for (const id of previouslyFree) {
@@ -104,40 +135,211 @@ function stageGuardVerdict(
     const after = result.esd[id];
     if (before !== undefined && before > 0 && after !== undefined && after > maxInfl * before && after > 1e-8) {
       return {
-        stageReason: `freeing ${newlyFreed.join(", ")} inflated esd(${id}) ${(after / before).toFixed(1)}×`,
-        refix: [],
+        stageReason: `freeing ${newcomers.join(", ")} inflated esd(${id}) ${(after / before).toFixed(1)}×`,
+        singular: [],
+        correlated: [],
       };
     }
   }
 
-  const refix: { id: string; reason: string }[] = [];
-  const fresh = new Set(newlyFreed);
-  // Singular directions the solver reported may name EITHER member of a
-  // degenerate pair. Attribution rule: any singular id that was not singular
-  // in the last accepted stage is evidence against THIS stage's additions —
-  // re-fix the singular ids that are fresh, and when the newly-singular id is
-  // an old parameter (the newcomer shadowed or duplicated it), re-fix the
-  // fresh ones instead.
-  const singularNow = result.diagnostics?.singularParameterIds ?? [];
-  const newSingular = singularNow.filter((id) => !prev.singular.has(id));
-  for (const id of newSingular) {
-    if (fresh.has(id)) refix.push({ id, reason: "singular direction" });
-  }
-  if (newSingular.length > 0 && refix.length === 0) {
-    for (const id of newlyFreed) {
-      refix.push({ id, reason: `made ${newSingular.join(", ")} singular` });
-    }
-  }
+  const candidates = newcomers.filter((id) => !keptFree.has(id));
+  const nullDirections = result.diagnostics?.nullDirections ?? [];
+  const singular = degenerateNewcomers(nullDirections, candidates, [...keptFree]);
+
+  // A parameter in a dropped direction has its covariance confined to the
+  // kept subspace, so its correlations are truncation artifacts (a degenerate
+  // set reads |ρ| = 1 throughout) — the singular rule owns those.
+  const inNull = new Set(nullDirections.flatMap((d) => Object.keys(d).filter((id) => Math.abs(d[id]!) >= PARTICIPATION)));
+  const fresh = new Set(candidates);
+  const correlated: Refix[] = [];
   const maxCorr = guards.maxCorrelation ?? 0.998;
   for (const c of result.diagnostics?.highCorrelations ?? []) {
-    if (Math.abs(c.coefficient) < maxCorr) continue;
+    if (Math.abs(c.coefficient) < maxCorr || inNull.has(c.parameterIdA) || inNull.has(c.parameterIdB)) continue;
     // Re-fix the NEW member of the pair (the older one was fine before).
     const target = fresh.has(c.parameterIdA) ? c.parameterIdA : fresh.has(c.parameterIdB) ? c.parameterIdB : null;
-    if (target && !refix.some((r) => r.id === target)) {
-      refix.push({ id: target, reason: `|ρ|=${Math.abs(c.coefficient).toFixed(4)} with ${target === c.parameterIdA ? c.parameterIdB : c.parameterIdA}` });
+    if (target && !correlated.some((r) => r.id === target)) {
+      correlated.push({ id: target, reason: `|ρ|=${Math.abs(c.coefficient).toFixed(4)} with ${target === c.parameterIdA ? c.parameterIdB : c.parameterIdA}` });
     }
   }
-  return { stageReason: null, refix };
+  return { stageReason: null, singular, correlated };
+}
+
+/**
+ * The fewest newcomers whose re-fixing removes every dropped direction they
+ * take part in. Fixing a parameter removes the directions along its row of the
+ * null basis, so the newcomers to re-fix are those whose rows are linearly
+ * independent — taken latest-declared first (Gram–Schmidt), so the earliest
+ * member of a degenerate set is the one that stays free, and a newcomer that
+ * only duplicates an old parameter is re-fixed while the old one stays free.
+ * Directions among old parameters alone (a pre-existing degeneracy, or an old
+ * parameter pinned on its bound) implicate no newcomer, nor do directions
+ * already `settled` — those of newcomers kept free because re-fixing them
+ * cost fit.
+ */
+function degenerateNewcomers(
+  nullDirections: readonly Readonly<Record<string, number>>[],
+  candidates: readonly string[],
+  settled: readonly string[],
+): Refix[] {
+  if (nullDirections.length === 0) return [];
+  const row = (id: string): number[] => nullDirections.map((d) => d[id] ?? 0);
+  const dot = (a: readonly number[], b: readonly number[]): number => a.reduce((s, x, i) => s + x * b[i]!, 0);
+
+  const basis: number[][] = [];
+  // Orthogonalize a row against the basis; extend the basis when it is new.
+  const addsDirection = (id: string): boolean => {
+    const r = row(id);
+    for (const q of basis) {
+      const t = dot(q, r);
+      for (let m = 0; m < r.length; m++) r[m]! -= t * q[m]!;
+    }
+    const norm = Math.sqrt(dot(r, r));
+    if (norm < PARTICIPATION) return false;
+    basis.push(r.map((x) => x / norm));
+    return true;
+  };
+  for (const id of settled) addsDirection(id);
+  const picked = new Set<string>();
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    if (addsDirection(candidates[i]!)) picked.add(candidates[i]!);
+  }
+
+  // Partners: the parameters a re-fixed one is confounded with, read off the
+  // projector onto the null space (basis-independent).
+  const involved = [...new Set(nullDirections.flatMap((d) => Object.keys(d)))];
+  return candidates.filter((id) => picked.has(id)).map((id) => {
+    const r = row(id);
+    const partners = involved.filter((j) => j !== id && Math.abs(dot(r, row(j))) >= PARTICIPATION);
+    const shown = partners.length > 4 ? `${partners.slice(0, 4).join(", ")} and ${partners.length - 4} more` : partners.join(", ");
+    return { id, reason: partners.length > 0 ? `degenerate with ${shown}` : "no leverage on the data" };
+  });
+}
+
+/** Whether a re-run without some newcomers fits worse than the run with them,
+ *  beyond the stage tolerance — the data does use them. */
+function refixCostsFit(rerun: RefinementResult, withThem: RefinementResult, guards: StageGuardOptions): boolean {
+  const a = rerun.agreement.rWeighted;
+  const b = withThem.agreement.rWeighted;
+  return a !== undefined && b !== undefined && a > b * (1 + (guards.maxWrIncrease ?? 1e-3)) + EXACT_FIT_RWP;
+}
+
+/**
+ * The staged sequence as a sans-io generator: it yields each problem to refine
+ * and receives the result, so the serial and the injectable-refiner drivers
+ * run the SAME loop (as the engine's `refineCore` does for its two drivers).
+ */
+function* stagedCore(
+  parameters: readonly RefinementParameter[],
+  buildProblem: (params: readonly RefinementParameter[]) => RefinementProblem,
+  stages: readonly RefinementStage[],
+  guards: StageGuardOptions,
+): Generator<RefinementProblem, StagedRefinementResult, RefinementResult> {
+  // Work on copies; remember which were caller-fixed so a stage cannot free one
+  // the caller deliberately held (a stage widens the free set, never overrides).
+  const work: RefinementParameter[] = parameters.map((p) => ({ ...p }));
+  const lockedByCaller = new Set(parameters.filter((p) => p.fixed).map((p) => p.id));
+  const freed = new Set<string>();
+  const stageResults: StageResult[] = [];
+  let final: RefinementResult | undefined;
+
+  let lastAcceptedWr: number | undefined;
+  let lastAcceptedEsd: ReadonlyMap<string, number> = new Map();
+  for (const stage of stages) {
+    const newlyFreed: string[] = [];
+    for (const p of work) {
+      if (!lockedByCaller.has(p.id) && stage.select(p) && !freed.has(p.id)) {
+        freed.add(p.id);
+        newlyFreed.push(p.id);
+      }
+    }
+    // No point running a stage that unlocks nothing new.
+    const freeIds = work.filter((p) => freed.has(p.id)).map((p) => p.id);
+    if (freeIds.length === 0) {
+      stageResults.push({ name: stage.name, freeIds: [], result: emptyStage() });
+      continue;
+    }
+
+    const before = new Map(work.map((p) => [p.id, p.value]));
+    const previouslyFree = freeIds.filter((id) => !newlyFreed.includes(id));
+    // Every run of the stage starts from the pre-stage values, so a re-run
+    // without some newcomers is the stage as if they had never been freed.
+    const restart = (): RefinementProblem => {
+      for (const p of work) {
+        p.value = before.get(p.id)!;
+        p.fixed = !freed.has(p.id);
+      }
+      return buildProblem(work);
+    };
+
+    // `result` is always the run of the current `freed` set.
+    let result = yield restart();
+    let rejected: string | null = null;
+    const refixed: Refix[] = [];
+    const kept: Refix[] = [];
+    for (;;) {
+      const newcomers = newlyFreed.filter((id) => freed.has(id));
+      const verdict = stageGuardVerdict(
+        { wr: lastAcceptedWr, esd: lastAcceptedEsd }, result, previouslyFree, newcomers,
+        new Set(kept.map((k) => k.id)), guards,
+      );
+      if (verdict.stageReason !== null) {
+        rejected = verdict.stageReason;
+        break;
+      }
+      if (verdict.singular.length > 0) {
+        for (const r of verdict.singular) freed.delete(r.id);
+        const rerun = yield restart();
+        if (refixCostsFit(rerun, result, guards)) {
+          for (const r of verdict.singular) {
+            freed.add(r.id);
+            kept.push({ id: r.id, reason: `${r.reason}; re-fixing raised wR ${pct(result.agreement.rWeighted)} → ${pct(rerun.agreement.rWeighted)}` });
+          }
+          continue;
+        }
+        refixed.push(...verdict.singular);
+        result = rerun;
+        continue;
+      }
+      if (verdict.correlated.length > 0) {
+        for (const r of verdict.correlated) freed.delete(r.id);
+        refixed.push(...verdict.correlated);
+        result = yield restart();
+        continue;
+      }
+      break;
+    }
+
+    const runFree = work.filter((p) => freed.has(p.id)).map((p) => p.id);
+    if (rejected !== null) {
+      // Revert: this stage's additions come back out; values roll back.
+      for (const id of newlyFreed) freed.delete(id);
+      for (const p of work) {
+        p.value = before.get(p.id)!;
+        p.fixed = !freed.has(p.id);
+      }
+      stageResults.push({ name: stage.name, freeIds: runFree, result, rejected: { reason: rejected } });
+      continue;
+    }
+    for (const p of work) {
+      p.fixed = !freed.has(p.id);
+      const v = result.parameters[p.id];
+      if (v !== undefined) p.value = v;
+      const e = result.esd[p.id];
+      if (e !== undefined) p.esd = e;
+    }
+    stageResults.push({
+      name: stage.name,
+      freeIds: runFree,
+      result,
+      ...(refixed.length ? { refixed } : {}),
+      ...(kept.length ? { keptDegenerate: kept } : {}),
+    });
+    final = result;
+    lastAcceptedWr = result.agreement.rWeighted ?? lastAcceptedWr;
+    lastAcceptedEsd = new Map(runFree.map((id) => [id, result.esd[id] ?? 0]));
+  }
+
+  return { parameters: work, stages: stageResults, ...(final !== undefined ? { final } : {}) };
 }
 
 /**
@@ -156,68 +358,10 @@ export function refineStaged(
   options: Partial<RefinementOptions> = {},
   guards: StageGuardOptions = {},
 ): StagedRefinementResult {
-  // Work on copies; remember which were caller-fixed so a stage cannot free one
-  // the caller deliberately held (a stage widens the free set, never overrides).
-  const work: RefinementParameter[] = parameters.map((p) => ({ ...p }));
-  const lockedByCaller = new Set(parameters.filter((p) => p.fixed).map((p) => p.id));
-  const freed = new Set<string>();
-  const stageResults: StageResult[] = [];
-  let final: RefinementResult | undefined;
-
-  let lastAcceptedWr: number | undefined;
-  let lastAcceptedEsd: ReadonlyMap<string, number> = new Map();
-  let lastAcceptedSingular: ReadonlySet<string> = new Set();
-  for (const stage of stages) {
-    const newlyFreed: string[] = [];
-    for (const p of work) {
-      if (!lockedByCaller.has(p.id) && stage.select(p) && !freed.has(p.id)) {
-        freed.add(p.id);
-        newlyFreed.push(p.id);
-      }
-    }
-    // No point running a stage that unlocks nothing new.
-    const freeIds = work.filter((p) => freed.has(p.id)).map((p) => p.id);
-    if (freeIds.length === 0) {
-      stageResults.push({ name: stage.name, freeIds: [], result: emptyStage() });
-      continue;
-    }
-    for (const p of work) p.fixed = !freed.has(p.id);
-
-    const before = new Map(work.map((p) => [p.id, p.value]));
-    const previouslyFree = freeIds.filter((id) => !newlyFreed.includes(id));
-    const result = refine(buildProblem(work), options);
-    const verdict = stageGuardVerdict({ wr: lastAcceptedWr, esd: lastAcceptedEsd, singular: lastAcceptedSingular }, result, previouslyFree, newlyFreed, guards);
-    if (verdict.stageReason !== null) {
-      // Revert: this stage's additions come back out; values roll back.
-      for (const id of newlyFreed) freed.delete(id);
-      for (const p of work) {
-        p.value = before.get(p.id)!;
-        p.fixed = !freed.has(p.id);
-      }
-      stageResults.push({ name: stage.name, freeIds, result, rejected: { reason: verdict.stageReason } });
-      continue;
-    }
-    const refixSet = new Set(verdict.refix.map((r) => r.id));
-    for (const p of work) {
-      if (refixSet.has(p.id)) {
-        p.value = before.get(p.id)!;
-        p.fixed = true;
-        freed.delete(p.id);
-        continue;
-      }
-      const v = result.parameters[p.id];
-      if (v !== undefined) p.value = v;
-      const e = result.esd[p.id];
-      if (e !== undefined) p.esd = e;
-    }
-    stageResults.push({ name: stage.name, freeIds, result, ...(verdict.refix.length ? { refixed: verdict.refix } : {}) });
-    final = result;
-    lastAcceptedWr = result.agreement.rWeighted ?? lastAcceptedWr;
-    lastAcceptedEsd = new Map(freeIds.filter((id) => !refixSet.has(id)).map((id) => [id, result.esd[id] ?? 0]));
-    lastAcceptedSingular = new Set(result.diagnostics?.singularParameterIds ?? []);
-  }
-
-  return { parameters: work, stages: stageResults, ...(final !== undefined ? { final } : {}) };
+  const gen = stagedCore(parameters, buildProblem, stages, guards);
+  let step = gen.next();
+  while (!step.done) step = gen.next(refine(step.value, options));
+  return step.value;
 }
 
 function emptyStage(): RefinementResult {
@@ -240,9 +384,9 @@ export type StagedRefiner = (
 
 /**
  * `refineStaged` with an injectable (possibly async) refiner, so the staged
- * sequence can run each stage through the parallel evaluator pool. The loop
- * body mirrors `refineStaged` exactly — `staged.test.ts` pins the two to
- * identical results when given the serial refiner.
+ * sequence can run each stage through the parallel evaluator pool. Both drive
+ * the same `stagedCore` loop — `staged.test.ts` pins the two to identical
+ * results when given the serial refiner.
  */
 export async function refineStagedAsync(
   parameters: readonly RefinementParameter[],
@@ -252,62 +396,8 @@ export async function refineStagedAsync(
   refiner: StagedRefiner = refine,
   guards: StageGuardOptions = {},
 ): Promise<StagedRefinementResult> {
-  const work: RefinementParameter[] = parameters.map((p) => ({ ...p }));
-  const lockedByCaller = new Set(parameters.filter((p) => p.fixed).map((p) => p.id));
-  const freed = new Set<string>();
-  const stageResults: StageResult[] = [];
-  let final: RefinementResult | undefined;
-
-  let lastAcceptedWr: number | undefined;
-  let lastAcceptedEsd: ReadonlyMap<string, number> = new Map();
-  let lastAcceptedSingular: ReadonlySet<string> = new Set();
-  for (const stage of stages) {
-    const newlyFreed: string[] = [];
-    for (const p of work) {
-      if (!lockedByCaller.has(p.id) && stage.select(p) && !freed.has(p.id)) {
-        freed.add(p.id);
-        newlyFreed.push(p.id);
-      }
-    }
-    const freeIds = work.filter((p) => freed.has(p.id)).map((p) => p.id);
-    if (freeIds.length === 0) {
-      stageResults.push({ name: stage.name, freeIds: [], result: emptyStage() });
-      continue;
-    }
-    for (const p of work) p.fixed = !freed.has(p.id);
-    const before = new Map(work.map((p) => [p.id, p.value]));
-    const previouslyFree = freeIds.filter((id) => !newlyFreed.includes(id));
-    const result = await refiner(buildProblem(work), options);
-    const verdict = stageGuardVerdict({ wr: lastAcceptedWr, esd: lastAcceptedEsd, singular: lastAcceptedSingular }, result, previouslyFree, newlyFreed, guards);
-    if (verdict.stageReason !== null) {
-      // Revert: this stage's additions come back out; values roll back.
-      for (const id of newlyFreed) freed.delete(id);
-      for (const p of work) {
-        p.value = before.get(p.id)!;
-        p.fixed = !freed.has(p.id);
-      }
-      stageResults.push({ name: stage.name, freeIds, result, rejected: { reason: verdict.stageReason } });
-      continue;
-    }
-    const refixSet = new Set(verdict.refix.map((r) => r.id));
-    for (const p of work) {
-      if (refixSet.has(p.id)) {
-        p.value = before.get(p.id)!;
-        p.fixed = true;
-        freed.delete(p.id);
-        continue;
-      }
-      const v = result.parameters[p.id];
-      if (v !== undefined) p.value = v;
-      const e = result.esd[p.id];
-      if (e !== undefined) p.esd = e;
-    }
-    stageResults.push({ name: stage.name, freeIds, result, ...(verdict.refix.length ? { refixed: verdict.refix } : {}) });
-    final = result;
-    lastAcceptedWr = result.agreement.rWeighted ?? lastAcceptedWr;
-    lastAcceptedEsd = new Map(freeIds.filter((id) => !refixSet.has(id)).map((id) => [id, result.esd[id] ?? 0]));
-    lastAcceptedSingular = new Set(result.diagnostics?.singularParameterIds ?? []);
-  }
-
-  return { parameters: work, stages: stageResults, ...(final !== undefined ? { final } : {}) };
+  const gen = stagedCore(parameters, buildProblem, stages, guards);
+  let step = gen.next();
+  while (!step.done) step = gen.next(await refiner(step.value, options));
+  return step.value;
 }
