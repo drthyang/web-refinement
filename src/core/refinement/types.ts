@@ -263,6 +263,15 @@ export interface RefinementDiagnostics {
   readonly svdZeroCount: number;
   /** Parameters with the largest participation in dropped singular directions. */
   readonly singularParameterIds: readonly string[];
+  /**
+   * The directions the final covariance dropped, one unit vector each as
+   * free-parameter id → component (|component| < 1e-9 omitted), in the
+   * preconditioned unit-diagonal coordinates. Together they span the parameter
+   * combinations the data cannot see: two duplicated parameters give one
+   * direction {a: 0.707, b: −0.707}, k identical columns give k − 1 directions,
+   * a dead column gives {a: 1}. Absent when nothing was dropped.
+   */
+  readonly nullDirections?: readonly Readonly<Record<string, number>>[];
   /** Effective condition number of the retained Hessian spectrum. */
   readonly conditionNumber: number;
   /** Strong parameter correlations, sorted by absolute coefficient. */

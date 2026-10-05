@@ -178,6 +178,17 @@ loop_
     expect(() => parseCif(cifWith(""))).toThrow(/No space-group information/);
   });
 
+  it("reads a CIF with no symmetry as P 1 only when asked, every listed atom kept", () => {
+    // diffpy-style output: the whole cell, no symbol, no operations.
+    const text = cifWith("", "4 4 4 90 90 90", "Ni Ni1 0 0 0 1.0\n  Ni Ni2 0.5 0.5 0 1.0");
+    const p1 = parseCif(text, "ni", { spaceGroupSetting: "P 1" });
+    expect(p1.spaceGroup.number).toBe(1);
+    expect(p1.spaceGroup.operations).toHaveLength(1);
+    expect(p1.sites.map((s) => s.label)).toEqual(["Ni1", "Ni2"]);
+    // The magnetic reader takes the same choice.
+    expect(parseMagneticCif(text, "ni", { spaceGroupSetting: "P 1" }).structure.spaceGroup.number).toBe(1);
+  });
+
   it("rejects 'F d -3 m' without operations: origin choice 1 or 2 must be stated", () => {
     let err: unknown;
     try {

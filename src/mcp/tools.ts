@@ -112,7 +112,8 @@ const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", w
 
 /** Parse a CIF/mCIF into a structure (and magnetic model, when present). A
  *  CIF without symmetry operations whose space group fits several settings is
- *  an error naming them; `spaceGroupSetting` picks one. */
+ *  an error naming them; `spaceGroupSetting` picks one. A CIF with no symmetry
+ *  at all needs `spaceGroupSetting: "P 1"`. */
 export function parse_structure(args: { cif: string; id?: string; spaceGroupSetting?: string }): { structure: StructureModel; magnetic: MagneticModel | null } {
   const { structure, magnetic } = parseMagneticCif(
     args.cif,
@@ -204,6 +205,17 @@ export function check_cell_symmetry(args: {
   const tof = instrument.kind === "tof"
     ? { difC: instrument.difC, difA: instrument.difA ?? 0, difB: instrument.difB ?? 0, zero: instrument.zero ?? 0 }
     : undefined;
+  // An instrument file's TOF peak coefficients start the Le Bail widths.
+  const tofProfile = instrument.kind === "tof" && instrument.alpha !== undefined && instrument.beta0 !== undefined && instrument.sig1 !== undefined
+    ? {
+      alpha: instrument.alpha, beta0: instrument.beta0, sig1: instrument.sig1,
+      ...(instrument.beta1 !== undefined ? { beta1: instrument.beta1 } : {}),
+      ...(instrument.betaQ !== undefined ? { betaQ: instrument.betaQ } : {}),
+      ...(instrument.sig0 !== undefined ? { sig0: instrument.sig0 } : {}),
+      ...(instrument.sig2 !== undefined ? { sig2: instrument.sig2 } : {}),
+      ...(instrument.sigQ !== undefined ? { sigQ: instrument.sigQ } : {}),
+    }
+    : undefined;
   return checkCellSymmetry(
     args.structure,
     args.pattern,
@@ -211,6 +223,7 @@ export function check_cell_symmetry(args: {
     spec.bindings.filter((b) => isCell(b.kind)),
     {
       ...(tof ? { tof } : {}),
+      ...(tofProfile ? { tofProfile } : {}),
       ...(args.extraPhases ? { extraPhases: args.extraPhases } : {}),
       ...(args.fitRange ? { fitRange: args.fitRange } : {}),
       ...(args.dMin !== undefined ? { dMin: args.dMin } : {}),

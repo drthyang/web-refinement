@@ -4,6 +4,8 @@ import { leBailExtract } from "@/core/workflow/leBail";
 import { exampleStructure } from "@/examples/mn3ga";
 import { powderCurves } from "@/core/workflow/powder";
 import { powderParameters, powderBindings } from "@/examples/synthetic";
+import { parseSymmetryOperation } from "@/core/crystal/symmetry";
+import { gaussian } from "@/core/diffraction/profile";
 
 const neutron = { kind: "neutron" as const, wavelength: 1.54 };
 
@@ -48,5 +50,22 @@ describe("Le Bail intensity extraction", () => {
     const peak = Math.max(...hi);
     // A hard cutoff jumped by up to 7·10⁻⁴ of the peak (the tail there, and every norm_k).
     for (let i = 0; i < grid.length; i++) expect(Math.abs(hi[i]! - lo[i]!) / peak, `point ${i}`).toBeLessThan(1e-7);
+  });
+
+  it("gives an isolated peak on a high background its whole net area in one cycle", () => {
+    // One reflection (100 of a P1 cell whose b and c are too short to put any
+    // other line in the window) of 500 counts on a background of 1000. The partition divides the net counts by the net calculation; when
+    // it divided by the gross one, each cycle grew the intensity only by the
+    // peak-to-background ratio, from a start of 1.
+    const spaceGroup = { operations: [parseSymmetryOperation("x,y,z")] };
+    const cell = { a: 4, b: 2.5, c: 2.5, alpha: 90, beta: 90, gamma: 90 };
+    const center = (2 * Math.asin(1.54 / 8) * 180) / Math.PI;
+    const x = Array.from({ length: 400 }, (_, i) => 18 + (i * 8) / 400);
+    const g = x.map((xi) => gaussian(xi, center, 0.2));
+    const sum = g.reduce((a, b) => a + b, 0);
+    const pattern: PowderPattern = { id: "p", name: "p", xUnit: "twoTheta", radiation: neutron, wavelength: 1.54, points: x.map((xi, i) => ({ x: xi, yObs: 1000 + (500 * g[i]!) / sum })) };
+    const lb = leBailExtract(pattern, cell, spaceGroup, { fwhm: 0.2, shape: "gaussian", background: 1000, cycles: 1 });
+    expect(lb.reflections.length).toBe(1);
+    expect(lb.reflections[0]!.intensity).toBeCloseTo(500, 0);
   });
 });
