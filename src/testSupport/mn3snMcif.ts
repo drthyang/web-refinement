@@ -1,21 +1,10 @@
 /**
- * Test-support readers for the Mn₃Sn mCIFs the mPDF real-data goldens use.
- * They are diffpy.mpdf output: all 16 atoms of the Ama2 cell, no symmetry at
- * all (read as P 1, the CIF default), no BNS operations, and one moment row per
- * Mn — label + 3 crystal-axis components, no symmetry to apply.
+ * Test-support reader for the `_atom_site_moment` loop of an explicit-P1 mCIF
+ * (no BNS operations — parseMagneticCif carries no magnetic model for these,
+ * the moment rows being exactly label + 3 crystal-axis components with no
+ * symmetry to apply). Used by the Mn₃Sn mPDF real-data goldens.
  */
-import type { StructureModel } from "@/core/crystal/types";
 import type { Vec3 } from "@/core/math/types";
-import { parseCif } from "@/parsers/cif";
-
-/**
- * The nuclear cell. Read with parseCif, not parseMagneticCif: the moment loop
- * declares a `symmform` column that no row fills, which a strict loop reader
- * rejects, and the moments come from {@link readMcifMomentLoop} anyway.
- */
-export function readMcifStructure(text: string, id: string): StructureModel {
-  return parseCif(text, id);
-}
 
 export function readMcifMomentLoop(text: string): Map<string, Vec3> {
   const moments = new Map<string, Vec3>();

@@ -28,9 +28,9 @@ import { describe, it, expect } from "vitest";
 import type { MagneticModel, MagneticMoment } from "@/core/magnetic/types";
 import type { RefinementParameter } from "@/core/refinement/types";
 import { dataExists, readData } from "@/testSupport/data";
-import { readMcifMomentLoop, readMcifStructure } from "@/testSupport/mn3snMcif";
+import { readMcifMomentLoop } from "@/testSupport/mn3snMcif";
 import { parseFgr, fgrToPattern, type FgrFit } from "@/parsers/fgrData";
-import { parseCif } from "@/parsers/cif";
+import { parseCif, parseMagneticCif } from "@/parsers/cif";
 import { refine } from "@/core/refinement/engine";
 import { buildMpdfProblem, buildMpdfSpec, mpdfComponents } from "@/core/workflow/mpdf";
 import { expandStructureAtoms } from "@/core/diffraction/structureFactor";
@@ -126,7 +126,7 @@ describe.skipIf(!dataExists(MANIFEST))("REAL Mn3Sn mPDF workflow (POWGEN, local-
     const fgr = loadFgr(g);
     // gObs = the Gdiff column: the nuclear-fit residual, i.e. the magnetic PDF.
     const pattern = fgrToPattern(fgr, { id: "mn3sn-gdiff", signal: "difference" });
-    const structure = readMcifStructure(readData(`${DIR}/${g.mcif}`), "mn3sn-p1");
+    const { structure } = parseMagneticCif(readData(`${DIR}/${g.mcif}`), "mn3sn-p1");
     expect(structure.sites.length).toBe(16); // 12 Mn + 4 Sn, Ama2 expanded to P1
     const magnetic = magneticFrom(readData(`${DIR}/${g.mcif}`), structure.id, g.formFactorIon);
     expect(magnetic.moments.length).toBe(12);

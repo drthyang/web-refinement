@@ -167,7 +167,7 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 <details>
 <summary>Full descriptions — the text an agent reads for each tool</summary>
 
-**`parse_structure`** — Parse CIF/mCIF text into a StructureModel (cell, sites, space group) and any magnetic model. The entry point: feed its `structure` to build_refinement / interpret_structure. The setting is never guessed: a CIF with no symmetry operations whose symbol or number fits several settings (e.g. "F d -3 m", origin choice 1 or 2) is an error listing them — pass the right one as `spaceGroupSetting`. A CIF with no symmetry at all (no operations, symbol, Hall symbol or number) is read as P 1, the CIF default, and `warnings` says so: check that its atoms are the whole cell.
+**`parse_structure`** — Parse CIF/mCIF text into a StructureModel (cell, sites, space group) and any magnetic model. The entry point: feed its `structure` to build_refinement / interpret_structure. The setting is never guessed: a CIF with no symmetry operations whose symbol or number fits several settings (e.g. "F d -3 m", origin choice 1 or 2) is an error listing them — pass the right one as `spaceGroupSetting`.
 
 **`parse_powder_data`** — Auto-detect and parse powder data (xye/xy/dat/GSAS/FullProf/ILL). Returns the pattern, a summary (points, unit, range, radiation), and how the format was detected (source + confidence).
 

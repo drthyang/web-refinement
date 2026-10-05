@@ -159,7 +159,7 @@ const mpdfBuilt = tools.build_mpdf_model({
 
 /** Canned args + the pinned top-level output keys for every tool. */
 const CONTRACTS: Record<string, { args: object; keys: string[] }> = {
-  parse_structure: { args: { cif: CIF }, keys: ["magnetic", "structure", "warnings"] },
+  parse_structure: { args: { cif: CIF }, keys: ["magnetic", "structure"] },
   parse_powder_data: {
     args: { text: "10 5\n10.1 6\n10.2 5\n10.3 7\n10.4 5\n", filename: "t.xy" },
     keys: ["detected", "pattern", "summary"],

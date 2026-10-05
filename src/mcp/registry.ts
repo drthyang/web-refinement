@@ -63,7 +63,7 @@ export const TOOL_REGISTRY: readonly ToolDefinition[] = [
   {
     name: "parse_structure",
     title: "Parse structure (CIF/mCIF)",
-    description: "Parse CIF/mCIF text into a StructureModel (cell, sites, space group) and any magnetic model. The entry point: feed its `structure` to build_refinement / interpret_structure. The setting is never guessed: a CIF with no symmetry operations whose symbol or number fits several settings (e.g. \"F d -3 m\", origin choice 1 or 2) is an error listing them — pass the right one as `spaceGroupSetting`. A CIF with no symmetry at all (no operations, symbol, Hall symbol or number) is read as P 1, the CIF default, and `warnings` says so: check that its atoms are the whole cell.",
+    description: "Parse CIF/mCIF text into a StructureModel (cell, sites, space group) and any magnetic model. The entry point: feed its `structure` to build_refinement / interpret_structure. The setting is never guessed: a CIF with no symmetry operations whose symbol or number fits several settings (e.g. \"F d -3 m\", origin choice 1 or 2) is an error listing them — pass the right one as `spaceGroupSetting`.",
     inputSchema: {
       cif: z.string().describe("CIF or mCIF file text"),
       id: z.string().optional(),

@@ -112,15 +112,14 @@ const DEFAULT_INSTRUMENT: InstrumentParameters = { kind: "constantWavelength", w
 
 /** Parse a CIF/mCIF into a structure (and magnetic model, when present). A
  *  CIF without symmetry operations whose space group fits several settings is
- *  an error naming them; `spaceGroupSetting` picks one. A CIF with no symmetry
- *  at all is read as P 1, and `warnings` says so. */
-export function parse_structure(args: { cif: string; id?: string; spaceGroupSetting?: string }): { structure: StructureModel; magnetic: MagneticModel | null; warnings: string[] } {
-  const warnings: string[] = [];
-  const { structure, magnetic } = parseMagneticCif(args.cif, args.id ?? "loaded", {
-    ...(args.spaceGroupSetting !== undefined ? { spaceGroupSetting: args.spaceGroupSetting } : {}),
-    onWarning: (w) => warnings.push(w),
-  });
-  return { structure, magnetic: magnetic ?? null, warnings };
+ *  an error naming them; `spaceGroupSetting` picks one. */
+export function parse_structure(args: { cif: string; id?: string; spaceGroupSetting?: string }): { structure: StructureModel; magnetic: MagneticModel | null } {
+  const { structure, magnetic } = parseMagneticCif(
+    args.cif,
+    args.id ?? "loaded",
+    args.spaceGroupSetting !== undefined ? { spaceGroupSetting: args.spaceGroupSetting } : {},
+  );
+  return { structure, magnetic: magnetic ?? null };
 }
 
 /** Classify + parse powder data; returns the pattern and how the format was detected. */

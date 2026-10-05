@@ -30,7 +30,7 @@
 import { describe, it, expect } from "vitest";
 import { dataExists, readData } from "@/testSupport/data";
 import { parseFgr, fgrToPattern } from "@/parsers/fgrData";
-import { readMcifStructure } from "@/testSupport/mn3snMcif";
+import { parseMagneticCif } from "@/parsers/cif";
 import { buildMpdfSpec, buildMpdfProblem } from "@/core/workflow/mpdf";
 import { samplePosterior } from "@/core/refinement/bayes/sampler";
 import { propagateGrSigma, parseSqWithErrors } from "@/core/totalscattering/grErrors";
@@ -62,7 +62,7 @@ describe.skipIf(!dataExists(MANIFEST) || !dataExists(SQ))("REAL Mn3Sn canting-an
     // Difference signal, no Qmax termination (the reference protocol applies
     // none to d(r)); ordScale := nucScale makes amplitudes physical μ_B.
     const { qmax: _qmax, ...pattern } = fgrToPattern(fgr, { id: "mn3sn-gdiff", signal: "difference" });
-    const structure = readMcifStructure(mcifText, "mn3sn-p1");
+    const { structure } = parseMagneticCif(mcifText, "mn3sn-p1");
 
     // Seed walkers slightly OFF the reference so the gate is not circular.
     const mu0 = g.reference.orderedMomentMuB;

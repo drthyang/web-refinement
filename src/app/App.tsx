@@ -398,19 +398,17 @@ export function App(): JSX.Element {
         : null,
     );
   }
-  /** A CIF that loads clears the notice of one that did not, and shows what
-   *  the reader assumed on its behalf (a CIF with no symmetry is read as P 1). */
-  function clearCifNotice(warnings: readonly string[] = []): void {
-    setNotice(warnings.length > 0 ? warnings.join(" ") : null);
+  /** A CIF that loads clears the notice of one that did not. */
+  function clearCifNotice(): void {
+    setNotice(null);
     setSettingChoice(null);
   }
 
   function onLoadCif(file: File, spaceGroupSetting?: string): void {
     file.text().then((text) => {
       try {
-        const warnings: string[] = [];
-        const { structure: parsed, magnetic } = parseMagneticCif(text, "loaded", { ...(spaceGroupSetting ? { spaceGroupSetting } : {}), onWarning: (w) => warnings.push(w) });
-        clearCifNotice(warnings);
+        const { structure: parsed, magnetic } = parseMagneticCif(text, "loaded", spaceGroupSetting ? { spaceGroupSetting } : {});
+        clearCifNotice();
         if (magnetic) {
           // Drive the powder view from the magnetic structure so the plot shows
           // the nuclear + magnetic pattern and reflection ticks.
@@ -547,9 +545,8 @@ export function App(): JSX.Element {
   function onAddPhase(file: File, spaceGroupSetting?: string): void {
     file.text().then((text) => {
       try {
-        const warnings: string[] = [];
-        const raw = parseCif(text, `phase-${Date.now().toString(36)}`, { ...(spaceGroupSetting ? { spaceGroupSetting } : {}), onWarning: (w) => warnings.push(w) });
-        clearCifNotice(warnings);
+        const raw = parseCif(text, `phase-${Date.now().toString(36)}`, spaceGroupSetting ? { spaceGroupSetting } : {});
+        clearCifNotice();
         // Fall back to a composition name (e.g. "MnO") when the CIF omits _pd_phase_name.
         const name = raw.name && raw.name !== "structure"
           ? raw.name

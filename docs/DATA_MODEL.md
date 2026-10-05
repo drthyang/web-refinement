@@ -69,8 +69,6 @@ The setting is never guessed. A symbol or number that fits several settings
 ("F d -3 m", origin choice 1 or 2) needs explicit operations, a Hall symbol, a
 suffix ("F d -3 m:2", ICSD "Z"), the cell (H vs R axes only) or the user's
 choice, and is a `SpaceGroupSettingError` otherwise; so is an unknown symbol.
-A CIF with no symmetry at all is P1, the CIF default operation x,y,z; the
-reader reports it through `onWarning`.
 Tabulated symbols carry the suffix (`hermannMauguin: "F d -3 m:2"`).
 
 ### `StructureModel`
