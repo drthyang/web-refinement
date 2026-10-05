@@ -117,9 +117,13 @@ function stageGuardVerdict(
   // in the last accepted stage is evidence against THIS stage's additions —
   // re-fix the singular ids that are fresh, and when the newly-singular id is
   // an old parameter (the newcomer shadowed or duplicated it), re-fix the
-  // fresh ones instead.
+  // fresh ones instead. An old parameter pinned on its bound is no such
+  // evidence: its zero esd is the bound, not a degeneracy the newcomers
+  // introduced — e.g. an isotropic Mustrain driven to 0, where its σ² term
+  // (quadratic in it) has zero slope.
+  const pinned = new Set((result.diagnostics?.atBounds ?? []).map((b) => b.parameterId));
   const singularNow = result.diagnostics?.singularParameterIds ?? [];
-  const newSingular = singularNow.filter((id) => !prev.singular.has(id));
+  const newSingular = singularNow.filter((id) => !prev.singular.has(id) && (fresh.has(id) || !pinned.has(id)));
   for (const id of newSingular) {
     if (fresh.has(id)) refix.push({ id, reason: "singular direction" });
   }
