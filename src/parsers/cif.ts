@@ -13,7 +13,7 @@ import { composeOperations, operationKey, parseMagneticSymmetryOperation, parseS
 import { IDENTITY3 } from "@/core/math/mat3";
 import { completeSpaceGroup, SpaceGroupSettingError } from "@/core/crystal/spaceGroups";
 import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
-import { elementFromLetters } from "@/core/crystal/elements";
+import { elementFromLetters, elementsForLabel, formulaElements, labelUsesCase, type LabelContext } from "@/core/crystal/elements";
 
 /** Strip the parenthetical esd and parse: "5.41317(8)" → 5.41317. */
 export function parseCifNumber(raw: string): number {
@@ -63,14 +63,19 @@ export function parseTypeSymbol(type: string): { element: string; oxidationState
 }
 
 /**
- * Element from an atom-site label, used only when the CIF has no type symbol:
- * the leading letters, case-insensitive, two-letter symbol first — "FE1" → Fe,
- * "CA1" → Ca, "C12" → C, "OW1" → O.
+ * Element from an atom-site label, used only when the CIF has no type symbol.
+ * Letter case decides where the file uses it ("Fe1" → Fe, "Cx1" → C); in a
+ * file of capitals the two-letter symbol is read ("FE1" → Fe, "CA1" → Ca,
+ * "OW1" → O). See {@link elementsForLabel}.
  */
-function elementFromLabel(label: string): string {
-  const element = elementFromLetters(label);
-  if (element === undefined) throw new Error(`CIF: no _atom_site_type_symbol and label "${label}" names no element`);
-  return element;
+function elementFromLabel(label: string, context: LabelContext): string {
+  const found = elementsForLabel(label, context);
+  if (found.length === 1) return found[0]!;
+  if (found.length === 0) throw new Error(`CIF: no _atom_site_type_symbol and label "${label}" names no element`);
+  throw new Error(
+    `CIF: no _atom_site_type_symbol, and label "${label}" could be ${found.join(" or ")}: other labels use ` +
+      `lower case, so its second capital need not be part of a symbol. Add _atom_site_type_symbol.`,
+  );
 }
 
 /** One CIF token. `quoted` marks a quoted string or a semicolon text field:
@@ -379,7 +384,7 @@ function parseAnisotropicAdps(loops: Loop[]): Map<string, DisplacementParameters
   return adps;
 }
 
-function parseSites(loops: Loop[]): AtomSite[] {
+function parseSites(items: Map<string, string>, loops: Loop[]): AtomSite[] {
   const atomLoop = findLoop(loops, (h) => h.some((k) => k.includes("atom_site_fract_x")));
   if (!atomLoop) return [];
   const anisoAdps = parseAnisotropicAdps(loops);
@@ -405,6 +410,13 @@ function parseSites(loops: Loop[]): AtomSite[] {
   const iU = col("_atom_site_u_iso_or_equiv");
   const iB = col("_atom_site_b_iso_or_equiv");
   const iMult = col("_atom_site_site_symmetry_multiplicity");
+  // For labels without a type symbol: does the file write element symbols in
+  // proper case anywhere, and which elements does its formula name?
+  const formula = cifText(items.get("_chemical_formula_sum"));
+  const labelContext: LabelContext = {
+    caseAware: iLabel >= 0 && atomLoop.rows.some((r) => labelUsesCase(r[iLabel] ?? "")),
+    ...(formula !== undefined ? { formula: formulaElements(formula) } : {}),
+  };
 
   return atomLoop.rows.map((row) => {
     // Per row, not per column: a mixed loop can leave U_iso as `?` on the sites
@@ -415,7 +427,7 @@ function parseSites(loops: Loop[]): AtomSite[] {
     const position: Vec3 = [parseCifNumber(row[iX]!), parseCifNumber(row[iY]!), parseCifNumber(row[iZ]!)];
     // A `?`/`.` type symbol is as good as none: fall back to the label.
     const typeText = iType >= 0 ? cifText(row[iType]) : undefined;
-    const typed = typeText !== undefined ? parseTypeSymbol(typeText) : { element: elementFromLabel(row[iLabel] ?? "") };
+    const typed = typeText !== undefined ? parseTypeSymbol(typeText) : { element: elementFromLabel(row[iLabel] ?? "", labelContext) };
     const element = typed.element;
     const label = iLabel >= 0 ? row[iLabel]! : element;
     const adpType = iAdpType >= 0 ? row[iAdpType]?.toLowerCase() : undefined;
@@ -449,7 +461,7 @@ export function parseCif(text: string, id = "structure", options: CifParseOption
     name,
     cell,
     spaceGroup: parseSpaceGroup(items, loops, cell, options.spaceGroupSetting),
-    sites: parseSites(loops),
+    sites: parseSites(items, loops),
   };
 }
 
@@ -558,7 +570,7 @@ export function parseMagneticCif(text: string, id = "structure", options: CifPar
     name,
     cell,
     spaceGroup: magSg ?? parseSpaceGroup(items, loops, cell, options.spaceGroupSetting),
-    sites: parseSites(loops),
+    sites: parseSites(items, loops),
   };
   const moments = parseMoments(loops);
   // Carry the BNS operations on the magnetic model: the structure factor then

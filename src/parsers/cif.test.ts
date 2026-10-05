@@ -519,8 +519,8 @@ describe("parseCifNumber null markers", () => {
   });
 });
 
-describe("atom types: charges kept, labels resolved case-insensitively", () => {
-  const atoms = (header: string, rows: string): string => `data_x
+describe("atom types: charges kept, labels resolved by their letter case", () => {
+  const atoms = (header: string, rows: string, extra = ""): string => `data_x${extra}
 _cell_length_a 5
 _cell_length_b 5
 _cell_length_c 5
@@ -559,9 +559,27 @@ ${rows}
     expect(siteIonId(model.sites[0]!)).toBe("Fe3"); // was "Fe2": the 3+ was stripped
   });
 
-  it("resolves upper-case labels to two-letter elements when there is no type symbol", () => {
-    const model = parseCif(atoms("_atom_site_label", "FE1 0 0 0\nCA1 0.5 0 0\nC12 0 0.5 0\nOW1 0 0 0.5\nCa2 0.5 0.5 0\nD1 0.5 0 0.5"));
-    expect(model.sites.map((x) => x.element)).toEqual(["Fe", "Ca", "C", "O", "Ca", "D"]);
+  it("reads labels in capitals as two-letter elements when there is no type symbol", () => {
+    // No label uses lower case, so case says nothing: FE1 is Fe (it was F), CA1 Ca.
+    const model = parseCif(atoms("_atom_site_label", "FE1 0 0 0\nCA1 0.5 0 0\nC12 0 0.5 0\nOW1 0 0 0.5\nMN2 0.5 0.5 0\nD1 0.5 0 0.5"));
+    expect(model.sites.map((x) => x.element)).toEqual(["Fe", "Ca", "C", "O", "Mn", "D"]);
+  });
+
+  it("reads a proper-case label as written: a second capital is not part of the symbol", () => {
+    const model = parseCif(atoms("_atom_site_label", "Fe1 0 0 0\nCa2 0.5 0 0\nCx1 0 0.5 0\nOw1 0 0 0.5\nOW2 0.5 0.5 0\nMN3 0.5 0 0.5"));
+    expect(model.sites.map((x) => x.element)).toEqual(["Fe", "Ca", "C", "O", "O", "Mn"]);
+    // HO1 beside Fe1 may be hydroxyl H or Ho: an error, not holmium.
+    expect(() => parseCif(atoms("_atom_site_label", "Fe1 0 0 0\nO1 0.5 0 0\nHO1 0 0.5 0"))).toThrow(
+      /label "HO1" could be Ho or H.*_atom_site_type_symbol/,
+    );
+  });
+
+  it("lets _chemical_formula_sum decide between the two readings of a label", () => {
+    const formula = (f: string): string => `\n_chemical_formula_sum '${f}'`;
+    const organic = parseCif(atoms("_atom_site_label", "C1 0 0 0\nO1 0.5 0 0\nHO1 0 0.5 0\nCO2 0 0 0.5", formula("C2 H O2")));
+    expect(organic.sites.map((x) => x.element)).toEqual(["C", "O", "H", "C"]);
+    const perovskite = parseCif(atoms("_atom_site_label", "CA1 0 0 0\nTI1 0.5 0.5 0.5\nO1 0.5 0.5 0", formula("Ca O3 Ti")));
+    expect(perovskite.sites.map((x) => x.element)).toEqual(["Ca", "Ti", "O"]);
   });
 
   it("falls back to the label when the type symbol is the CIF null '?'", () => {
