@@ -72,7 +72,9 @@ folder skip when it is absent (CI, fresh clones).
 | Anisotropic ADP (reduces to isotropic) | unit | ✅ `core/diffraction/features.test.ts` |
 | March-Dollase preferred orientation | unit | ✅ `core/diffraction/features.test.ts` |
 | Multi-phase powder (2-phase recovery) | integration | ✅ `core/workflow/multiPhase.test.ts` |
-| Le Bail extraction (pattern reconstruction) | integration | ✅ `core/workflow/leBail.test.ts` |
+| Le Bail extraction (pattern reconstruction; an isolated peak gets its net area in one cycle) | integration | ✅ `core/workflow/leBail.test.ts` |
+| Le Bail TOF peak widths (α, β₀, σ₂²) recovered from an engine-simulated TOF pattern | self-consistent | ✅ `core/workflow/leBailPrefit.test.ts` |
+| Cell / space-group gate: a wrong centring or lattice is caught at constant wavelength and on TOF; on real Mn₃Ga POWGEN 600 K data the only leftover lines are MnO's, and the gate passes once MnO is named | synthetic + integration (committed data) | ✅ `mcp/cellSymmetry.test.ts` |
 | Magnetic powder (separable components + refine) | integration | ✅ `core/workflow/magneticPowder.test.ts` |
 | k≠0 Fourier structure factor (SDW/helix) + amplitude recovery | unit + self-consistent | ✅ `core/magnetic/fourierMoment.test.ts` |
 | Two-arm (incommensurate-type) modulation: k-formalism ≡ brute-force real-space supercell sum — k = ¼ (both θ), ⅓ (P3₁ screw), 3/10, self-conjugate ½; ½ two-arm factor; −k conjugation; gauge invariance; symmetry-forced K-point helix | **convention-free oracle** | ✅ `core/magnetic/fourierModulation.test.ts` |

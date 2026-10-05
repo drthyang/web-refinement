@@ -206,6 +206,7 @@ approximate, however plausible its output looks.
   `check_cell_symmetry`): a Le Bail fit refines the cell, then every leftover
   peak must index and every forbidden reflection must show no intensity.
   Forbidden reflections too close to an allowed one are reported as untestable.
+  Named impurity phases are fitted too, each with its own expansion and width.
 - Fit-quality plots beyond R, wR and GoF: F_obs vs F_calc, and a normal
   probability plot (Abrahams & Keve 1971). A straight line of slope 1 through
   the origin means both the model and the uncertainties are right. Overlapping
@@ -214,9 +215,11 @@ approximate, however plausible its output looks.
 
 **Approximate**
 - Axial asymmetry is modelled on the low-angle side (2θ < 90°) only.
-- The cell and space-group gate fits one peak width. On time-of-flight data
-  that width is scaled with TOF in place of the real resolution curve. The
-  gate reads d ≥ 0.7 Å by default.
+- The cell and space-group gate fits a simplified profile. At constant
+  wavelength it is one pseudo-Voigt width with a refined Lorentzian fraction.
+  On time-of-flight data it is a back-to-back exponential with four refined
+  width terms (σ₁², σ₂², α, β₀), not the instrument's full resolution curve. An
+  impurity's expansion is limited to ±3 %. The gate reads d ≥ 0.7 Å by default.
 
 **Not yet**
 - Spherical-harmonic texture; powder extinction; microabsorption (Brindley);

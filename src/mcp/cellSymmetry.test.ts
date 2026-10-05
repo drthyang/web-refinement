@@ -5,6 +5,7 @@ import { check_cell_symmetry, parse_instrument, parse_powder_data, parse_structu
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import { MN3GA_CIF } from "@/examples/mn3ga";
+import { generateReflections } from "@/core/diffraction/reflections";
 import { dataDir } from "@/testSupport/data";
 
 /**
@@ -41,10 +42,14 @@ const structureOf = (text: string): StructureModel => parse_structure({ cif: tex
  * widths (the app's own model), so the gate's one-width Le Bail fit meets real
  * peak-shape mismatch.
  */
-function observed(...phases: readonly [StructureModel, number][]): PowderPattern {
+function noise(): () => number {
   let seed = 12345;
   const rnd = (): number => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
-  const gauss = (): number => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+  return () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+}
+
+function observed(...phases: readonly [StructureModel, number][]): PowderPattern {
+  const gauss = noise();
   const sims = phases.map(([s, w]) => {
     const sim = simulate_pattern({ structure: s, xMin: 10, xMax: 110, points: 5000 });
     const top = Math.max(...sim.curves.yCalc);
@@ -104,8 +109,44 @@ describe("check_cell_symmetry — synthetic failures", () => {
   });
 });
 
+describe("check_cell_symmetry — time of flight", () => {
+  // Back-to-back-exponential peaks whose width grows ~30× from d = 0.7 to 6 Å,
+  // as a real TOF instrument's do (σ² = σ₁²d² + σ₂²d⁴). The gate is given the
+  // calibration alone, as from a FullProf .irf, and must find the widths itself.
+  const instrument = { kind: "tof" as const, difC: 22585.8, alpha: 0.1, beta0: 0.013, sig1: 300, sig2: 100 };
+  const calibration = { kind: "tof" as const, difC: 22585.8 };
+  const cscl = structureOf(cif("P m -3 m", 4.12, 4.12, CSCL_SITES));
+  const pattern = ((): PowderPattern => {
+    const gauss = noise();
+    const sim = simulate_pattern({ structure: cscl, instrument, xMin: 15000, xMax: 135000, points: 12000 });
+    const top = Math.max(...sim.curves.yCalc);
+    return {
+      id: "t", name: "tof", xUnit: "tof", radiation: { kind: "neutron-tof" },
+      points: sim.curves.x.map((x, i) => {
+        const y = (20000 * sim.curves.yCalc[i]!) / top + 300 - x / 1000;
+        return { x, yObs: y + Math.sqrt(y) * gauss(), sigma: Math.sqrt(y) };
+      }),
+    };
+  })();
+
+  it("passes the right cell and group over the whole range, from the calibration alone", () => {
+    const r = check_cell_symmetry({ structure: cscl, pattern, instrument: calibration });
+    expect(r.unindexedPeaks).toEqual([]);
+    expect(r.passed).toBe(true);
+    expect(r.cell.a).toBeCloseTo(4.12, 3);
+    expect(r.limits.some((l) => l.includes("back-to-back"))).toBe(true);
+  });
+
+  it("a centring the crystal lacks is still caught", () => {
+    const bcc = structureOf(cif("I m -3 m", 4.12, 4.12, "Cs1 Cs 0 0 0 1 0.01"));
+    const r = check_cell_symmetry({ structure: bcc, pattern, instrument: calibration });
+    expect(r.absencesConsistent).toBe(false);
+    for (const v of r.absences.violated) expect((v.h + v.k + v.l) % 2).not.toBe(0);
+  });
+});
+
 describe("check_cell_symmetry — real data", () => {
-  it("Mn₃Ga POWGEN 600 K (TOF): the MnO impurity's lines index once MnO is named", () => {
+  it("Mn₃Ga POWGEN 600 K (TOF): fails on the MnO impurity alone, passes once MnO is named", () => {
     const structure = structureOf(MN3GA_CIF);
     const pattern = parse_powder_data({
       text: readFileSync(resolve(__dirname, "../examples/datasets/mn3ga_powgen_600k.dat"), "utf8"),
@@ -116,9 +157,14 @@ describe("check_cell_symmetry — real data", () => {
     const at = (t: number): boolean => Math.abs(t / instrument.difC - 2.567) < 0.02; // MnO (111)
     const alone = check_cell_symmetry({ structure, pattern, instrument });
     const withMnO = check_cell_symmetry({ structure, pattern, instrument, extraPhases: [mno] });
+    // Alone, what is left over is MnO — and nothing else: no peak-shape misfit
+    // reads as a peak (a single Gaussian width once left eight false ones here).
     expect(alone.unindexedPeaks.some((p) => at(p.x))).toBe(true);
-    expect(withMnO.unindexedPeaks.some((p) => at(p.x))).toBe(false);
-    expect(withMnO.absencesConsistent).toBe(true); // P6₃/mmc's absences hold
+    const mnoD = generateReflections(mno.cell, mno.spaceGroup, 0.7, 6).map((r) => r.d);
+    for (const p of alone.unindexedPeaks) expect(mnoD.some((d) => Math.abs(p.x / instrument.difC / d - 1) < 0.01), `${p.x}`).toBe(true);
+    expect(withMnO.unindexedPeaks).toEqual([]);
+    expect(withMnO.passed).toBe(true); // P6₃/mmc's absences hold too
+    expect(withMnO.absences.tested).toBeGreaterThan(0);
     expect(withMnO.cell.a).toBeCloseTo(5.4194, 2);
   }, 30_000);
 

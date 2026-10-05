@@ -25,9 +25,15 @@
  *
  * Limits, stated in the result: a cell that is too LARGE (a supercell) indexes
  * any pattern, so this gate cannot catch one; a group with FEWER absences than
- * the crystal's shows no violation (its extra reflections are simply weak). The
- * Le Bail fit uses one peak width for the whole pattern; on time-of-flight data
- * the position tolerance is scaled with TOF, since widths grow with it.
+ * the crystal's shows no violation (its extra reflections are simply weak).
+ *
+ * The Le Bail fit uses one pseudo-Voigt width at constant wavelength. On
+ * time-of-flight data it uses back-to-back-exponential peaks whose widths grow
+ * with d, as real TOF resolution does: one width cannot span a TOF pattern, and
+ * a Gaussian leaves the asymmetric tails as false peaks. Known impurity phases
+ * are fitted too, each with a refined expansion factor (|ε| ≤ 3 %) and width
+ * factor, so their lines are modelled at the sample's temperature and with
+ * their own broadening rather than left over.
  *
  * The check reads only d ≥ `dMin` (0.7 Å by default). Below that, reflections
  * crowd too closely to index a peak or test an absence, and the diagnostic
@@ -41,7 +47,7 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { FitRange } from "@/core/workflow/powder";
 import { generateReflections } from "@/core/diffraction/reflections";
-import { dRange, dToX, leBailExtract, type TofCalibration } from "@/core/workflow/leBail";
+import { dRange, dToX, leBailExtract, tofFwhmAt, type LeBailTofProfile, type TofCalibration } from "@/core/workflow/leBail";
 import { leBailCellPrefit } from "@/core/workflow/leBailPrefit";
 
 export interface CellSymmetryCheckOptions {
@@ -49,18 +55,22 @@ export interface CellSymmetryCheckOptions {
   readonly eta?: number;
   /** Required for a time-of-flight pattern. */
   readonly tof?: TofCalibration;
+  /** Starting TOF peak coefficients, e.g. from the instrument file. */
+  readonly tofProfile?: LeBailTofProfile;
   readonly fitRange?: FitRange;
   /** Smallest d-spacing (Å) the check reads. Default 0.7. */
   readonly dMin?: number;
-  /** Other phases known to be present: their reflections count as indexing a peak. */
+  /** Other phases known to be present: fitted alongside, and their reflections
+   *  count as indexing a peak. */
   readonly extraPhases?: readonly StructureModel[];
   /** Leftover height, in σ, that counts as observed intensity. Default 5. */
   readonly significance?: number;
   /**
-   * Model-error floor as a fraction of the calculated profile: σ² = σ_count² +
-   * (f·y_calc)². One Gaussian width cannot match every peak's real shape, and
-   * on high-count data a 1 % shape mismatch is many counting σ — without a
-   * floor, the shoulders of strong peaks read as extra peaks. Default 0.05.
+   * Model-error floor as a fraction of the calculated peak height nearby (the
+   * tallest within one peak width): σ² = σ_count² + (f·y_peak)². The Le Bail
+   * profile cannot match every peak's real shape, and on high-count data a 1 %
+   * shape mismatch is many counting σ — without a floor, the shoulders of
+   * strong peaks read as extra peaks. Default 0.05.
    */
   readonly modelError?: number;
   /** How close a leftover peak must be to a reflection to count as indexed, in peak widths. Default 1. */
@@ -90,6 +100,7 @@ export interface CellSymmetryCheck {
   /** The cell after the Le Bail fit, and the refined cell-parameter values by id. */
   readonly cell: UnitCell;
   readonly cellValues: Readonly<Record<string, number>>;
+  /** The Le Bail fit: `fwhm` is at the middle of the pattern on TOF data. */
   readonly leBail: { readonly rWeighted: number; readonly fwhm: number; readonly background: number };
   /** Leftover peaks near no reflection (strongest first). */
   readonly unindexedPeaks: readonly { readonly x: number; readonly significance: number }[];
@@ -153,8 +164,9 @@ export function checkCellSymmetry(
 ): CellSymmetryCheck {
   // Pseudo-Voigt for constant wavelength: a Gaussian misses the Lorentzian
   // tails, whose shoulders then read as extra peaks (GaNb₄Se₈ at 28-ID). TOF
-  // peaks are neither; a Gaussian is the plainer stand-in there.
-  const shape = options.shape ?? (fullPattern.xUnit === "tof" ? "gaussian" : "pseudoVoigt");
+  // peaks are back-to-back exponentials whose widths grow with d; one Gaussian
+  // width left their tails as false peaks (Mn₃Ga at POWGEN).
+  const shape = options.shape ?? (fullPattern.xUnit === "tof" ? "tof" : "pseudoVoigt");
   const eta = options.eta ?? 0.5;
   const threshold = options.significance ?? 5;
   const tolWidths = options.tolerance ?? 1;
@@ -171,29 +183,55 @@ export function checkCellSymmetry(
 
   // 1. The cell, from peak positions alone (free intensities).
   const free = cellParameters.map((p) => ({ ...p, fixed: p.expression ? p.fixed : false }));
-  const pre = leBailCellPrefit(structure, pattern, free, cellBindings, { shape, eta, ...(tof ? { tof } : {}) });
+  const extraPhases = options.extraPhases ?? [];
+  const pre = leBailCellPrefit(structure, pattern, free, cellBindings, {
+    shape, eta,
+    ...(tof ? { tof } : {}),
+    ...(options.tofProfile ? { tofProfile: options.tofProfile } : {}),
+    ...(extraPhases.length ? { extraPhases } : {}),
+  });
   const cell = pre.cell;
 
-  // 2. What the allowed reflections cannot account for.
+  // 2. What the allowed reflections (and the extra phases') cannot account for.
   const lb = leBailExtract(pattern, cell, structure.spaceGroup, {
-    fwhm: pre.fwhm, shape, eta, background: pre.background, ...(tof ? { tof } : {}),
+    fwhm: pre.fwhm, shape, eta: pre.eta ?? eta, background: pre.backgroundCurve,
+    ...(tof ? { tof } : {}),
+    ...(pre.tofProfile ? { tofProfile: pre.tofProfile } : {}),
+    ...(extraPhases.length ? { extraPhases: extraPhases.map((ph, i) => ({ cell: pre.extraCells[i] ?? ph.cell, spaceGroup: ph.spaceGroup, widthScale: pre.extraWidthScales[i] ?? 1 })) } : {}),
   });
   const x = lb.x;
   const n = x.length;
   const residual = x.map((_, i) => lb.yObs[i]! - lb.yCalc[i]!);
   const step = median(x.slice(1).map((xi, i) => Math.abs(xi - x[i]!)).filter((s) => s > 0)) || 1;
   const baseline = runningMedian(residual, Math.max(15, Math.round((12 * pre.fwhm) / step)));
+
+  // The peak width at a position: the refined TOF width at that d, or the one
+  // Le Bail width (grown with TOF when the fit had no TOF peak shape).
+  const xMid = median(x);
+  const tofProfile = pre.tofProfile;
+  const width = (xi: number): number =>
+    tofProfile && tof ? tofFwhmAt((xi - tof.zero) / tof.difC, tofProfile)
+      : pattern.xUnit === "tof" && xMid > 0 ? pre.fwhm * (xi / xMid) : pre.fwhm;
+
+  // A shape error is a fraction of the peak it belongs to, spread across that
+  // peak — not of the calculated value at the same point, which on a steep
+  // flank is small (Mn₃Ga at POWGEN left 5–10σ lobes beside its strong lines).
+  // So the floor scales with the tallest calculated peak within one width.
+  const net = x.map((_, i) => Math.max(lb.yCalc[i]! - pre.backgroundCurve[i]!, 0));
+  const envelope = x.map((xi, i) => {
+    const w = width(xi);
+    let top = net[i]!;
+    for (let j = i - 1; j >= 0 && Math.abs(x[j]! - xi) <= w; j--) top = Math.max(top, net[j]!);
+    for (let j = i + 1; j < n && Math.abs(x[j]! - xi) <= w; j++) top = Math.max(top, net[j]!);
+    return top;
+  });
   const f = options.modelError ?? 0.05;
   const sigma = pattern.points.map((p, i) => {
     const counting = p.sigma ?? Math.sqrt(Math.max(p.yObs, 1));
-    const model = f * Math.max(lb.yCalc[i]! - pre.background, 0);
+    const model = f * envelope[i]!;
     return Math.sqrt(counting * counting + model * model) || 1;
   });
   const z = residual.map((r, i) => (r - baseline[i]!) / sigma[i]!);
-
-  // The peak width at a position: one Le Bail width, grown with TOF (Δt/t ≈ const).
-  const xMid = median(x);
-  const width = (xi: number): number => (pattern.xUnit === "tof" && xMid > 0 ? pre.fwhm * (xi / xMid) : pre.fwhm);
   const xMin = Math.min(x[0]!, x[n - 1]!);
   const xMax = Math.max(x[0]!, x[n - 1]!);
   const inside = (xi: number): boolean => Number.isFinite(xi) && xi >= xMin && xi <= xMax;
@@ -222,15 +260,9 @@ export function checkCellSymmetry(
   // forbidden family below the first allowed one (bcc's 100) must be tested too.
   const { dMin: dLo, dMax: dHi } = dRange(pattern, tof);
   const allowed: HklAt[] = lb.reflections.filter((r) => inside(r.center)).map((r) => ({ h: r.h, k: r.k, l: r.l, d: r.d, x: r.center }));
-  const others: { x: number; label: string }[] = [];
-  if (Number.isFinite(dLo) && dHi > 0) {
-    for (const phase of options.extraPhases ?? []) {
-      for (const r of generateReflections(phase.cell, phase.spaceGroup, dLo * 0.98, dHi * 1.02)) {
-        const xi = place(r.d);
-        if (inside(xi)) others.push({ x: xi, label: `${phase.name || phase.id} ${hkl(r)}` });
-      }
-    }
-  }
+  // The extra phases' reflections, at their refined cells.
+  const others: { x: number; label: string }[] = extraPhases.flatMap((phase, i) =>
+    (lb.extraReflections[i] ?? []).filter((r) => inside(r.center)).map((r) => ({ x: r.center, label: `${phase.name || phase.id} ${hkl(r)}` })));
   const closest = <T extends { x: number }>(list: readonly T[], xi: number): T | undefined => {
     let best: T | undefined;
     for (const r of list) if (!best || Math.abs(r.x - xi) < Math.abs(best.x - xi)) best = r;
@@ -306,7 +338,9 @@ export function checkCellSymmetry(
     limits: [
       ...LIMITS,
       `Only d ≥ ${dMinRead} Å was read.`,
-      ...(pattern.xUnit === "tof" ? ["Time of flight: one Le Bail peak width, scaled with TOF, stands in for the real resolution curve."] : []),
+      ...(pattern.xUnit !== "tof" ? []
+        : tofProfile ? ["Time of flight: back-to-back-exponential peaks with four refined width terms (σ₁², σ₂², α, β₀) stand in for the instrument's full resolution curve."]
+        : ["Time of flight: one Le Bail peak width, scaled with TOF, stands in for the real resolution curve."]),
       ...(tested === 0 && forbidden.length > 0 ? ["Every forbidden reflection overlaps an allowed one here: the absences could not be tested."] : []),
     ],
   };

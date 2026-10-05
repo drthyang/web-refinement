@@ -214,25 +214,36 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
   }
 
   // --- physical sanity of the values ------------------------------------
+  // A held parameter never moved, so its value is an input (starting structure
+  // or CIF): word it that way and do not blame the fit for it.
   for (const p of parameters) {
     if (ADP_KINDS.has(p.kind) && p.value < 0) {
+      const what = PHYSICAL_LABEL[p.kind] ?? "displacement parameter";
       findings.push({
         category: "physical",
         severity: "critical",
-        summary: `${p.label} refined negative (${p.value.toFixed(4)}) — an unphysical ${PHYSICAL_LABEL[p.kind] ?? "displacement parameter"}.`,
-        detail: "A negative ADP has no physical meaning; it typically absorbs an error elsewhere (scale, background, absorption, or a wrong scattering type). Fix it at a small positive value and address the real cause.",
+        summary: p.fixed
+          ? `${p.label} is held at ${p.value.toFixed(4)}, negative — an unphysical ${what}.`
+          : `${p.label} refined negative (${p.value.toFixed(4)}) — an unphysical ${what}.`,
+        detail: p.fixed
+          ? "This value was not refined; it comes from the starting structure or CIF. A negative ADP has no physical meaning — correct the input to a small positive value, or constrain it, before refining."
+          : "A negative ADP has no physical meaning; it typically absorbs an error elsewhere (scale, background, absorption, or a wrong scattering type). Fix it at a small positive value and address the real cause.",
         parameterIds: [p.id],
-        evidence: { value: p.value },
+        evidence: { value: p.value, origin: p.fixed ? "input" : "refined" },
       });
     }
     if (p.kind === "occupancy" && (p.value < -1e-6 || p.value > 1 + 1e-6)) {
       findings.push({
         category: "physical",
         severity: "warning",
-        summary: `${p.label} refined to ${p.value.toFixed(4)}, outside [0, 1].`,
-        detail: "Occupancy outside its physical range points to a scale/occupancy correlation or the wrong site multiplicity. Constrain it (full site, or a Σ=1 tie) unless a second contrast justifies the value.",
+        summary: p.fixed
+          ? `${p.label} is held at ${p.value.toFixed(4)}, outside [0, 1].`
+          : `${p.label} refined to ${p.value.toFixed(4)}, outside [0, 1].`,
+        detail: p.fixed
+          ? "This value was not refined; it comes from the starting structure or CIF. Correct the input occupancy to its physical range, or constrain it (full site, or a Σ=1 tie)."
+          : "Occupancy outside its physical range points to a scale/occupancy correlation or the wrong site multiplicity. Constrain it (full site, or a Σ=1 tie) unless a second contrast justifies the value.",
         parameterIds: [p.id],
-        evidence: { value: p.value },
+        evidence: { value: p.value, origin: p.fixed ? "input" : "refined" },
       });
     }
   }
@@ -335,8 +346,11 @@ export function suggestNextSteps(assessment: RefinementAssessment): NextStep[] {
 
   const physical = assessment.findings.find((f) => f.category === "physical" && f.severity === "critical");
   if (physical) {
+    const target = physical.parameterIds?.[0] ?? "the offending parameter";
     steps.push({
-      action: `Fix ${physical.parameterIds?.[0] ?? "the offending parameter"} at a physical value and re-refine, then trace the upstream cause (scale, background, or scattering type).`,
+      action: physical.evidence?.origin === "input"
+        ? `Correct ${target} in the starting structure to a physical value, then re-refine.`
+        : `Fix ${target} at a physical value and re-refine, then trace the upstream cause (scale, background, or scattering type).`,
       rationale: physical.summary,
       priority: 1,
       addresses: ["physical"],

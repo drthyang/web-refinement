@@ -75,7 +75,9 @@ numbered order.
   zero-shift check ([`startingValues.ts`](../src/core/workflow/startingValues.ts)).
 - ✅ **F1.4 Convergence and staged guards:** the controller rejects a stage that
   raises wR or inflates earlier esds, and re-fixes a new parameter that turns
-  singular or near-perfectly correlated. A shift-based stop is opt-in
+  singular or near-perfectly correlated. It then re-runs the stage without it
+  and keeps that run. Of a degenerate set it re-fixes all but one; if that
+  costs fit, the set stays free. A shift-based stop is opt-in
   ([`staged.ts`](../src/core/refinement/staged.ts)).
 - ✅ **F1.5 Next-parameter diagnostic:** ranks fixed parameter groups by
   expected χ² drop ([`nextParameters.ts`](../src/core/workflow/nextParameters.ts)).
