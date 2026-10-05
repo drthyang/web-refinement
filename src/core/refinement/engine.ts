@@ -707,9 +707,13 @@ function* refineCore(
     ...covDiagnostics.droppedIndices.map((i) => freeIds[i]).filter((id): id is string => id !== undefined),
     ...solveDropped,
   ]));
+  const nullDirections = covDiagnostics.droppedVectors.map((v) =>
+    Object.fromEntries(v.flatMap((c, j) => (Math.abs(c) >= 1e-9 ? [[freeIds[j]!, c] as const] : []))),
+  );
   const diagnostics = {
     svdZeroCount: Math.max(covDiagnostics.zeroCount, maxSolveZeroCount),
     singularParameterIds,
+    ...(nullDirections.length > 0 ? { nullDirections } : {}),
     conditionNumber: Math.max(covDiagnostics.conditionNumber, maxSolveConditionNumber),
     highCorrelations: highCorrelations(
       covarianceBase,

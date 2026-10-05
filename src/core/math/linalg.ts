@@ -14,6 +14,8 @@ export interface SymmetricPseudoInverseResult {
   readonly zeroCount: number;
   /** Indices with the largest participation in discarded singular directions. */
   readonly droppedIndices: readonly number[];
+  /** The discarded directions themselves: orthonormal eigenvectors of `a`. */
+  readonly droppedVectors: readonly (readonly number[])[];
   readonly conditionNumber: number;
 }
 
@@ -197,6 +199,7 @@ export function pseudoInverseSymmetric(a: Matrix, rcond = 1e-6): SymmetricPseudo
   const cutoff = rcond * maxSingular;
   const inverse: Matrix = Array.from({ length: n }, () => new Array<number>(n).fill(0));
   const droppedScore = new Array<number>(n).fill(0);
+  const droppedVectors: number[][] = [];
   let zeroCount = 0;
   let minKept = Infinity;
 
@@ -206,6 +209,7 @@ export function pseudoInverseSymmetric(a: Matrix, rcond = 1e-6): SymmetricPseudo
     if (singular <= cutoff || !Number.isFinite(singular)) {
       zeroCount++;
       for (let i = 0; i < n; i++) droppedScore[i]! += Math.abs(vectors[i]![k]!);
+      droppedVectors.push(vectors.map((row) => row[k]!));
       continue;
     }
     minKept = Math.min(minKept, singular);
@@ -228,6 +232,7 @@ export function pseudoInverseSymmetric(a: Matrix, rcond = 1e-6): SymmetricPseudo
     singularValues,
     zeroCount,
     droppedIndices,
+    droppedVectors,
     conditionNumber: minKept < Infinity && minKept > 0 ? maxSingular / minKept : Infinity,
   };
 }
