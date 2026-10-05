@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { StructureModel } from "@/core/crystal/types";
 import { parseCif, parseCifNumber, parseMagneticCif, parseTypeSymbol } from "@/parsers/cif";
 import { siteIonId } from "@/core/magnetic/magneticIons";
+import { nuclearStructureFactor } from "@/core/diffraction/structureFactor";
 import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { siteMultiplicity } from "@/core/crystal/symmetry";
@@ -580,6 +581,22 @@ ${rows}
     expect(organic.sites.map((x) => x.element)).toEqual(["C", "O", "H", "C"]);
     const perovskite = parseCif(atoms("_atom_site_label", "CA1 0 0 0\nTI1 0.5 0.5 0.5\nO1 0.5 0.5 0", formula("Ca O3 Ti")));
     expect(perovskite.sites.map((x) => x.element)).toEqual(["Ca", "Ti", "O"]);
+  });
+
+  it("reads an isotope from a mass number in the type symbol, so Pu, Cm and Am sites can be computed", () => {
+    expect(parseTypeSymbol("239Pu")).toEqual({ element: "Pu", isotope: 239 });
+    expect(parseTypeSymbol("2H")).toEqual({ element: "H", isotope: 2 });
+    expect(parseTypeSymbol("57Fe3+")).toEqual({ element: "Fe", isotope: 57, oxidationState: 3 });
+    const neutron = { kind: "neutron", wavelength: 1.5 } as const;
+    const model = parseCif(atoms("_atom_site_label\n_atom_site_type_symbol", "Pu1 239Pu 0 0 0\nO1 O2- 0.25 0.25 0.25"));
+    expect(model.sites.map((x) => [x.element, x.isotope])).toEqual([["Pu", 239], ["O", undefined]]);
+    // ²³⁹Pu b = 7.7 fm; O at (¼,¼,¼) contributes 5.803·i for (100).
+    const f = nuclearStructureFactor(model, neutron, 1, 0, 0);
+    expect(f.re).toBeCloseTo(7.7, 10);
+    expect(f.im).toBeCloseTo(5.803, 10);
+    // Without an isotope the error says how to give one.
+    const natural = parseCif(atoms("_atom_site_label\n_atom_site_type_symbol", "Pu1 Pu 0 0 0"));
+    expect(() => nuclearStructureFactor(natural, neutron, 1, 0, 0)).toThrow(/type symbol "238Pu".*238, 239, 240, 242/);
   });
 
   it("falls back to the label when the type symbol is the CIF null '?'", () => {

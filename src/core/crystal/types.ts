@@ -58,7 +58,8 @@ export interface AtomSite {
    * Optional isotope mass number for neutron scattering, e.g. 2 for D or 57 for
    * ⁵⁷Fe. Every isotope Sears (1992) tabulates is resolved; an untabulated one
    * is an error, never a silent fall-back to the natural value. Pu, Cm and Am
-   * have no natural-abundance value and require it (see neutron.ts).
+   * have no natural-abundance value and require it (see neutron.ts). A CIF sets
+   * it with a mass number in the type symbol, e.g. "239Pu".
    */
   readonly isotope?: number;
   /**

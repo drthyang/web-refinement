@@ -158,7 +158,8 @@ approximate, however plausible its output looks.
 **Supported**
 - Neutron coherent scattering lengths: Sears (1992) *Neutron News* via NIST,
   88 elements + D and 248 isotopes (Hf corrected to 7.77). Pu, Cm and Am need
-  an explicit isotope.
+  an explicit isotope: a mass number in the CIF type symbol, e.g. `239Pu`
+  (likewise `2H`, `57Fe3+` for any tabulated isotope).
 - X-ray form factors: Cromer–Mann coefficients for 98 neutral atoms H–Cf
   (Vol. C), each checked to give f(0) = Z.
 - Magnetic form factors: ⟨j0⟩ for 97 ions and ⟨j2⟩ for 95 (Vol. C). The

@@ -45,21 +45,27 @@ function parseCifNumberOr(raw: string | undefined, fallback: number): number {
  * dropped. A non-integer charge ("Fe2.5+") is no tabulated oxidation state and
  * is left unset. A symbol whose letters are not an element ("Wat", "OH-") is an
  * error rather than a guess.
+ *
+ * A leading mass number names an isotope for neutron scattering: "239Pu",
+ * "2H", "57Fe3+". It is the way to give Pu, Cm and Am sites the isotope they
+ * need (Sears 1992 has no natural-element value for them); an isotope Sears
+ * does not tabulate is an error when the neutron amplitude is computed.
  */
-export function parseTypeSymbol(type: string): { element: string; oxidationState?: number } {
+export function parseTypeSymbol(type: string): { element: string; isotope?: number; oxidationState?: number } {
   const t = type.trim();
-  const m = /^([A-Za-z]{1,2})(?![A-Za-z])(.*)$/.exec(t);
-  const element = m ? elementFromLetters(m[1]!) : undefined;
-  if (!m || element === undefined || element.length !== m[1]!.length) {
+  const m = /^(\d+)?([A-Za-z]{1,2})(?![A-Za-z])(.*)$/.exec(t);
+  const element = m ? elementFromLetters(m[2]!) : undefined;
+  if (!m || element === undefined || element.length !== m[2]!.length) {
     throw new Error(`CIF: atom type symbol "${type}" is not an element symbol`);
   }
-  const rest = m[2]!.trim();
+  const species = { element, ...(m[1] !== undefined ? { isotope: Number(m[1]) } : {}) };
+  const rest = m[3]!.trim();
   const charge = /^(\d+(?:\.\d+)?)?([+-])$/.exec(rest) ?? /^([+-])(\d+(?:\.\d+)?)?$/.exec(rest);
-  if (!charge) return { element };
+  if (!charge) return species;
   const signFirst = charge[1] === "+" || charge[1] === "-";
   const sign = (signFirst ? charge[1] : charge[2]) === "-" ? -1 : 1;
   const magnitude = Number((signFirst ? charge[2] : charge[1]) ?? "1");
-  return Number.isInteger(magnitude) && magnitude !== 0 ? { element, oxidationState: sign * magnitude } : { element };
+  return Number.isInteger(magnitude) && magnitude !== 0 ? { ...species, oxidationState: sign * magnitude } : species;
 }
 
 /**
@@ -427,7 +433,8 @@ function parseSites(items: Map<string, string>, loops: Loop[]): AtomSite[] {
     const position: Vec3 = [parseCifNumber(row[iX]!), parseCifNumber(row[iY]!), parseCifNumber(row[iZ]!)];
     // A `?`/`.` type symbol is as good as none: fall back to the label.
     const typeText = iType >= 0 ? cifText(row[iType]) : undefined;
-    const typed = typeText !== undefined ? parseTypeSymbol(typeText) : { element: elementFromLabel(row[iLabel] ?? "", labelContext) };
+    const typed: ReturnType<typeof parseTypeSymbol> =
+      typeText !== undefined ? parseTypeSymbol(typeText) : { element: elementFromLabel(row[iLabel] ?? "", labelContext) };
     const element = typed.element;
     const label = iLabel >= 0 ? row[iLabel]! : element;
     const adpType = iAdpType >= 0 ? row[iAdpType]?.toLowerCase() : undefined;
@@ -437,6 +444,7 @@ function parseSites(items: Map<string, string>, loops: Loop[]): AtomSite[] {
     const site: AtomSite = {
       label,
       element,
+      ...(typed.isotope !== undefined ? { isotope: typed.isotope } : {}),
       ...(typed.oxidationState !== undefined ? { oxidationState: typed.oxidationState } : {}),
       position,
       occupancy: iOcc >= 0 ? parseCifNumberOr(row[iOcc], 1) : 1,
