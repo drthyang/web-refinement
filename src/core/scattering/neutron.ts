@@ -57,8 +57,8 @@ export function boundCoherentLength(element: string, isotope?: number): BoundCoh
     const known = tabulatedIsotopes(element);
     if (known.length > 0) {
       throw new Error(
-        `${element} has no natural-abundance neutron scattering length; set the site's isotope ` +
-          `(Sears 1992 lists ${element} ${known.join(", ")})`,
+        `${element} has no natural-abundance neutron scattering length; give the site an isotope, ` +
+          `e.g. the CIF type symbol "${known[0]}${element}" (Sears 1992 lists ${element} ${known.join(", ")})`,
       );
     }
     throw new Error(`No neutron scattering length for element "${element}"`);

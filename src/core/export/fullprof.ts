@@ -43,6 +43,7 @@ import type { StructureModel } from "@/core/crystal/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { siteMultiplicity } from "@/core/crystal/symmetry";
 import { reciprocalMetricTensor } from "@/core/crystal/unitCell";
+import { spaceGroupSymbol } from "@/core/crystal/spaceGroups";
 
 /** One phase of the `.pcr`: its (refined) structure plus per-phase extras. */
 export interface PcrPhase {
@@ -172,12 +173,27 @@ function phaseList(structure: StructureModel, opts: PcrExportOptions): readonly 
   return [{ structure, ...(opts.scale !== undefined ? { scale: opts.scale } : {}) }];
 }
 
+/**
+ * The space-group symbol FullProf rebuilds the phase's operations from. A phase
+ * with operations but no symbol (a CIF with only a symop loop) is named by the
+ * tabulated setting its operations are; one that is none cannot be written. It
+ * used to become "P 1", which FullProf expands as a different structure.
+ */
+function pcrSpaceGroupSymbol(structure: StructureModel): string {
+  const symbol = spaceGroupSymbol(structure.spaceGroup);
+  if (symbol !== undefined) return symbol;
+  throw new Error(
+    `FullProf export: phase "${structure.name || structure.id}" has ${structure.spaceGroup.operations.length} symmetry ` +
+      `operations, no space-group symbol, and they are none of the tabulated settings, so no symbol reproduces them.`,
+  );
+}
+
 /** Emit the phase's space-group + atom block (identical for CW, TOF and single
  *  crystal). `npr` is the phase profile number (7 CW, 9 TOF, 0 single crystal),
  *  `irf` the phase Irf flag (4 = F² list for single crystal). */
 function pushPhaseAtoms(lines: string[], phase: PcrPhase, index: number, npr: number, irf = 0): void {
   const structure = phase.structure;
-  const spaceGroup = structure.spaceGroup.hermannMauguin ?? "P 1";
+  const spaceGroup = pcrSpaceGroupSymbol(structure);
   const [pr1, pr2, pr3] = phase.po?.axis ?? [0, 0, 1];
   const anyAniso = structure.sites.some((s) => s.adp.kind === "anisotropic");
   lines.push(`!-------------------------------------------------------------------------------`);

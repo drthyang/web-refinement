@@ -1,10 +1,9 @@
 /**
- * Minimal CIF parser sufficient for GSAS-II-exported structure CIFs: unit cell,
- * space-group symmetry operations, and atom sites. Handles the esd-in-
- * parentheses notation (e.g. "5.41317(8)") and quoted values.
- *
- * Not a general CIF reader: it assumes one data row per line inside loops, which
- * holds for the files this workbench consumes. Unknown items are ignored.
+ * CIF reader for structures: unit cell, space-group symmetry operations, and
+ * atom sites. Reads CIF 1.1 syntax as a token stream — comments, quoted
+ * strings, semicolon text fields, values on the line after their tag, loop rows
+ * that wrap or share a line — and the esd-in-parentheses notation (e.g.
+ * "5.41317(8)", the esd is dropped). Unknown items are ignored.
  */
 
 import type { AtomSite, DisplacementParameters, SpaceGroup, StructureModel, SymmetryOperation, UnitCell } from "@/core/crystal/types";
@@ -14,7 +13,7 @@ import { composeOperations, operationKey, parseMagneticSymmetryOperation, parseS
 import { IDENTITY3 } from "@/core/math/mat3";
 import { completeSpaceGroup, SpaceGroupSettingError } from "@/core/crystal/spaceGroups";
 import { EIGHT_PI_SQUARED } from "@/core/crystal/adp";
-import { elementFromLetters } from "@/core/crystal/elements";
+import { elementFromLetters, elementsForLabel, formulaElements, labelUsesCase, type LabelContext } from "@/core/crystal/elements";
 
 /** Strip the parenthetical esd and parse: "5.41317(8)" → 5.41317. */
 export function parseCifNumber(raw: string): number {
@@ -46,47 +45,162 @@ function parseCifNumberOr(raw: string | undefined, fallback: number): number {
  * dropped. A non-integer charge ("Fe2.5+") is no tabulated oxidation state and
  * is left unset. A symbol whose letters are not an element ("Wat", "OH-") is an
  * error rather than a guess.
+ *
+ * A leading mass number names an isotope for neutron scattering: "239Pu",
+ * "2H", "57Fe3+". It is the way to give Pu, Cm and Am sites the isotope they
+ * need (Sears 1992 has no natural-element value for them); an isotope Sears
+ * does not tabulate is an error when the neutron amplitude is computed.
  */
-export function parseTypeSymbol(type: string): { element: string; oxidationState?: number } {
+export function parseTypeSymbol(type: string): { element: string; isotope?: number; oxidationState?: number } {
   const t = type.trim();
-  const m = /^([A-Za-z]{1,2})(?![A-Za-z])(.*)$/.exec(t);
-  const element = m ? elementFromLetters(m[1]!) : undefined;
-  if (!m || element === undefined || element.length !== m[1]!.length) {
+  const m = /^(\d+)?([A-Za-z]{1,2})(?![A-Za-z])(.*)$/.exec(t);
+  const element = m ? elementFromLetters(m[2]!) : undefined;
+  if (!m || element === undefined || element.length !== m[2]!.length) {
     throw new Error(`CIF: atom type symbol "${type}" is not an element symbol`);
   }
-  const rest = m[2]!.trim();
+  const species = { element, ...(m[1] !== undefined ? { isotope: Number(m[1]) } : {}) };
+  const rest = m[3]!.trim();
   const charge = /^(\d+(?:\.\d+)?)?([+-])$/.exec(rest) ?? /^([+-])(\d+(?:\.\d+)?)?$/.exec(rest);
-  if (!charge) return { element };
+  if (!charge) return species;
   const signFirst = charge[1] === "+" || charge[1] === "-";
   const sign = (signFirst ? charge[1] : charge[2]) === "-" ? -1 : 1;
   const magnitude = Number((signFirst ? charge[2] : charge[1]) ?? "1");
-  return Number.isInteger(magnitude) && magnitude !== 0 ? { element, oxidationState: sign * magnitude } : { element };
+  return Number.isInteger(magnitude) && magnitude !== 0 ? { ...species, oxidationState: sign * magnitude } : species;
 }
 
 /**
- * Element from an atom-site label, used only when the CIF has no type symbol:
- * the leading letters, case-insensitive, two-letter symbol first — "FE1" → Fe,
- * "CA1" → Ca, "C12" → C, "OW1" → O.
+ * Element from an atom-site label, used only when the CIF has no type symbol.
+ * Letter case decides where the file uses it ("Fe1" → Fe, "Cx1" → C); in a
+ * file of capitals the two-letter symbol is read ("FE1" → Fe, "CA1" → Ca,
+ * "OW1" → O). See {@link elementsForLabel}.
  */
-function elementFromLabel(label: string): string {
-  const element = elementFromLetters(label);
-  if (element === undefined) throw new Error(`CIF: no _atom_site_type_symbol and label "${label}" names no element`);
-  return element;
+function elementFromLabel(label: string, context: LabelContext): string {
+  const found = elementsForLabel(label, context);
+  if (found.length === 1) return found[0]!;
+  if (found.length === 0) throw new Error(`CIF: no _atom_site_type_symbol and label "${label}" names no element`);
+  throw new Error(
+    `CIF: no _atom_site_type_symbol, and label "${label}" could be ${found.join(" or ")}: other labels use ` +
+      `lower case, so its second capital need not be part of a symbol. Add _atom_site_type_symbol.`,
+  );
 }
 
-function tokenizeLine(line: string): string[] {
-  const tokens: string[] = [];
-  const re = /'([^']*)'|"([^"]*)"|(\S+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(line)) !== null) {
-    tokens.push(m[1] ?? m[2] ?? m[3] ?? "");
+/** One CIF token. `quoted` marks a quoted string or a semicolon text field:
+ *  always a value, never a tag, a reserved word or the null `?`/`.`. */
+interface CifToken {
+  readonly text: string;
+  readonly quoted: boolean;
+  /** 1-based line the token starts on. */
+  readonly line: number;
+}
+
+/** Split one line (no text field) into tokens. A comment starts with `#` at a
+ *  token boundary. A quoted string ends at its quote followed by whitespace or
+ *  the end of the line, so 'O'Brien' is one value; an unterminated quote is
+ *  read as a bare word. */
+function tokenizeLine(line: string, lineNo: number, out: CifToken[]): void {
+  let i = 0;
+  while (i < line.length) {
+    const c = line[i]!;
+    if (/\s/.test(c)) {
+      i++; // any whitespace, including a byte-order mark
+      continue;
+    }
+    if (c === "#") return;
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < line.length && !(line[j] === c && (j + 1 === line.length || /\s/.test(line[j + 1]!)))) j++;
+      if (j < line.length) {
+        out.push({ text: line.slice(i + 1, j), quoted: true, line: lineNo });
+        i = j + 1;
+        continue;
+      }
+    }
+    let j = i;
+    while (j < line.length && !/\s/.test(line[j]!)) j++;
+    out.push({ text: line.slice(i, j), quoted: false, line: lineNo });
+    i = j;
+  }
+}
+
+/**
+ * CIF 1.1 tokens. A line starting with `;` opens a text field that runs to the
+ * next line starting with `;`; its lines are one value, so a `_tag`, `loop_` or
+ * `data_` inside it is text, not syntax.
+ */
+function tokenizeCif(text: string): CifToken[] {
+  const lines = text.split(/\r\n|\r|\n/);
+  const tokens: CifToken[] = [];
+  for (let n = 0; n < lines.length; n++) {
+    const line = lines[n]!;
+    if (!line.startsWith(";")) {
+      tokenizeLine(line, n + 1, tokens);
+      continue;
+    }
+    const body = [line.slice(1)];
+    let end = n + 1;
+    while (end < lines.length && !lines[end]!.startsWith(";")) body.push(lines[end++]!);
+    if (end === lines.length) throw new Error(`CIF line ${n + 1}: the text field opened by ";" is never closed`);
+    tokens.push({ text: body.join("\n").trim(), quoted: true, line: n + 1 });
+    tokenizeLine(lines[end]!.slice(1), end + 1, tokens);
+    n = end;
   }
   return tokens;
 }
 
+/** The reserved word a token is (`data_<name>` → "data_"), if any. */
+function reservedWord(t: CifToken): string | undefined {
+  if (t.quoted) return undefined;
+  const lower = t.text.toLowerCase();
+  if (lower.startsWith("data_")) return "data_";
+  if (lower.startsWith("save_")) return "save_";
+  return lower === "loop_" || lower === "global_" || lower === "stop_" ? lower : undefined;
+}
+
+const isTag = (t: CifToken): boolean => !t.quoted && t.text.startsWith("_");
+
 interface Loop {
   readonly headers: string[];
   readonly rows: string[][];
+  /** Set when the values do not fill whole rows; reading the loop throws it. */
+  readonly malformed?: string;
+}
+
+/**
+ * Rows of a loop. CIF puts rows anywhere — wrapped over lines, several to a
+ * line — so the values are cut into rows of `headers.length`. One exception
+ * keeps a non-conformant layout readable as before: when every line holds the
+ * same number of values, more than one row's worth but not a whole number of
+ * rows (MAGNDATA's `1 x,y,z,+1 mx,my,mz` under two tags), each line is a row
+ * and the extra values are ignored. Values that cannot be cut into rows mark
+ * the loop malformed instead of shifting every later column.
+ */
+function loopRows(headers: string[], values: CifToken[]): Pick<Loop, "rows" | "malformed"> {
+  const n = headers.length;
+  if (values.length === 0) return { rows: [] };
+  const perLine: string[][] = [];
+  let last = -1;
+  for (const v of values) {
+    if (v.line !== last) perLine.push([]);
+    perLine[perLine.length - 1]!.push(v.text);
+    last = v.line;
+  }
+  const width = perLine[0]!.length;
+  const uniform = perLine.every((r) => r.length === width);
+  if (n > 0 && uniform && width > n && width % n !== 0) return { rows: perLine };
+  // Every line short by the same count, and not a clean wrap of a row over
+  // several lines: a column is missing, so cutting rows would misalign them.
+  const missingColumn = uniform && width < n && n % width !== 0;
+  if (n > 0 && !missingColumn && values.length % n === 0) {
+    const rows: string[][] = [];
+    for (let i = 0; i < values.length; i += n) rows.push(values.slice(i, i + n).map((v) => v.text));
+    return { rows };
+  }
+  return {
+    rows: [],
+    malformed:
+      `CIF loop ${headers[0] ?? "(no tags)"} (line ${values[0]!.line}): ${values.length} values ` +
+      `in lines of ${[...new Set(perLine.map((r) => r.length))].join("/")} do not fill rows of ${n} columns`,
+  };
 }
 
 interface ParsedCif {
@@ -109,16 +223,13 @@ function parseCifBlocks(text: string): ParsedCif {
     if (items.size > 0 || loops.length > 0) blocks.push({ items, loops });
   };
 
-  const lines = text.split(/\r?\n/);
+  const tokens = tokenizeCif(text);
+  const isValue = (t: CifToken | undefined): t is CifToken => t !== undefined && !isTag(t) && reservedWord(t) === undefined;
   let i = 0;
-  while (i < lines.length) {
-    const raw = lines[i]!;
-    const line = raw.trim();
-    if (line === "" || line.startsWith("#")) {
-      i++;
-      continue;
-    }
-    if (line.toLowerCase().startsWith("data_")) {
+  while (i < tokens.length) {
+    const t = tokens[i]!;
+    const word = reservedWord(t);
+    if (word === "data_") {
       // New data block — start fresh so blocks never merge.
       flush();
       items = new Map<string, string>();
@@ -126,35 +237,32 @@ function parseCifBlocks(text: string): ParsedCif {
       i++;
       continue;
     }
-    if (line.toLowerCase() === "loop_") {
+    if (word === "loop_") {
       i++;
       const headers: string[] = [];
-      while (i < lines.length && lines[i]!.trim().startsWith("_")) {
-        headers.push(lines[i]!.trim().split(/\s+/)[0]!);
-        i++;
-      }
-      const rows: string[][] = [];
-      while (i < lines.length) {
-        const rl = lines[i]!.trim();
-        if (rl === "" || rl.startsWith("_") || rl.startsWith("#") || rl.toLowerCase() === "loop_" || rl.toLowerCase().startsWith("data_")) {
-          break;
-        }
-        rows.push(tokenizeLine(rl));
-        i++;
-      }
-      loops.push({ headers, rows });
+      while (i < tokens.length && isTag(tokens[i]!)) headers.push(tokens[i++]!.text);
+      const values: CifToken[] = [];
+      while (isValue(tokens[i])) values.push(tokens[i++]!);
+      loops.push({ headers, ...loopRows(headers, values) });
       continue;
     }
-    if (line.startsWith("_")) {
-      const tokens = tokenizeLine(line);
-      const key = tokens[0]!.toLowerCase();
-      if (tokens.length >= 2) {
-        items.set(key, tokens.slice(1).join(" "));
-      }
+    if (isTag(t)) {
+      const key = t.text.toLowerCase();
+      const value = tokens[i + 1];
       i++;
+      if (isValue(value)) {
+        // Further bare words on the value's line belong to it: a common
+        // non-conformant spelling is `_symmetry_space_group_name_H-M P 21/c`.
+        let text = value.text;
+        i++;
+        while (!value.quoted && isValue(tokens[i]) && !tokens[i]!.quoted && tokens[i]!.line === value.line) {
+          text += ` ${tokens[i++]!.text}`;
+        }
+        items.set(key, text);
+      }
       continue;
     }
-    i++;
+    i++; // global_, save_, stop_, or a stray value
   }
   flush();
 
@@ -166,8 +274,12 @@ function parseCifBlocks(text: string): ParsedCif {
   return blocks.find(hasAtoms) ?? blocks[0]!;
 }
 
+/** The first loop whose tags satisfy `predicate`; throws if that loop's values
+ *  do not fill whole rows, rather than reading misaligned columns. */
 function findLoop(loops: Loop[], predicate: (headers: string[]) => boolean): Loop | undefined {
-  return loops.find((l) => predicate(l.headers.map((h) => h.toLowerCase())));
+  const loop = loops.find((l) => predicate(l.headers.map((h) => h.toLowerCase())));
+  if (loop?.malformed) throw new Error(loop.malformed);
+  return loop;
 }
 
 function parseCell(items: Map<string, string>): UnitCell {
@@ -280,7 +392,7 @@ function parseAnisotropicAdps(loops: Loop[]): Map<string, DisplacementParameters
   return adps;
 }
 
-function parseSites(loops: Loop[]): AtomSite[] {
+function parseSites(items: Map<string, string>, loops: Loop[]): AtomSite[] {
   const atomLoop = findLoop(loops, (h) => h.some((k) => k.includes("atom_site_fract_x")));
   if (!atomLoop) return [];
   const anisoAdps = parseAnisotropicAdps(loops);
@@ -306,6 +418,13 @@ function parseSites(loops: Loop[]): AtomSite[] {
   const iU = col("_atom_site_u_iso_or_equiv");
   const iB = col("_atom_site_b_iso_or_equiv");
   const iMult = col("_atom_site_site_symmetry_multiplicity");
+  // For labels without a type symbol: does the file write element symbols in
+  // proper case anywhere, and which elements does its formula name?
+  const formula = cifText(items.get("_chemical_formula_sum"));
+  const labelContext: LabelContext = {
+    caseAware: iLabel >= 0 && atomLoop.rows.some((r) => labelUsesCase(r[iLabel] ?? "")),
+    ...(formula !== undefined ? { formula: formulaElements(formula) } : {}),
+  };
 
   return atomLoop.rows.map((row) => {
     // Per row, not per column: a mixed loop can leave U_iso as `?` on the sites
@@ -316,7 +435,8 @@ function parseSites(loops: Loop[]): AtomSite[] {
     const position: Vec3 = [parseCifNumber(row[iX]!), parseCifNumber(row[iY]!), parseCifNumber(row[iZ]!)];
     // A `?`/`.` type symbol is as good as none: fall back to the label.
     const typeText = iType >= 0 ? cifText(row[iType]) : undefined;
-    const typed = typeText !== undefined ? parseTypeSymbol(typeText) : { element: elementFromLabel(row[iLabel] ?? "") };
+    const typed: ReturnType<typeof parseTypeSymbol> =
+      typeText !== undefined ? parseTypeSymbol(typeText) : { element: elementFromLabel(row[iLabel] ?? "", labelContext) };
     const element = typed.element;
     const label = iLabel >= 0 ? row[iLabel]! : element;
     const adpType = iAdpType >= 0 ? row[iAdpType]?.toLowerCase() : undefined;
@@ -326,6 +446,7 @@ function parseSites(loops: Loop[]): AtomSite[] {
     const site: AtomSite = {
       label,
       element,
+      ...(typed.isotope !== undefined ? { isotope: typed.isotope } : {}),
       ...(typed.oxidationState !== undefined ? { oxidationState: typed.oxidationState } : {}),
       position,
       occupancy: iOcc >= 0 ? parseCifNumberOr(row[iOcc], 1) : 1,
@@ -350,7 +471,7 @@ export function parseCif(text: string, id = "structure", options: CifParseOption
     name,
     cell,
     spaceGroup: parseSpaceGroup(items, loops, cell, options.spaceGroupSetting),
-    sites: parseSites(loops),
+    sites: parseSites(items, loops),
   };
 }
 
@@ -459,9 +580,12 @@ export function parseMagneticCif(text: string, id = "structure", options: CifPar
     name,
     cell,
     spaceGroup: magSg ?? parseSpaceGroup(items, loops, cell, options.spaceGroupSetting),
-    sites: parseSites(loops),
+    sites: parseSites(items, loops),
   };
-  const moments = parseMoments(loops);
+  // Moments are only used with the BNS operations below, so a file without
+  // them never has its moment loop read. diffpy's explicit-P1 mCIFs declare a
+  // symmform column that no row fills; their structure reads, as before.
+  const moments = magSg ? parseMoments(loops) : [];
   // Carry the BNS operations on the magnetic model: the structure factor then
   // expands each moment over the magnetic group with position deduplication.
   // Without them it falls back to the legacy no-dedup expansion, which

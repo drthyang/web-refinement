@@ -159,7 +159,8 @@ approximate, however plausible its output looks.
 **Supported**
 - Neutron coherent scattering lengths: Sears (1992) *Neutron News* via NIST,
   88 elements + D and 248 isotopes (Hf corrected to 7.77). Pu, Cm and Am need
-  an explicit isotope.
+  an explicit isotope: a mass number in the CIF type symbol, e.g. `239Pu`
+  (likewise `2H`, `57Fe3+` for any tabulated isotope).
 - X-ray form factors: Cromer–Mann coefficients for 98 neutral atoms H–Cf
   (Vol. C), each checked to give f(0) = Z.
 - Magnetic form factors: ⟨j0⟩ for 97 ions and ⟨j2⟩ for 95 (Vol. C). The
@@ -388,7 +389,9 @@ Conventions are pinned in
 ## Input and output
 
 **Supported: input**
-- Structures: CIF and mCIF.
+- Structures: CIF and mCIF, read as CIF 1.1 tokens: text fields, comments, and
+  loop rows that wrap or share a line. A loop whose values do not fill its rows
+  is an error.
 - Powder patterns: two- or three-column text (x y [σ]), the GSAS-II CSV export,
   ILL powder files, and GSAS standard histograms (`.gsa`, `.gss`, `.fxye`).
 - Instrument files: GSAS-II `.instprm`, classic GSAS `.prm`, and FullProf `.irf`
@@ -416,6 +419,8 @@ Conventions are pinned in
   `CONST` bank needs its unit set by hand.
 
 **Not yet**
+- CIF: DDLm-style dotted names for the cell and atom sites
+  (`_cell.length_a`), and the esds of input values (they are dropped).
 - `.pcr` export for single-crystal and multi-phase refinements.
 - Bond-length and angle tables in the report.
 - Saving and opening projects through the agent tools.

@@ -404,6 +404,37 @@ export function spaceGroupSettings(): SpaceGroupSettingInfo[] {
   return SPACE_GROUP_DATA.map(settingInfo);
 }
 
+const opSetKey = (ops: readonly SymmetryOperation[]): string => [...new Set(ops.map(operationKey))].sort().join(";");
+const TABLE_OP_KEYS = new Map<SpaceGroupData, string>();
+
+/**
+ * The tabulated setting whose operations are exactly `ops` (modulo lattice
+ * translations), or undefined when they are no tabulated setting (e.g. an
+ * origin-shifted one). Names a structure that carries operations but no
+ * symbol, such as one read from a CIF with only a symop loop.
+ */
+export function settingForOperations(ops: readonly SymmetryOperation[]): SpaceGroupData | undefined {
+  const n = new Set(ops.map(operationKey)).size;
+  const key = opSetKey(ops);
+  return SPACE_GROUP_DATA.find((e) => {
+    if (e.ops.length !== n) return false;
+    let k = TABLE_OP_KEYS.get(e);
+    if (k === undefined) {
+      k = opSetKey(e.ops.map(parseSymmetryOperation));
+      TABLE_OP_KEYS.set(e, k);
+    }
+    return k === key;
+  });
+}
+
+/** A space group's symbol for display and export: its own, else the extended
+ *  symbol of the tabulated setting its operations are, else undefined. */
+export function spaceGroupSymbol(sg: SpaceGroup): string | undefined {
+  if (sg.hermannMauguin) return sg.hermannMauguin;
+  const entry = settingForOperations(sg.operations);
+  return entry ? extendedSymbol(entry) : undefined;
+}
+
 /**
  * Build a {@link SpaceGroup} from an International Tables number or a
  * Hermann–Mauguin symbol (optionally with a setting suffix, e.g. "F d -3 m:2"),

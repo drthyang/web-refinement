@@ -27,7 +27,8 @@ the sibling module (`neutron.ts`, `xray.ts`, `magnetic.ts`):
   Pu and Cm print no element value (their isotopes differ by up to 10 fm), so a
   Pu or Cm site must name its isotope. Am's row is the ²⁴³Am value (its
   half-life is printed), so it is emitted as ²⁴³Am and an Am site must name
-  its isotope too. Hf is corrected from NIST's 7.7 to 7.77 (below).
+  its isotope too. A CIF names it with a mass number in the type symbol
+  (`239Pu`, `243Am`). Hf is corrected from NIST's 7.7 to 7.77 (below).
 - X-ray — [`scripts/gen_xray_ff.py`](../scripts/gen_xray_ff.py). All neutral
   atoms from the ITC-C Cromer–Mann parametrization. Two pinned transcriptions
   are read (DABAX `f0_InterTables.dat` and cctbx `it1992.cpp`); every row must

@@ -22,6 +22,7 @@ import type { ParameterKind, RefinementParameter, RefinementResult } from "@/cor
 import type { ParameterBinding } from "@/core/refinement/types";
 import type { Vec3 } from "@/core/math/types";
 import { buildEsdMap, cellVolume, formatWithEsd } from "@/core/export/cif";
+import { spaceGroupSymbol } from "@/core/crystal/spaceGroups";
 import { crystalComponentsToCartesian } from "@/core/magnetic/moment";
 import { kLabel } from "@/core/magnetic/kSearch";
 import { magneticSupercell, momentAnchorPosition } from "@/core/crystal/cellExpansion";
@@ -272,7 +273,8 @@ function phaseHtml(phase: ReportPhase, index: number, total: number): string {
   const st = phase.structure;
   const esd = buildEsdMap(phase.params, phase.bindings);
   const sg = st.spaceGroup;
-  const sgText = `${sg.hermannMauguin ?? "P1 (as loaded)"}${sg.number !== undefined ? ` · No. ${sg.number}` : ""}`;
+  // A structure with operations but no symbol is named by its setting, never "P1".
+  const sgText = `${spaceGroupSymbol(sg) ?? "no symbol"}${sg.number !== undefined ? ` · No. ${sg.number}` : ""}`;
   const role = phase.role ?? (total > 1 ? (index === 0 ? "primary phase" : `phase ${index + 1}`) : undefined);
   return `<h3>${esc(st.name || st.id)} <span class="pill">${esc(sgText)}</span>${role ? `<span class="pill">${esc(role)}</span>` : ""}</h3>
 <div class="two">
