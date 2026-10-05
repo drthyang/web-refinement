@@ -69,6 +69,39 @@ describe("staged controller guards", () => {
     expect(out.final).toBeDefined();
   });
 
+  it("does not blame the newcomers for an old parameter pinned on its bound", () => {
+    // y = a + w²·x + c·x³ with w ≥ 0, against data whose linear term is
+    // negative. Without c, w² > 0 absorbs part of the cubic; once c is free
+    // the best w² would be negative, so w rails at 0 — where ∂(w²x)/∂w = 0
+    // and the solver reports it singular. That is the bound, not a
+    // degeneracy c introduced: c must stay free, as an isotropic Mustrain
+    // driven to 0 must not cost a stage its atomic positions.
+    const xs = Array.from({ length: 21 }, (_, i) => i * 0.2);
+    const toy = (ps: readonly RefinementParameter[]) => ({
+      parameters: ps,
+      observations: Float64Array.from(xs.map((x) => 1 - 0.2 * x + 0.05 * x ** 3)),
+      weights: Float64Array.from(xs.map(() => 1)),
+      calculate: (v: Readonly<Record<string, number>>) => Float64Array.from(xs.map((x) => (v.a ?? 0) + (v.w ?? 0) ** 2 * x + (v.c ?? 0) * x ** 3)),
+    });
+    const params: RefinementParameter[] = [
+      { id: "a", label: "a", kind: "background", value: 0, initialValue: 0, fixed: false },
+      { id: "w", label: "w", kind: "peakWidth", value: 0.5, initialValue: 0.5, min: 0, fixed: false },
+      { id: "c", label: "c", kind: "positionShift", value: 0, initialValue: 0, fixed: false },
+    ];
+    const out = refineStaged(params, toy, [
+      { name: "width", select: (p) => p.id === "a" || p.id === "w" },
+      { name: "cubic", select: (p) => p.id === "c" },
+    ], { maxIterations: 50 });
+    const cubic = out.stages.find((s) => s.name === "cubic")!;
+    expect(cubic.result.diagnostics?.singularParameterIds).toContain("w");
+    expect(cubic.result.diagnostics?.atBounds.map((b) => b.parameterId)).toContain("w");
+    expect(cubic.rejected).toBeUndefined();
+    expect(cubic.refixed).toBeUndefined();
+    const c = out.parameters.find((p) => p.id === "c")!;
+    expect(c.fixed).toBe(false);
+    expect(c.value).toBeCloseTo(cubic.result.parameters.c!, 12);
+  });
+
   it("guards can be disabled explicitly", async () => {
     const { params, build } = fixture();
     const out = await refineStagedAsync(params, build, stages, { maxIterations: 10 }, undefined, { enabled: false });

@@ -69,6 +69,9 @@ The setting is never guessed. A symbol or number that fits several settings
 ("F d -3 m", origin choice 1 or 2) needs explicit operations, a Hall symbol, a
 suffix ("F d -3 m:2", ICSD "Z"), the cell (H vs R axes only) or the user's
 choice, and is a `SpaceGroupSettingError` otherwise; so is an unknown symbol.
+No symmetry information at all is one too, with P 1 as its only candidate: the
+atom list may be the whole cell or an asymmetric unit that lost its symmetry,
+and only the user can say which (`spaceGroupSetting: "P 1"`).
 Tabulated symbols carry the suffix (`hermannMauguin: "F d -3 m:2"`).
 
 ### `StructureModel`

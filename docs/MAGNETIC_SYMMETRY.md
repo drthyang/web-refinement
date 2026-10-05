@@ -139,7 +139,7 @@ moment component perpendicular to Q scatters and orientations are averaged
 Ties are therefore expected. Among tied fits, prefer the maximal subgroup (lowest
 index) with the fewest moment parameters.
 
-On unpublished AWO₄ 6 K data with k = (½, 0, 0), five candidates tie at wR 7.45 %
+On unpublished AWO₄ 6 K data with k = (½, 0, 0), five candidates tie at wR 7.59 %
 with the nuclear model fixed: P2/c′, P-1′, Pc′, P2 and P1. The rule picks P2/c′,
 of index 2 with two moment parameters. The magnetic page ranks candidates by this
 rule, as [USER_GUIDE.md](./USER_GUIDE.md) describes.

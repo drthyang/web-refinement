@@ -154,6 +154,22 @@ describe("completeSpaceGroup — integration hook", () => {
     expect(() => completeSpaceGroup({ operations: [] })).toThrow(/No space-group information/);
   });
 
+  it("offers P 1 as the one choice when there is no space-group information", () => {
+    let err: unknown;
+    try {
+      completeSpaceGroup({ operations: [] });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(SpaceGroupSettingError);
+    expect((err as SpaceGroupSettingError).candidates.map((c) => c.symbol)).toEqual(["P 1"]);
+    const p1 = completeSpaceGroup({ operations: [] }, undefined, { setting: "P 1" });
+    expect(p1.number).toBe(1);
+    expect(p1.operations.map((o) => o.xyz)).toEqual(["x,y,z"]);
+    // Nothing else can be chosen without a symbol or number to fit.
+    expect(() => completeSpaceGroup({ operations: [] }, undefined, { setting: "F d -3 m:2" })).toThrow(/only P 1 can be chosen/);
+  });
+
   it("uses a Hall symbol to pick the setting", () => {
     const sg = completeSpaceGroup({ hermannMauguin: "F d -3 m", operations: [] }, undefined, { hall: "-F 4vw 2vw 3" });
     expect(sg.hermannMauguin).toBe("F d -3 m:2");

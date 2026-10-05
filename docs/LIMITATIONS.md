@@ -130,8 +130,9 @@ approximate, however plausible its output looks.
 - The setting is never guessed. A CIF without operations whose symbol or number
   fits several settings (e.g. "F d -3 m") must say which — a Hall symbol, a
   suffix ("F d -3 m:2", ICSD "Z"), or the user's choice when loading; the cell
-  decides H vs R axes. An unknown symbol, or no symmetry at all, is an error,
-  not P1.
+  decides H vs R axes. An unknown symbol is an error, not P1. So is a CIF with
+  no symmetry at all; it loads as P1 only when you choose that, because its
+  atoms are the whole cell (diffpy writes such files).
 - Magnetic subgroup candidates carry standard BNS/OG labels from a bundled
   ISO-MAG table (types I and III). A setting search also names candidates
   written in other settings: axis permutations, origin shifts, orthohexagonal

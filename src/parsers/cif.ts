@@ -192,6 +192,8 @@ export interface CifParseOptions {
    * The setting to use when the CIF gives no symmetry operations and its
    * symbol/number fits more than one setting — the extended symbol of one of
    * the candidates a {@link SpaceGroupSettingError} lists (e.g. "F d -3 m:2").
+   * A CIF with no symmetry at all is read only with "P 1": its atom list is
+   * then the whole cell, as in the fully expanded files diffpy writes.
    */
   readonly spaceGroupSetting?: string;
 }

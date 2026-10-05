@@ -265,7 +265,8 @@ export interface SpaceGroupSpec {
   /**
    * The user's choice among the settings an ambiguous description fits — the
    * extended symbol of one of `SpaceGroupSettingError.candidates`, e.g.
-   * "F d -3 m:2". It must be one of the settings the rest of the spec fits.
+   * "F d -3 m:2". It must be one of the settings the rest of the spec fits;
+   * with nothing else given, that is "P 1" alone.
    */
   readonly setting?: string;
 }
@@ -282,6 +283,9 @@ export interface SpaceGroupSpec {
  *  - Hexagonal vs rhombohedral axes are decided by the cell when given. Two
  *    origin choices are never decided: that needs operations, a Hall symbol,
  *    a suffix, or the user's choice (`error.candidates`).
+ *  - No description at all is an error whose one candidate is P 1: the atom
+ *    list may be every atom in the cell (diffpy writes such files) or an
+ *    asymmetric unit that lost its symmetry, and only the user can say which.
  */
 export function resolveSpaceGroupSetting(spec: SpaceGroupSpec, cell?: UnitCell): SpaceGroupData {
   const hall = spec.hall?.trim() || undefined;
@@ -334,8 +338,13 @@ export function resolveSpaceGroupSetting(spec: SpaceGroupSpec, cell?: UnitCell):
     }
   }
   if (pool === null) {
+    const p1 = BY_NUMBER.get(1)![0]!;
+    if (spec.setting !== undefined && normalizeSymbol(spec.setting) === normalizeSymbol(extendedSymbol(p1))) return p1;
+    const chosen = spec.setting !== undefined ? ` The chosen setting "${spec.setting}" needs a symbol or number to fit; only P 1 can be chosen.` : "";
     throw new SpaceGroupSettingError(
-      "No space-group information: no symmetry operations, Hermann–Mauguin symbol, Hall symbol or IT number.",
+      "No space-group information: no symmetry operations, Hermann–Mauguin symbol, Hall symbol or IT number." +
+        `${chosen} If the file lists every atom in the cell, choose P 1.`,
+      [{ ...settingInfo(p1), description: "no symmetry: the file lists every atom in the cell" }],
     );
   }
   pool = narrowByCell(pool, cell);

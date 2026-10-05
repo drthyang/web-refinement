@@ -43,7 +43,10 @@ describe.skipIf(!has)("local AWO₄ magnetic demo (POWGEN 6 K, k = ½ 0 0)", () 
     if (ex.instrument.kind === "tof") expect(ex.instrument.difC).toBeCloseTo(22600, 0);
   });
 
-  it("carries the solved P2/c′ model: a maximal candidate of the k = (½,0,0) lattice, tied cations at 2.57 µ_B", () => {
+  // 2.50 µ_B since the solve uses sig-q linear in d (GSAS-II getTOFsig); under
+  // the old sig-q/d² width it was 2.57 — a 0.07 µ_B shift against an esd of
+  // ≈ 0.05 µ_B, the moment following the corrected peak widths.
+  it("carries the solved P2/c′ model: a maximal candidate of the k = (½,0,0) lattice, tied cations at 2.50 µ_B", () => {
     const ex = example();
     expect(ex.k).toEqual([0.5, 0, 0]);
     expect(ex.magnetic.propagation[0]).toEqual([0.5, 0, 0]);
@@ -55,7 +58,7 @@ describe.skipIf(!has)("local AWO₄ magnetic demo (POWGEN 6 K, k = ½ 0 0)", () 
     expect(magneticIonCandidates(ex.structure).map((i) => i.siteLabel)).toEqual(ex.magneticSites);
     const carried = ex.magnetic.moments.filter((m) => m.components.some((c) => c !== 0));
     expect(carried.map((m) => m.siteLabel).sort()).toEqual([...ex.magneticSites].sort());
-    for (const m of carried) expect(Math.hypot(...momentCartesian(ex.structure.cell, m))).toBeCloseTo(2.57, 1);
+    for (const m of carried) expect(Math.hypot(...momentCartesian(ex.structure.cell, m))).toBeCloseTo(2.5, 1);
     expect(ex.momentParams).toHaveLength(2);
   });
 
