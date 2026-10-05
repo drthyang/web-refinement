@@ -236,6 +236,7 @@ function parseInstrumentBase(text: string): InstrumentParameters {
       ...(v.get("sig-0") !== undefined ? { sig0: v.get("sig-0")! } : {}),
       ...(v.get("sig-1") !== undefined ? { sig1: v.get("sig-1")! } : {}),
       ...(v.get("sig-2") !== undefined ? { sig2: v.get("sig-2")! } : {}),
+      // GSAS-II sig-q is the σ² term LINEAR in d (GSASIImath.getTOFsig), as is MATERIA's sigQ.
       ...(v.get("sig-q") !== undefined ? { sigQ: v.get("sig-q")! } : {}),
     };
     return params;

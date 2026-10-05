@@ -47,7 +47,7 @@ export interface AppliedModel {
   /**
    * Time-of-flight peak-shape coefficients (GSAS-II convention). The d-dependent
    * rise/decay/Gaussian widths of the back-to-back-exponential profile:
-   *   α = α₀ + α₁/d,  β = β₀ + β₁/d⁴,  σ² = σ₀ + σ₁·d² + σ₂·d⁴.
+   *   α = α₀ + α₁/d,  β = β₀ + β₁/d⁴ + β_q/d²,  σ² = σ₀ + σ₁·d² + σ₂·d⁴ + σ_q·d.
    * Present only when a `tofProfile` binding is supplied. Only applies to a TOF
    * pattern.
    */

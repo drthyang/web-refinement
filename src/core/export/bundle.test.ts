@@ -40,7 +40,7 @@ describe("data writers", () => {
   it("FullProf .int carries the Crystal header + wavelength", () => {
     const int = singleCrystalInt(single).split("\n");
     expect(int[0]).toBe("Crystal");
-    expect(int[1]).toBe("(3i4,2f8.2)");
+    expect(int[1]).toBe("(3i4,2f10.3,i4)"); // float columns sized to the data, cod column
     expect(int[2]).toBe("1.0000 0 0");
   });
 });
