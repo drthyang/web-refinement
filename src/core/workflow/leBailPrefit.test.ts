@@ -6,6 +6,7 @@ import { parseSymmetryOperation } from "@/core/crystal/symmetry";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { gaussian } from "@/core/diffraction/profile";
 import { leBailCellPrefit } from "@/core/workflow/leBailPrefit";
+import { parse_structure, simulate_pattern } from "@/mcp/tools";
 
 const WL = 1.54;
 const twoTheta = (d: number): number => (2 * Math.asin(WL / (2 * d)) * 180) / Math.PI;
@@ -103,5 +104,48 @@ describe("leBailCellPrefit", () => {
     expect(res.refined).toBe(false);
     expect(res.cell.a).toBe(5.0);
     expect(res.cellValues).toEqual({});
+  });
+
+  it("TOF: recovers the back-to-back-exponential widths of an engine-simulated pattern", () => {
+    // A CsCl pattern from the engine's own TOF profile, whose widths grow ~30×
+    // across d = 0.7–6 Å. Started from the data alone (no instrument shape), the
+    // Le Bail peaks must land on the same α, β₀ and σ₂².
+    const cscl = parse_structure({ cif: `data_t
+_cell_length_a 4.12
+_cell_length_b 4.12
+_cell_length_c 4.12
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_symmetry_space_group_name_H-M 'P m -3 m'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_U_iso_or_equiv
+Cs1 Cs 0 0 0 1 0.01
+Cl1 Cl 0.5 0.5 0.5 1 0.01
+` }).structure;
+    const truth = { alpha: 0.1, beta0: 0.013, sig2: 100 };
+    const sim = simulate_pattern({ structure: cscl, instrument: { kind: "tof", difC: 22585.8, sig1: 300, ...truth }, xMin: 15000, xMax: 135000, points: 12000 });
+    const top = Math.max(...sim.curves.yCalc);
+    const tofPattern: PowderPattern = {
+      id: "t", name: "tof", xUnit: "tof", radiation: { kind: "neutron-tof" },
+      points: sim.curves.x.map((x, i) => {
+        const y = (20000 * sim.curves.yCalc[i]!) / top + 300;
+        return { x, yObs: y, sigma: Math.sqrt(y) };
+      }),
+    };
+    const cubic: ParameterBinding[] = (["a", "b", "c"] as const).map((k) => ({ parameterId: "cell_a", kind: "cellLength", targetId: cscl.id, targetKey: k }));
+    const a: RefinementParameter = { id: "cell_a", label: "a", kind: "cellLength", value: 4.12, initialValue: 4.12, fixed: false };
+    const res = leBailCellPrefit(cscl, tofPattern, [a], cubic, { shape: "tof", tof: { difC: 22585.8, difA: 0, difB: 0, zero: 0 } });
+    expect(res.rWeighted).toBeLessThan(0.01);
+    expect(res.cellValues["cell_a"]).toBeCloseTo(4.12, 4);
+    expect(res.tofProfile!.alpha).toBeCloseTo(truth.alpha, 2);
+    expect(res.tofProfile!.beta0).toBeCloseTo(truth.beta0, 3);
+    expect(res.tofProfile!.sig2! / truth.sig2).toBeCloseTo(1, 1);
   });
 });
