@@ -66,15 +66,21 @@ describe.skipIf(!has)("AWO₄ magnetic demo — solve the 6 K magnetic structure
     // 1. Nuclear staged refinement. The stage plan unlocks kind-groups in
     // order; every structural / profile / microstructure row is sent as
     // unlockable except occupancy, the Gaussian U and the TOF calibration.
+    // sig-q stays at its .instprm calibration too: it is the σ² term linear in
+    // d (GSAS-II getTOFsig), and over this bank's d range it is not separable
+    // from sig-0 and the isotropic Mustrain (∝ d²). Freed with them, both
+    // esds exceed their values (ρ(sig-0, sig-q) ≈ −0.98), the pair drifts
+    // along that direction, and the stage guard rejects the positions stage.
     const spec = buildPowderSpec(structure, pattern, instrument, true, 6, { positions: true, adp: true });
     const unlock = new Set<ParameterKind>([
       "positionShift", "bIso", "uAniso", "poRatio", ...CORRECTION_KINDS,
       "peakWidth", "profileV", "profileW", "profileX", "profileY", "asymSL", "asymHL", "zeroShift", "tofProfile",
       "stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainIso",
     ]);
+    const heldAtCalibration = new Set(["tof_sigQ"]);
     const t0 = Date.now();
     const staged = refineStaged(
-      spec.params.map((p) => (unlock.has(p.kind) ? { ...p, fixed: false } : p)),
+      spec.params.map((p) => (unlock.has(p.kind) && !heldAtCalibration.has(p.id) ? { ...p, fixed: false } : p)),
       (params) => buildPowderProblem(structure, pattern, params, spec.bindings, spec.profile),
       stagesFromKindGroups(DEFAULT_STAGE_KINDS),
       { maxIterations: 12 },
