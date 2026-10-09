@@ -10,7 +10,10 @@ import { COPILOT_TOOLS } from "@/copilot/tools";
  * that the loop runs tools, answers them, and stops — no network, no key.
  */
 
-type Block = { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: unknown };
+type Block =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "fallback"; from: string; to: string };
 
 function sse(blocks: Block[], stop: string): string {
   const ev = (type: string, data: unknown): string => `event: ${type}\ndata: ${JSON.stringify({ type, ...(data as object) })}\n\n`;
@@ -21,6 +24,8 @@ function sse(blocks: Block[], stop: string): string {
     if (b.type === "text") {
       out += ev("content_block_start", { index, content_block: { type: "text", text: "" } });
       out += ev("content_block_delta", { index, delta: { type: "text_delta", text: b.text } });
+    } else if (b.type === "fallback") {
+      out += ev("content_block_start", { index, content_block: { type: "fallback", from: { model: b.from }, to: { model: b.to }, trigger: { type: "refusal" } } });
     } else {
       out += ev("content_block_start", { index, content_block: { type: "tool_use", id: b.id, name: b.name, input: {} } });
       out += ev("content_block_delta", { index, delta: { type: "input_json_delta", partial_json: JSON.stringify(b.input) } });
@@ -92,12 +97,13 @@ describe("CopilotChat", () => {
     const results = history[2]!.content as { type: string; tool_use_id: string; is_error?: boolean }[];
     expect(results.map((r) => [r.tool_use_id, r.is_error ?? false])).toEqual([["tu_1", false], ["tu_2", true]]);
 
-    // What the SDK sent: the model, the key, the tools, caching, thinking, fallback.
+    // What the SDK sent: the model, the key, the tools, caching, thinking — and
+    // no fallback, which is opt-in.
     const first = api.requests[0]!;
     expect(first.headers["x-api-key"]).toBe("sk-test");
-    expect(String(first.headers["anthropic-beta"])).toContain("server-side-fallback-2026-07-01");
+    expect(first.headers["anthropic-beta"]).toBeUndefined();
     expect(first.body.model).toBe("claude-opus-5-5");
-    expect(first.body.fallbacks).toBe("default");
+    expect(first.body.fallbacks).toBeUndefined();
     expect(first.body.stream).toBe(true);
     expect(first.body.thinking).toEqual({ type: "adaptive", display: "summarized" });
     expect(first.body.output_config).toEqual({ effort: "high" });
@@ -113,13 +119,31 @@ describe("CopilotChat", () => {
     expect((api.requests[1]!.body.messages as unknown[]).length).toBe(3);
   });
 
-  it("sends no fallback for a model without one", async () => {
+  it("sends the fallback when opted in, and says when another model answered", async () => {
+    const api = await fakeApi([sse([{ type: "fallback", from: "claude-opus-5-5", to: "claude-opus-4-8" }, { type: "text", text: "ok" }], "end_turn")]);
+    server = api.server;
+    const notices: string[] = [];
+    const chat = new CopilotChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as CopilotExecutor);
+    await chat.send(
+      "hi",
+      { transport: "api-key", apiKey: "sk-test", baseURL: api.url, model: "claude-opus-5-5", effort: "high", fallback: true },
+      { onAssistantStart: () => undefined, onText: () => undefined, onThinking: () => undefined, onNotice: (t) => notices.push(t), onUsage: () => undefined },
+      new AbortController().signal,
+    );
+    expect(String(api.requests[0]!.headers["anthropic-beta"])).toContain("server-side-fallback-2026-07-01");
+    expect(api.requests[0]!.body.fallbacks).toBe("default");
+    expect(notices).toEqual(["claude-opus-5-5 declined this turn; claude-opus-4-8 answered it."]);
+    // The fallback block stays in the history, verbatim, as the API requires.
+    expect((chat.history()[1]!.content as { type: string }[])[0]!.type).toBe("fallback");
+  });
+
+  it("sends no fallback for a model without one, even when opted in", async () => {
     const api = await fakeApi([sse([{ type: "text", text: "ok" }], "end_turn")]);
     server = api.server;
     const chat = new CopilotChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as CopilotExecutor);
     await chat.send(
       "hi",
-      { transport: "api-key", apiKey: "sk-test", baseURL: api.url, model: "claude-haiku-5-5", effort: "low" },
+      { transport: "api-key", apiKey: "sk-test", baseURL: api.url, model: "claude-haiku-5-5", effort: "low", fallback: true },
       { onAssistantStart: () => undefined, onText: () => undefined, onThinking: () => undefined, onNotice: () => undefined, onUsage: () => undefined },
       new AbortController().signal,
     );

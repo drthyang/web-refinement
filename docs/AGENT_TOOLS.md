@@ -391,7 +391,9 @@ rest of the session. Every change is a step in History tagged `agent`
   this machine may connect. `materia` keeps the full headless toolset for
   what-ifs on data the app has not opened.
 - **API key.** Claude Opus 5.5 by default (Sonnet 5.5 and Haiku 5.5 on offer),
-  adaptive thinking, streamed. The key is kept for the tab unless you tick
+  adaptive thinking, streamed. Every turn stays on the chosen model: the API's
+  refusal fallback to another model is an opt-in setting, and a turn another
+  model answered is announced. The key is kept for the tab unless you tick
   Remember; it is never written to a project, autosave, or report. The system
   prompt carries the `my-rietveld-workflow` skill and two `knowledge/` notes,
   and is cached across turns.

@@ -9,7 +9,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { color, fz, mono, radius } from "@/app/theme";
 import type { ActivityEntry } from "@/copilot/executor";
 import type { CopilotController, CopilotMode, TranscriptItem } from "@/copilot/useCopilot";
-import { CHAT_MODELS } from "@/copilot/chat-models";
+import { CHAT_MODELS, hasRefusalFallback } from "@/copilot/chat-models";
 
 interface Props {
   readonly copilot: CopilotController;
@@ -134,6 +134,12 @@ function Settings({ copilot }: { copilot: CopilotController }): JSX.Element {
             </select>
           </label>
         </div>
+      )}
+      {settings.mode !== "claude-code" && hasRefusalFallback(settings.model) && (
+        <label style={{ ...field, flexDirection: "row", alignItems: "center", gap: 6 }} title="Off: every turn stays on the chosen model, so a session can be reproduced. On: if the model declines a turn, the API answers it with another model, and the conversation says which.">
+          <input type="checkbox" checked={settings.fallback} onChange={(e) => updateSettings({ fallback: e.target.checked })} />
+          <span style={{ fontSize: 12.5 }}>Fall back to another model if this one declines</span>
+        </label>
       )}
       <label style={{ ...field, flexDirection: "row", alignItems: "center", gap: 6 }} title="Changes run without an approval card. Each one is still a step in History you can undo.">
         <input type="checkbox" checked={settings.autoApprove} onChange={(e) => copilot.updateSettings({ autoApprove: e.target.checked })} />

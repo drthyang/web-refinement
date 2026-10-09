@@ -28,6 +28,7 @@ import type {
 import { COPILOT_TOOLS, inputJsonSchema } from "@/copilot/tools";
 import type { ToolRunner } from "@/copilot/executor";
 import { copilotSystemPrompt } from "@/copilot/systemPrompt";
+import { hasRefusalFallback } from "@/copilot/chat-models";
 
 export type ChatTransport = "api-key" | "proxy";
 export type ChatEffort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -40,6 +41,13 @@ export interface ChatConfig {
   readonly baseURL?: string;
   readonly model: string;
   readonly effort: ChatEffort;
+  /**
+   * Let the API re-run a declined turn on another model (server-side refusal
+   * fallback). Off unless the user turns it on: a silent model switch makes a
+   * session harder to reproduce, so every turn stays on `model` by default,
+   * and a turn another model answered is always announced.
+   */
+  readonly fallback?: boolean;
 }
 
 export interface ChatCallbacks {
@@ -57,8 +65,6 @@ const MAX_TURNS = 40;
 /** The proxy route's path under the app's base URL (vite.config.ts serves it). */
 export const PROXY_PATH = "api/anthropic";
 
-/** Models that take the server-side refusal fallback (Claude API, `"default"` form). */
-const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5"]);
 
 export class CopilotChat {
   private readonly messages: BetaMessageParam[] = [];
@@ -94,7 +100,7 @@ export class CopilotChat {
             output_config: { effort: config.effort },
             // Caches the conversation so far on every turn, after the system prompt.
             cache_control: { type: "ephemeral" },
-            ...(FALLBACK_MODELS.has(config.model) ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
+            ...(config.fallback && hasRefusalFallback(config.model) ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
           },
           { signal },
         );
@@ -111,6 +117,10 @@ export class CopilotChat {
       }
       cb.onUsage(message.usage);
       this.messages.push({ role: "assistant", content: message.content });
+      // Never a silent switch: say which model answered when a fallback did.
+      for (const b of message.content) {
+        if (b.type === "fallback") cb.onNotice(`${b.from.model} declined this turn; ${b.to.model} answered it.`, "info");
+      }
 
       if (message.stop_reason === "refusal") {
         cb.onNotice("Claude declined to continue this request.", "error");

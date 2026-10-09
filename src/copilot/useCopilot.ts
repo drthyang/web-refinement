@@ -21,6 +21,8 @@ export interface CopilotSettings {
   readonly autoApprove: boolean;
   /** Keep the API key in this browser's local storage, not just for the tab. */
   readonly rememberKey: boolean;
+  /** Let the API answer a declined turn with another model (off: every turn stays on `model`). */
+  readonly fallback: boolean;
   readonly bridgeUrl: string;
 }
 
@@ -57,6 +59,7 @@ const DEFAULTS: CopilotSettings = {
   effort: "high",
   autoApprove: false,
   rememberKey: false,
+  fallback: false,
   bridgeUrl: DEFAULT_BRIDGE_URL,
 };
 
@@ -162,7 +165,7 @@ export function useCopilot(host: CopilotHost, enabled: boolean, onAttention: () 
         chat.current ??= new mod.CopilotChat(executor);
         await chat.current.send(
           message,
-          { transport: s.mode === "proxy" ? "proxy" : "api-key", apiKey: apiKeyRef.current, model: s.model, effort: s.effort },
+          { transport: s.mode === "proxy" ? "proxy" : "api-key", apiKey: apiKeyRef.current, model: s.model, effort: s.effort, fallback: s.fallback },
           {
             onAssistantStart: () => {
               const id = itemId();
