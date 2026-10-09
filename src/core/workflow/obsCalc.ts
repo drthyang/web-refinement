@@ -57,6 +57,29 @@ export interface ReflectionObsCalc {
   readonly phaseId?: string;
   readonly phaseLabel?: string;
   readonly phaseIndex?: number;
+  /** σ of iObs, when known (single crystal). */
+  readonly sigma?: number;
+  /**
+   * The fit's χ² attributed to this reflection, when attribution was requested:
+   * Σᵢ fₖᵢ·δᵢ², with fₖᵢ this peak's share of the calculated intensity at point
+   * i (background included in the denominator, so background-only points stay
+   * unattributed) and δᵢ = (y_obs − y_calc)/σᵢ.
+   */
+  readonly chi2?: number;
+  /** Share-weighted mean of δ under the peak: > 0 under-calculated, < 0 over-calculated. */
+  readonly misfitMean?: number;
+  /** Share-weighted mean of sign(x − centre)·δ: large when the residual has ± lobes. */
+  readonly misfitLobe?: number;
+}
+
+/** What the χ² attribution is measured against (Rietveld decomposition only). */
+export interface MisfitAttribution {
+  /** The calculated pattern the fit is judged against, background included. */
+  readonly yCalc: readonly number[];
+  /** σ of every observation. */
+  readonly sigma: readonly number[];
+  /** Points that enter the fit; the others carry no χ². */
+  readonly include: readonly boolean[];
 }
 
 /** One peak (nuclear or magnetic) contributing to the decomposition. */
@@ -104,6 +127,10 @@ function peakCenter(sub: readonly ProfilePeak[]): number | undefined {
  * The phases share one instrument/background (bindings are routed per phase
  * exactly as `computePattern` does), so the decomposition matches the real
  * multi-phase pattern.
+ *
+ * Pass `misfit` (Rietveld path) to also attribute the fit's χ² to each
+ * reflection and read the residual's shape under it (`chi2`, `misfitMean`,
+ * `misfitLobe`) — what the Validation view's worst-peaks list is built from.
  */
 /** Le Bail intensity-extraction cycles for the structure-independent F_obs. */
 const LEBAIL_CYCLES = 12;
@@ -118,6 +145,7 @@ export function powderReflectionObsCalc(
   fitRange: { readonly min: number; readonly max: number } | null = null,
   extraPhases: readonly StructureModel[] = [],
   method: "rietveld" | "leBail" = "rietveld",
+  misfit: MisfitAttribution | null = null,
 ): ReflectionObsCalc[] {
   const values: Record<string, number> = {};
   for (const p of parameters) values[p.id] = p.value;
@@ -304,11 +332,35 @@ export function powderReflectionObsCalc(
   const out: ReflectionObsCalc[] = [];
   components.forEach((cmp, ri) => {
     if (cmp.kind === "nuclear" && cmp.iCalc <= (maxByPhase.get(cmp.phaseIndex) ?? 0) * 1e-6) return; // near-absent → F_obs not measurable
+    const center = peakCenter(cmp.sub);
     if (fitRange) {
-      const center = peakCenter(cmp.sub);
       if (center === undefined || center < fitRange.min || center > fitRange.max) return; // outside the fit window
     }
     const c = contrib[ri]!;
+    // χ² attribution: this peak's share of the calculated intensity at each
+    // fitted point (background in the denominator) times that point's δ².
+    let chi2 = 0, shareSum = 0, meanSum = 0, lobeSum = 0;
+    if (misfit && method === "rietveld" && center !== undefined) {
+      for (let i = 0; i < x.length; i++) {
+        if (c[i]! <= 0 || !misfit.include[i]) continue;
+        const s = misfit.sigma[i]!;
+        if (!(s > 0)) continue;
+        const f = c[i]! / (total[i]! + Math.max(bkg[i]!, 0));
+        if (!(f > 0)) continue;
+        const dl = (yObs[i]! - misfit.yCalc[i]!) / s;
+        chi2 += f * dl * dl;
+        shareSum += f;
+        meanSum += f * dl;
+        lobeSum += f * Math.sign(x[i]! - center) * dl;
+      }
+    }
+    const attribution = misfit && method === "rietveld"
+      ? {
+          chi2,
+          misfitMean: shareSum > 0 ? meanSum / shareSum : 0,
+          misfitLobe: shareSum > 0 ? lobeSum / shareSum : 0,
+        }
+      : {};
     // I_calc and I_obs are both the peak's summed calc profile: I_calc = Σᵢ cₖ(i),
     // and I_obs apportions the observed point intensity by the same weights, so
     // they are on one scale (iObs = iCalc for a perfect fit) and the ratio is
@@ -330,6 +382,7 @@ export function powderReflectionObsCalc(
     out.push({
       kind: cmp.kind, h: cmp.h, k: cmp.k, l: cmp.l, d: cmp.d, iObs, iCalc,
       phaseId: cmp.phaseId, phaseLabel: cmp.phaseLabel, phaseIndex: cmp.phaseIndex,
+      ...attribution,
     });
   });
   return out;

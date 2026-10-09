@@ -28,7 +28,7 @@ import {
   guidedSingleCrystalParams,
   singleCrystalRefinementComparison,
 } from "@/core/workflow/singleCrystalRefinement";
-import { normalProbabilityPlot } from "@/core/refinement/diagnostics";
+import { nonPositiveDefiniteSites } from "@/core/crystal/adp";
 import { dSpacing } from "@/core/crystal/unitCell";
 import { isMagneticModelParameterKind } from "@/core/refinement/types";
 import type { ParameterBinding } from "@/core/refinement/types";
@@ -36,7 +36,9 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import { applyMagneticMoments, magneticComparison } from "@/core/workflow/magnetic";
 import { applyParameters } from "@/core/workflow/apply";
 import { KSearchPanel, type MagneticFit } from "@/components/KSearchPanel";
-import { FobsFcalc, NormalProb } from "@/app/ui/QualityPlots";
+import { FobsFcalc } from "@/app/ui/QualityPlots";
+import { SingleCrystalValidationView } from "@/app/ui/SingleCrystalValidation";
+import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
 import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { structureToCif, type CifRefinementMeta } from "@/core/export/cif";
@@ -154,7 +156,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   const [busy, setBusy] = useState(false);
   // Outcome of the last Prefit / Escape-min run, shown beside the refine actions.
   const [thoroughNote, setThoroughNote] = useState<string | null>(null);
-  const [plotKind, setPlotKind] = useState<"fobs" | "npp">("fobs");
+  // The quality card's view: the working layout (F plot beside the 3D model),
+  // or the full validation analysis.
+  const [qualityView, setQualityView] = useState<"refinement" | "validation">("refinement");
   // Reflection spotlighted by a click in the F_obs/F_calc plot (or null).
   const [selected, setSelected] = useState<Selection | null>(null);
 
@@ -197,9 +201,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
     [structure, activeDataset, params, bindings, filterOn, excluded, fullComparison],
   );
 
-  // Reuse the powder quality plots: F_obs/F_calc (√Fo² vs √Fc²) + the normal-
-  // probability plot over the standardized residuals (Fo²−Fc²)/σ. With a magnetic
-  // model applied, the calc is the total (nuclear + magnetic) intensity.
+  // Observed vs calculated per reflection (Fo², Fc², σ) for the F plot and the
+  // validation analysis. With a magnetic model applied, the calc is the total
+  // (nuclear + magnetic) intensity.
   const obsCalc: ReflectionObsCalc[] = useMemo(() => {
     if (magnetic) {
       return magneticComparison(structure, magnetic, activeDataset, params, [...bindings, ...momentBindings]).map((r) => ({
@@ -207,6 +211,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
         h: r.h, k: r.k, l: r.l,
         d: dSpacing(structure.cell, r.h, r.k, r.l),
         iObs: r.iObs, iCalc: r.iTotal,
+        ...(r.sigma !== undefined && r.sigma > 0 ? { sigma: r.sigma } : {}),
       }));
     }
     return comparison.rows.map((r) => ({
@@ -214,9 +219,11 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       h: r.h, k: r.k, l: r.l,
       d: dSpacing(structure.cell, r.h, r.k, r.l),
       iObs: r.foSq, iCalc: r.fcSq,
+      ...(r.sigma > 0 ? { sigma: r.sigma } : {}),
     }));
   }, [magnetic, structure, activeDataset, params, bindings, momentBindings, comparison]);
-  const npp = useMemo(() => normalProbabilityPlot(comparison.rows.map((r) => r.deltaOverSigma)), [comparison]);
+  // Anisotropic sites whose refined U is not positive-definite (validation).
+  const nonPositiveDefinite = useMemo(() => nonPositiveDefiniteSites(refinedStructure), [refinedStructure]);
   const outliers = useMemo(
     () => [...comparison.rows].sort((a, b) => Math.abs(b.deltaOverSigma) - Math.abs(a.deltaOverSigma)).slice(0, 6),
     [comparison],
@@ -576,6 +583,25 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   });
 
   const ag = comparison.agreement;
+  // The σ-reject control (SHELX-style OMIT), rendered in either view.
+  const outlierFilter = (
+    <label style={filterRow} title="Reject reflections whose |Fo²−Fc²|/σ exceeds the threshold against the current model (SHELX-style OMIT)">
+      <input type="checkbox" checked={filterOn} onChange={(e) => setFilterOn(e.target.checked)} style={{ accentColor: color.primary }} />
+      <span style={{ color: color.secondary }}>Reject reflections with |Δ|/σ &gt;</span>
+      <input
+        type="number" min={2} step={0.5} value={cutoffSigma}
+        disabled={!filterOn}
+        onChange={(e) => setCutoffSigma(Math.max(0, Number(e.target.value) || 0))}
+        style={{ ...numInput, ...(filterOn ? {} : { opacity: 0.5 }) }}
+      />
+      <span style={{ color: color.secondary }}>σ</span>
+      {filterOn && (
+        <span style={{ marginLeft: "auto", fontFamily: mono, color: excluded > 0 ? color.warnInk : color.faint }}>
+          {excluded} of {dataset.reflections.length} excluded
+        </span>
+      )}
+    </label>
+  );
   const st = merge.statistics;
   const cell = structure.cell;
   const probeLabel = probe === "xray" ? "X-ray · CW" : probe === "neutron" ? "Neutron · CW" : "Neutron · TOF";
@@ -635,65 +661,61 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
       {/* Step 0 (F² refinement) and step 1 (magnetic symmetry) stay mounted; the
           step toggles visibility so each page's state survives switching. */}
       <div className="wb-sc" style={{ display: step === 1 ? "none" : undefined }}>
-        {/* Quality rail: F² agreement + merge stats + F_obs/F_calc beside the 3D model. */}
+        {/* Quality card: F² agreement, then either the working view (merge stats,
+            Fo² vs Fc² beside the 3D model, largest outliers) or the validation
+            analysis. */}
         <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <span style={uppercaseLabel}>Refinement quality — single crystal (F²)</span>
-            <div style={{ display: "flex", gap: 20 }}>
+            <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
               <Stat value={pct(ag.r1)} label="R1" hint={`${ag.observed}/${ag.total} obs > 2σ`} ink={r1Ink(ag.r1)} />
               <Stat value={pct(ag.wr2)} label="wR2" />
               <Stat value={ag.goof.toFixed(2)} label="GooF" />
+              <SegmentedToggle
+                options={[
+                  { id: "refinement", label: "Refinement", title: "Fo² vs Fc² beside the 3D model, with the largest outliers" },
+                  { id: "validation", label: "Validation", title: "Verdict, agreement and data quality, analysis of variance by intensity and resolution, outliers, convergence" },
+                ] as const}
+                value={qualityView}
+                onChange={setQualityView}
+              />
             </div>
           </div>
 
-          <div style={mergeStrip}>
+          {qualityView === "refinement" && <div style={mergeStrip}>
             <Stat small value={`${st.observations}`} label={excluded > 0 ? "kept" : "observations"} />
             <Stat small value={`${st.unique}`} label="unique" />
             <Stat small value={st.redundancy.toFixed(2)} label="redundancy" />
             <Stat small value={pct(st.rInt)} label="R_int" />
             <Stat small value={pct(st.rSigma)} label="R_sigma" />
-          </div>
+          </div>}
 
-          {/* Outlier (σ) reflection filter. */}
-          <label style={filterRow} title="Reject reflections whose |Fo²−Fc²|/σ exceeds the threshold against the current model (SHELX-style OMIT)">
-            <input type="checkbox" checked={filterOn} onChange={(e) => setFilterOn(e.target.checked)} style={{ accentColor: color.primary }} />
-            <span style={{ color: color.secondary }}>Reject reflections with |Δ|/σ &gt;</span>
-            <input
-              type="number" min={2} step={0.5} value={cutoffSigma}
-              disabled={!filterOn}
-              onChange={(e) => setCutoffSigma(Math.max(0, Number(e.target.value) || 0))}
-              style={{ ...numInput, ...(filterOn ? {} : { opacity: 0.5 }) }}
+          {/* Outlier (σ) reflection filter: here in the working view; in the
+              validation view it sits in the Outliers panel, where it acts. */}
+          {qualityView === "refinement" && outlierFilter}
+
+          {qualityView === "validation" ? (
+            <SingleCrystalValidationView
+              rows={obsCalc}
+              cell={structure.cell}
+              spaceGroup={structure.spaceGroup}
+              nParams={nFree}
+              merge={st}
+              result={result}
+              parameters={params}
+              nonPositiveDefinite={nonPositiveDefinite}
+              xray={probe === "xray"}
+              selected={selected}
+              onSelect={setSelected}
+              outlierFilter={outlierFilter}
+              omitted={filterOn ? { count: excluded, cutoff: cutoffSigma } : undefined}
             />
-            <span style={{ color: color.secondary }}>σ</span>
-            {filterOn && (
-              <span style={{ marginLeft: "auto", fontFamily: mono, color: excluded > 0 ? color.warnInk : color.faint }}>
-                {excluded} of {dataset.reflections.length} excluded
-              </span>
-            )}
-          </label>
-
-          {/* One plot at a time (F_obs/F_calc ↔ normal-probability, toggled) beside
-              the 3D structure model; stacks when the panel is narrow. */}
+          ) : (<>
+          {/* Fo² vs Fc² beside the 3D structure model; stacks when the panel is narrow. */}
           <div className="wb-sc-plots">
             <div>
-              <div style={{ display: "flex", gap: 16, marginBottom: 6 }}>
-                {(["fobs", "npp"] as const).map((k) => (
-                  <button
-                    key={k}
-                    onClick={() => setPlotKind(k)}
-                    style={{
-                      ...uppercaseLabel, background: "none", border: "none", padding: "0 0 3px", cursor: "pointer",
-                      color: plotKind === k ? color.primary : color.faint,
-                      borderBottom: `2px solid ${plotKind === k ? color.primary : "transparent"}`,
-                    }}
-                  >
-                    {k === "fobs" ? "F_obs vs F_calc" : "Normal probability"}
-                  </button>
-                ))}
-              </div>
-              {plotKind === "fobs"
-                ? <FobsFcalc rows={obsCalc} selected={selected} onHighlight={setSelected} />
-                : <NormalProb npp={npp} />}
+              <div style={{ ...uppercaseLabel, marginBottom: 6 }}><span style={{ textTransform: "none" }}>Fo² vs Fc²</span></div>
+              <FobsFcalc rows={obsCalc} selected={selected} onHighlight={setSelected} />
             </div>
             <div>
               <div style={{ ...uppercaseLabel, marginBottom: 4 }}>Crystal structure — unit cell</div>
@@ -704,7 +726,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
           </div>
 
           <div>
-            <div style={{ ...uppercaseLabel, marginBottom: 6 }}>Largest outliers · (Fo²−Fc²)/σ</div>
+            <div style={{ ...uppercaseLabel, marginBottom: 6 }}>Largest outliers · <span style={{ textTransform: "none" }}>(Fo²−Fc²)/σ</span></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, fontFamily: mono, fontSize: fz.small }}>
               {outliers.map((r, i) => {
                 const hkl = `${r.h} ${r.k} ${r.l}`;
@@ -730,6 +752,7 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
               })}
             </div>
           </div>
+          </>)}
         </div>
 
         {/* Parameters — the shared collapsible panel, single-crystal actions. */}

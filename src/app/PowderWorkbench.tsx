@@ -54,8 +54,8 @@ import { momentEntriesFrom } from "@/app/ui/cellModel";
 import { detectExtraPeaks, annotateExtraPeaks, type ExtraPeak } from "@/core/magnetic/extraPeaks";
 import { momentKickFloor } from "@/core/magnetic/canonicalize";
 import { powderReflectionObsCalc, type ReflectionObsCalc } from "@/core/workflow/obsCalc";
-import { normalProbabilityPlot, weightedResiduals } from "@/core/refinement/diagnostics";
-import { QualityPlots } from "@/app/ui/QualityPlots";
+import { PowderValidationView } from "@/app/ui/PowderValidation";
+import type { CheckAction } from "@/core/diagnostics/validationChecks";
 import type { MagneticModel } from "@/core/magnetic/types";
 import {
   axisContext,
@@ -72,6 +72,7 @@ import {
   magneticPhaseTicks,
   PHASE_COLORS,
   MAGNETIC_COLOR,
+  type PhaseTicks,
 } from "@/visualization/reflectionTicks";
 import { SummaryCards, type SummaryCardData } from "@/app/ui/SummaryCards";
 import { InfoBadge } from "@/app/ui/InfoBadge";
@@ -165,9 +166,11 @@ export function PowderWorkbench({
   // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
   // active fit window when it changes.
   const [focusFitToken, setFocusFitToken] = useState(0);
-  // Bumped by "Show in pattern" (F_obs/F_calc plot) to zoom the pattern onto the
-  // highlighted reflection's peak.
+  // Bumped by a worst-peak "view →" in the Validation view to zoom the pattern
+  // onto the highlighted reflection's peak.
   const [focusPeakToken, setFocusPeakToken] = useState(0);
+  // "Open this spot" from the Validation view's residual strip (display-unit x).
+  const [focusPoint, setFocusPoint] = useState<{ x: number; token: number } | null>(null);
   // Optional refinement window; null = fit the full pattern. Reset when the
   // observed pattern changes (see effect below).
   const [fitRange, setFitRange] = useState<FitRangeSelection | null>(null);
@@ -396,6 +399,24 @@ export function PowderWorkbench({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tick-gated ref read
   }, [displayCurves, busy, liveTick]);
   const displayXLabel = axisLabel(effectiveUnit);
+  // For the Validation view: native x → display x, every point's d-spacing
+  // (when the axis converts), and the points the fit uses — the same selection
+  // as `weightedR` below (masked plateau, TOF calc > 0, the fit range).
+  const toDisplayX = useCallback(
+    (xv: number): number => (effectiveUnit === pattern.xUnit ? xv : convertAxisValue(xv, pattern.xUnit, effectiveUnit, axisCtx)),
+    [effectiveUnit, pattern.xUnit, axisCtx],
+  );
+  const curvesD = useMemo(
+    () => (!displayUnits.includes("dSpacing") ? undefined : pattern.xUnit === "dSpacing" ? curves.x : convertAxisArray(curves.x, pattern.xUnit, "dSpacing", axisCtx)),
+    [curves.x, pattern.xUnit, axisCtx, displayUnits],
+  );
+  const validationInclude = useMemo(() => {
+    const excluded = excludedPointMask(curves.yObs);
+    return curves.x.map((xv, i) =>
+      !excluded[i] &&
+      !(powderIsTof && (curves.yCalc[i] ?? 0) <= 0) &&
+      !(fitRangeActive && (xv < fitRange!.min || xv > fitRange!.max)));
+  }, [curves, powderIsTof, fitRangeActive, fitRange]);
   // Fit-range handles live in display space; convert to/from the native window.
   const displayFitRange = useMemo(
     () => convertInterval(effectiveFitRange, pattern.xUnit, effectiveUnit, axisCtx),
@@ -1368,7 +1389,7 @@ export function PowderWorkbench({
               <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", height: "100%" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
                   <span style={themeLabel}>
-                    {plotMode === "structure" ? "Crystal structure — unit cell" : plotMode === "validation" ? "Validation plots" : plotMode === "posterior" ? "Bayesian posterior — free parameters" : "Powder pattern"}
+                    {plotMode === "structure" ? "Crystal structure — unit cell" : plotMode === "validation" ? "Validation" : plotMode === "posterior" ? "Bayesian posterior — free parameters" : "Powder pattern"}
                   </span>
                   {plotMode !== "structure" && (
                     <span style={{ display: "flex", gap: 14, fontFamily: themeMono, fontSize: 12.5 }}>
@@ -1406,7 +1427,7 @@ export function PowderWorkbench({
                         optimize view
                       </button>
                     )}
-                    <ViewModeToggle value={plotMode} onChange={setPlotMode} />
+                    <ViewModeToggle value={plotMode} onChange={(m) => { setFocusPoint(null); setPlotMode(m); }} />
                   </div>
                 </div>
                 {plotMode === "structure" ? (() => {
@@ -1464,12 +1485,27 @@ export function PowderWorkbench({
                       bindings={pBindings}
                       profile={session.powderProfile}
                       magnetic={session.magnetic ?? null}
-                      onHighlight={setHighlight}
-                      selected={highlight}
-                      onLocate={(row) => {
+                      curves={curves}
+                      include={validationInclude}
+                      {...(curvesD ? { d: curvesD } : {})}
+                      phaseTicks={phaseTicks}
+                      toDisplay={toDisplayX}
+                      displayLabel={displayXLabel}
+                      result={powderResult}
+                      onLocateReflection={(row) => {
                         setHighlight({ hkl: `${row.h} ${row.k} ${row.l}`, kind: row.kind, ...(row.phaseId !== undefined ? { phaseId: row.phaseId } : {}) });
+                        setFocusPoint(null);
                         setPlotMode("curves");
                         setFocusPeakToken((t) => t + 1);
+                      }}
+                      onLocateX={(x) => {
+                        setFocusPoint((f) => ({ x: toDisplayX(x), token: (f?.token ?? 0) + 1 }));
+                        setPlotMode("curves");
+                      }}
+                      onAction={(a) => {
+                        if (a === "export-gsas2") exportBundle("gsas2");
+                        else if (a === "export-fullprof") exportBundle("fullprof");
+                        else if (a === "posterior") setPlotMode("posterior");
                       }}
                       fitRange={fitRangeActive ? { min: fitRange!.min, max: fitRange!.max } : null}
                     />
@@ -1494,6 +1530,7 @@ export function PowderWorkbench({
                       phases={phaseTicks}
                       focusFitToken={focusFitToken}
                       focusPeakToken={focusPeakToken}
+                      focusPoint={focusPoint}
                       highlight={highlight}
                       onHighlight={setHighlight}
                       {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
@@ -1674,9 +1711,16 @@ function QualityPanel({
   bindings,
   profile,
   magnetic,
-  onHighlight,
-  selected,
-  onLocate,
+  curves,
+  include,
+  d,
+  phaseTicks,
+  toDisplay,
+  displayLabel,
+  result,
+  onLocateReflection,
+  onLocateX,
+  onAction,
   fitRange,
 }: {
   structure: StructureModel;
@@ -1687,44 +1731,63 @@ function QualityPanel({
   params: readonly RefinementParameter[];
   bindings: readonly ParameterBinding[];
   profile: PowderProfile;
-  /** Magnetic model, if any — adds magnetic satellites to the F_obs/F_calc plot. */
+  /** Magnetic model, if any — its satellites join the reflection list. */
   magnetic?: MagneticModel | null;
-  /** Spotlight a reflection (its "h k l" + kind + phase) in the pattern plot; null clears it. */
-  onHighlight?: (sel: { hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null) => void;
-  /** The shared selection, so a Bragg-tick click highlights the matching scatter point. */
-  selected?: { hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null;
-  /** Jump to a reflection's peak in the observed pattern (from the F_obs/F_calc plot). */
-  onLocate?: (row: ReflectionObsCalc) => void;
-  /** Active fit window (pattern x-unit); reflections outside it are hidden from the scatter. */
+  /** The page's curves (native x; total calc, background included). */
+  curves: { readonly x: number[]; readonly yObs: number[]; readonly yCalc: number[]; readonly yBackground?: number[] };
+  /** Points the fit uses. */
+  include: readonly boolean[];
+  /** d-spacing of every point, when the axis converts. */
+  d?: readonly number[];
+  phaseTicks: readonly PhaseTicks[];
+  toDisplay: (x: number) => number;
+  displayLabel: string;
+  result: RefinementResult | null;
+  onLocateReflection: (row: ReflectionObsCalc) => void;
+  onLocateX: (x: number) => void;
+  onAction: (action: CheckAction) => void;
+  /** Active fit window (pattern x-unit); reflections outside it are left out. */
   fitRange?: { min: number; max: number } | null;
 }): JSX.Element {
-  // Validation plots (Rietveld obs/calc + normal probability) for the current fit.
+  // σ as the engine weights the points (data σ, else counting statistics).
+  const sigma = useMemo(() => pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1)), [pattern]);
+  const hasSigma = pattern.points.length > 0 && pattern.points.every((p) => p.sigma !== undefined);
+  // The Rietveld partition with the fit's χ² attributed to every reflection.
+  // With impurity phases it splits each point among every phase's peaks.
   const phasesKey = (extraPhases ?? []).map((p) => p.id).join(",");
-  const diagnostics = useMemo(() => {
-    const extras = extraPhases ?? [];
-    const obsCalc = powderReflectionObsCalc(structure, pattern, params, bindings, profile, magnetic ?? null, fitRange ?? null, extras);
-    // Residuals for the normal-probability plot use the *total* calculated
-    // pattern, so with impurity phases present it sums every phase (else the
-    // missing impurity peaks would read as large false residuals).
-    const curves = extras.length > 0
-      ? multiPhaseCurves([{ structure, id: structure.id }, ...extras.map((s) => ({ structure: s, id: s.id }))], pattern, params, bindings, profile)
-      : powderCurves(structure, pattern, params, bindings, profile);
-    const sigmas = pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1));
-    const npp = normalProbabilityPlot(weightedResiduals(curves.yObs, curves.yCalc, sigmas));
-    return { obsCalc, npp };
+  const reflections = useMemo(
+    () => powderReflectionObsCalc(structure, pattern, params, bindings, profile, magnetic ?? null, fitRange ?? null, extraPhases ?? [], "rietveld", {
+      yCalc: curves.yCalc, sigma, include,
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [structure, phasesKey, pattern, params, bindings, profile, magnetic, fitRange?.min, fitRange?.max]);
+    [structure, phasesKey, pattern, params, bindings, profile, magnetic, fitRange?.min, fitRange?.max, curves.yCalc, sigma, include],
+  );
+  const nParams = params.filter((p) => !p.fixed && !p.expression).length;
 
   // Rendered inside the pattern-plot card's "Validation" view mode; the toggle
-  // labels it, so no heading here — just the plots side by side.
+  // labels it, so no heading here.
   return (
-    <div>
-      <QualityPlots obsCalc={diagnostics.obsCalc} npp={diagnostics.npp} selected={selected ?? null} {...(onHighlight ? { onHighlight } : {})} {...(onLocate ? { onLocate } : {})} />
-      <p style={{ fontSize: fz.micro, color: theme.secondary, marginTop: 8 }}>
-        F_obs vs F_calc flags individual bad reflections; the normal probability plot
-        (Abrahams &amp; Keve 1971) is straight with slope 1 for an ideal fit &amp; weights.
-      </p>
-    </div>
+    <PowderValidationView
+      x={curves.x}
+      yObs={curves.yObs}
+      yCalc={curves.yCalc}
+      {...(curves.yBackground && curves.yBackground.length === curves.x.length ? { yBackground: curves.yBackground } : {})}
+      sigma={sigma}
+      include={include}
+      {...(d ? { d } : {})}
+      hasSigma={hasSigma}
+      nParams={nParams}
+      reflections={reflections}
+      phaseTicks={phaseTicks}
+      toDisplay={toDisplay}
+      displayLabel={displayLabel}
+      result={result}
+      parameters={params}
+      onLocateReflection={onLocateReflection}
+      onLocateX={onLocateX}
+      onAction={onAction}
+      canExport
+    />
   );
 }
 
@@ -1775,7 +1838,7 @@ function ViewModeToggle({
     <SegmentedToggle
       options={[
         { id: "curves", label: "Refinement", title: "Observed vs calculated pattern" },
-        { id: "validation", label: "Validation", title: "F_obs vs F_calc + normal-probability plot" },
+        { id: "validation", label: "Validation", title: "Verdict, agreement, where the misfit is (normalized residual, cumulative χ², worst peaks) and convergence" },
         { id: "structure", label: "3D Model", title: "3D crystal-structure model" },
         { id: "posterior", label: "Posterior", title: "Bayesian posterior of the free parameters (ensemble MCMC) — credible intervals, convergence diagnostics, and the posterior-vs-esd check" },
       ] as const}

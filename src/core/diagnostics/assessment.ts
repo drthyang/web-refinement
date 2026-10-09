@@ -155,6 +155,49 @@ const PHYSICAL_LABEL: Partial<Record<ParameterKind, string>> = {
 };
 
 /**
+ * Physical sanity of the parameter values: negative displacement parameters
+ * and occupancies outside [0, 1]. Needs no refinement result, so the
+ * Validation view can run it on the current values. A held parameter never
+ * moved, so its value is an input (starting structure or CIF): word it that
+ * way and do not blame the fit for it.
+ */
+export function physicalFindings(parameters: readonly RefinementParameter[]): AssessmentFinding[] {
+  const findings: AssessmentFinding[] = [];
+  for (const p of parameters) {
+    if (ADP_KINDS.has(p.kind) && p.value < 0) {
+      const what = PHYSICAL_LABEL[p.kind] ?? "displacement parameter";
+      findings.push({
+        category: "physical",
+        severity: "critical",
+        summary: p.fixed
+          ? `${p.label} is held at ${p.value.toFixed(4)}, negative — an unphysical ${what}.`
+          : `${p.label} refined negative (${p.value.toFixed(4)}) — an unphysical ${what}.`,
+        detail: p.fixed
+          ? "This value was not refined; it comes from the starting structure or CIF. A negative ADP has no physical meaning — correct the input to a small positive value, or constrain it, before refining."
+          : "A negative ADP has no physical meaning; it typically absorbs an error elsewhere (scale, background, absorption, or a wrong scattering type). Fix it at a small positive value and address the real cause.",
+        parameterIds: [p.id],
+        evidence: { value: p.value, origin: p.fixed ? "input" : "refined" },
+      });
+    }
+    if (p.kind === "occupancy" && (p.value < -1e-6 || p.value > 1 + 1e-6)) {
+      findings.push({
+        category: "physical",
+        severity: "warning",
+        summary: p.fixed
+          ? `${p.label} is held at ${p.value.toFixed(4)}, outside [0, 1].`
+          : `${p.label} refined to ${p.value.toFixed(4)}, outside [0, 1].`,
+        detail: p.fixed
+          ? "This value was not refined; it comes from the starting structure or CIF. Correct the input occupancy to its physical range, or constrain it (full site, or a Σ=1 tie)."
+          : "Occupancy outside its physical range points to a scale/occupancy correlation or the wrong site multiplicity. Constrain it (full site, or a Σ=1 tie) unless a second contrast justifies the value.",
+        parameterIds: [p.id],
+        evidence: { value: p.value, origin: p.fixed ? "input" : "refined" },
+      });
+    }
+  }
+  return findings;
+}
+
+/**
  * Assess a completed refinement: a trust verdict plus the findings an expert
  * would flag, most severe first. Pure and deterministic — same result in, same
  * assessment out.
@@ -214,39 +257,7 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
   }
 
   // --- physical sanity of the values ------------------------------------
-  // A held parameter never moved, so its value is an input (starting structure
-  // or CIF): word it that way and do not blame the fit for it.
-  for (const p of parameters) {
-    if (ADP_KINDS.has(p.kind) && p.value < 0) {
-      const what = PHYSICAL_LABEL[p.kind] ?? "displacement parameter";
-      findings.push({
-        category: "physical",
-        severity: "critical",
-        summary: p.fixed
-          ? `${p.label} is held at ${p.value.toFixed(4)}, negative — an unphysical ${what}.`
-          : `${p.label} refined negative (${p.value.toFixed(4)}) — an unphysical ${what}.`,
-        detail: p.fixed
-          ? "This value was not refined; it comes from the starting structure or CIF. A negative ADP has no physical meaning — correct the input to a small positive value, or constrain it, before refining."
-          : "A negative ADP has no physical meaning; it typically absorbs an error elsewhere (scale, background, absorption, or a wrong scattering type). Fix it at a small positive value and address the real cause.",
-        parameterIds: [p.id],
-        evidence: { value: p.value, origin: p.fixed ? "input" : "refined" },
-      });
-    }
-    if (p.kind === "occupancy" && (p.value < -1e-6 || p.value > 1 + 1e-6)) {
-      findings.push({
-        category: "physical",
-        severity: "warning",
-        summary: p.fixed
-          ? `${p.label} is held at ${p.value.toFixed(4)}, outside [0, 1].`
-          : `${p.label} refined to ${p.value.toFixed(4)}, outside [0, 1].`,
-        detail: p.fixed
-          ? "This value was not refined; it comes from the starting structure or CIF. Correct the input occupancy to its physical range, or constrain it (full site, or a Σ=1 tie)."
-          : "Occupancy outside its physical range points to a scale/occupancy correlation or the wrong site multiplicity. Constrain it (full site, or a Σ=1 tie) unless a second contrast justifies the value.",
-        parameterIds: [p.id],
-        evidence: { value: p.value, origin: p.fixed ? "input" : "refined" },
-      });
-    }
-  }
+  findings.push(...physicalFindings(parameters));
 
   // --- correlations ------------------------------------------------------
   for (const c of diag?.highCorrelations ?? []) {
@@ -401,7 +412,7 @@ export function suggestNextSteps(assessment: RefinementAssessment): NextStep[] {
   // model extension rather than more of the same.
   if ((band === "excellent" || band === "good") && !physical && !atBound) {
     steps.push({
-      action: "Validate before extending: check the F_obs/F_calc and normal-probability plots for structure the wR hides; then consider anisotropic ADPs or the next physically-motivated parameter.",
+      action: "Validate before extending: check the Validation view (normalized residual, Durbin–Watson, worst peaks or the intensity bins) for structure the wR hides; then consider anisotropic ADPs or the next physically-motivated parameter.",
       rationale: `${assessment.verdict.rationale}`,
       priority: residual ? 6 : 3,
       addresses: ["fit-quality"],

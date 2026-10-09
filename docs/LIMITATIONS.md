@@ -207,11 +207,23 @@ approximate, however plausible its output looks.
   peak must index and every forbidden reflection must show no intensity.
   Forbidden reflections too close to an allowed one are reported as untestable.
   Named impurity phases are fitted too, each with its own expansion and width.
-- Fit-quality plots beyond R, wR and GoF: F_obs vs F_calc, and a normal
-  probability plot (Abrahams & Keve 1971). A straight line of slope 1 through
-  the origin means both the model and the uncertainties are right. Overlapping
+- A Validation view beyond R, wR and GoF. Powder: background-subtracted
+  Rwp′/Rexp′, the Durbin–Watson d against Hill & Flack's Q_D, the normalized
+  residual with its cumulative χ², χ² by d-shell, per-phase R_Bragg/R_F, the
+  reflections carrying the most χ², and unindexed residual peaks. Overlapping
   intensity is shared across all phases, so an impurity peak on top of a
-  main-phase reflection is not credited to the main phase.
+  main-phase reflection is not credited to the main phase. Single crystal:
+  Fo² vs Fc², SHELXL's analysis of variance (K and GooF by intensity and by
+  resolution), completeness, reflections per parameter, and an extinction
+  check on the strong reflections.
+
+**Not checked by the Validation view**
+- Difference-Fourier residual density, the Flack parameter, and the
+  Hirshfeld rigid-bond test (single crystal).
+- Phase weight fractions (powder).
+- The full correlation matrix: the engine reports only pairs above 0.95.
+- The Bérar–Lelann esd correction for serially correlated residuals: the view
+  flags the correlation (Durbin–Watson) but does not rescale the esds.
 
 **Approximate**
 - Axial asymmetry is modelled on the low-angle side (2θ < 90°) only.

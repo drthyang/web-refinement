@@ -97,6 +97,10 @@ folder skip when it is absent (CI, fresh clones).
 | PDF posterior std vs LM esd (esdRatio ≈ 1), ensemble AND NUTS | golden (PDFfit2 Ni fixture) | ✅ `core/workflow/pdfPosterior.test.ts` |
 | NUTS: exact linear-Gaussian posterior, flat-measure, determinism/resume, divergence reporting | unit | ✅ `core/refinement/bayes/nuts.test.ts` |
 | PDF analytic ∂G/∂p columns vs central FD + `gradChi2` | unit (F1.1) | ✅ `core/workflow/pdfAnalyticJacobian.test.ts` |
+| Powder validation: Rp/Rwp/Rexp and background-subtracted set vs direct sums, Durbin–Watson (white noise ≈ 2, Hill & Flack Q_D), cumulative χ², d-shells, per-phase R_Bragg/R_F, unindexed peaks | unit | ✅ `core/diagnostics/powderValidation.test.ts` |
+| χ² attribution per reflection: an under-calculated peak ranks first as "under"; a shifted pattern reads as "shape" | unit | ✅ `core/workflow/obsCalc.test.ts` |
+| Single-crystal validation: completeness (incl. accidental d coincidences), shells, K/GooF bins, extinction signature, R_int with redundancy | unit | ✅ `core/diagnostics/singleCrystalValidation.test.ts` |
+| Validation verdict checks (powder and single crystal) | unit | ✅ `core/diagnostics/validationChecks.test.ts` |
 
 ## Golden examples
 

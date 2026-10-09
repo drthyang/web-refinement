@@ -124,6 +124,8 @@ export interface MultiPhaseCurves {
   readonly x: number[];
   readonly yObs: number[];
   readonly yCalc: number[];
+  /** The shared background alone (absent when the model has none). */
+  readonly yBackground?: number[];
   readonly diff: number[];
 }
 
@@ -137,12 +139,22 @@ export function multiPhaseCurves(
   const values: Record<string, number> = {};
   for (const p of parameters) values[p.id] = p.value;
   const xValues = pattern.points.map((p) => p.x);
-  const yCalc = computePattern(phases, pattern, bindings, resolveTies(parameters, values), xValues, profile);
+  const resolved = resolveTies(parameters, values);
+  const yCalc = computePattern(phases, pattern, bindings, resolved, xValues, profile);
   const yObs = pattern.points.map((p) => p.yObs);
+  // The shared background as computePattern applies it (the last phase that
+  // carries background terms), drawn with no peaks.
+  let background: number[] = [];
+  for (const phase of phases) {
+    const applied = applyParameters(phase.structure, phaseBindingsFor(bindings, phase.id), resolved);
+    if (applied.background.length) background = applied.background;
+  }
+  const yBackground = background.length ? Array.from(synthesizePattern(xValues, [], { shape: profile.shape, background })) : undefined;
   return {
     x: [...xValues],
     yObs,
     yCalc: Array.from(yCalc),
+    ...(yBackground ? { yBackground } : {}),
     diff: yObs.map((o, i) => o - (yCalc[i] ?? 0)),
   };
 }

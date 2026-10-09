@@ -47,6 +47,9 @@ export const color = {
   diff: "oklch(0.55 0.12 155)",
   hkl: "#1f4fd8",
   magnetic: "#c2185b",
+  // A data mark past a validation threshold (a shell or bin worth a look); the
+  // in-range marks stay primary blue, so the pair differs in hue and lightness.
+  flag: "#c2581b",
 } as const;
 
 export const mono = "'IBM Plex Mono', ui-monospace, monospace";
