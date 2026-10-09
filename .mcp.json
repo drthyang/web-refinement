@@ -3,6 +3,10 @@
     "materia": {
       "command": "node",
       "args": ["scripts/build-mcp.mjs", "--serve"]
+    },
+    "materia-live": {
+      "command": "node",
+      "args": ["scripts/build-mcp.mjs", "--live", "--serve"]
     }
   }
 }

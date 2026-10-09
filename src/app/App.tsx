@@ -11,13 +11,13 @@
  * the structure the single-crystal engine refines) and the instrument.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APP_VERSION } from "@/app/constants";
 import type { RefinementResult } from "@/core/refinement/types";
 import type { StructureModel } from "@/core/crystal/types";
 import { TECHNIQUE_LABEL, type PdfWorkspace, type ProjectFile, type SingleCrystalWorkspace, type Workspace } from "@/core/project/types";
 import { looksLikeProjectFile, parseProject, projectFileName, restoreHistoryStep, serializeProject } from "@/core/project/io";
-import { moveTo, recordStep, redoTarget, renameStep, undoTarget, type ProjectHistory, type Snapshot, type StepKind } from "@/core/project/history";
+import { moveTo, recordStep, redoTarget, renameStep, undoTarget, type ProjectHistory, type Snapshot, type StepActor, type StepKind } from "@/core/project/history";
 import { clearAutosave, readAutosave, writeAutosave, type AutosaveEntry } from "@/app/autosave";
 import type { HistoryBinding } from "@/app/historyBinding";
 import { defaultProjectTitle, projectFileFor, sessionFromPowderWorkspace, type PowderViewState } from "@/app/projectIo";
@@ -61,6 +61,10 @@ import {
   EMPTY_SOURCE,
 } from "@/app/powderSession";
 import type { WorkbenchExports } from "@/app/workbenchEngine";
+import { CopilotLink } from "@/copilot/link";
+import type { CopilotHost } from "@/copilot/executor";
+import { useCopilot } from "@/copilot/useCopilot";
+import { CopilotDrawer } from "@/copilot/ui/CopilotDrawer";
 
 // The header's refinement-target chips. "Nuclear" is the main refinement page
 // (the whole app refines, so no "Refinement" label needed); "Magnetic" is the
@@ -128,6 +132,8 @@ interface StepRequest {
   readonly label?: string;
   /** Start a new history (a new material, a demo) instead of extending this one. */
   readonly fresh?: boolean;
+  /** Who made the change: absent for the user, "agent" for the Copilot. */
+  readonly actor?: StepActor;
 }
 
 /** Identity of the project the session came from, so Save keeps its title and creation date. */
@@ -247,6 +253,11 @@ export function App(): JSX.Element {
   const powderExports = useRef<WorkbenchExports | null>(null);
   const scExports = useRef<WorkbenchExports | null>(null);
   const pdfExports = useRef<WorkbenchExports | null>(null);
+  // The Copilot (src/copilot/): the active engine publishes its port into the
+  // link; while the Copilot acts, `stepActor` tags the steps it records.
+  const copilotLink = useRef(new CopilotLink()).current;
+  const stepActor = useRef<StepActor | undefined>(undefined);
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   const { structure } = session;
 
@@ -273,14 +284,16 @@ export function App(): JSX.Element {
   function recordNow(kind: StepKind, label?: string): ProjectHistory | null {
     const snap = liveSnapshot();
     if (!snap) return history;
-    const next = recordStep(history, { ...snap, kind, ...(label ? { label } : {}) });
+    const next = recordStep(history, { ...snap, kind, ...(label ? { label } : {}), ...(stepActor.current ? { actor: stepActor.current } : {}) });
     if (next !== history) setHistory(next);
     return next;
   }
 
   /** Record a step once the state change that caused it has rendered. */
   const requestStep = useCallback((kind: StepKind, label?: string, fresh = false): void => {
-    setStepRequest((r) => ({ n: (r?.n ?? 0) + 1, kind, ...(label ? { label } : {}), ...(fresh ? { fresh } : {}) }));
+    // The actor is read now, while the action that asked for the step runs.
+    const actor = stepActor.current;
+    setStepRequest((r) => ({ n: (r?.n ?? 0) + 1, kind, ...(label ? { label } : {}), ...(fresh ? { fresh } : {}), ...(actor ? { actor } : {}) }));
   }, []);
 
   // Recorded a tick after the request renders: an engine may settle its state
@@ -292,14 +305,14 @@ export function App(): JSX.Element {
   });
   useEffect(() => {
     if (!stepRequest) return;
-    const { kind, label, fresh } = stepRequest;
+    const { kind, label, fresh, actor } = stepRequest;
     setTimeout(() => {
       const snap = liveSnapshotRef.current();
       if (!snap) {
         if (fresh) setHistory(null);
         return;
       }
-      setHistory((h) => recordStep(fresh ? null : h, { ...snap, kind, ...(label ? { label } : {}) }));
+      setHistory((h) => recordStep(fresh ? null : h, { ...snap, kind, ...(label ? { label } : {}), ...(actor ? { actor } : {}) }));
     }, 0);
   }, [stepRequest]);
 
@@ -347,6 +360,40 @@ export function App(): JSX.Element {
     ...(history && undoTarget(history) ? { back: stepBack } : {}),
     ...(history && redoTarget(history) ? { forward: stepForward } : {}),
   };
+
+  // ── Copilot ─────────────────────────────────────────────────────────────
+  // What the Copilot's executor needs from the shell (copilot/executor.ts). It
+  // reads the latest render's functions through a ref, so the host object is
+  // made once and every call sees the current history and page.
+  const copilotLatest = useRef({ recordNow, goToStep, history, technique: null as "powder" | "singleCrystal" | "pdf" | null });
+  useEffect(() => {
+    copilotLatest.current = { recordNow, goToStep, history, technique: pdfDataset ? "pdf" : scDataset ? "singleCrystal" : session.powderSource !== EMPTY_SOURCE ? "powder" : null };
+    copilotLink.notify();
+  });
+  const copilotHost = useMemo<CopilotHost>(() => ({
+    port: () => copilotLink.port(),
+    technique: () => copilotLatest.current.technique,
+    settle: () => copilotLink.settle(),
+    asAgent: async (fn) => {
+      stepActor.current = "agent";
+      try {
+        return await fn();
+      } finally {
+        stepActor.current = undefined;
+      }
+    },
+    recordNow: (kind, label) => {
+      copilotLatest.current.recordNow(kind, label);
+    },
+    history: () => copilotLatest.current.history,
+    goToStep: (id) => copilotLatest.current.goToStep(id),
+  }), [copilotLink]);
+  // Nothing connects until the Copilot is first opened.
+  const [copilotUsed, setCopilotUsed] = useState(false);
+  useEffect(() => {
+    if (copilotOpen) setCopilotUsed(true);
+  }, [copilotOpen]);
+  const copilot = useCopilot(copilotHost, copilotUsed, () => setCopilotOpen(true));
 
   // ⌘Z / Ctrl+Z steps back, with Shift steps forward — except inside a text
   // field, which keeps its own undo.
@@ -1071,6 +1118,7 @@ export function App(): JSX.Element {
     // workbench.css (.wb-shell): the height must follow the dynamic viewport on
     // iOS and undo the large-screen UI zoom, and on phones the whole page
     // scrolls instead, header included.
+    <div className="wb-frame">
     <div className="wb-shell">
       <WorkbenchHeader
         steps={headerSteps}
@@ -1087,6 +1135,7 @@ export function App(): JSX.Element {
         {...(hasContent ? { onSaveProject } : {})}
         gpu={{ enabled: gpuEnabled, onChange: setGpu }}
         {...(hasContent ? { history: stepHistory } : {})}
+        copilot={{ open: copilotOpen, onToggle: () => setCopilotOpen((o) => !o), pending: copilot.pending.length }}
       />
       {notice && (
         <div role="alert" style={noticeBar}>
@@ -1160,6 +1209,7 @@ export function App(): JSX.Element {
         useGpu={gpuEnabled}
         {...(restore.powderView ? { viewRestore: restore.powderView } : {})}
         stepHistory={stepHistory}
+        copilotLink={copilotLink}
       />
       </WorkbenchErrorBoundary>
       {pdfDataset && (
@@ -1187,6 +1237,8 @@ export function App(): JSX.Element {
           About &amp; documentation
         </a>
       </footer>
+    </div>
+    {copilotOpen && <CopilotDrawer copilot={copilot} onClose={() => setCopilotOpen(false)} />}
     </div>
   );
 }

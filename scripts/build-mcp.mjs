@@ -14,6 +14,10 @@
  * `--outfile <path>` writes the bundle elsewhere. The examples test uses it so
  * it never replaces the dist/mcp-server.mjs a running server's evaluator
  * workers re-execute.
+ *
+ * `--live` builds the `materia-live` server instead (src/copilot/bridge/): the
+ * Copilot's tools on the app open in the browser, for Claude Code. Output:
+ * dist/materia-live.mjs.
  */
 
 import { build } from "esbuild";
@@ -21,11 +25,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const live = process.argv.includes("--live");
 const at = process.argv.indexOf("--outfile");
-const outfile = at > 0 && process.argv[at + 1] ? resolve(process.argv[at + 1]) : resolve(root, "dist/mcp-server.mjs");
+const outfile = at > 0 && process.argv[at + 1]
+  ? resolve(process.argv[at + 1])
+  : resolve(root, live ? "dist/materia-live.mjs" : "dist/mcp-server.mjs");
 
 await build({
-  entryPoints: [resolve(root, "src/mcp/server.ts")],
+  entryPoints: [resolve(root, live ? "src/copilot/bridge/server.ts" : "src/mcp/server.ts")],
   outfile,
   bundle: true,
   platform: "node",
