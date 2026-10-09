@@ -583,6 +583,25 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
   });
 
   const ag = comparison.agreement;
+  // The σ-reject control (SHELX-style OMIT), rendered in either view.
+  const outlierFilter = (
+    <label style={filterRow} title="Reject reflections whose |Fo²−Fc²|/σ exceeds the threshold against the current model (SHELX-style OMIT)">
+      <input type="checkbox" checked={filterOn} onChange={(e) => setFilterOn(e.target.checked)} style={{ accentColor: color.primary }} />
+      <span style={{ color: color.secondary }}>Reject reflections with |Δ|/σ &gt;</span>
+      <input
+        type="number" min={2} step={0.5} value={cutoffSigma}
+        disabled={!filterOn}
+        onChange={(e) => setCutoffSigma(Math.max(0, Number(e.target.value) || 0))}
+        style={{ ...numInput, ...(filterOn ? {} : { opacity: 0.5 }) }}
+      />
+      <span style={{ color: color.secondary }}>σ</span>
+      {filterOn && (
+        <span style={{ marginLeft: "auto", fontFamily: mono, color: excluded > 0 ? color.warnInk : color.faint }}>
+          {excluded} of {dataset.reflections.length} excluded
+        </span>
+      )}
+    </label>
+  );
   const st = merge.statistics;
   const cell = structure.cell;
   const probeLabel = probe === "xray" ? "X-ray · CW" : probe === "neutron" ? "Neutron · CW" : "Neutron · TOF";
@@ -671,23 +690,9 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
             <Stat small value={pct(st.rSigma)} label="R_sigma" />
           </div>}
 
-          {/* Outlier (σ) reflection filter. */}
-          <label style={filterRow} title="Reject reflections whose |Fo²−Fc²|/σ exceeds the threshold against the current model (SHELX-style OMIT)">
-            <input type="checkbox" checked={filterOn} onChange={(e) => setFilterOn(e.target.checked)} style={{ accentColor: color.primary }} />
-            <span style={{ color: color.secondary }}>Reject reflections with |Δ|/σ &gt;</span>
-            <input
-              type="number" min={2} step={0.5} value={cutoffSigma}
-              disabled={!filterOn}
-              onChange={(e) => setCutoffSigma(Math.max(0, Number(e.target.value) || 0))}
-              style={{ ...numInput, ...(filterOn ? {} : { opacity: 0.5 }) }}
-            />
-            <span style={{ color: color.secondary }}>σ</span>
-            {filterOn && (
-              <span style={{ marginLeft: "auto", fontFamily: mono, color: excluded > 0 ? color.warnInk : color.faint }}>
-                {excluded} of {dataset.reflections.length} excluded
-              </span>
-            )}
-          </label>
+          {/* Outlier (σ) reflection filter: here in the working view; in the
+              validation view it sits in the Outliers panel, where it acts. */}
+          {qualityView === "refinement" && outlierFilter}
 
           {qualityView === "validation" ? (
             <SingleCrystalValidationView
@@ -702,6 +707,8 @@ export function SingleCrystalWorkbench({ structure, dataset, magneticDataset, cl
               xray={probe === "xray"}
               selected={selected}
               onSelect={setSelected}
+              outlierFilter={outlierFilter}
+              omitted={filterOn ? { count: excluded, cutoff: cutoffSigma } : undefined}
             />
           ) : (<>
           {/* Fo² vs Fc² beside the 3D structure model; stacks when the panel is narrow. */}

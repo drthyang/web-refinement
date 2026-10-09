@@ -149,6 +149,14 @@ describe("singleCrystalChecks", () => {
     expect(byId.get("not-checked")!.detail).toMatch(/Flack/);
   });
 
+  it("says when the σ filter has omitted reflections", () => {
+    const v = singleCrystalChecks({ validation: sc(), goof: 1.04, result: fit, parameters: params, omitted: { count: 8, cutoff: 6 } });
+    const c = v.checks.find((x) => x.id === "omitted")!;
+    expect(c.status).toBe("note");
+    expect(c.title).toBe("8 reflections omitted (|Δ|/σ > 6)");
+    expect(singleCrystalChecks({ validation: sc(), goof: 1.04, result: fit, parameters: params, omitted: { count: 0, cutoff: 6 } }).checks.some((x) => x.id === "omitted")).toBe(false);
+  });
+
   it("K drifting with resolution is noted when extinction does not explain it", () => {
     const shells = Array.from({ length: 8 }, (_, i) => ({ dMax: 2, dMin: 1, n: 100, unique: 100, completeness: 1, iOverSigma: 10, k: 1.08 - i * 0.02, goof: 1, r1: 0.04 }));
     const v = singleCrystalChecks({ validation: sc({ shells }), goof: 1.05, result: fit, parameters: params });

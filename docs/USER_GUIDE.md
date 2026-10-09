@@ -442,7 +442,10 @@ Never judge a fit by its R value alone. The definitions are in
   of variance); and, in one panel switched by its title, the resolution shells
   or the largest outliers with sinθ/λ and Fc/Fc(max). Strong
   reflections with Fo² < Fc² and K below 1 in the strongest bin are flagged as
-  extinction.
+  extinction. In this view the **Reject reflections with |Δ|/σ >** filter sits
+  in the Outliers panel; when it omits reflections, the verdict says so first,
+  because a σ cut removes exactly the reflections a systematic error (such as
+  extinction) pushes furthest.
 - **Result**, in the panel footer, gives the status and cycles on one line,
   with ⚠ when there is a note. Click it to open the notes and χ² and wR per
   cycle. A note is **SVD dropped** (undetermined combinations, whose esds mean

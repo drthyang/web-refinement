@@ -80,7 +80,30 @@ function axisLine(x1: number, y1: number, x2: number, y2: number): JSX.Element {
   return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={theme.border} strokeWidth={1} />;
 }
 
-export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWidth = 360, initialScale = "log", initialQuantity = "F2" }: {
+/** The log/linear and F²/|F| switches (also usable in a panel header). */
+export function ScatterToolbar({ scale, quantity, onScale, onQuantity }: {
+  scale: ScatterScale;
+  quantity: ScatterQuantity;
+  onScale: (s: ScatterScale) => void;
+  onQuantity: (q: ScatterQuantity) => void;
+}): JSX.Element {
+  return (
+    <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+      <SegmentedToggle
+        options={[{ id: "log", label: "log", title: "Logarithmic axes: weak and strong reflections get equal room" }, { id: "linear", label: "linear", title: "Linear axes" }] as const}
+        value={scale}
+        onChange={onScale}
+      />
+      <SegmentedToggle
+        options={[{ id: "F2", label: "F²", title: "Fo² vs Fc², the quantity the refinement fits" }, { id: "F", label: "|F|", title: "|Fo| vs |Fc|" }] as const}
+        value={quantity}
+        onChange={onQuantity}
+      />
+    </span>
+  );
+}
+
+export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWidth = 360, initialScale = "log", initialQuantity = "F2", scale: scaleProp, quantity: quantityProp, toolbar = true, compact = false }: {
   rows: readonly ReflectionObsCalc[];
   onHighlight?: (sel: Selection | null) => void;
   selected?: Selection | null;
@@ -89,9 +112,18 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
   maxWidth?: number;
   initialScale?: ScatterScale;
   initialQuantity?: ScatterQuantity;
+  /** Controlled axes (with `toolbar={false}`, the caller renders ScatterToolbar). */
+  scale?: ScatterScale | undefined;
+  quantity?: ScatterQuantity | undefined;
+  /** Draw the log/linear and F²/|F| switches above the plot (default true). */
+  toolbar?: boolean;
+  /** One-line caption. */
+  compact?: boolean;
 }): JSX.Element {
-  const [scale, setScale] = useState<ScatterScale>(initialScale);
-  const [quantity, setQuantity] = useState<ScatterQuantity>(initialQuantity);
+  const [scaleState, setScale] = useState<ScatterScale>(initialScale);
+  const [quantityState, setQuantity] = useState<ScatterQuantity>(initialQuantity);
+  const scale = scaleProp ?? scaleState;
+  const quantity = quantityProp ?? quantityState;
   const value = (i: number): number => (quantity === "F2" ? i : Math.sqrt(Math.max(i, 0)));
 
   // Fully controlled by the parent's shared selection; clicking a point toggles
@@ -173,18 +205,7 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
 
   return (
     <figure style={{ margin: 0, display: "flex", flexDirection: "column", gap: 6, maxWidth }}>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <SegmentedToggle
-          options={[{ id: "log", label: "log", title: "Logarithmic axes: weak and strong reflections get equal room" }, { id: "linear", label: "linear", title: "Linear axes" }] as const}
-          value={scale}
-          onChange={setScale}
-        />
-        <SegmentedToggle
-          options={[{ id: "F2", label: "F²", title: "Fo² vs Fc², the quantity the refinement fits" }, { id: "F", label: "|F|", title: "|Fo| vs |Fc|" }] as const}
-          value={quantity}
-          onChange={setQuantity}
-        />
-      </div>
+      {toolbar ? <ScatterToolbar scale={scale} quantity={quantity} onScale={setScale} onQuantity={setQuantity} /> : null}
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", cursor: onHighlight ? "pointer" : undefined }} role="img" aria-label={`${qLabel[1]} against ${qLabel[0]}, ${scale} axes`} onClick={onPlotClick}>
         {ticks.map((t) => (
           <g key={t.label}>
@@ -259,6 +280,8 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
             ({selRow.h} {selRow.k} {selRow.l}) · d {selRow.d.toFixed(4)} Å · Fo² {selRow.iObs.toFixed(1)} · Fc² {selRow.iCalc.toFixed(1)}
             {rowZ(selRow) !== undefined ? ` · Δ/σ ${rowZ(selRow)!.toFixed(1)}` : ""}
           </span>
+        ) : compact ? (
+          <>{rows.length} reflections{hidden > 0 ? ` · ${hidden} off the log axes` : ""} · click a point for its (hkl)</>
         ) : (
           <>
             {rows.length} reflections{magCount > 0 ? ` (${magCount} magnetic)` : ""}; points on the dashed line agree.

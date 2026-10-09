@@ -209,6 +209,8 @@ export interface SingleCrystalCheckInput {
   readonly nonPositiveDefinite?: readonly string[];
   /** X-ray data (the Flack parameter matters for a non-centrosymmetric group). */
   readonly xray?: boolean;
+  /** Reflections left out by the σ filter (SHELX OMIT-style), when it is on. */
+  readonly omitted?: { readonly count: number; readonly cutoff: number } | undefined;
 }
 
 /** The single-crystal verdict, most important first. */
@@ -216,6 +218,16 @@ export function singleCrystalChecks(input: SingleCrystalCheckInput): ValidationV
   const { validation: v, goof, result, parameters } = input;
   const checks: ValidationCheck[] = [];
   const ext = v.extinction;
+  // Omitting by |Δ|/σ removes exactly the reflections a systematic error
+  // pushes furthest — extinction's strong reflections first — so every check
+  // below may look better than the model is. Say so up front.
+  if (input.omitted && input.omitted.count > 0) {
+    checks.push({
+      id: "omitted", status: "note",
+      title: `${input.omitted.count} reflection${input.omitted.count === 1 ? "" : "s"} omitted (|Δ|/σ > ${input.omitted.cutoff})`,
+      detail: "the checks here exclude them; omit only genuine outliers (beamstop, overlap) — a systematic error such as extinction should be modelled, not filtered",
+    });
+  }
   // With extinction, say how much of the GooF the strong reflections carry.
   const drivenByStrong = ext.suspected && v.goofWithoutStrongest !== undefined && goof - v.goofWithoutStrongest > 0.1;
   checks.push(gofCheck(goof, "GooF", 1.3, drivenByStrong ? `driven by the strongest reflections — ${fmt(v.goofWithoutStrongest!)} without them` : undefined));

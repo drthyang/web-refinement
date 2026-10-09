@@ -12,7 +12,7 @@
  * are off and in which direction.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { SpaceGroup, UnitCell } from "@/core/crystal/types";
 import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
@@ -20,7 +20,7 @@ import type { MergeStatistics } from "@/core/diffraction/merge";
 import { singleCrystalValidation, type ScOutlier, type ScValidation } from "@/core/diagnostics/singleCrystalValidation";
 import { singleCrystalChecks } from "@/core/diagnostics/validationChecks";
 import { shelxWeights, singleCrystalAgreement } from "@/core/diffraction/singleCrystalFactors";
-import { FobsFcalc } from "@/app/ui/QualityPlots";
+import { FobsFcalc, ScatterToolbar, type ScatterQuantity, type ScatterScale } from "@/app/ui/QualityPlots";
 import { color, fz } from "@/app/theme";
 import { InfoBadge } from "@/app/ui/InfoBadge";
 import {
@@ -59,6 +59,10 @@ export interface SingleCrystalValidationProps {
   readonly xray: boolean;
   readonly selected: Selection | null;
   readonly onSelect: (sel: Selection | null) => void;
+  /** The σ-reject control, shown in the Outliers panel where it acts. */
+  readonly outlierFilter?: ReactNode;
+  /** Reflections currently omitted by that control, flagged in the strip. */
+  readonly omitted?: { readonly count: number; readonly cutoff: number } | undefined;
 }
 
 const pct = (v: number, digits = 2): string => (Number.isFinite(v) ? `${(100 * v).toFixed(digits)}%` : "—");
@@ -84,8 +88,8 @@ export function SingleCrystalValidationView(props: SingleCrystalValidationProps)
     [rows, cell, spaceGroup, nParams],
   );
   const verdict = useMemo(
-    () => singleCrystalChecks({ validation, goof: ag.goof, result, parameters, nonPositiveDefinite: props.nonPositiveDefinite, xray: props.xray }),
-    [validation, ag.goof, result, parameters, props.nonPositiveDefinite, props.xray],
+    () => singleCrystalChecks({ validation, goof: ag.goof, result, parameters, nonPositiveDefinite: props.nonPositiveDefinite, xray: props.xray, omitted: props.omitted }),
+    [validation, ag.goof, result, parameters, props.nonPositiveDefinite, props.xray, props.omitted],
   );
 
   const v = validation;
@@ -96,6 +100,8 @@ export function SingleCrystalValidationView(props: SingleCrystalValidationProps)
   const pattern = outlierPattern(v);
 
   const [table, setTable] = useState<"shells" | "outliers">("shells");
+  const [scale, setScale] = useState<ScatterScale>("log");
+  const [quantity, setQuantity] = useState<ScatterQuantity>("F2");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -107,6 +113,9 @@ export function SingleCrystalValidationView(props: SingleCrystalValidationProps)
         <Metric value={pct(st.rSigma, 1)} label="R_σ" />
         <Metric value={`${st.observations} → ${st.unique}`} label={`obs → unique · ×${st.redundancy.toFixed(2)}`} />
         <Metric value={Number.isFinite(v.dMin) ? `${v.dMin.toFixed(3)} Å` : "—"} label={`d_min · ${v.sinThetaOverLambdaMax.toFixed(2)} Å⁻¹`} />
+        {props.omitted && props.omitted.count > 0 ? (
+          <Metric value={String(props.omitted.count)} label={`omitted · |Δ|/σ > ${props.omitted.cutoff}`} tone="note" title="Reflections rejected by the σ filter (Outliers panel); every number here is computed without them" />
+        ) : null}
         <span style={{ alignSelf: "center" }}><InfoBadge text={DATA_INFO} width={300} align="right" /></span>
       </MetricStrip>
 
@@ -118,6 +127,7 @@ export function SingleCrystalValidationView(props: SingleCrystalValidationProps)
             centre={1}
             span={Math.max(0.2, ...v.bins.slice(1).map((b) => Math.abs(b.k - 1)))}
             centreLabel="1.00"
+            height={66}
             items={v.bins.map((b, i) => ({
               label: b.fcRatioMax.toFixed(2),
               value: b.k,
@@ -133,14 +143,14 @@ export function SingleCrystalValidationView(props: SingleCrystalValidationProps)
             reference={1}
             referenceLabel="1.0"
             axisLabel="bin upper edge, Fc/Fc(max)"
-            height={84}
+            height={74}
           />
         </Section>
       </Row>
 
       <Row>
-        <Section title="Fo² vs Fc²" style={col(4, 280)}>
-          <FobsFcalc rows={rows} selected={props.selected} onHighlight={props.onSelect} maxWidth={360} />
+        <Section title="Fo² vs Fc²" right={<ScatterToolbar scale={scale} quantity={quantity} onScale={setScale} onQuantity={setQuantity} />} style={col(4, 280)}>
+          <FobsFcalc rows={rows} selected={props.selected} onHighlight={props.onSelect} maxWidth={330} scale={scale} quantity={quantity} toolbar={false} compact />
         </Section>
         <Section
         style={col(7, 440)}
@@ -185,6 +195,7 @@ export function SingleCrystalValidationView(props: SingleCrystalValidationProps)
           </div>
         ) : (
           <>
+            {props.outlierFilter}
             {pattern ? (
               <div style={{ background: color.noteBg, border: `1px solid ${color.noteBorder}`, borderRadius: 7, padding: "5px 9px", fontSize: fz.micro, color: color.noteInk, lineHeight: 1.45 }}>
                 <b>Pattern:</b> {pattern}
