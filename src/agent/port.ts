@@ -1,16 +1,16 @@
 /**
- * The Copilot port: what a refinement engine publishes so the Copilot can read
+ * The Agent port: what a refinement engine publishes so the Agent can read
  * the live analysis and take the same actions the page's own controls take.
  *
  * It follows the engine-exports pattern (app/workbenchEngine.ts): the mounted,
  * active engine writes a fresh port into a shell-owned ref on every render, so
  * a call always runs against the state on screen. The actions are the page's
- * own handlers — the Refine button and the Copilot's `refine` are one function
- * — so a Copilot action is indistinguishable from a click, and the step history
+ * own handlers — the Refine button and the Agent's `refine` are one function
+ * — so a Agent action is indistinguishable from a click, and the step history
  * records it the same way (tagged `actor: "agent"` by the shell).
  *
  * Powder only for now. Single crystal and PDF keep their state private to the
- * page; each will publish its own port when the Copilot reaches it.
+ * page; each will publish its own port when the Agent reaches it.
  */
 
 import type { MutableRefObject } from "react";
@@ -23,7 +23,7 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import type { BackgroundType } from "@/core/diffraction/background";
 import type { MustrainModel, SiteTies } from "@/app/powderSpec";
 
-/** The powder page as the Copilot reads it — one render's state. */
+/** The powder page as the Agent reads it — one render's state. */
 export interface PowderLiveState {
   readonly structure: StructureModel;
   readonly extraPhases: readonly StructureModel[];
@@ -65,8 +65,8 @@ export interface PowderLiveState {
   readonly source: string;
 }
 
-/** What the powder page lets the Copilot do. Each call is the page's own handler. */
-export interface PowderCopilotPort {
+/** What the powder page lets the Agent do. Each call is the page's own handler. */
+export interface PowderAgentPort {
   readonly technique: "powder";
   readonly state: () => PowderLiveState;
   /** Free or fix parameters by id (the parameter panel's check boxes). */
@@ -88,7 +88,7 @@ export interface PowderCopilotPort {
 }
 
 /** Any engine's port. A union as more techniques join. */
-export type CopilotPort = PowderCopilotPort;
+export type AgentPort = PowderAgentPort;
 
 /** The shell-owned ref an engine publishes its port into (null when unmounted or inactive). */
-export type CopilotPortRef = MutableRefObject<CopilotPort | null>;
+export type AgentPortRef = MutableRefObject<AgentPort | null>;

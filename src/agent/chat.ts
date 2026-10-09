@@ -1,6 +1,6 @@
 /**
- * The in-app Copilot conversation: Claude through the Anthropic SDK, from the
- * browser, with the Copilot tools (tools.ts) run by the executor on the live
+ * The in-app Agent conversation: Claude through the Anthropic SDK, from the
+ * browser, with the Agent tools (tools.ts) run by the executor on the live
  * page. Two ways in, same loop:
  *
  *  - `api-key`: the user's own Anthropic API key, sent straight from this
@@ -25,10 +25,10 @@ import type {
   BetaToolUseBlock,
   BetaUsage,
 } from "@anthropic-ai/sdk/resources/beta/messages/messages";
-import { COPILOT_TOOLS, inputJsonSchema } from "@/copilot/tools";
-import type { ToolRunner } from "@/copilot/executor";
-import { copilotSystemPrompt } from "@/copilot/systemPrompt";
-import { hasRefusalFallback } from "@/copilot/chat-models";
+import { LIVE_TOOLS, inputJsonSchema } from "@/agent/tools";
+import type { ToolRunner } from "@/agent/executor";
+import { agentSystemPrompt } from "@/agent/systemPrompt";
+import { hasRefusalFallback } from "@/agent/chat-models";
 
 export type ChatTransport = "api-key" | "proxy";
 export type ChatEffort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -66,16 +66,16 @@ const MAX_TURNS = 40;
 export const PROXY_PATH = "api/anthropic";
 
 
-export class CopilotChat {
+export class AgentChat {
   private readonly messages: BetaMessageParam[] = [];
-  private readonly tools: BetaTool[] = COPILOT_TOOLS.map((t) => ({
+  private readonly tools: BetaTool[] = LIVE_TOOLS.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: inputJsonSchema(t) as BetaTool["input_schema"],
     // Inputs stream as generated; the executor validates each against its schema.
     eager_input_streaming: true,
   }));
-  private readonly system = copilotSystemPrompt();
+  private readonly system = agentSystemPrompt();
 
   constructor(private readonly executor: ToolRunner) {}
 
@@ -168,7 +168,7 @@ function clientFor(config: ChatConfig): Anthropic {
     // The proxy replaces this placeholder with the real key, server side.
     return new Anthropic({ apiKey: "proxy-holds-the-key", baseURL: base, dangerouslyAllowBrowser: true, maxRetries: 2 });
   }
-  if (!config.apiKey) throw new Error("No API key: add one in the Copilot settings.");
+  if (!config.apiKey) throw new Error("No API key: add one in the Agent settings.");
   return new Anthropic({ apiKey: config.apiKey, dangerouslyAllowBrowser: true, maxRetries: 2, ...(config.baseURL ? { baseURL: config.baseURL } : {}) });
 }
 
@@ -177,7 +177,7 @@ export function describeChatError(e: unknown, transport: ChatTransport): string 
   if (e instanceof Anthropic.AuthenticationError) {
     return transport === "proxy"
       ? "The proxy's API key was rejected. Check ANTHROPIC_API_KEY where the dev server runs."
-      : "The API key was rejected. Check it in the Copilot settings.";
+      : "The API key was rejected. Check it in the Agent settings.";
   }
   if (e instanceof Anthropic.PermissionDeniedError) return "This API key is not allowed to use that model.";
   if (e instanceof Anthropic.RateLimitError) return "Rate limited by the API. Wait a moment and try again.";

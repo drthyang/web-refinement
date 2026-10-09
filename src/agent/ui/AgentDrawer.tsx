@@ -1,5 +1,5 @@
 /**
- * The Copilot drawer: the conversation with Claude (in-app chat) or the feed of
+ * The Agent drawer: the conversation with Claude (in-app chat) or the feed of
  * Claude Code's calls (bridge), every tool call as a card, and an approval
  * card for each change waiting on the user. It sits beside the page, not over
  * it, so the plot and the parameter panel stay in view while Claude works.
@@ -7,59 +7,59 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { color, fz, mono, radius } from "@/app/theme";
-import type { ActivityEntry } from "@/copilot/executor";
-import type { CopilotController, CopilotMode, TranscriptItem } from "@/copilot/useCopilot";
-import { CHAT_MODELS, hasRefusalFallback } from "@/copilot/chat-models";
+import type { ActivityEntry } from "@/agent/executor";
+import type { AgentController, AgentMode, TranscriptItem } from "@/agent/useAgent";
+import { CHAT_MODELS, hasRefusalFallback } from "@/agent/chat-models";
 
 interface Props {
-  readonly copilot: CopilotController;
+  readonly agent: AgentController;
   readonly onClose: () => void;
 }
 
-const MODE_LABEL: Record<CopilotMode, string> = { "claude-code": "Claude Code", "api-key": "API key", proxy: "Local proxy" };
+const MODE_LABEL: Record<AgentMode, string> = { "claude-code": "Claude Code", "api-key": "API key", proxy: "Local proxy" };
 
-export function CopilotDrawer({ copilot, onClose }: Props): JSX.Element {
-  const { settings } = copilot;
+export function AgentDrawer({ agent, onClose }: Props): JSX.Element {
+  const { settings } = agent;
   const [showSettings, setShowSettings] = useState(false);
   const chatMode = settings.mode !== "claude-code";
-  const needsKey = settings.mode === "api-key" && !copilot.apiKey;
+  const needsKey = settings.mode === "api-key" && !agent.apiKey;
   // First open with nothing set up: show the settings.
   useEffect(() => {
     if (needsKey) setShowSettings(true);
   }, [needsKey]);
 
   return (
-    <aside className="wb-copilot" style={drawer} aria-label="Copilot">
+    <aside className="wb-agent" style={drawer} aria-label="Agent">
       <div style={head}>
         <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <SparkIcon />
-          <b style={{ fontSize: 15, color: color.ink }}>Copilot</b>
-          <StatusChip copilot={copilot} />
+          <b style={{ fontSize: 15, color: color.ink }}>Agent</b>
+          <StatusChip agent={agent} />
         </span>
         <span style={{ display: "flex", gap: 4 }}>
           <IconButton title="Settings" active={showSettings} onClick={() => setShowSettings((v) => !v)}>⚙</IconButton>
-          <IconButton title="Clear the conversation" onClick={copilot.clear} disabled={copilot.thinking}>⌫</IconButton>
-          <IconButton title="Close the Copilot" onClick={onClose}>✕</IconButton>
+          <IconButton title="Clear the conversation" onClick={agent.clear} disabled={agent.thinking}>⌫</IconButton>
+          <IconButton title="Close the Agent" onClick={onClose}>✕</IconButton>
         </span>
       </div>
-      {showSettings && <Settings copilot={copilot} />}
-      <Transcript copilot={copilot} />
-      {chatMode ? <Composer copilot={copilot} disabled={needsKey} /> : <BridgeHint copilot={copilot} />}
+      {showSettings && <Settings agent={agent} />}
+      <Transcript agent={agent} />
+      {chatMode ? <Composer agent={agent} disabled={needsKey} /> : <BridgeHint agent={agent} />}
     </aside>
   );
 }
 
 // ── status ──────────────────────────────────────────────────────────────────
 
-function StatusChip({ copilot }: { copilot: CopilotController }): JSX.Element {
-  const { settings, bridge } = copilot;
+function StatusChip({ agent }: { agent: AgentController }): JSX.Element {
+  const { settings, bridge } = agent;
   let text = MODE_LABEL[settings.mode];
   let tone: "ok" | "wait" | "off" = "ok";
   if (settings.mode === "claude-code") {
     if (bridge.state === "connected") text = "Claude Code · connected";
     else if (bridge.state === "replaced") { text = "Claude Code · another tab"; tone = "off"; }
     else { text = "Claude Code · waiting"; tone = "wait"; }
-  } else if (settings.mode === "api-key" && !copilot.apiKey) {
+  } else if (settings.mode === "api-key" && !agent.apiKey) {
     text = "API key · not set";
     tone = "off";
   }
@@ -73,12 +73,12 @@ function StatusChip({ copilot }: { copilot: CopilotController }): JSX.Element {
 
 // ── settings ────────────────────────────────────────────────────────────────
 
-function Settings({ copilot }: { copilot: CopilotController }): JSX.Element {
-  const { settings, updateSettings } = copilot;
+function Settings({ agent }: { agent: AgentController }): JSX.Element {
+  const { settings, updateSettings } = agent;
   return (
     <div style={settingsBox}>
-      <div style={{ display: "flex", gap: 0, border: `1px solid ${color.control}`, borderRadius: radius.button, overflow: "hidden" }} role="radiogroup" aria-label="How the Copilot reaches Claude">
-        {(Object.keys(MODE_LABEL) as CopilotMode[]).map((m) => (
+      <div style={{ display: "flex", gap: 0, border: `1px solid ${color.control}`, borderRadius: radius.button, overflow: "hidden" }} role="radiogroup" aria-label="How the Agent reaches Claude">
+        {(Object.keys(MODE_LABEL) as AgentMode[]).map((m) => (
           <button
             key={m}
             role="radio"
@@ -105,7 +105,7 @@ function Settings({ copilot }: { copilot: CopilotController }): JSX.Element {
         <>
           <label style={field}>
             <span style={fieldLabel}>Anthropic API key</span>
-            <input style={input} type="password" autoComplete="off" placeholder="sk-ant-…" value={copilot.apiKey} onChange={(e) => copilot.setApiKey(e.target.value.trim())} spellCheck={false} />
+            <input style={input} type="password" autoComplete="off" placeholder="sk-ant-…" value={agent.apiKey} onChange={(e) => agent.setApiKey(e.target.value.trim())} spellCheck={false} />
           </label>
           <label style={{ ...field, flexDirection: "row", alignItems: "center", gap: 6 }}>
             <input type="checkbox" checked={settings.rememberKey} onChange={(e) => updateSettings({ rememberKey: e.target.checked })} />
@@ -142,7 +142,7 @@ function Settings({ copilot }: { copilot: CopilotController }): JSX.Element {
         </label>
       )}
       <label style={{ ...field, flexDirection: "row", alignItems: "center", gap: 6 }} title="Changes run without an approval card. Each one is still a step in History you can undo.">
-        <input type="checkbox" checked={settings.autoApprove} onChange={(e) => copilot.updateSettings({ autoApprove: e.target.checked })} />
+        <input type="checkbox" checked={settings.autoApprove} onChange={(e) => agent.updateSettings({ autoApprove: e.target.checked })} />
         <span style={{ fontSize: 12.5 }}>Auto-approve changes (this session)</span>
       </label>
     </div>
@@ -151,23 +151,23 @@ function Settings({ copilot }: { copilot: CopilotController }): JSX.Element {
 
 // ── transcript ──────────────────────────────────────────────────────────────
 
-function Transcript({ copilot }: { copilot: CopilotController }): JSX.Element {
+function Transcript({ agent }: { agent: AgentController }): JSX.Element {
   const end = useRef<HTMLDivElement>(null);
-  const items = copilot.transcript;
+  const items = agent.transcript;
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [items, copilot.activity]);
+  }, [items, agent.activity]);
   return (
     <div style={transcriptBox} aria-live="polite">
-      {items.length === 0 && <EmptyState mode={copilot.settings.mode} />}
-      {items.map((item) => <Item key={item.id} item={item} copilot={copilot} />)}
-      {copilot.thinking && <div style={{ fontSize: 12.5, color: color.faint, padding: "0 2px" }}>Working…</div>}
+      {items.length === 0 && <EmptyState mode={agent.settings.mode} />}
+      {items.map((item) => <Item key={item.id} item={item} agent={agent} />)}
+      {agent.thinking && <div style={{ fontSize: 12.5, color: color.faint, padding: "0 2px" }}>Working…</div>}
       <div ref={end} />
     </div>
   );
 }
 
-function EmptyState({ mode }: { mode: CopilotMode }): JSX.Element {
+function EmptyState({ mode }: { mode: AgentMode }): JSX.Element {
   return (
     <div style={{ color: color.secondary, fontSize: fz.small, lineHeight: 1.5, padding: "6px 2px" }}>
       {mode === "claude-code" ? (
@@ -185,7 +185,7 @@ function EmptyState({ mode }: { mode: CopilotMode }): JSX.Element {
   );
 }
 
-function Item({ item, copilot }: { item: TranscriptItem; copilot: CopilotController }): JSX.Element | null {
+function Item({ item, agent }: { item: TranscriptItem; agent: AgentController }): JSX.Element | null {
   switch (item.kind) {
     case "user":
       return <div style={userBubble}>{item.text}</div>;
@@ -202,8 +202,8 @@ function Item({ item, copilot }: { item: TranscriptItem; copilot: CopilotControl
         </div>
       );
     case "tool": {
-      const entry = copilot.activity[item.entryId];
-      return entry ? <ToolCard entry={entry} onDecide={copilot.decide} /> : null;
+      const entry = agent.activity[item.entryId];
+      return entry ? <ToolCard entry={entry} onDecide={agent.decide} /> : null;
     }
     case "notice":
       return <div style={noticeStyle(item.tone)}>{item.text}</div>;
@@ -238,17 +238,17 @@ function ToolCard({ entry, onDecide }: { entry: ActivityEntry; onDecide: (id: st
 
 // ── input ───────────────────────────────────────────────────────────────────
 
-function Composer({ copilot, disabled }: { copilot: CopilotController; disabled: boolean }): JSX.Element {
+function Composer({ agent, disabled }: { agent: AgentController; disabled: boolean }): JSX.Element {
   const [text, setText] = useState("");
   const submit = (): void => {
-    if (!text.trim() || copilot.thinking || disabled) return;
-    copilot.send(text);
+    if (!text.trim() || agent.thinking || disabled) return;
+    agent.send(text);
     setText("");
   };
   return (
     <div style={composer}>
       <textarea
-        aria-label="Message the Copilot"
+        aria-label="Message the Agent"
         style={{ ...input, resize: "none", minHeight: 58, fontFamily: "inherit", lineHeight: 1.4 }}
         placeholder={disabled ? "Add your API key in the settings first" : "Ask about the fit, or ask for the next step…"}
         value={text}
@@ -263,20 +263,20 @@ function Composer({ copilot, disabled }: { copilot: CopilotController; disabled:
       />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: fz.micro, color: color.faint, fontFamily: mono }}>
-          {copilot.usage.input + copilot.usage.output > 0
-            ? `${fmtTokens(copilot.usage.input)} in · ${fmtTokens(copilot.usage.cacheRead)} cached · ${fmtTokens(copilot.usage.output)} out`
+          {agent.usage.input + agent.usage.output > 0
+            ? `${fmtTokens(agent.usage.input)} in · ${fmtTokens(agent.usage.cacheRead)} cached · ${fmtTokens(agent.usage.output)} out`
             : "Enter to send · Shift+Enter for a new line"}
         </span>
-        {copilot.thinking
-          ? <button style={secondaryButton} onClick={copilot.stop}>Stop</button>
+        {agent.thinking
+          ? <button style={secondaryButton} onClick={agent.stop}>Stop</button>
           : <button style={primaryButton} onClick={submit} disabled={disabled || !text.trim()}>Send</button>}
       </div>
     </div>
   );
 }
 
-function BridgeHint({ copilot }: { copilot: CopilotController }): JSX.Element {
-  const { bridge } = copilot;
+function BridgeHint({ agent }: { agent: AgentController }): JSX.Element {
+  const { bridge } = agent;
   return (
     <div style={{ ...composer, fontSize: 12.5, color: color.secondary, lineHeight: 1.45 }}>
       {bridge.state === "connected" && <span>Connected to Claude Code. Ask it in your terminal; its calls appear here.</span>}
@@ -346,7 +346,7 @@ function IconButton({ children, title, onClick, active, disabled }: { children: 
   );
 }
 
-/** The Copilot mark: a four-point spark. */
+/** The Agent mark: a four-point spark. */
 export function SparkIcon({ size = 16 }: { size?: number }): JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden style={{ display: "block", flex: "none" }}>

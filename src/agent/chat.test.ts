@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
-import { CopilotChat } from "@/copilot/chat";
-import type { CopilotExecutor } from "@/copilot/executor";
-import { COPILOT_TOOLS } from "@/copilot/tools";
+import { AgentChat } from "@/agent/chat";
+import type { AgentExecutor } from "@/agent/executor";
+import { LIVE_TOOLS } from "@/agent/tools";
 
 /**
  * The chat loop against a stand-in Messages API that streams scripted turns
@@ -59,7 +59,7 @@ async function fakeApi(turns: string[]): Promise<{ url: string; server: Server; 
   return { url: `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`, server, requests };
 }
 
-describe("CopilotChat", () => {
+describe("AgentChat", () => {
   let server: Server | null = null;
   afterEach(async () => {
     if (server) await new Promise<void>((r) => server!.close(() => r()));
@@ -78,8 +78,8 @@ describe("CopilotChat", () => {
         ran.push(`${name}/${source}`);
         return name === "assess_refinement" ? { isError: true, text: "Error: refine first" } : { isError: false, text: "{\"technique\":\"powder\"}" };
       },
-    } as unknown as CopilotExecutor;
-    const chat = new CopilotChat(executor);
+    } as unknown as AgentExecutor;
+    const chat = new AgentChat(executor);
     let text = "";
     let starts = 0;
     await chat.send(
@@ -109,7 +109,7 @@ describe("CopilotChat", () => {
     expect(first.body.output_config).toEqual({ effort: "high" });
     expect(first.body.cache_control).toEqual({ type: "ephemeral" });
     const tools = first.body.tools as { name: string; eager_input_streaming?: boolean }[];
-    expect(tools.map((t) => t.name)).toEqual(COPILOT_TOOLS.map((t) => t.name));
+    expect(tools.map((t) => t.name)).toEqual(LIVE_TOOLS.map((t) => t.name));
     expect(tools.every((t) => t.eager_input_streaming)).toBe(true);
     const system = first.body.system as { text: string; cache_control?: unknown }[];
     expect(system[0]!.cache_control).toEqual({ type: "ephemeral" });
@@ -123,7 +123,7 @@ describe("CopilotChat", () => {
     const api = await fakeApi([sse([{ type: "fallback", from: "claude-opus-5-5", to: "claude-opus-4-8" }, { type: "text", text: "ok" }], "end_turn")]);
     server = api.server;
     const notices: string[] = [];
-    const chat = new CopilotChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as CopilotExecutor);
+    const chat = new AgentChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor);
     await chat.send(
       "hi",
       { transport: "api-key", apiKey: "sk-test", baseURL: api.url, model: "claude-opus-5-5", effort: "high", fallback: true },
@@ -140,7 +140,7 @@ describe("CopilotChat", () => {
   it("sends no fallback for a model without one, even when opted in", async () => {
     const api = await fakeApi([sse([{ type: "text", text: "ok" }], "end_turn")]);
     server = api.server;
-    const chat = new CopilotChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as CopilotExecutor);
+    const chat = new AgentChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor);
     await chat.send(
       "hi",
       { transport: "api-key", apiKey: "sk-test", baseURL: api.url, model: "claude-haiku-5-5", effort: "low", fallback: true },
@@ -155,12 +155,12 @@ describe("CopilotChat", () => {
     const api = await fakeApi([sse([{ type: "tool_use", id: "tu_1", name: "refine", input: {} }, { type: "tool_use", id: "tu_2", name: "assess_refinement", input: {} }], "tool_use")]);
     server = api.server;
     const ctrl = new AbortController();
-    const chat = new CopilotChat({
+    const chat = new AgentChat({
       run: async () => {
         ctrl.abort(); // the user presses Stop while the first call runs
         return { isError: false, text: "{\"refined\":true}" };
       },
-    } as unknown as CopilotExecutor);
+    } as unknown as AgentExecutor);
     await chat.send(
       "refine",
       { transport: "api-key", apiKey: "sk-test", baseURL: api.url, model: "claude-opus-5-5", effort: "high" },

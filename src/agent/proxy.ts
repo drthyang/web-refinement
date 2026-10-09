@@ -1,5 +1,5 @@
 /**
- * The Copilot's local proxy to the Anthropic API, for the dev and preview
+ * The Agent's local proxy to the Anthropic API, for the dev and preview
  * servers (vite.config.ts): the page calls `<base>api/anthropic/…`, and the
  * server forwards it with the key from ANTHROPIC_API_KEY, so the key never
  * reaches the browser. Not part of the static build.
@@ -36,7 +36,7 @@ export function anthropicProxy(apiKey: string | undefined, mount = "/api/anthrop
 async function forward(req: IncomingMessage, res: ServerResponse, path: string, apiKey: string | undefined): Promise<void> {
   if (!sameOrigin(req)) return fail(res, 403, "forbidden", "Only this app's own pages may use the proxy.");
   if (!apiKey) {
-    return fail(res, 503, "proxy_not_configured", "The proxy has no API key. Start the dev server with ANTHROPIC_API_KEY set (in the shell, or in .env.local), or use your own key in the Copilot settings.");
+    return fail(res, 503, "proxy_not_configured", "The proxy has no API key. Start the dev server with ANTHROPIC_API_KEY set (in the shell, or in .env.local), or use your own key in the Agent settings.");
   }
   if (!path.startsWith("/v1/")) return fail(res, 404, "not_found", "The proxy forwards /v1/ API paths only.");
   const headers = new Headers();

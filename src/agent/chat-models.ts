@@ -1,5 +1,5 @@
 /**
- * The models the in-app Copilot offers. Kept apart from chat.ts so the drawer
+ * The models the in-app Agent offers. Kept apart from chat.ts so the drawer
  * can list them without loading the SDK and the system prompt.
  */
 

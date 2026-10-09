@@ -1,20 +1,21 @@
 /**
- * The Copilot's state for the drawer: settings, the conversation, the tool
+ * The Agent's state for the drawer: settings, the conversation, the tool
  * activity, approvals waiting on the user, and the Claude Code bridge. Lives in
  * the app shell (always mounted), so the bridge stays connected and a call can
  * ask for approval while the drawer is closed — `onAttention` opens it.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ActivityEntry, CopilotExecutor, CopilotHost, ToolRunner } from "@/copilot/executor";
-import { BridgeClient, DEFAULT_BRIDGE_URL, type BridgeStatus } from "@/copilot/bridgeClient";
-import type { ChatEffort, CopilotChat } from "@/copilot/chat";
+import type { ActivityEntry, AgentExecutor, AgentHost, ToolRunner } from "@/agent/executor";
+import { BridgeClient, DEFAULT_BRIDGE_URL, type BridgeStatus } from "@/agent/bridgeClient";
+import type { ChatEffort, AgentChat } from "@/agent/chat";
+import { API_KEY_KEY, SETTINGS_KEY, migrateLegacyKeys } from "@/agent/storage";
 
-/** How the Copilot reaches Claude. */
-export type CopilotMode = "claude-code" | "api-key" | "proxy";
+/** How the Agent reaches Claude. */
+export type AgentMode = "claude-code" | "api-key" | "proxy";
 
-export interface CopilotSettings {
-  readonly mode: CopilotMode;
+export interface AgentSettings {
+  readonly mode: AgentMode;
   readonly model: string;
   readonly effort: ChatEffort;
   /** Run changes without an approval card. Off unless the user turns it on. */
@@ -32,9 +33,9 @@ export type TranscriptItem =
   | { readonly kind: "tool"; readonly id: string; readonly entryId: string }
   | { readonly kind: "notice"; readonly id: string; readonly text: string; readonly tone: "info" | "error" };
 
-export interface CopilotController {
-  readonly settings: CopilotSettings;
-  readonly updateSettings: (patch: Partial<CopilotSettings>) => void;
+export interface AgentController {
+  readonly settings: AgentSettings;
+  readonly updateSettings: (patch: Partial<AgentSettings>) => void;
   readonly apiKey: string;
   readonly setApiKey: (key: string) => void;
   readonly transcript: readonly TranscriptItem[];
@@ -51,9 +52,8 @@ export interface CopilotController {
   readonly usage: { readonly input: number; readonly output: number; readonly cacheRead: number };
 }
 
-const SETTINGS_KEY = "materia.copilot.settings";
-const KEY_KEY = "materia.copilot.apiKey";
-const DEFAULTS: CopilotSettings = {
+const KEY_KEY = API_KEY_KEY;
+const DEFAULTS: AgentSettings = {
   mode: "claude-code",
   model: "claude-opus-5-5",
   effort: "high",
@@ -67,11 +67,11 @@ let nextItem = 1;
 const itemId = (): string => `t${nextItem++}`;
 
 /**
- * `enabled`: the user has opened the Copilot in this page. Until then nothing
+ * `enabled`: the user has opened the Agent in this page. Until then nothing
  * connects anywhere — the bridge does not poll a server nobody asked for.
  */
-export function useCopilot(host: CopilotHost, enabled: boolean, onAttention: () => void): CopilotController {
-  const [settings, setSettings] = useState<CopilotSettings>(readSettings);
+export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => void): AgentController {
+  const [settings, setSettings] = useState<AgentSettings>(readSettings);
   const [apiKey, setApiKeyState] = useState<string>(readKey);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [activity, setActivity] = useState<Record<string, ActivityEntry>>({});
@@ -87,13 +87,13 @@ export function useCopilot(host: CopilotHost, enabled: boolean, onAttention: () 
   attention.current = onAttention;
 
   // The executor (and the MATERIA tool handlers and zod behind it) loads on the
-  // first call, so a session that never uses the Copilot never downloads it.
+  // first call, so a session that never uses the Agent never downloads it.
   const executor = useMemo<ToolRunner>(() => {
-    let loaded: Promise<CopilotExecutor> | null = null;
-    const load = (): Promise<CopilotExecutor> =>
-      (loaded ??= import("@/copilot/executor").then(
+    let loaded: Promise<AgentExecutor> | null = null;
+    const load = (): Promise<AgentExecutor> =>
+      (loaded ??= import("@/agent/executor").then(
         (m) =>
-          new m.CopilotExecutor(host, {
+          new m.AgentExecutor(host, {
             approve: (entry) => {
               if (settingsRef.current.autoApprove) return Promise.resolve(true);
               attention.current();
@@ -111,7 +111,7 @@ export function useCopilot(host: CopilotHost, enabled: boolean, onAttention: () 
     return { run: async (name, input, source) => (await load()).run(name, input, source) };
   }, [host]);
 
-  // The Claude Code bridge runs while that mode is chosen (once the Copilot is in use).
+  // The Claude Code bridge runs while that mode is chosen (once the Agent is in use).
   useEffect(() => {
     if (!enabled || settings.mode !== "claude-code") return;
     const client = new BridgeClient(settings.bridgeUrl, executor, setBridge);
@@ -119,7 +119,7 @@ export function useCopilot(host: CopilotHost, enabled: boolean, onAttention: () 
     return () => client.stop();
   }, [enabled, settings.mode, settings.bridgeUrl, executor]);
 
-  const updateSettings = useCallback((patch: Partial<CopilotSettings>) => {
+  const updateSettings = useCallback((patch: Partial<AgentSettings>) => {
     setSettings((s) => {
       const next = { ...s, ...patch };
       writeSettings(next);
@@ -140,7 +140,7 @@ export function useCopilot(host: CopilotHost, enabled: boolean, onAttention: () 
   }, []);
 
   // ── the in-app chat ─────────────────────────────────────────────────────
-  const chat = useRef<CopilotChat | null>(null);
+  const chat = useRef<AgentChat | null>(null);
   const turn = useRef<AbortController | null>(null);
 
   const send = useCallback((text: string) => {
@@ -160,9 +160,9 @@ export function useCopilot(host: CopilotHost, enabled: boolean, onAttention: () 
     };
     void (async () => {
       // Loaded on first use: the SDK and the system prompt stay out of the main bundle.
-      const mod = await import("@/copilot/chat");
+      const mod = await import("@/agent/chat");
       try {
-        chat.current ??= new mod.CopilotChat(executor);
+        chat.current ??= new mod.AgentChat(executor);
         await chat.current.send(
           message,
           { transport: s.mode === "proxy" ? "proxy" : "api-key", apiKey: apiKeyRef.current, model: s.model, effort: s.effort, fallback: s.fallback },
@@ -233,11 +233,12 @@ export function useCopilot(host: CopilotHost, enabled: boolean, onAttention: () 
 
 // ── storage (guarded: private windows and blocked site data throw) ─────────
 
-function readSettings(): CopilotSettings {
+function readSettings(): AgentSettings {
   try {
+    migrateLegacyKeys(localStorage, sessionStorage);
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return DEFAULTS;
-    const parsed = JSON.parse(raw) as Partial<CopilotSettings>;
+    const parsed = JSON.parse(raw) as Partial<AgentSettings>;
     return {
       ...DEFAULTS,
       ...parsed,
@@ -249,7 +250,7 @@ function readSettings(): CopilotSettings {
   }
 }
 
-function writeSettings(s: CopilotSettings): void {
+function writeSettings(s: AgentSettings): void {
   try {
     const { autoApprove: _auto, ...kept } = s;
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(kept));
@@ -260,6 +261,7 @@ function writeSettings(s: CopilotSettings): void {
 
 function readKey(): string {
   try {
+    migrateLegacyKeys(localStorage, sessionStorage);
     return sessionStorage.getItem(KEY_KEY) ?? localStorage.getItem(KEY_KEY) ?? "";
   } catch {
     return "";

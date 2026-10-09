@@ -2,8 +2,8 @@
  * The `materia-live` bridge: an MCP server whose tools act on the MATERIA page
  * open in the browser, so Claude Code can drive the live analysis.
  *
- * Claude Code starts this server (stdio, .mcp.json). It serves the Copilot's
- * tool list (copilot/tools.ts) and listens on 127.0.0.1 for the page: the page
+ * Claude Code starts this server (stdio, .mcp.json). It serves the Agent's
+ * tool list (agent/tools.ts) and listens on 127.0.0.1 for the page: the page
  * long-polls `/poll` for the next call, runs it through its own executor (the
  * user approves changes there), and posts the answer to `/result`. Nothing
  * science-related happens here — the page holds the state and does the work.
@@ -16,7 +16,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { COPILOT_TOOLS } from "@/copilot/tools";
+import { LIVE_TOOLS } from "@/agent/tools";
 
 export const DEFAULT_BRIDGE_PORT = 5199;
 /** How long a poll is held open before it returns empty. */
@@ -29,13 +29,13 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 const INSTRUCTIONS = `MATERIA live: these tools act on the MATERIA workbench open in the user's browser — the analysis they are looking at, not a copy.
 
-Start with get_state. Read tools (get_state, assess_refinement, suggest_next_steps, rank_next_parameters, check_cell_symmetry, find_unexplained_peaks, bond_geometry, interpret_structure) run at once. Change tools (set_free, set_background, set_microstrain, set_adp_model, set_fit_range, refine, reset_parameters, go_to_step) wait until the user approves them in the app's Copilot panel, unless they turned on auto-approve there; a declined change says so. Every change becomes a step in the app's history, tagged as the agent's, so the user can undo it.
+Start with get_state. Read tools (get_state, assess_refinement, suggest_next_steps, rank_next_parameters, check_cell_symmetry, find_unexplained_peaks, bond_geometry, interpret_structure) run at once. Change tools (set_free, set_background, set_microstrain, set_adp_model, set_fit_range, refine, reset_parameters, go_to_step) wait until the user approves them in the app's Agent panel, unless they turned on auto-approve there; a declined change says so. Every change becomes a step in the app's history, tagged as the agent's, so the user can undo it.
 
 You choose what to free and when to refine; the least-squares engine sets every value. There is no tool to type in a value.
 
 For what-if work on data the user has not opened (simulate, build a magnetic model, refine headless), the separate \`materia\` MCP server holds the full toolset.
 
-If a call says the app is not connected, ask the user to open the app (npm run dev) and choose "Claude Code" in its Copilot panel.`;
+If a call says the app is not connected, ask the user to open the app (npm run dev) and choose "Claude Code" in its Agent panel.`;
 
 interface Pending {
   readonly id: string;
@@ -80,7 +80,7 @@ export function createLiveBridge(opts: { port?: number; version?: string } = {})
       return Promise.resolve({ isError: true, text: `Error: the bridge could not listen for the app (${listenError.message}). Another Claude Code session may be running it; close that one or set MATERIA_LIVE_PORT.` });
     }
     if (!connected()) {
-      return Promise.resolve({ isError: true, text: "Error: the MATERIA app is not connected. Ask the user to open the app (npm run dev) and choose \"Claude Code\" in its Copilot panel, then try again." });
+      return Promise.resolve({ isError: true, text: "Error: the MATERIA app is not connected. Ask the user to open the app (npm run dev) and choose \"Claude Code\" in its Agent panel, then try again." });
     }
     return new Promise((resolve) => {
       const id = `b${nextId++}`;
@@ -96,7 +96,7 @@ export function createLiveBridge(opts: { port?: number; version?: string } = {})
   };
 
   const mcp = new McpServer({ name: "materia-live", version: opts.version ?? "0" }, { instructions: INSTRUCTIONS });
-  for (const tool of COPILOT_TOOLS) {
+  for (const tool of LIVE_TOOLS) {
     mcp.registerTool(
       tool.name,
       { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
@@ -139,7 +139,7 @@ export function createLiveBridge(opts: { port?: number; version?: string } = {})
       }
       session = s;
       lastSeen = Date.now();
-      return json(res, 200, { server: "materia-live", tools: COPILOT_TOOLS.length });
+      return json(res, 200, { server: "materia-live", tools: LIVE_TOOLS.length });
     }
     if (req.method === "GET" && url.pathname === "/poll") {
       if (url.searchParams.get("session") !== session) return json(res, 409, { error: "another tab took over" });

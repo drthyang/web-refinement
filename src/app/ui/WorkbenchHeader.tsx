@@ -10,7 +10,7 @@ import { color, fz, mono, radius, shadow, space } from "@/app/theme";
 import type { DemoId } from "@/app/demos";
 import type { HistoryBinding } from "@/app/historyBinding";
 import { HistoryIcon, HistoryPanel, StepArrow, StepText } from "@/app/ui/HistoryPanel";
-import { SparkIcon } from "@/copilot/ui/CopilotDrawer";
+import { SparkIcon } from "@/agent/ui/AgentDrawer";
 
 /** Display face for the MATERIA wordmark — geometric, loaded in index.html. */
 const display = '"Space Grotesk", "IBM Plex Sans", system-ui, sans-serif';
@@ -81,16 +81,16 @@ interface Props {
    */
   readonly history?: HistoryBinding;
   /**
-   * The Copilot drawer's toggle (src/copilot/), at the row's right end beside
+   * The Agent drawer's toggle (src/agent/), at the row's right end beside
    * the drawer it opens. `pending` counts changes waiting for approval.
    */
-  readonly copilot?: { readonly open: boolean; readonly onToggle: () => void; readonly pending: number };
+  readonly agent?: { readonly open: boolean; readonly onToggle: () => void; readonly pending: number };
 }
 
 /** File-picker filter for project files (any .json is accepted; the reader decides). */
 const PROJECT_ACCEPT = ".materia.json,.json,application/json";
 
-export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo, onOpenProject, onSaveProject, gpu, history, copilot }: Props): JSX.Element {
+export function WorkbenchHeader({ steps, active, onStep, version, exports, technique = null, demos, activeDemo = null, onLoadDemo, onExitDemo, onOpenProject, onSaveProject, gpu, history, agent }: Props): JSX.Element {
   return (
     <header className="wb-header" style={headerBar}>
       <div className="wb-header-brand" style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
@@ -145,17 +145,17 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
           <DemosMenu demos={demos} activeDemo={activeDemo} onLoadDemo={onLoadDemo} onExitDemo={onExitDemo} />
         )}
         {exports.length > 0 && <ExportMenu exports={exports} />}
-        {copilot && (
+        {agent && (
           <ActionButton
-            onClick={copilot.onToggle}
-            active={copilot.open}
-            ariaLabel="Copilot"
-            title={copilot.pending > 0 ? `Copilot: ${copilot.pending} change${copilot.pending === 1 ? "" : "s"} waiting for your approval` : "Copilot: Claude reads the analysis, judges the fit with MATERIA's tools, and makes changes you approve"}
+            onClick={agent.onToggle}
+            active={agent.open}
+            ariaLabel="Agent"
+            title={agent.pending > 0 ? `Agent: ${agent.pending} change${agent.pending === 1 ? "" : "s"} waiting for your approval` : "Agent: Claude reads the analysis, judges the fit with MATERIA's tools, and makes changes you approve"}
           >
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <SparkIcon size={14} />
-              Copilot
-              {copilot.pending > 0 && <span style={pendingBadge}>{copilot.pending}</span>}
+              Agent
+              {agent.pending > 0 && <span style={pendingBadge}>{agent.pending}</span>}
             </span>
           </ActionButton>
         )}
@@ -650,7 +650,7 @@ function MenuItem({ children, onClick, title }: { children: React.ReactNode; onC
   );
 }
 
-/** The count of Copilot changes waiting for approval, on the Copilot button. */
+/** The count of Agent changes waiting for approval, on the Agent button. */
 const pendingBadge: CSSProperties = {
   minWidth: 17,
   height: 17,

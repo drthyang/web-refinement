@@ -1,5 +1,5 @@
 /**
- * Runs Copilot tool calls against the live page, whoever sent them (the
+ * Runs Agent tool calls against the live page, whoever sent them (the
  * in-app chat or Claude Code through the bridge): validate the input, ask the
  * user before a change, make the change as the agent so the history tags its
  * step, wait for it to render, and answer with a compact JSON view.
@@ -10,16 +10,16 @@
  */
 
 import { z } from "zod";
-import { copilotTool, type CopilotToolSpec, type ToolEffect } from "@/copilot/tools";
-import type { CopilotPort, PowderLiveState } from "@/copilot/port";
-import { changePowder, describePowderChange, powderNoOp, readPowderTool, type PowderToolHost } from "@/copilot/powderTools";
+import { liveTool, type LiveToolSpec, type ToolEffect } from "@/agent/tools";
+import type { AgentPort, PowderLiveState } from "@/agent/port";
+import { changePowder, describePowderChange, powderNoOp, readPowderTool, type PowderToolHost } from "@/agent/powderTools";
 import { REF_KEY, RefStore, buildView } from "@/mcp/refs";
 import type { StepKind } from "@/core/project/history";
 
 /** What the executor needs from the app shell. */
-export interface CopilotHost extends PowderToolHost {
+export interface AgentHost extends PowderToolHost {
   /** The active engine's port; null with nothing loaded. */
-  readonly port: () => CopilotPort | null;
+  readonly port: () => AgentPort | null;
   /** The page on screen, to explain why a tool is unavailable there. */
   readonly technique: () => "powder" | "singleCrystal" | "pdf" | null;
   /** Resolves once the state an action set has rendered and any step it requested is recorded. */
@@ -31,14 +31,14 @@ export interface CopilotHost extends PowderToolHost {
 }
 
 /** Who sent a call. */
-export type CopilotSource = "chat" | "claude-code";
+export type AgentSource = "chat" | "claude-code";
 
 export type ActivityStatus = "waiting" | "running" | "done" | "declined" | "failed";
 
-/** One tool call as the Copilot drawer lists it. */
+/** One tool call as the Agent drawer lists it. */
 export interface ActivityEntry {
   readonly id: string;
-  readonly source: CopilotSource;
+  readonly source: AgentSource;
   readonly tool: string;
   readonly title: string;
   readonly effect: ToolEffect;
@@ -58,7 +58,7 @@ export interface ToolOutcome {
 
 /** What the chat and the bridge call: the executor, or a lazy stand-in for it. */
 export interface ToolRunner {
-  readonly run: (name: string, input: unknown, source: CopilotSource) => Promise<ToolOutcome>;
+  readonly run: (name: string, input: unknown, source: AgentSource) => Promise<ToolOutcome>;
 }
 
 export interface ExecutorOptions {
@@ -81,16 +81,16 @@ const STEP_KIND: Readonly<Record<string, StepKind>> = {
 
 let nextCallId = 1;
 
-export class CopilotExecutor implements ToolRunner {
+export class AgentExecutor implements ToolRunner {
   private readonly refs = new RefStore(128);
   /** Changes run one at a time: the page has one compute client and one history. */
   private changes: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly host: CopilotHost, private readonly opts: ExecutorOptions) {}
+  constructor(private readonly host: AgentHost, private readonly opts: ExecutorOptions) {}
 
   /** Run one call. Never throws: failures come back as an error outcome the model can read. */
-  run(name: string, input: unknown, source: CopilotSource): Promise<ToolOutcome> {
-    const spec = copilotTool(name);
+  run(name: string, input: unknown, source: AgentSource): Promise<ToolOutcome> {
+    const spec = liveTool(name);
     if (!spec) return Promise.resolve(error(`no tool named ${name}`));
     if (spec.effect !== "change") return this.execute(spec, input, source);
     const run = this.changes.then(() => this.execute(spec, input, source));
@@ -98,7 +98,7 @@ export class CopilotExecutor implements ToolRunner {
     return run;
   }
 
-  private async execute(spec: CopilotToolSpec, raw: unknown, source: CopilotSource): Promise<ToolOutcome> {
+  private async execute(spec: LiveToolSpec, raw: unknown, source: AgentSource): Promise<ToolOutcome> {
     let entry: ActivityEntry = { id: `c${nextCallId++}`, source, tool: spec.name, title: spec.title, effect: spec.effect, at: Date.now(), status: "running" };
     const update = (patch: Partial<ActivityEntry>): void => {
       entry = { ...entry, ...patch };
@@ -171,13 +171,13 @@ export class CopilotExecutor implements ToolRunner {
     }
   }
 
-  private requirePort(): CopilotPort {
+  private requirePort(): AgentPort {
     const port = this.host.port();
     if (port) return port;
     const technique = this.host.technique();
     throw new Error(
       technique === "singleCrystal" || technique === "pdf"
-        ? `the Copilot works on the powder page for now; the ${technique === "pdf" ? "PDF" : "single-crystal"} page is not connected yet`
+        ? `the Agent works on the powder page for now; the ${technique === "pdf" ? "PDF" : "single-crystal"} page is not connected yet`
         : "no analysis is open — ask the user to load a structure and data, or a demo",
     );
   }

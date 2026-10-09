@@ -6,7 +6,7 @@
  * needs no dependency and survives the server restarting with Claude Code.
  */
 
-import type { ToolRunner } from "@/copilot/executor";
+import type { ToolRunner } from "@/agent/executor";
 
 /** Where the bridge listens unless the user changes it (MATERIA_LIVE_PORT on the server). */
 export const DEFAULT_BRIDGE_URL = "http://127.0.0.1:5199";

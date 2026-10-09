@@ -1,12 +1,12 @@
 /**
- * The Copilot tools on the powder page: each one reads the live state through
+ * The Agent tools on the powder page: each one reads the live state through
  * the page's port (port.ts) or calls the page's own handler. The analysis
  * tools are the MATERIA MCP handlers (src/mcp/tools.ts) fed from what is on
- * screen, so the Copilot and a headless agent judge a fit the same way.
+ * screen, so the Agent and a headless agent judge a fit the same way.
  */
 
-import type { PowderCopilotPort, PowderLiveState } from "@/copilot/port";
-import type { CopilotToolSpec } from "@/copilot/tools";
+import type { PowderAgentPort, PowderLiveState } from "@/agent/port";
+import type { LiveToolSpec } from "@/agent/tools";
 import type { RefinementParameter } from "@/core/refinement/types";
 import type { ProjectHistory } from "@/core/project/history";
 import { lineage } from "@/core/project/history";
@@ -33,7 +33,7 @@ export interface PowderToolHost {
 type Input = any;
 
 /** Run a read or control tool. Returns the JSON result the model sees. */
-export function readPowderTool(name: string, input: Input, port: PowderCopilotPort, host: PowderToolHost): unknown {
+export function readPowderTool(name: string, input: Input, port: PowderAgentPort, host: PowderToolHost): unknown {
   const s = port.state();
   switch (name) {
     case "get_state":
@@ -106,7 +106,7 @@ export function readPowderTool(name: string, input: Input, port: PowderCopilotPo
  * needed adjusting (tied parameters skipped). The caller records the step and
  * reports the outcome once the change has rendered.
  */
-export async function changePowder(name: string, input: Input, port: PowderCopilotPort, host: PowderToolHost): Promise<string | undefined> {
+export async function changePowder(name: string, input: Input, port: PowderAgentPort, host: PowderToolHost): Promise<string | undefined> {
   const s = port.state();
   switch (name) {
     case "set_free": {
@@ -163,7 +163,7 @@ export async function changePowder(name: string, input: Input, port: PowderCopil
  * Why a change would do nothing, or null when it would do something — a
  * no-op never asks the user for approval.
  */
-export function powderNoOp(spec: CopilotToolSpec, input: Input, s: PowderLiveState): string | null {
+export function powderNoOp(spec: LiveToolSpec, input: Input, s: PowderLiveState): string | null {
   if (spec.name === "set_free") {
     const plan = freePlan(s.parameters, input.free ?? [], input.fix ?? []);
     return plan.changes.length === 0 ? plan.note ?? "every named parameter is already in that state" : null;
@@ -172,7 +172,7 @@ export function powderNoOp(spec: CopilotToolSpec, input: Input, s: PowderLiveSta
 }
 
 /** One line for the approval card: what this change will do, in the page's terms. */
-export function describePowderChange(spec: CopilotToolSpec, input: Input, s: PowderLiveState): string {
+export function describePowderChange(spec: LiveToolSpec, input: Input, s: PowderLiveState): string {
   switch (spec.name) {
     case "set_free": {
       const plan = freePlan(s.parameters, input.free ?? [], input.fix ?? []);

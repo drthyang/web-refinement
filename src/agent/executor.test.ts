@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { CopilotExecutor, type ActivityEntry, type CopilotHost } from "@/copilot/executor";
-import type { PowderCopilotPort, PowderLiveState } from "@/copilot/port";
-import { freePlan } from "@/copilot/powderTools";
-import { COPILOT_TOOLS, inputJsonSchema } from "@/copilot/tools";
+import { AgentExecutor, type ActivityEntry, type AgentHost } from "@/agent/executor";
+import type { PowderAgentPort, PowderLiveState } from "@/agent/port";
+import { freePlan } from "@/agent/powderTools";
+import { LIVE_TOOLS, inputJsonSchema } from "@/agent/tools";
 import { newSession, type Session } from "@/app/powderSession";
 import { exampleStructure } from "@/examples/mn3ga";
 import { powderCurves } from "@/core/workflow/powder";
@@ -16,7 +16,7 @@ import type { StepKind } from "@/core/project/history";
  * A powder page without React: a session, the real curves and the real
  * engine behind the port, so the tools judge an actual fit.
  */
-function sessionPort(start: Session): { port: PowderCopilotPort; calls: string[]; session: () => Session } {
+function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; session: () => Session } {
   let s = start;
   let result: RefinementResult | null = null;
   let fitRange: { min: number; max: number } | null = null;
@@ -74,7 +74,7 @@ function sessionPort(start: Session): { port: PowderCopilotPort; calls: string[]
     result = r;
     return null;
   };
-  const port: PowderCopilotPort = {
+  const port: PowderAgentPort = {
     technique: "powder",
     state,
     setFixed: (changes) => {
@@ -98,10 +98,10 @@ function sessionPort(start: Session): { port: PowderCopilotPort; calls: string[]
   return { port, calls, session: () => s };
 }
 
-function fakeHost(port: PowderCopilotPort | null): { host: CopilotHost; steps: { kind: StepKind; agent: boolean }[] } {
+function fakeHost(port: PowderAgentPort | null): { host: AgentHost; steps: { kind: StepKind; agent: boolean }[] } {
   const steps: { kind: StepKind; agent: boolean }[] = [];
   let agent = false;
-  const host: CopilotHost = {
+  const host: AgentHost = {
     port: () => port,
     technique: () => (port ? "powder" : null),
     settle: async () => undefined,
@@ -120,10 +120,10 @@ function fakeHost(port: PowderCopilotPort | null): { host: CopilotHost; steps: {
   return { host, steps };
 }
 
-function executor(host: CopilotHost, decision: boolean | "auto" = true): { ex: CopilotExecutor; asked: ActivityEntry[]; seen: ActivityEntry[] } {
+function executor(host: AgentHost, decision: boolean | "auto" = true): { ex: AgentExecutor; asked: ActivityEntry[]; seen: ActivityEntry[] } {
   const asked: ActivityEntry[] = [];
   const seen: ActivityEntry[] = [];
-  const ex = new CopilotExecutor(host, {
+  const ex = new AgentExecutor(host, {
     approve: async (entry) => {
       asked.push(entry);
       return decision === "auto" ? true : decision;
@@ -135,11 +135,11 @@ function executor(host: CopilotHost, decision: boolean | "auto" = true): { ex: C
 
 const parse = (text: string): Record<string, unknown> => JSON.parse(text) as Record<string, unknown>;
 
-describe("Copilot tool list", () => {
+describe("Agent tool list", () => {
   it("has unique names and an object JSON schema for every tool", () => {
-    const names = COPILOT_TOOLS.map((t) => t.name);
+    const names = LIVE_TOOLS.map((t) => t.name);
     expect(new Set(names).size).toBe(names.length);
-    for (const t of COPILOT_TOOLS) {
+    for (const t of LIVE_TOOLS) {
       expect(t.name).toMatch(/^[a-z][a-z_]*$/);
       const schema = inputJsonSchema(t);
       expect(schema.type).toBe("object");
@@ -149,7 +149,7 @@ describe("Copilot tool list", () => {
   });
 
   it("offers no tool that sets a parameter value", () => {
-    for (const t of COPILOT_TOOLS) expect(Object.keys(t.inputSchema)).not.toContain("value");
+    for (const t of LIVE_TOOLS) expect(Object.keys(t.inputSchema)).not.toContain("value");
   });
 });
 
@@ -179,7 +179,7 @@ describe("freePlan", () => {
   });
 });
 
-describe("CopilotExecutor on a live powder fit", () => {
+describe("AgentExecutor on a live powder fit", () => {
   it("reads the analysis without asking, compactly", async () => {
     const { port } = sessionPort(newSession(exampleStructure()));
     const { host } = fakeHost(port);
@@ -267,7 +267,7 @@ describe("CopilotExecutor on a live powder fit", () => {
 
   it("reports a refinement that did not finish", async () => {
     const { port } = sessionPort(newSession(exampleStructure()));
-    const stuck: PowderCopilotPort = { ...port, refine: async () => "cancelled" };
+    const stuck: PowderAgentPort = { ...port, refine: async () => "cancelled" };
     const { ex } = executor(fakeHost(stuck).host, "auto");
     const out = parse((await ex.run("refine", {}, "chat")).text);
     expect(out.refined).toBe(false);
@@ -276,7 +276,7 @@ describe("CopilotExecutor on a live powder fit", () => {
 
   it("refuses a change while a refinement runs, but lets a cancel through", async () => {
     const { port, calls } = sessionPort(newSession(exampleStructure()));
-    const busy: PowderCopilotPort = { ...port, state: () => ({ ...port.state(), busy: true }) };
+    const busy: PowderAgentPort = { ...port, state: () => ({ ...port.state(), busy: true }) };
     const { ex, asked } = executor(fakeHost(busy).host, true);
     expect((await ex.run("set_free", { free: ["scale"] }, "chat")).text).toMatch(/a refinement is running/);
     expect(asked).toEqual([]);

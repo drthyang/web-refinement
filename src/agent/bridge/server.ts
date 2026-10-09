@@ -7,8 +7,8 @@
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { APP_VERSION } from "@/app/constants";
-import { COPILOT_TOOLS } from "@/copilot/tools";
-import { DEFAULT_BRIDGE_PORT, createLiveBridge } from "@/copilot/bridge/liveBridge";
+import { LIVE_TOOLS } from "@/agent/tools";
+import { DEFAULT_BRIDGE_PORT, createLiveBridge } from "@/agent/bridge/liveBridge";
 
 async function main(): Promise<void> {
   const port = Number(process.env.MATERIA_LIVE_PORT ?? DEFAULT_BRIDGE_PORT);
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   // Never write to stdout: it is the JSON-RPC channel. Diagnostics go to stderr.
   try {
     const at = await bridge.listening;
-    process.stderr.write(`materia-live MCP server ready (stdio, ${COPILOT_TOOLS.length} tools; app bridge on http://127.0.0.1:${at})\n`);
+    process.stderr.write(`materia-live MCP server ready (stdio, ${LIVE_TOOLS.length} tools; app bridge on http://127.0.0.1:${at})\n`);
   } catch (e) {
     // Keep serving MCP: each tool call then explains the port problem.
     process.stderr.write(`materia-live: could not listen on 127.0.0.1:${port} — ${e instanceof Error ? e.message : String(e)}\n`);

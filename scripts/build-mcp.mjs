@@ -15,8 +15,8 @@
  * it never replaces the dist/mcp-server.mjs a running server's evaluator
  * workers re-execute.
  *
- * `--live` builds the `materia-live` server instead (src/copilot/bridge/): the
- * Copilot's tools on the app open in the browser, for Claude Code. Output:
+ * `--live` builds the `materia-live` server instead (src/agent/bridge/): the
+ * Agent's tools on the app open in the browser, for Claude Code. Output:
  * dist/materia-live.mjs.
  */
 
@@ -32,7 +32,7 @@ const outfile = at > 0 && process.argv[at + 1]
   : resolve(root, live ? "dist/materia-live.mjs" : "dist/mcp-server.mjs");
 
 await build({
-  entryPoints: [resolve(root, live ? "src/copilot/bridge/server.ts" : "src/mcp/server.ts")],
+  entryPoints: [resolve(root, live ? "src/agent/bridge/server.ts" : "src/mcp/server.ts")],
   outfile,
   bundle: true,
   platform: "node",

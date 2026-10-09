@@ -1,5 +1,5 @@
 /**
- * The Copilot's tools: what a model may read and do in the LIVE analysis.
+ * The Agent's tools: what a model may read and do in the LIVE analysis.
  *
  * One list serves every way a model reaches the app — the in-app chat (API key
  * or local proxy) and Claude Code through the `materia-live` MCP bridge — so
@@ -22,12 +22,12 @@ import { z } from "zod";
 
 /**
  * What a tool does to the analysis. `read` tools run freely; `change` tools
- * alter the model or the fit and need the user's approval unless the Copilot
+ * alter the model or the fit and need the user's approval unless the Agent
  * is in auto mode; `control` tools (stopping a run) never need it.
  */
 export type ToolEffect = "read" | "change" | "control";
 
-export interface CopilotToolSpec {
+export interface LiveToolSpec {
   /** snake_case, unique. */
   readonly name: string;
   /** Short human title, shown on the approval card. */
@@ -40,7 +40,7 @@ export interface CopilotToolSpec {
 
 const ids = z.array(z.string().min(1)).describe("Parameter ids, or globs such as \"bkg*\" or \"*Fe1*\"");
 
-export const COPILOT_TOOLS: readonly CopilotToolSpec[] = [
+export const LIVE_TOOLS: readonly LiveToolSpec[] = [
   {
     name: "get_state",
     title: "Read the analysis",
@@ -212,12 +212,12 @@ export const COPILOT_TOOLS: readonly CopilotToolSpec[] = [
   },
 ];
 
-export function copilotTool(name: string): CopilotToolSpec | undefined {
-  return COPILOT_TOOLS.find((t) => t.name === name);
+export function liveTool(name: string): LiveToolSpec | undefined {
+  return LIVE_TOOLS.find((t) => t.name === name);
 }
 
 /** The JSON Schema of a tool's input, for an LLM API or an MCP client. */
-export function inputJsonSchema(spec: CopilotToolSpec): Record<string, unknown> {
+export function inputJsonSchema(spec: LiveToolSpec): Record<string, unknown> {
   const schema = z.toJSONSchema(z.object(spec.inputSchema).strict()) as Record<string, unknown>;
   delete schema.$schema;
   return schema;

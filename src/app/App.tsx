@@ -61,10 +61,10 @@ import {
   EMPTY_SOURCE,
 } from "@/app/powderSession";
 import type { WorkbenchExports } from "@/app/workbenchEngine";
-import { CopilotLink } from "@/copilot/link";
-import type { CopilotHost } from "@/copilot/executor";
-import { useCopilot } from "@/copilot/useCopilot";
-import { CopilotDrawer } from "@/copilot/ui/CopilotDrawer";
+import { AgentLink } from "@/agent/link";
+import type { AgentHost } from "@/agent/executor";
+import { useAgent } from "@/agent/useAgent";
+import { AgentDrawer } from "@/agent/ui/AgentDrawer";
 
 // The header's refinement-target chips. "Nuclear" is the main refinement page
 // (the whole app refines, so no "Refinement" label needed); "Magnetic" is the
@@ -132,7 +132,7 @@ interface StepRequest {
   readonly label?: string;
   /** Start a new history (a new material, a demo) instead of extending this one. */
   readonly fresh?: boolean;
-  /** Who made the change: absent for the user, "agent" for the Copilot. */
+  /** Who made the change: absent for the user, "agent" for the Agent. */
   readonly actor?: StepActor;
 }
 
@@ -253,11 +253,11 @@ export function App(): JSX.Element {
   const powderExports = useRef<WorkbenchExports | null>(null);
   const scExports = useRef<WorkbenchExports | null>(null);
   const pdfExports = useRef<WorkbenchExports | null>(null);
-  // The Copilot (src/copilot/): the active engine publishes its port into the
-  // link; while the Copilot acts, `stepActor` tags the steps it records.
-  const copilotLink = useRef(new CopilotLink()).current;
+  // The Agent (src/agent/): the active engine publishes its port into the
+  // link; while the Agent acts, `stepActor` tags the steps it records.
+  const agentLink = useRef(new AgentLink()).current;
   const stepActor = useRef<StepActor | undefined>(undefined);
-  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
 
   const { structure } = session;
 
@@ -361,19 +361,19 @@ export function App(): JSX.Element {
     ...(history && redoTarget(history) ? { forward: stepForward } : {}),
   };
 
-  // ── Copilot ─────────────────────────────────────────────────────────────
-  // What the Copilot's executor needs from the shell (copilot/executor.ts). It
+  // ── Agent ─────────────────────────────────────────────────────────────
+  // What the Agent's executor needs from the shell (agent/executor.ts). It
   // reads the latest render's functions through a ref, so the host object is
   // made once and every call sees the current history and page.
-  const copilotLatest = useRef({ recordNow, goToStep, history, technique: null as "powder" | "singleCrystal" | "pdf" | null });
+  const agentLatest = useRef({ recordNow, goToStep, history, technique: null as "powder" | "singleCrystal" | "pdf" | null });
   useEffect(() => {
-    copilotLatest.current = { recordNow, goToStep, history, technique: pdfDataset ? "pdf" : scDataset ? "singleCrystal" : session.powderSource !== EMPTY_SOURCE ? "powder" : null };
-    copilotLink.notify();
+    agentLatest.current = { recordNow, goToStep, history, technique: pdfDataset ? "pdf" : scDataset ? "singleCrystal" : session.powderSource !== EMPTY_SOURCE ? "powder" : null };
+    agentLink.notify();
   });
-  const copilotHost = useMemo<CopilotHost>(() => ({
-    port: () => copilotLink.port(),
-    technique: () => copilotLatest.current.technique,
-    settle: () => copilotLink.settle(),
+  const agentHost = useMemo<AgentHost>(() => ({
+    port: () => agentLink.port(),
+    technique: () => agentLatest.current.technique,
+    settle: () => agentLink.settle(),
     asAgent: async (fn) => {
       stepActor.current = "agent";
       try {
@@ -383,17 +383,17 @@ export function App(): JSX.Element {
       }
     },
     recordNow: (kind, label) => {
-      copilotLatest.current.recordNow(kind, label);
+      agentLatest.current.recordNow(kind, label);
     },
-    history: () => copilotLatest.current.history,
-    goToStep: (id) => copilotLatest.current.goToStep(id),
-  }), [copilotLink]);
-  // Nothing connects until the Copilot is first opened.
-  const [copilotUsed, setCopilotUsed] = useState(false);
+    history: () => agentLatest.current.history,
+    goToStep: (id) => agentLatest.current.goToStep(id),
+  }), [agentLink]);
+  // Nothing connects until the Agent is first opened.
+  const [agentUsed, setAgentUsed] = useState(false);
   useEffect(() => {
-    if (copilotOpen) setCopilotUsed(true);
-  }, [copilotOpen]);
-  const copilot = useCopilot(copilotHost, copilotUsed, () => setCopilotOpen(true));
+    if (agentOpen) setAgentUsed(true);
+  }, [agentOpen]);
+  const agent = useAgent(agentHost, agentUsed, () => setAgentOpen(true));
 
   // ⌘Z / Ctrl+Z steps back, with Shift steps forward — except inside a text
   // field, which keeps its own undo.
@@ -1135,7 +1135,7 @@ export function App(): JSX.Element {
         {...(hasContent ? { onSaveProject } : {})}
         gpu={{ enabled: gpuEnabled, onChange: setGpu }}
         {...(hasContent ? { history: stepHistory } : {})}
-        copilot={{ open: copilotOpen, onToggle: () => setCopilotOpen((o) => !o), pending: copilot.pending.length }}
+        agent={{ open: agentOpen, onToggle: () => setAgentOpen((o) => !o), pending: agent.pending.length }}
       />
       {notice && (
         <div role="alert" style={noticeBar}>
@@ -1209,7 +1209,7 @@ export function App(): JSX.Element {
         useGpu={gpuEnabled}
         {...(restore.powderView ? { viewRestore: restore.powderView } : {})}
         stepHistory={stepHistory}
-        copilotLink={copilotLink}
+        agentLink={agentLink}
       />
       </WorkbenchErrorBoundary>
       {pdfDataset && (
@@ -1238,7 +1238,7 @@ export function App(): JSX.Element {
         </a>
       </footer>
     </div>
-    {copilotOpen && <CopilotDrawer copilot={copilot} onClose={() => setCopilotOpen(false)} />}
+    {agentOpen && <AgentDrawer agent={agent} onClose={() => setAgentOpen(false)} />}
     </div>
   );
 }

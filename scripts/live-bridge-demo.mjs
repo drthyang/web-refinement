@@ -3,12 +3,12 @@
  * Claude Code does — a smoke test of the whole path without a model.
  *
  *   1. npm run dev, load a powder analysis (e.g. Demos ▸ Rietveld), open the
- *      Copilot and choose "Claude Code".
+ *      Agent and choose "Claude Code".
  *   2. node scripts/live-bridge-demo.mjs
  *
  * It starts the server exactly as .mcp.json does (stdio), then reads the fit,
  * asks to refine it (approve the card in the app), and judges the result.
- * Each change waits for your approval in the Copilot panel.
+ * Each change waits for your approval in the Agent panel.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -39,7 +39,7 @@ async function connected() {
     const r = await client.callTool({ name: "get_state", arguments: {} });
     const text = r.content[0]?.text ?? "";
     if (!/not connected/.test(text)) return;
-    if (i === 0) console.log("waiting for the app (open the Copilot, choose Claude Code)…");
+    if (i === 0) console.log("waiting for the app (open the Agent, choose Claude Code)…");
     await new Promise((res) => setTimeout(res, 2000));
   }
   throw new Error("the app never connected");
@@ -52,7 +52,7 @@ try {
   console.log(`  wR on screen ${state.wR}%; free: ${state.parameterGroups.filter((g) => g.free).map((g) => `${g.kind} ${g.free}/${g.count}`).join(", ")}`);
   console.log(`  last refinement: ${state.lastRefinement ? `${state.lastRefinement.status}, wR ${state.lastRefinement.wR}%` : "none yet"}\n`);
 
-  console.log("Asking to refine — approve the card in the Copilot panel.");
+  console.log("Asking to refine — approve the card in the Agent panel.");
   const refined = await call("refine");
   console.log(`  ${refined.isError ? refined.out : refined.out.refined ? `${refined.out.status}: wR ${refined.out.wRBefore}% → ${refined.out.wR}%, GoF ${refined.out.gof}, ${refined.out.iterations} iterations, step ${refined.out.step?.id} "${refined.out.step?.label}"` : JSON.stringify(refined.out)}\n`);
 

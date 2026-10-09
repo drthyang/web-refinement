@@ -114,7 +114,7 @@ html {
 }
 
 /*
- * The frame holds the shell and, when open, the Copilot drawer beside it. The
+ * The frame holds the shell and, when open, the Agent drawer beside it. The
  * drawer takes its width from the window, so the whole shell — header, bars,
  * page and footer — narrows as one column and keeps the alignment rule above;
  * nothing slides under the drawer.
@@ -127,7 +127,7 @@ html {
   flex: 1;
   min-width: 0;
 }
-.wb-copilot {
+.wb-agent {
   flex: none;
   width: clamp(340px, 27vw, 460px);
   height: calc(100vh / var(--ui-zoom));
@@ -137,7 +137,7 @@ html {
 }
 /* A narrow window has no room beside the page: the drawer covers it. */
 @media (max-width: 900px) {
-  .wb-copilot {
+  .wb-agent {
     position: fixed;
     inset: 0;
     width: auto;

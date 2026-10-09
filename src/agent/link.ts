@@ -1,22 +1,22 @@
 /**
- * The shell-owned link between the active engine and the Copilot: the engine
+ * The shell-owned link between the active engine and the Agent: the engine
  * publishes its port here on every render (port.ts), and the executor waits on
  * it for an action's effects to render before it reads the result.
  *
- * React applies state asynchronously — a Copilot action calls a page handler,
+ * React applies state asynchronously — a Agent action calls a page handler,
  * the page re-renders, and the shell records the history step a tick later
  * (App's `requestStep`). `settle` waits through exactly that: the render that
  * applies the change, the shell's deferred step, and the render after it.
  */
 
-import type { CopilotPort } from "@/copilot/port";
+import type { AgentPort } from "@/agent/port";
 
-export class CopilotLink {
-  private current: CopilotPort | null = null;
+export class AgentLink {
+  private current: AgentPort | null = null;
   private waiters: (() => void)[] = [];
 
   /** The engine's port for this render (null clears it: unmounted, inactive). */
-  publish(port: CopilotPort | null): void {
+  publish(port: AgentPort | null): void {
     this.current = port;
     if (port) this.wake();
   }
@@ -26,7 +26,7 @@ export class CopilotLink {
     this.wake();
   }
 
-  port(): CopilotPort | null {
+  port(): AgentPort | null {
     return this.current;
   }
 

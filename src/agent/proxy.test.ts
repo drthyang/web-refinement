@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { anthropicProxy, sameOrigin } from "@/copilot/proxy";
+import { anthropicProxy, sameOrigin } from "@/agent/proxy";
 
 /** The proxy behind a real HTTP server; the upstream API is a stubbed fetch. */
 async function serve(apiKey: string | undefined): Promise<{ url: string; server: Server }> {
@@ -14,7 +14,7 @@ async function serve(apiKey: string | undefined): Promise<{ url: string; server:
   return { url: `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`, server };
 }
 
-describe("Copilot API proxy", () => {
+describe("Agent API proxy", () => {
   const realFetch = globalThis.fetch;
   let server: Server | null = null;
   afterEach(async () => {

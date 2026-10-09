@@ -5,7 +5,7 @@ import { fileURLToPath, URL } from "node:url";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { normalize, resolve, sep } from "node:path";
-import { anthropicProxy } from "./src/copilot/proxy";
+import { anthropicProxy } from "./src/agent/proxy";
 
 // GitHub Pages serves from a repo subpath; override with VITE_BASE if needed.
 const base = process.env.VITE_BASE ?? "/web-refinement/";
@@ -63,15 +63,15 @@ function serveLocalData(): Plugin {
 }
 
 /**
- * The Copilot's local proxy (src/copilot/proxy.ts): `<base>api/anthropic/…`
+ * The Agent's local proxy (src/agent/proxy.ts): `<base>api/anthropic/…`
  * forwarded to the Anthropic API with ANTHROPIC_API_KEY from the environment
  * or .env.local, so the key never reaches the page. Dev and preview servers
  * only; the static build has no server and so no proxy.
  */
-function copilotProxy(apiKey: string | undefined): Plugin {
+function agentProxy(apiKey: string | undefined): Plugin {
   const handler = anthropicProxy(apiKey);
   return {
-    name: "copilot-anthropic-proxy",
+    name: "agent-anthropic-proxy",
     configureServer(server) {
       server.middlewares.use(handler);
     },
@@ -84,7 +84,7 @@ function copilotProxy(apiKey: string | undefined): Plugin {
 export default defineConfig(({ mode }) => ({
   base,
   // Read without a prefix filter, server side only: never exposed to the page.
-  plugins: [react(), serveLocalData(), copilotProxy(loadEnv(mode, process.cwd(), "").ANTHROPIC_API_KEY)],
+  plugins: [react(), serveLocalData(), agentProxy(loadEnv(mode, process.cwd(), "").ANTHROPIC_API_KEY)],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

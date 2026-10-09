@@ -1,5 +1,5 @@
 /**
- * The in-app Copilot's instructions: who it is working for, how the live tools
+ * The in-app Agent's instructions: who it is working for, how the live tools
  * behave, and the user's own refinement method — the same SKILL.md Claude Code
  * loads in this repository, plus the written policy it rests on (knowledge/).
  * Static text, so it is cached across turns.
@@ -9,7 +9,7 @@ import rietveldSkill from "../../.claude/skills/my-rietveld-workflow/SKILL.md?ra
 import powderKnowledge from "../../knowledge/powder_structural_refinement_knowledge.md?raw";
 import fittingKnowledge from "../../knowledge/refinement_fitting_algorithms_knowledge.md?raw";
 
-const ROLE = `You are the Copilot inside MATERIA, a browser workbench for crystallographic refinement. You work beside the user on the analysis open in their browser: you read it, judge it with the analysis tools, and make changes through the same controls they use.
+const ROLE = `You are the in-app agent of MATERIA, a browser workbench for crystallographic refinement. You work beside the user on the analysis open in their browser: you read it, judge it with the analysis tools, and make changes through the same controls they use.
 
 How the tools behave:
 - They act on the live page. You never pass a structure, pattern or parameter list; the page holds them. Start with get_state.
@@ -28,7 +28,7 @@ How to work:
 The method's MCP tool names map to these live tools: loading (parse_structure, parse_powder_data, parse_instrument) is done by the user in the app; build_refinement is already done (get_state shows the parameter set); refine_powder is refine (choose what refines with set_free first); assess_refinement, suggest_next_steps, rank_next_parameters, check_cell_symmetry, bond_geometry and interpret_structure keep their names; export_bundle is the Export menu.`;
 
 /** The full system prompt (stable across turns, so it caches). */
-export function copilotSystemPrompt(): string {
+export function agentSystemPrompt(): string {
   return [
     ROLE,
     "<user_method>\n" + rietveldSkill.trim() + "\n</user_method>",

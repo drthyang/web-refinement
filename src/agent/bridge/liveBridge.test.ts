@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createLiveBridge, isLocalOrigin, type LiveBridge } from "@/copilot/bridge/liveBridge";
-import { COPILOT_TOOLS } from "@/copilot/tools";
+import { createLiveBridge, isLocalOrigin, type LiveBridge } from "@/agent/bridge/liveBridge";
+import { LIVE_TOOLS } from "@/agent/tools";
 
 /**
  * The bridge end to end, minus the browser: an MCP client plays Claude Code,
@@ -33,9 +33,9 @@ describe("materia-live bridge", () => {
   const hello = (session: string): Promise<Response> => page("/hello", { method: "POST", body: JSON.stringify({ session }) });
   const textOf = (r: unknown): string => ((r as { content: { text: string }[] }).content[0]!.text);
 
-  it("serves the Copilot's tool list", async () => {
+  it("serves the Agent's tool list", async () => {
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(COPILOT_TOOLS.map((t) => t.name).sort());
+    expect(tools.map((t) => t.name).sort()).toEqual(LIVE_TOOLS.map((t) => t.name).sort());
   });
 
   it("explains that the app is not connected", async () => {

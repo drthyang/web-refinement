@@ -251,8 +251,8 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 **The judgment tools.** `assess_refinement`, `suggest_next_steps` and
 `interpret_structure` turn a refinement result into a verdict, ranked next
 actions and a materials reading. They are pure, tested core code in
-[`src/core/diagnostics/`](../src/core/diagnostics), and the in-app Copilot
-calls the same functions on the live page ([below](#the-copilot-in-the-app)).
+[`src/core/diagnostics/`](../src/core/diagnostics), and the in-app Agent
+calls the same functions on the live page ([below](#the-in-app-agent)).
 
 **How the tools are tested.**
 - A contract test calls every tool on canned inputs and pins the shape of its
@@ -280,7 +280,7 @@ keeping those boundaries mechanical is what keeps the surface maintainable.
 |---|---|---|---|
 | **Tools** | one capability | a pure JSON → JSON handler plus schema, registered in [`src/mcp/registry.ts`](../src/mcp/registry.ts) | a handler never calls another handler; no sequencing, no judgment prose |
 | **Skills** | an expert procedure | a `SKILL.md` that names tools | branches only on the *structured* outputs of the judgment tools |
-| **Orchestration** | the conversation, files, when to invoke | the agent runtime (Claude Code, Claude Desktop, any MCP client), or the in-app Copilot | outside the core; the Copilot is a thin loop over the same tools |
+| **Orchestration** | the conversation, files, when to invoke | the agent runtime (Claude Code, Claude Desktop, any MCP client), or the in-app Agent | outside the core; the Agent is a thin loop over the same tools |
 
 Where a piece of work belongs:
 - It must be correct every time → a core function, exposed as a tool. Example:
@@ -348,11 +348,11 @@ values or bypasses the constrained least squares. Replaying the same tool calls
 reproduces the result, and nothing counts as validated until a test or an
 external comparison records it.
 
-## The Copilot (in the app)
+## The in-app Agent
 
-The Copilot puts Claude beside the analysis open in the browser. It reads the
+The Agent puts Claude beside the analysis open in the browser. It reads the
 live page, judges the fit with the tools above, and makes changes through the
-page's own controls. Open it with the **Copilot** button in the header.
+page's own controls. Open it with the **Agent** button in the header.
 
 **Where it works.**
 - Supported: the powder page (Rietveld), single- and multi-phase, with or
@@ -360,7 +360,7 @@ page's own controls. Open it with the **Copilot** button in the header.
 - Not yet: the magnetic page, single crystal, and PDF. Their state is private
   to the page; each needs its own port.
 
-**Its tools.** One list ([`src/copilot/tools.ts`](../src/copilot/tools.ts))
+**Its tools.** One list ([`src/agent/tools.ts`](../src/agent/tools.ts))
 serves every way in, so a model sees the same names everywhere.
 - Read tools run at once: `get_state`, `assess_refinement`,
   `suggest_next_steps`, `rank_next_parameters`, `check_cell_symmetry`,
@@ -368,7 +368,7 @@ serves every way in, so a model sees the same names everywhere.
   The analysis tools are the MCP handlers above, fed from what is on screen.
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
   `set_adp_model`, `set_fit_range`, `refine`, `reset_parameters`, `go_to_step`.
-  Each is the page's own handler — the Copilot's `refine` is the Refine button.
+  Each is the page's own handler — the Agent's `refine` is the Refine button.
 - `cancel_refinement` never asks.
 - There is no tool that sets a parameter value. The guardrails above hold.
 
@@ -387,7 +387,7 @@ rest of the session. Every change is a step in History tagged `agent`
 
 - **Claude Code.** `.mcp.json` starts `materia-live` (`npm run mcp:live`) next
   to `materia`. It listens on `127.0.0.1:5199` (`MATERIA_LIVE_PORT`); the page
-  long-polls it when the Copilot is open in this mode. Only pages served from
+  long-polls it when the Agent is open in this mode. Only pages served from
   this machine may connect. `materia` keeps the full headless toolset for
   what-ifs on data the app has not opened.
 - **API key.** Claude Opus 5.5 by default (Sonnet 5.5 and Haiku 5.5 on offer),
@@ -398,13 +398,13 @@ rest of the session. Every change is a step in History tagged `agent`
   prompt carries the `my-rietveld-workflow` skill and two `knowledge/` notes,
   and is cached across turns.
 - **Local proxy.** `<base>api/anthropic/` on the dev and preview servers
-  ([`src/copilot/proxy.ts`](../src/copilot/proxy.ts)). Only the app's own
+  ([`src/agent/proxy.ts`](../src/agent/proxy.ts)). Only the app's own
   pages may use it. The static build has no proxy.
 
 `node scripts/live-bridge-demo.mjs` drives an open page through the bridge
 the way Claude Code does, as a smoke test without a model.
 
-**How it is tested.** [`src/copilot/`](../src/copilot) tests run the tools on
+**How it is tested.** [`src/agent/`](../src/agent) tests run the tools on
 a real powder fit (the refinement engine, the assessment), the bridge through
 an MCP client, the chat loop against a stand-in API that streams scripted
 turns, and the proxy against a stubbed upstream.
@@ -428,7 +428,7 @@ Other planned work:
 - Richer per-tool JSON schemas.
 - Assessment variants for single-crystal data (in the R1/wR2/GooF convention)
   and for magnetic refinements.
-- The Copilot on the magnetic, single-crystal and PDF pages, each through its
+- The Agent on the magnetic, single-crystal and PDF pages, each through its
   own port.
 
 The order across the whole project is in [ROADMAP.md §5](./ROADMAP.md).

@@ -85,7 +85,7 @@ import { excludedPointMask } from "@/core/refinement/factors";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { type Session, buildSpecFor, DEFAULT_INSTRUMENT, SYNTHETIC_SOURCE, EMPTY_SOURCE } from "@/app/powderSession";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
-import type { CopilotLink } from "@/copilot/link";
+import type { AgentLink } from "@/agent/link";
 
 // Lazy so three.js (~550 kB) only loads when the user opens the 3D view.
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
@@ -153,8 +153,8 @@ export interface PowderWorkbenchProps {
   useGpu?: boolean;
   /** The shell's step history: recorded at this page's refinements and model changes. */
   stepHistory?: HistoryBinding;
-  /** Where this engine publishes its Copilot port (copilot/port.ts) while active. */
-  copilotLink?: CopilotLink;
+  /** Where this engine publishes its Agent port (agent/port.ts) while active. */
+  agentLink?: AgentLink;
 }
 
 export function PowderWorkbench({
@@ -163,7 +163,7 @@ export function PowderWorkbench({
   onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, detection, onOverrideXUnit,
   onLoadInstrument, onLoadDemo, demos = [],
   onOpenProject, viewRestore, useGpu = true,
-  stepHistory, copilotLink,
+  stepHistory, agentLink,
 }: PowderWorkbenchProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
@@ -1230,17 +1230,17 @@ export function PowderWorkbench({
     return () => { exportsRef.current = null; };
   });
 
-  // Publish the Copilot port (copilot/port.ts) while this engine is the active
+  // Publish the Agent port (agent/port.ts) while this engine is the active
   // one with data loaded: the live state, read lazily, and this page's own
-  // handlers — the Copilot's `refine` is the Refine button. Republished every
+  // handlers — the Agent's `refine` is the Refine button. Republished every
   // render, so a call always sees the state on screen.
   useEffect(() => {
-    if (!copilotLink) return;
+    if (!agentLink) return;
     if (!active || !hasContent) {
-      copilotLink.publish(null);
+      agentLink.publish(null);
       return;
     }
-    copilotLink.publish({
+    agentLink.publish({
       technique: "powder",
       state: () => {
         const excluded = excludedPointMask(curves.yObs);
@@ -1294,7 +1294,7 @@ export function PowderWorkbench({
       reset: resetPowderParams,
     });
   });
-  useEffect(() => () => copilotLink?.publish(null), [copilotLink]);
+  useEffect(() => () => agentLink?.publish(null), [agentLink]);
 
   // Summary-card content (Structure / Data / Instrument).
   const cell = structure.cell;
