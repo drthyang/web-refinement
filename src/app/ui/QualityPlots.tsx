@@ -48,9 +48,16 @@ function pointColor(row: ReflectionObsCalc, multiPhase: boolean, byZ: boolean): 
   return { fill: PHASE_COLORS[(row.phaseIndex ?? 0) % PHASE_COLORS.length]!, opacity: 0.55 };
 }
 
-// SVG user-space size; the rendered box is fluid (viewBox + width:100%).
-const SIZE = 300;
-const PAD = 42;
+// SVG user space: a square plotting area A with room for tick labels and axis
+// titles on the left and bottom only (the rendered box is fluid: viewBox +
+// width 100%), so no empty margin sits above or right of the plot.
+const PL = 44;
+const PB = 34;
+const PT = 8;
+const PR = 10;
+const A = 248;
+const W = PL + A + PR;
+const H = PT + A + PB;
 /** How far (user units) a click may land from a dot and still select it. */
 const HIT_RADIUS = 7;
 
@@ -100,7 +107,7 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
   };
 
   const vals = rows.map((r) => ({ c: value(r.iCalc), o: value(r.iObs) }));
-  const span = SIZE - 2 * PAD;
+  const span = A;
   let sx: (v: number) => number;
   let sy: (v: number) => number;
   let ticks: { v: number; label: string }[];
@@ -114,13 +121,13 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
     lo = Math.max(Math.floor(Math.log10(positive[Math.floor(0.02 * (positive.length - 1))]!)), hi - 6);
     if (hi - lo < 1) lo = hi - 1;
     const to = (v: number): number => (Math.log10(v) - lo) / (hi - lo);
-    sx = (v) => PAD + to(v) * span;
-    sy = (v) => SIZE - PAD - to(v) * span;
+    sx = (v) => PL + to(v) * span;
+    sy = (v) => PT + A - to(v) * span;
     ticks = Array.from({ length: hi - lo + 1 }, (_, i) => ({ v: Math.pow(10, lo + i), label: decadeLabel(lo + i) }));
   } else {
     const max = Math.max(1e-9, ...vals.map((p) => Math.max(p.c, p.o)));
-    sx = (v) => PAD + (v / max) * span;
-    sy = (v) => SIZE - PAD - (v / max) * span;
+    sx = (v) => PL + (v / max) * span;
+    sy = (v) => PT + A - (v / max) * span;
     const step = niceStep(max);
     ticks = [];
     for (let t = 0; t <= max * 1.0001; t += step) ticks.push({ v: t, label: t >= 1e4 ? t.toExponential(0) : String(+t.toPrecision(3)) });
@@ -131,7 +138,7 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
   // Off-axis points get NaN coordinates: never drawn, never hit.
   const plotPts = vals.map((p) => (visible(p) ? { x: sx(p.c), y: sy(p.o) } : { x: Number.NaN, y: Number.NaN }));
   const onPlotClick = (e: React.MouseEvent<SVGSVGElement>): void => {
-    const at = clientToSvgUser(e.currentTarget, e.clientX, e.clientY, { width: SIZE, height: SIZE });
+    const at = clientToSvgUser(e.currentTarget, e.clientX, e.clientY, { width: W, height: H });
     const i = nearestPointIndex(plotPts, at.x, at.y, HIT_RADIUS);
     if (i >= 0) select(i);
   };
@@ -178,17 +185,17 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
           onChange={setQuantity}
         />
       </div>
-      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} style={{ width: "100%", height: "auto", display: "block", cursor: onHighlight ? "pointer" : undefined }} role="img" aria-label={`${qLabel[1]} against ${qLabel[0]}, ${scale} axes`} onClick={onPlotClick}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", cursor: onHighlight ? "pointer" : undefined }} role="img" aria-label={`${qLabel[1]} against ${qLabel[0]}, ${scale} axes`} onClick={onPlotClick}>
         {ticks.map((t) => (
           <g key={t.label}>
-            <line x1={sx(t.v)} y1={PAD} x2={sx(t.v)} y2={SIZE - PAD} stroke={theme.subtle2} strokeWidth={1} />
-            <line x1={PAD} y1={sy(t.v)} x2={SIZE - PAD} y2={sy(t.v)} stroke={theme.subtle2} strokeWidth={1} />
-            <text x={sx(t.v)} y={SIZE - PAD + 13} textAnchor="middle" fontSize={9.5} fontFamily={themeMono} fill={theme.secondary}>{t.label}</text>
-            <text x={PAD - 4} y={sy(t.v) + 3} textAnchor="end" fontSize={9.5} fontFamily={themeMono} fill={theme.secondary}>{t.label}</text>
+            <line x1={sx(t.v)} y1={PT} x2={sx(t.v)} y2={PT + A} stroke={theme.subtle2} strokeWidth={1} />
+            <line x1={PL} y1={sy(t.v)} x2={PL + A} y2={sy(t.v)} stroke={theme.subtle2} strokeWidth={1} />
+            <text x={sx(t.v)} y={PT + A + 13} textAnchor="middle" fontSize={9.5} fontFamily={themeMono} fill={theme.secondary}>{t.label}</text>
+            <text x={PL - 4} y={sy(t.v) + 3} textAnchor="end" fontSize={9.5} fontFamily={themeMono} fill={theme.secondary}>{t.label}</text>
           </g>
         ))}
-        {axisLine(PAD, SIZE - PAD, SIZE - PAD, SIZE - PAD)}
-        {axisLine(PAD, PAD, PAD, SIZE - PAD)}
+        {axisLine(PL, PT + A, PL + A, PT + A)}
+        {axisLine(PL, PT, PL, PT + A)}
         {/* Fo = Fc reference line. */}
         <line x1={sx(lineLo)} y1={sy(lineLo)} x2={sx(lineHi)} y2={sy(lineHi)} stroke={theme.primary} strokeWidth={1.25} strokeDasharray="5 4" />
         {order.map((i) => {
@@ -201,8 +208,8 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
           <g fontSize={9.5} fontFamily={themeMono}>
             {legend.map((item, i) => (
               <g key={item.label}>
-                <circle cx={PAD + 7} cy={PAD + 7 + i * 12} r={2.8} fill={item.color} fillOpacity={0.85} />
-                <text x={PAD + 13} y={PAD + 10 + i * 12} fill={theme.secondary}>{item.label}</text>
+                <circle cx={PL + 7} cy={PT + 8 + i * 12} r={2.8} fill={item.color} fillOpacity={0.85} />
+                <text x={PL + 13} y={PT + 11 + i * 12} fill={theme.secondary}>{item.label}</text>
               </g>
             ))}
           </g>
@@ -215,7 +222,7 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
             return (
               <g pointerEvents="none">
                 {ring}
-                <text x={px < SIZE / 2 ? px + 9 : px - 9} y={Math.max(py - 8, PAD + 10)} textAnchor={px < SIZE / 2 ? "start" : "end"} fontSize={11.5} fontFamily={themeMono} fill={theme.ink}>
+                <text x={px < W / 2 ? px + 9 : px - 9} y={Math.max(py - 8, PT + 10)} textAnchor={px < W / 2 ? "start" : "end"} fontSize={11.5} fontFamily={themeMono} fill={theme.ink}>
                   {label}
                 </text>
               </g>
@@ -226,8 +233,8 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
           const labelW = label.length * 6.9;
           const padX = 8, gap = 7, arrowW = 11, chipH = 19;
           const chipW = padX + labelW + gap + arrowW + padX;
-          const chipX = px > SIZE / 2 ? px - 8 - chipW : px + 8;
-          const chipY = Math.min(Math.max(py - chipH / 2, PAD + 1), SIZE - PAD - chipH);
+          const chipX = px > W / 2 ? px - 8 - chipW : px + 8;
+          const chipY = Math.min(Math.max(py - chipH / 2, PT + 1), PT + A - chipH);
           const midY = chipY + chipH / 2;
           const ax = chipX + padX + labelW + gap;
           return (
@@ -242,8 +249,8 @@ export function FobsFcalc({ rows, onHighlight, selected = null, onLocate, maxWid
             </g>
           );
         })()}
-        <text x={SIZE / 2} y={SIZE - 8} textAnchor="middle" fontSize={11} fill={theme.secondary}>{qLabel[0]}</text>
-        <text x={12} y={SIZE / 2} textAnchor="middle" fontSize={11} fill={theme.secondary} transform={`rotate(-90 12 ${SIZE / 2})`}>{qLabel[1]}</text>
+        <text x={PL + A / 2} y={H - 5} textAnchor="middle" fontSize={11} fill={theme.secondary}>{qLabel[0]}</text>
+        <text x={12} y={PT + A / 2} textAnchor="middle" fontSize={11} fill={theme.secondary} transform={`rotate(-90 12 ${PT + A / 2})`}>{qLabel[1]}</text>
       </svg>
       <figcaption style={cap}>
         {selRow ? (

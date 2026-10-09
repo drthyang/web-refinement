@@ -1,18 +1,24 @@
 /**
  * Building blocks shared by the powder and single-crystal Validation views:
- * the section card, the verdict checklist, stat tiles, the small bar charts
- * (χ² by shell, K and GooF by intensity) and the convergence card.
+ * the section card, the verdict (issues first, passing checks as chips), the
+ * compact metric grid, and the small bar charts (χ² by shell, K and GooF by
+ * intensity).
+ *
+ * Density rule: a view should read on one screen. Explanations live in "?"
+ * badges, passing checks collapse to chips, and nothing repeats what the card
+ * header or the parameter panel already shows.
  */
 
-import type { CSSProperties, ReactNode } from "react";
-import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { CheckAction, CheckStatus, ValidationVerdict } from "@/core/diagnostics/validationChecks";
-import { parametersChangedSince } from "@/core/diagnostics/validationChecks";
-import { color, fz, mono, uppercaseLabel } from "@/app/theme";
+import { color, fz, mono } from "@/app/theme";
+import { InfoBadge } from "@/app/ui/InfoBadge";
 
-export function Section({ title, subtitle, right, children, style, id }: {
+export function Section({ title, subtitle, info, right, children, style, id }: {
   title: ReactNode;
   subtitle?: ReactNode;
+  /** Help text behind a "?" badge beside the title. */
+  info?: ReactNode;
   right?: ReactNode;
   children: ReactNode;
   style?: CSSProperties | undefined;
@@ -20,10 +26,11 @@ export function Section({ title, subtitle, right, children, style, id }: {
 }): JSX.Element {
   return (
     <section id={id} style={{ ...sectionStyle, ...style }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, rowGap: 4, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, rowGap: 4, flexWrap: "wrap", minHeight: 20 }}>
         <h3 style={sectionTitle}>{title}</h3>
-        {subtitle ? <span style={{ fontSize: fz.small, color: color.secondary }}>{subtitle}</span> : null}
-        {right ? <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>{right}</span> : null}
+        {info ? <InfoBadge text={info} width={300} /> : null}
+        {subtitle ? <span style={{ fontSize: fz.micro, color: color.secondary }}>{subtitle}</span> : null}
+        {right ? <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>{right}</span> : null}
       </div>
       {children}
     </section>
@@ -32,7 +39,7 @@ export function Section({ title, subtitle, right, children, style, id }: {
 
 /** A row of cards that wrap onto their own lines when the view is narrow. */
 export function Row({ children }: { children: ReactNode }): JSX.Element {
-  return <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "stretch" }}>{children}</div>;
+  return <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "stretch" }}>{children}</div>;
 }
 
 /** Flex weights for a card in a Row: grow ratio and the width below which it wraps. */
@@ -48,12 +55,12 @@ const TONES: Record<CheckStatus, { bg: string; border: string; ink: string }> = 
   info: { bg: color.chipBg, border: color.control, ink: color.secondary },
 };
 
-function StatusIcon({ status }: { status: CheckStatus }): JSX.Element {
+function StatusIcon({ status, size = 17 }: { status: CheckStatus; size?: number }): JSX.Element {
   const t = TONES[status];
   const label = status === "ok" ? "passes" : status === "info" ? "information" : status === "note" ? "worth a look" : status === "warn" ? "warning" : "critical";
   return (
-    <span role="img" aria-label={label} style={{ flex: "none", width: 18, height: 18, borderRadius: 999, background: t.bg, border: `1px solid ${t.border}`, display: "inline-flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke={t.ink} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <span role="img" aria-label={label} style={{ flex: "none", width: size, height: size, borderRadius: 999, background: t.bg, border: `1px solid ${t.border}`, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+      <svg width={size - 7} height={size - 7} viewBox="0 0 16 16" fill="none" stroke={t.ink} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         {status === "ok" ? <path d="M3.5 8.5l3 3 6-7" /> : status === "info" ? <path d="M4 8h8" /> : <><path d="M8 3.5v5.5" /><path d="M8 12.4v0.1" /></>}
       </svg>
     </span>
@@ -62,53 +69,113 @@ function StatusIcon({ status }: { status: CheckStatus }): JSX.Element {
 
 const ACTION_LABEL: Record<CheckAction, string> = {
   "show-unindexed": "show",
-  "export-gsas2": "Export GSAS-II bundle",
-  "export-fullprof": "Export FullProf bundle",
-  posterior: "Run in Posterior",
+  "export-gsas2": "GSAS-II bundle",
+  "export-fullprof": "FullProf bundle",
+  posterior: "Posterior",
 };
 
+/**
+ * The verdict: the checks that need attention as full rows (worst first), the
+ * passing ones as a single line of chips (detail on hover), and the context
+ * lines (not refined yet, cross-checks, what is not checked) muted below.
+ */
 export function VerdictPanel({ verdict, onAction, style }: {
   verdict: ValidationVerdict;
   onAction?: ((action: CheckAction) => void) | undefined;
   style?: CSSProperties | undefined;
 }): JSX.Element {
   const chip = TONES[verdict.tone];
+  const rank: Record<CheckStatus, number> = { critical: 0, warn: 1, note: 2, ok: 3, info: 4 };
+  const issues = verdict.checks.filter((c) => c.status === "critical" || c.status === "warn" || c.status === "note")
+    .sort((a, b) => rank[a.status] - rank[b.status]);
+  const passing = verdict.checks.filter((c) => c.status === "ok");
+  const context = verdict.checks.filter((c) => c.status === "info");
+  const actions = (list: readonly CheckAction[] | undefined): ReactNode =>
+    list && onAction ? list.map((a) => <button key={a} onClick={() => onAction(a)} style={linkButton}>{ACTION_LABEL[a]}</button>) : null;
   return (
     <Section
       title="Verdict"
       style={style}
       subtitle={<span style={{ fontSize: fz.micro, fontWeight: 600, color: chip.ink, background: chip.bg, border: `1px solid ${chip.border}`, borderRadius: 999, padding: "1px 9px" }}>{verdict.headline}</span>}
     >
-      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column" }}>
-        {verdict.checks.map((c, i) => (
-          <li key={c.id} style={{ display: "flex", gap: 9, alignItems: "flex-start", padding: "5px 2px", borderTop: i > 0 ? `1px solid ${color.subtle2}` : "none" }}>
-            <StatusIcon status={c.status} />
-            <span style={{ fontSize: fz.small, lineHeight: 1.45, color: color.ink }}>
-              <b style={{ fontWeight: 600, color: c.status === "critical" ? color.warnInk : color.ink }}>{c.title}</b>
-              {c.detail ? <span style={{ color: color.secondary }}> — {c.detail}</span> : null}
-              {c.actions && onAction ? c.actions.map((a) => (
-                <button key={a} onClick={() => onAction(a)} style={linkButton}>{ACTION_LABEL[a]}</button>
-              )) : null}
+      {issues.length > 0 ? (
+        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 5 }}>
+          {issues.map((c) => (
+            <li key={c.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <span style={{ marginTop: 1 }}><StatusIcon status={c.status} /></span>
+              <span style={{ fontSize: fz.small, lineHeight: 1.4, color: color.ink }}>
+                <b style={{ fontWeight: 600, color: c.status === "critical" ? color.warnInk : color.ink }}>{c.title}</b>
+                {c.detail ? <span style={{ color: color.secondary }}> — {c.detail}</span> : null}
+                {actions(c.actions)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {passing.length > 0 ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, paddingTop: issues.length > 0 ? 6 : 0, borderTop: issues.length > 0 ? `1px solid ${color.subtle2}` : "none" }}>
+          {passing.map((c) => (
+            <span key={c.id} title={c.detail ?? c.title} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fz.micro, color: color.okInk, background: color.okBg, border: `1px solid ${color.okBorder}`, borderRadius: 999, padding: "1px 8px 1px 3px", whiteSpace: "nowrap" }}>
+              <StatusIcon status="ok" size={14} />{c.title}
             </span>
-          </li>
-        ))}
-      </ul>
+          ))}
+        </div>
+      ) : null}
+      {context.map((c) => (
+        <div key={c.id} style={{ fontSize: fz.micro, lineHeight: 1.45, color: color.secondary }}>
+          <b style={{ fontWeight: 600 }}>{c.title}</b>{c.detail ? ` — ${c.detail}` : ""}{actions(c.actions)}
+        </div>
+      ))}
     </Section>
   );
 }
 
-export function StatTile({ value, label, tone, title }: { value: string; label: ReactNode; tone?: "ok" | "note" | "warn" | undefined; title?: string | undefined }): JSX.Element {
-  const t = tone ? TONES[tone] : null;
+/** One number with its label beneath; the tone colours the number. */
+export function Metric({ value, label, tone, title }: { value: string; label: ReactNode; tone?: "ok" | "note" | "warn" | undefined; title?: string | undefined }): JSX.Element {
   return (
-    <div title={title} style={{ background: t ? t.bg : color.surface, border: `1px solid ${t ? t.border : color.subtle}`, borderRadius: 8, padding: "7px 9px", display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-      <span style={{ fontFamily: mono, fontSize: 16, fontWeight: 600, color: t ? t.ink : color.ink, whiteSpace: "nowrap" }}>{value}</span>
-      <span style={{ fontSize: fz.micro, color: color.secondary, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+    <div title={title} style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <span style={{ fontFamily: mono, fontSize: 14.5, fontWeight: 600, color: tone ? TONES[tone].ink : color.ink, whiteSpace: "nowrap" }}>{value}</span>
+      <span style={{ fontSize: fz.micro, color: color.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
     </div>
   );
 }
 
-export function StatGrid({ children, columns = 4 }: { children: ReactNode; columns?: number }): JSX.Element {
-  return <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${columns >= 4 ? 108 : 130}px, 1fr))`, gap: 7 }}>{children}</div>;
+/** A single wrapping line of metrics (a strip under a card header). */
+export function MetricStrip({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 24px", padding: "8px 2px", borderTop: `1px solid ${color.subtle}`, borderBottom: `1px solid ${color.subtle}` }}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The rendered width of an element, kept current with a ResizeObserver, so an
+ * SVG can draw in true pixels (fixed height, text that never scales) instead of
+ * stretching a fixed viewBox with the card.
+ */
+export function useElementWidth(fallback: number): [(el: HTMLElement | null) => void, number] {
+  const [width, setWidth] = useState(fallback);
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((el: HTMLElement | null) => {
+    observer.current?.disconnect();
+    if (!el) return;
+    const measure = (): void => {
+      const w = Math.round(el.getBoundingClientRect().width);
+      if (w > 0) setWidth(w);
+    };
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      observer.current = new ResizeObserver(measure);
+      observer.current.observe(el);
+    }
+  }, []);
+  useEffect(() => () => observer.current?.disconnect(), []);
+  return [ref, width];
+}
+
+export function MetricGrid({ children, min = 84 }: { children: ReactNode; min?: number }): JSX.Element {
+  return <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${min}px, 1fr))`, gap: "8px 12px" }}>{children}</div>;
 }
 
 export interface BarItem {
@@ -121,7 +188,7 @@ export interface BarItem {
 }
 
 /** Vertical bars from zero with a dashed reference line (e.g. χ²/N = 1). */
-export function Bars({ items, max, reference, referenceLabel, axisLabel, height = 130 }: {
+export function Bars({ items, max, reference, referenceLabel, axisLabel, height = 96 }: {
   items: readonly BarItem[];
   max: number;
   reference?: number;
@@ -162,7 +229,7 @@ export function Bars({ items, max, reference, referenceLabel, axisLabel, height 
 }
 
 /** Bars diverging from a centre value (e.g. K about 1): up when above, down when below. */
-export function DivergingBars({ items, centre, span, centreLabel, height = 96 }: {
+export function DivergingBars({ items, centre, span, centreLabel, height = 80 }: {
   items: readonly BarItem[];
   centre: number;
   /** Full scale either side of the centre. */
@@ -192,66 +259,31 @@ export function DivergingBars({ items, centre, span, centreLabel, height = 96 }:
   );
 }
 
-/** Convergence and conditioning of the last refinement. */
-export function ConvergenceCard({ result, parameters, style, extra }: {
-  result: RefinementResult | null;
-  parameters: readonly RefinementParameter[];
-  style?: CSSProperties | undefined;
-  /** Extra rows (technique-specific). */
-  extra?: ReactNode;
+/** A compact two-way switch inside a section header. */
+export function Tabs<T extends string>({ options, value, onChange }: {
+  options: readonly { readonly id: T; readonly label: ReactNode }[];
+  value: T;
+  onChange: (id: T) => void;
 }): JSX.Element {
-  const label = (id: string): string => parameters.find((p) => p.id === id)?.label ?? id;
-  const d = result?.diagnostics;
-  const stale = result ? parametersChangedSince(result, parameters) : false;
   return (
-    <Section title="Convergence & conditioning" subtitle={stale ? "from the last refinement; values edited since" : undefined} style={style}>
-      {!result ? (
-        <p style={{ margin: 0, fontSize: fz.small, color: color.secondary }}>Refine to see convergence, conditioning and correlations.</p>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <KV k="Status" v={`${result.status} · ${result.history.length} cycle${result.history.length === 1 ? "" : "s"}`} tone={result.status === "converged" ? "ok" : "warn"} />
-          {d ? (
-            <>
-              <KV
-                k="Max shift/esd"
-                v={`${d.maxShiftOverEsd.toFixed(d.maxShiftOverEsd < 0.01 ? 3 : 2)}${d.maxShiftParameterId ? ` · ${label(d.maxShiftParameterId)}` : ""}`}
-                tone={d.maxShiftOverEsd > 1 ? "warn" : d.maxShiftOverEsd > 0.1 ? "note" : "ok"}
-              />
-              <KV k="Condition number" v={scientific(d.conditionNumber)} />
-              <KV k="SVD null directions" v={String(d.svdZeroCount)} tone={d.svdZeroCount > 0 ? "warn" : "ok"} />
-              <KV k="At a bound" v={d.atBounds.length === 0 ? "none" : d.atBounds.map((b) => label(b.parameterId)).join(", ")} tone={d.atBounds.length > 0 ? "warn" : "ok"} />
-              <KV
-                k="Correlations ≥ 0.95"
-                v={d.highCorrelations.length === 0 ? "none" : d.highCorrelations.slice(0, 3).map((c) => `${label(c.parameterIdA)}/${label(c.parameterIdB)} ${c.coefficient.toFixed(2)}`).join(" · ")}
-                tone={d.highCorrelations.length > 0 ? "note" : "ok"}
-              />
-            </>
-          ) : null}
-          {extra}
-        </div>
-      )}
-    </Section>
-  );
-}
-
-const SUPERSCRIPT: Record<string, string> = { "-": "⁻", "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹" };
-
-/** 41000 → "4.1 × 10⁴". */
-export function scientific(v: number): string {
-  if (!Number.isFinite(v)) return "∞";
-  if (v !== 0 && (Math.abs(v) >= 1e4 || Math.abs(v) < 1e-3)) {
-    const [m, e] = v.toExponential(1).split("e");
-    return `${m} × 10${[...String(Number(e))].map((ch) => SUPERSCRIPT[ch] ?? ch).join("")}`;
-  }
-  return Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : String(+v.toPrecision(3));
-}
-
-export function KV({ k, v, tone }: { k: ReactNode; v: ReactNode; tone?: "ok" | "note" | "warn" }): JSX.Element {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 1px", borderBottom: `1px solid ${color.subtle2}`, fontSize: fz.small }}>
-      <span style={{ color: color.secondary, flex: "none" }}>{k}</span>
-      <span style={{ fontFamily: mono, textAlign: "right", color: tone ? TONES[tone].ink : color.ink, overflowWrap: "anywhere" }}>{v}</span>
-    </div>
+    <span role="tablist" style={{ display: "inline-flex", gap: 14 }}>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          role="tab"
+          aria-selected={o.id === value}
+          onClick={() => onChange(o.id)}
+          style={{
+            border: "none", background: "none", padding: "0 0 2px", cursor: "pointer", fontFamily: "inherit",
+            fontSize: fz.body, fontWeight: 700,
+            color: o.id === value ? color.ink : color.faint,
+            borderBottom: `2px solid ${o.id === value ? color.primary : "transparent"}`,
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
+    </span>
   );
 }
 
@@ -259,19 +291,17 @@ export const sectionStyle: CSSProperties = {
   background: color.raised,
   border: `1px solid ${color.border}`,
   borderRadius: 10,
-  padding: "12px 14px",
+  padding: "10px 12px",
   boxSizing: "border-box",
   display: "flex",
   flexDirection: "column",
-  gap: 9,
+  gap: 8,
   minWidth: 0,
 };
 
 const sectionTitle: CSSProperties = { margin: 0, fontSize: fz.body, fontWeight: 700, color: color.ink };
 
 export const caption: CSSProperties = { margin: 0, fontSize: fz.micro, lineHeight: 1.45, color: color.secondary };
-
-export const smallLabel: CSSProperties = { ...uppercaseLabel, color: color.secondary };
 
 export const linkButton: CSSProperties = {
   border: "none",
@@ -286,5 +316,5 @@ export const linkButton: CSSProperties = {
 };
 
 export const tableStyle: CSSProperties = { width: "100%", borderCollapse: "collapse", fontSize: fz.small, fontFamily: mono, textAlign: "right" };
-export const th: CSSProperties = { fontFamily: "inherit", fontWeight: 600, fontSize: fz.micro, color: color.secondary, padding: "4px 6px", borderBottom: `1px solid ${color.border}`, whiteSpace: "nowrap" };
-export const td: CSSProperties = { padding: "4px 6px", borderBottom: `1px solid ${color.subtle2}`, whiteSpace: "nowrap" };
+export const th: CSSProperties = { fontFamily: "inherit", fontWeight: 600, fontSize: fz.micro, color: color.secondary, padding: "3px 6px", borderBottom: `1px solid ${color.border}`, whiteSpace: "nowrap" };
+export const td: CSSProperties = { padding: "3px 6px", borderBottom: `1px solid ${color.subtle2}`, whiteSpace: "nowrap" };

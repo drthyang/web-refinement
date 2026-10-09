@@ -417,8 +417,9 @@ Never judge a fit by its R value alone. The definitions are in
 | PDF | Rw | A relative measure: a PDF Rw runs higher than a Bragg wR for an equally good fit |
 
 - **Validation**, a view of the powder plot card and of the single-crystal
-  quality card, opens with a **Verdict**: one line per check, each passing,
-  worth a look, or to fix. The checks are the goodness of fit (below 1 is a
+  quality card, opens with a **Verdict**: what needs a look or a fix comes
+  first, one line each; passing checks follow as green chips (hover for the
+  detail). The checks are the goodness of fit (below 1 is a
   warning too), convergence (max shift/esd below 0.1), physical values, the
   correlations and undetermined directions of the last refinement, and the
   technique's own tests below.
@@ -430,14 +431,16 @@ Never judge a fit by its R value alone. The definitions are in
   (y_obs − y_calc)/σ along the pattern with the **cumulative χ²** below it;
   χ² per point in d-shells; and the **Worst peaks**, the reflections carrying
   the most χ² with whether the residual under each is a shape or an intensity
-  error. A residual peak where no reflection of any phase lies is listed as
-  **unindexed**. Click the strip or a **view →** to open that spot in the
-  Refinement view.
+  error (four shown; **all** lists eight). A residual peak where no reflection
+  of any phase lies is listed as **unindexed**. Click the strip or a
+  **view →** to open that spot in the Refinement view. The **?** beside each
+  panel title explains how to read it.
 - On **single crystal**: R1 (I > 2σ and all), wR2, GooF, reflections per
   parameter and completeness beside R_int and R_σ; **Fo² vs Fc²** (log axes by
   default; switch to linear or |F|), coloured by |Δ|/σ; K = ⟨Fo²⟩/⟨Fc²⟩ and
   GooF in equal-count bins of intensity and of resolution (SHELXL's analysis
-  of variance); and the largest outliers with sinθ/λ and Fc/Fc(max). Strong
+  of variance); and, in one panel switched by its title, the resolution shells
+  or the largest outliers with sinθ/λ and Fc/Fc(max). Strong
   reflections with Fo² < Fc² and K below 1 in the strongest bin are flagged as
   extinction.
 - **Result**, in the panel footer, gives the status and cycles on one line,

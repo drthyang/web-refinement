@@ -1,15 +1,16 @@
 /**
- * The powder page's Validation view: the verdict, the Rietveld agreement set,
- * where the misfit sits (normalized residual and cumulative χ² on the pattern's
- * axis, χ² by d-shell, the reflections that carry the most χ²), and the
- * convergence of the last refinement.
+ * The powder page's Validation view, laid out to read on one screen: the
+ * verdict beside the Rietveld agreement set, where the misfit sits (normalized
+ * residual and cumulative χ² on the pattern's axis), then χ² by d-shell beside
+ * the reflections that carry the most χ². Convergence detail lives in the
+ * verdict and the parameter panel's Result footer, not in a card of its own.
  *
  * Deliberately absent: an F_obs vs F_calc scatter. Powder I_obs is split
  * between overlapping peaks in proportion to I_calc, so the scatter leans
  * toward the model; the per-phase R_Bragg keeps the same caveat and says so.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
 import type { PhaseTicks } from "@/visualization/reflectionTicks";
@@ -27,12 +28,11 @@ import { powderChecks, type CheckAction } from "@/core/diagnostics/validationChe
 import { color, fz, mono } from "@/app/theme";
 import {
   Bars,
-  ConvergenceCard,
-  KV,
+  Metric,
+  MetricGrid,
   Row,
+  useElementWidth,
   Section,
-  StatGrid,
-  StatTile,
   VerdictPanel,
   caption,
   col,
@@ -41,6 +41,14 @@ import {
   td,
   th,
 } from "@/app/ui/ValidationParts";
+
+const AGREEMENT_INFO = "Rwp is judged against Rexp: their ratio is the GoF (Toby 2006). With the background subtracted (Rwp′, Rexp′) the same misfit is measured against the peaks alone. Durbin–Watson d ≈ 2 for uncorrelated residuals; below Q_D (Hill & Flack 1987) neighbouring points miss together — a profile misfit, and esds that are too small. R_Bragg and R_F come from the Rietveld split of I_obs, so overlapped reflections lean toward the model: compare phases with them, don't quote them as proof.";
+const STRIP_INFO = "Top: (y_obs − y_calc)/σ per point, the ±3σ band shaded. Bottom: the running χ² as a share of the total. Noise alone climbs as a straight ramp; steps are where the model misses, and the numbered steps are the rows of Worst peaks. Click the strip to open that spot in the Refinement view.";
+const SHELL_INFO = "χ² per point in equal-count shells of d. Near 1 is noise. Misfit concentrated at short d points to the ADPs or an absorption/roughness correction; at long d, to peak shape, asymmetry or preferred orientation.";
+const WORST_INFO = "Each point's χ² is shared among the reflections in proportion to their calculated intensity there. The signature reads the residual under the peak: ± lobes mean position, width or asymmetry; a one-signed residual means intensity. Several reflections of one hkl family on the same side suggest preferred orientation.";
+
+/** Worst-peak rows shown before "all". */
+const WORST_SHOWN = 4;
 
 export interface PowderValidationProps {
   /** Native-unit curves of the page (total calc, background included). */
@@ -133,54 +141,64 @@ export function PowderValidationView(props: PowderValidationProps): JSX.Element 
   const refCount = phases.reduce((a, p) => a + p.reflections, 0);
   const meanChi2 = ag.n > 0 ? validation.chi2 / ag.n : 0;
 
+  const [allWorst, setAllWorst] = useState(false);
+  const shownEntries = allWorst ? entries : entries.slice(0, WORST_SHOWN);
+  // Per-phase rows only when there is more than one series to compare; a
+  // single phase puts its R_Bragg/R_F into the metric grid.
+  const single = phases.length === 1 ? phases[0] : undefined;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingBottom: 4 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Row>
-        <VerdictPanel verdict={verdict} onAction={onAction} style={col(7, 380)} />
-        <Section title="Agreement" style={col(5, 300)}>
-          <StatGrid>
-            <StatTile value={pct(ag.rp)} label="Rp" />
-            <StatTile value={pct(ag.rwp)} label="Rwp" />
-            <StatTile value={pct(ag.rexp)} label="Rexp" />
-            <StatTile value={ag.gof.toFixed(2)} label={`GoF · χ²ᵥ ${ag.chi2nu.toFixed(2)}`} tone={ag.gof < 1 ? "note" : ag.gof <= 1.5 ? "ok" : ag.gof <= 2.5 ? "note" : "warn"} />
-            {ag.rwpBkg !== undefined ? <StatTile value={pct(ag.rwpBkg)} label="Rwp′ bkg-sub" title="Background subtracted: Σw(y_o − y_c)² over Σw(y_o − y_b)²" /> : null}
-            {ag.rexpBkg !== undefined ? <StatTile value={pct(ag.rexpBkg)} label="Rexp′ bkg-sub" /> : null}
-            {dw ? <StatTile value={dw.d.toFixed(2)} label={`Durbin–Watson · Q_D ${dw.qd.toFixed(2)}`} tone={dw.correlated ? "warn" : "ok"} title="d ≈ 2 for uncorrelated residuals; below Q_D, neighbouring points miss together (Hill & Flack 1987)" /> : null}
-          </StatGrid>
-          <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
-            {ag.n.toLocaleString()} points · {refCount} reflections · {nParams} free parameters
-          </span>
-          {phases.length > 0 ? (
-            <div style={{ overflowX: "auto" }}>
-              <table style={tableStyle}>
-                <thead>
-                  <tr>
-                    <th style={{ ...th, textAlign: "left" }}>Phase</th>
-                    <th style={th}>R_Bragg</th>
-                    <th style={th}>R_F</th>
-                    <th style={th}>N_refl</th>
+        <VerdictPanel verdict={verdict} onAction={onAction} style={col(6, 360)} />
+        <Section
+          title="Agreement"
+          info={AGREEMENT_INFO}
+          subtitle={`${ag.n.toLocaleString()} points · ${refCount} refl · ${nParams} free`}
+          style={col(5, 300)}
+        >
+          <MetricGrid>
+            <Metric value={pct(ag.rwp)} label="Rwp" />
+            <Metric value={pct(ag.rexp)} label="Rexp" />
+            <Metric value={ag.gof.toFixed(2)} label={`GoF · χ²ᵥ ${ag.chi2nu.toFixed(1)}`} tone={ag.gof < 1 ? "note" : ag.gof <= 1.5 ? "ok" : ag.gof <= 2.5 ? "note" : "warn"} />
+            <Metric value={pct(ag.rp)} label="Rp" />
+            {ag.rwpBkg !== undefined ? <Metric value={pct(ag.rwpBkg)} label="Rwp′ bkg-sub" title="Σw(y_o − y_c)² over Σw(y_o − y_b)²" /> : null}
+            {ag.rexpBkg !== undefined ? <Metric value={pct(ag.rexpBkg)} label="Rexp′ bkg-sub" /> : null}
+            {dw ? <Metric value={dw.d.toFixed(2)} label={`DW · Q_D ${dw.qd.toFixed(2)}`} tone={dw.correlated ? "warn" : "ok"} title="Durbin–Watson d against Hill & Flack's critical value" /> : null}
+            {single ? <Metric value={pct(single.rBragg)} label="R_Bragg" /> : null}
+            {single ? <Metric value={pct(single.rF)} label="R_F" /> : null}
+          </MetricGrid>
+          {phases.length > 1 ? (
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={{ ...th, textAlign: "left" }}>Phase</th>
+                  <th style={th}>R_Bragg</th>
+                  <th style={th}>R_F</th>
+                  <th style={th}>N</th>
+                </tr>
+              </thead>
+              <tbody>
+                {phases.map((p) => (
+                  <tr key={p.phaseId}>
+                    <td style={{ ...td, textAlign: "left", fontFamily: "inherit" }}><Dot color={phaseColor(p.phaseId)} />{p.label}</td>
+                    <td style={td}>{pct(p.rBragg)}</td>
+                    <td style={td}>{pct(p.rF)}</td>
+                    <td style={td}>{p.reflections}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {phases.map((p) => (
-                    <tr key={p.phaseId}>
-                      <td style={{ ...td, textAlign: "left", fontFamily: "inherit" }}>
-                        <Dot color={phaseColor(p.phaseId)} />{p.label}
-                      </td>
-                      <td style={td}>{pct(p.rBragg)}</td>
-                      <td style={td}>{pct(p.rF)}</td>
-                      <td style={td}>{p.reflections}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           ) : null}
-          <p style={caption}>R_Bragg and R_F use the Rietveld split of I_obs, so overlapped reflections lean toward the model. Compare phases with them; don't quote them as proof.</p>
         </Section>
       </Row>
 
-      <Section title="Where the misfit is" subtitle="normalized residual (y_obs − y_calc)/σ and cumulative χ²" id="validation-residual">
+      <Section
+        title="Where the misfit is"
+        info={STRIP_INFO}
+        subtitle="(y_obs − y_calc)/σ and cumulative χ² · click to open in the pattern"
+        id="validation-residual"
+      >
         <ResidualStrip
           x={x}
           validation={validation}
@@ -191,13 +209,10 @@ export function PowderValidationView(props: PowderValidationProps): JSX.Element 
           markers={markers}
           {...(props.onLocateX ? { onLocateX: props.onLocateX } : {})}
         />
-        <p style={caption}>
-          Noise alone climbs the cumulative χ² as a straight ramp; steps are where the model misses. Numbered steps are the rows of the worst-peaks table. Click anywhere on the strip to open that spot in the Refinement view.
-        </p>
       </Section>
 
       <Row>
-        <Section title="χ² per point by shell" subtitle={validation.shellAxis === "d" ? "equal-count d-shells" : "equal-count shells"} style={col(5, 300)}>
+        <Section title="χ² per point" info={SHELL_INFO} subtitle={validation.shellAxis === "d" ? "by d-shell" : "by shell"} style={col(4, 260)}>
           <Bars
             items={validation.shells.map((s) => ({
               label: s.lo.toFixed(validation.shellAxis === "d" ? 2 : 1),
@@ -211,28 +226,37 @@ export function PowderValidationView(props: PowderValidationProps): JSX.Element 
             referenceLabel="noise"
             axisLabel={validation.shellAxis === "d" ? "shell start, d (Å)" : `shell start, ${props.displayLabel}`}
           />
-          <p style={caption}>Misfit concentrated at short d points to the ADPs or an absorption/roughness correction; at long d, to peak shape, asymmetry or preferred orientation.</p>
         </Section>
 
-        <Section title="Worst peaks" subtitle={entries.length > 0 ? `by share of χ² · these ${entries.length} carry ${pct(shareTop, 0)}` : undefined} style={col(7, 420)}>
+        <Section
+          title="Worst peaks"
+          info={WORST_INFO}
+          subtitle={entries.length > 0 ? `share of χ² · top ${entries.length} carry ${pct(shareTop, 0)}` : undefined}
+          right={entries.length > WORST_SHOWN ? (
+            <button style={{ ...linkButton, padding: 0, fontSize: fz.micro }} onClick={() => setAllWorst((v) => !v)}>
+              {allWorst ? "fewer" : `all ${entries.length}`}
+            </button>
+          ) : undefined}
+          style={col(7, 420)}
+        >
           {entries.length === 0 ? (
             <p style={caption}>No reflection list to attribute the misfit to.</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ ...tableStyle, minWidth: 520 }}>
+              <table style={{ ...tableStyle, minWidth: 470 }}>
                 <thead>
                   <tr>
                     <th style={{ ...th, textAlign: "left" }}>#</th>
                     <th style={{ ...th, textAlign: "left" }}>Reflection</th>
                     <th style={th}>d (Å)</th>
-                    <th style={th}>I_obs/I_calc</th>
-                    <th style={th}>χ² share</th>
+                    <th style={th} title="Rietveld-partitioned I_obs over I_calc">I_o/I_c</th>
+                    <th style={th}>χ²</th>
                     <th style={{ ...th, textAlign: "left" }}>Signature</th>
                     <th style={th} />
                   </tr>
                 </thead>
                 <tbody>
-                  {entries.map((e, i) => (
+                  {shownEntries.map((e, i) => (
                     <tr key={e.kind === "unindexed" ? `u${e.peak.index}` : `${e.row.phaseId}:${e.row.h},${e.row.k},${e.row.l}:${e.row.kind}`}>
                       <td style={{ ...td, textAlign: "left" }}><Badge n={i + 1} /></td>
                       {e.kind === "reflection" ? (
@@ -252,7 +276,7 @@ export function PowderValidationView(props: PowderValidationProps): JSX.Element 
                           <td style={td}>{e.peak.d.toFixed(4)}</td>
                           <td style={td}>—</td>
                           <td style={td}>{pct(e.share, 1)}</td>
-                          <td style={{ ...td, textAlign: "left", fontFamily: "inherit", color: color.warnInk }}>+ peak · no reflection here</td>
+                          <td style={{ ...td, textAlign: "left", fontFamily: "inherit", color: color.warnInk }}>no reflection here</td>
                           <td style={td}>{props.onLocateX ? <button style={{ ...linkButton, padding: 0 }} onClick={() => props.onLocateX!(x[e.peak.index]!)}>view →</button> : null}</td>
                         </>
                       )}
@@ -262,17 +286,8 @@ export function PowderValidationView(props: PowderValidationProps): JSX.Element 
               </table>
             </div>
           )}
-          <p style={caption}>The signature reads the residual under each peak: ± lobes mean position, width or asymmetry; a one-signed residual means intensity. Several reflections of one hkl family on the same side suggest preferred orientation.</p>
         </Section>
       </Row>
-
-      <ConvergenceCard
-        result={result}
-        parameters={parameters}
-        extra={props.onAction ? (
-          <KV k="Posterior vs esd" v={<button style={{ ...linkButton, padding: 0 }} onClick={() => props.onAction!("posterior")}>open Posterior</button>} />
-        ) : undefined}
-      />
     </div>
   );
 }
@@ -298,10 +313,11 @@ function niceTicks(lo: number, hi: number, target = 8): number[] {
   return out;
 }
 
-const W = 1000;
 const X0 = 46;
-const X1 = 988;
 const DELTA_LIM = 8;
+/** δ panel: centre line and px per σ (±DELTA_LIM spans 92 px). */
+const D_MID = 56;
+const D_SCALE = 5.75;
 
 /**
  * δ = (y_obs − y_calc)/σ as a per-pixel min/max envelope with the ±3σ band,
@@ -317,6 +333,10 @@ function ResidualStrip({ x, validation, include, toDisplay, displayLabel, phaseT
   markers: readonly { n: number; x: number | undefined; unindexed: boolean }[];
   onLocateX?: (x: number) => void;
 }): JSX.Element {
+  // Draw in true pixels: the strip keeps its height and its text size however
+  // wide the card is (a fixed viewBox would scale both with the width).
+  const [boxRef, W] = useElementWidth(900);
+  const X1 = Math.max(X0 + 120, W - 12);
   const geom = useMemo(() => {
     const idx: number[] = [];
     const dx: number[] = [];
@@ -358,16 +378,16 @@ function ResidualStrip({ x, validation, include, toDisplay, displayLabel, phaseT
       else last = cum[c]!;
     }
     return { lo, hi, px, cMin, cMax, cWorst, cum, cols };
-  }, [x, include, validation, toDisplay]);
+  }, [x, include, validation, toDisplay, X1]);
 
   if (!geom) return <p style={caption}>No fitted points.</p>;
   const { lo, hi, px, cMin, cMax, cWorst, cum, cols } = geom;
-  const yD = (v: number): number => 82 - Math.max(-DELTA_LIM, Math.min(DELTA_LIM, v)) * 8.5;
+  const yD = (v: number): number => D_MID - Math.max(-DELTA_LIM, Math.min(DELTA_LIM, v)) * D_SCALE;
   const rows = phaseTicks.filter((p) => p.ticks.length > 0);
-  const tickTop = 158;
-  const cumTop = tickTop + rows.length * 11 + 16;
-  const cumH = 60;
-  const H = cumTop + cumH + 30;
+  const tickTop = yD(-DELTA_LIM) + 6;
+  const cumTop = tickTop + rows.length * 10 + 10;
+  const cumH = 40;
+  const H = cumTop + cumH + 26;
   const yC = (f: number): number => cumTop + cumH - f * (cumH - 4);
 
   let env = "";
@@ -397,28 +417,29 @@ function ResidualStrip({ x, validation, include, toDisplay, displayLabel, phaseT
   };
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", cursor: onLocateX ? "pointer" : undefined }} role="img" aria-label="Normalized residual and cumulative chi-square along the pattern" onClick={onClick}>
+    <div ref={boxRef}>
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ width: "100%", height: H, display: "block", cursor: onLocateX ? "pointer" : undefined }} role="img" aria-label="Normalized residual and cumulative chi-square along the pattern" onClick={onClick}>
       <rect x={X0} y={yD(3)} width={X1 - X0} height={yD(-3) - yD(3)} fill={color.chipBg} />
-      <line x1={X0} y1={82} x2={X1} y2={82} stroke={color.control} strokeWidth={1} />
+      <line x1={X0} y1={D_MID} x2={X1} y2={D_MID} stroke={color.control} strokeWidth={1} />
       <line x1={X0} y1={yD(DELTA_LIM)} x2={X0} y2={yD(-DELTA_LIM)} stroke={color.border} strokeWidth={1} />
       <path d={env} stroke={color.ink} strokeWidth={1} opacity={0.75} />
       <g fontSize={10} fill={color.secondary} fontFamily={mono} textAnchor="end">
         <text x={X0 - 5} y={yD(3) + 3.5}>+3</text>
-        <text x={X0 - 5} y={85.5}>0</text>
+        <text x={X0 - 5} y={D_MID + 3.5}>0</text>
         <text x={X0 - 5} y={yD(-3) + 3.5}>−3</text>
         <text x={X0 - 5} y={yD(DELTA_LIM) + 3.5}>+{DELTA_LIM}</text>
         <text x={X0 - 5} y={yD(-DELTA_LIM) + 3.5}>−{DELTA_LIM}</text>
       </g>
-      <text x={12} y={82} textAnchor="middle" fontSize={11} fill={color.secondary} transform="rotate(-90 12 82)">Δ/σ</text>
+      <text x={12} y={D_MID} textAnchor="middle" fontSize={11} fill={color.secondary} transform={`rotate(-90 12 ${D_MID})`}>Δ/σ</text>
 
       {rows.map((p, r) => {
-        const y = tickTop + r * 11;
+        const y = tickTop + r * 10;
         let path = "";
-        for (const t of p.ticks) if (t.x >= lo && t.x <= hi) path += `M${px(t.x).toFixed(1)} ${y}v8`;
+        for (const t of p.ticks) if (t.x >= lo && t.x <= hi) path += `M${px(t.x).toFixed(1)} ${y}v7`;
         return (
           <g key={p.id}>
             <path d={path} stroke={p.color} strokeWidth={1} />
-            <text x={X0 - 5} y={y + 7.5} textAnchor="end" fontSize={9} fontFamily={mono} fill={color.secondary}>{p.label.length > 7 ? `${p.label.slice(0, 6)}…` : p.label}</text>
+            <text x={X0 - 5} y={y + 7} textAnchor="end" fontSize={9} fontFamily={mono} fill={color.secondary}>{p.label.length > 7 ? `${p.label.slice(0, 6)}…` : p.label}</text>
           </g>
         );
       })}
@@ -436,12 +457,12 @@ function ResidualStrip({ x, validation, include, toDisplay, displayLabel, phaseT
         if (m.x === undefined || m.x < lo || m.x > hi) return null;
         const xx = px(m.x);
         const f = cum[Math.min(cols - 1, colOf(m.x) + 2)]!;
-        const cy = Math.max(cumTop + 2, yC(f) - 10);
+        const cy = Math.max(cumTop + 1, yC(f) - 9);
         return (
           <g key={m.n} pointerEvents="none">
             {m.unindexed ? <path d={`M${xx - 5} ${yD(DELTA_LIM) - 9}l5 7l5 -7z`} fill={color.warnInk} /> : null}
-            <circle cx={xx} cy={cy} r={7} fill={color.flag} />
-            <text x={xx} y={cy + 3.4} textAnchor="middle" fontSize={9.5} fontWeight={600} fill="#fff" fontFamily={mono}>{m.n}</text>
+            <circle cx={xx} cy={cy} r={6.5} fill={color.flag} />
+            <text x={xx} y={cy + 3.2} textAnchor="middle" fontSize={9} fontWeight={600} fill="#fff" fontFamily={mono}>{m.n}</text>
           </g>
         );
       })}
@@ -453,5 +474,6 @@ function ResidualStrip({ x, validation, include, toDisplay, displayLabel, phaseT
       </g>
       <text x={X1} y={H - 1} textAnchor="end" fontSize={10} fill={color.secondary}>{displayLabel}</text>
     </svg>
+    </div>
   );
 }

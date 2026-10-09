@@ -1,15 +1,18 @@
 /**
- * The single-crystal page's Validation view: the verdict, the SHELX agreement
- * and data-quality set, Fo² vs Fc² (log axes by default), SHELXL's analysis of
- * variance by intensity (K and GooF), the resolution-shell table, the largest
- * outliers with where they sit, and the convergence of the last refinement.
+ * The single-crystal page's Validation view, laid out to read on about one
+ * screen: a strip of the data/agreement numbers the card header does not
+ * already show; the verdict beside SHELXL's analysis of variance by intensity
+ * (K and GooF); then Fo² vs Fc² (log axes by default) beside one panel that
+ * switches between the resolution-shell table and the largest outliers.
+ * Convergence detail lives in the verdict and the parameter panel's Result
+ * footer.
  *
  * The analysis of variance replaces the normal-probability plot: both ask
  * whether the weights describe the scatter, but the bins say which reflections
  * are off and in which direction.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { SpaceGroup, UnitCell } from "@/core/crystal/types";
 import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { ReflectionObsCalc } from "@/core/workflow/obsCalc";
@@ -18,22 +21,27 @@ import { singleCrystalValidation, type ScOutlier, type ScValidation } from "@/co
 import { singleCrystalChecks } from "@/core/diagnostics/validationChecks";
 import { shelxWeights, singleCrystalAgreement } from "@/core/diffraction/singleCrystalFactors";
 import { FobsFcalc } from "@/app/ui/QualityPlots";
-import { color, fz, mono } from "@/app/theme";
+import { color, fz } from "@/app/theme";
+import { InfoBadge } from "@/app/ui/InfoBadge";
 import {
   Bars,
-  ConvergenceCard,
   DivergingBars,
+  Metric,
+  MetricStrip,
   Row,
   Section,
-  StatGrid,
-  StatTile,
+  Tabs,
   VerdictPanel,
-  caption,
   col,
   tableStyle,
   td,
   th,
 } from "@/app/ui/ValidationParts";
+
+const DATA_INFO = "R1, wR2 and GooF are in the card header. wR2 and GooF on all F² are the honest numbers; R1 is the familiar one. Data quality (completeness, R_int, R_σ) sits beside model quality so a weak dataset is not mistaken for a bad model. checkCIF asks ≥ 10 reflections per parameter for a centrosymmetric group, ≥ 8 otherwise.";
+const INTENSITY_INFO = "SHELXL's analysis of variance, in equal-count bins of Fc/Fc(max). A flat GooF near 1 means the weights describe the scatter. K = ⟨Fo²⟩/⟨Fc²⟩ below 1 in the strongest bin is extinction; GooF rising with intensity alone means the weighting scheme. The weakest bin's K is noisy because Fo² there is close to zero.";
+const SHELLS_INFO = "Equal-count resolution shells, low angle first. K below 1 with a high GooF only at low angle is extinction (or the beamstop); K drifting across every shell points to the ADPs, absorption or scattering factors. R_int and ⟨I/σ⟩ show where the data run out.";
+const OUTLIERS_INFO = "The largest standardized residuals (Fo² − Fc²)/σ with where they sit. Click a row to find it in Fo² vs Fc². Before omitting a reflection, check the pattern: outliers explained by extinction or absorption should be modelled, not rejected.";
 
 type Selection = { hkl: string; kind: ReflectionObsCalc["kind"]; phaseId?: string };
 
@@ -87,34 +95,25 @@ export function SingleCrystalValidationView(props: SingleCrystalValidationProps)
   const hkl = (o: ScOutlier): string => `${o.h} ${o.k} ${o.l}`;
   const pattern = outlierPattern(v);
 
+  const [table, setTable] = useState<"shells" | "outliers">("shells");
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <Row>
-        <VerdictPanel verdict={verdict} style={col(7, 380)} />
-        <Section title="Agreement & data" style={col(5, 300)}>
-          <StatGrid>
-            <StatTile value={pct(ag.r1)} label="R1 · I > 2σ" title={`${ag.observed} of ${ag.total} reflections with Fo² > 2σ`} />
-            <StatTile value={pct(ag.r1All)} label="R1 · all" />
-            <StatTile value={pct(ag.wr2)} label="wR2 · all F²" />
-            <StatTile value={ag.goof.toFixed(2)} label="GooF" tone={verdict.checks.find((c) => c.id === "gof")?.status === "ok" ? "ok" : "note"} />
-            <StatTile value={v.reflectionsPerParameter.toFixed(1)} label="refl / param" tone={v.reflectionsPerParameter >= need ? "ok" : "warn"} title={`${v.uniqueObserved} unique / ${nParams} free parameters`} />
-            {v.completeness !== undefined ? <StatTile value={pct(v.completeness, 1)} label="complete" title={`to sinθ/λ ${v.sinThetaOverLambdaMax.toFixed(3)} Å⁻¹`} tone={v.completeness >= 0.95 ? "ok" : v.completeness >= 0.9 ? "note" : "warn"} /> : null}
-            <StatTile value={st.redundancy > 1 ? pct(st.rInt, 1) : "—"} label="R_int" title={st.redundancy > 1 ? undefined : "no redundant observations to merge"} />
-            <StatTile value={pct(st.rSigma, 1)} label="R_σ" />
-          </StatGrid>
-          <span style={{ fontFamily: mono, fontSize: fz.micro, color: color.secondary }}>
-            {st.observations} obs → {st.unique} unique · redundancy {st.redundancy.toFixed(2)} · d_min {Number.isFinite(v.dMin) ? v.dMin.toFixed(3) : "—"} Å (sinθ/λ {v.sinThetaOverLambdaMax.toFixed(2)} Å⁻¹) · weights 1/σ²
-          </span>
-          <p style={caption}>wR2 and GooF on all F² are the honest numbers; R1 is the familiar one. Data quality sits beside model quality, so a weak dataset is not mistaken for a bad model.</p>
-        </Section>
-      </Row>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <MetricStrip>
+        <Metric value={v.reflectionsPerParameter.toFixed(1)} label="refl / param" tone={v.reflectionsPerParameter >= need ? "ok" : "warn"} title={`${v.uniqueObserved} unique / ${nParams} free parameters; checkCIF asks ≥ ${need}`} />
+        {v.completeness !== undefined ? <Metric value={pct(v.completeness, 1)} label="complete" title={`to sinθ/λ ${v.sinThetaOverLambdaMax.toFixed(3)} Å⁻¹`} tone={v.completeness >= 0.95 ? "ok" : v.completeness >= 0.9 ? "note" : "warn"} /> : null}
+        <Metric value={pct(ag.r1All)} label="R1 · all" title="R1 over every reflection; R1 (I > 2σ), wR2 and GooF are in the header" />
+        <Metric value={st.redundancy > 1 ? pct(st.rInt, 1) : "—"} label="R_int" title={st.redundancy > 1 ? undefined : "no redundant observations to merge"} />
+        <Metric value={pct(st.rSigma, 1)} label="R_σ" />
+        <Metric value={`${st.observations} → ${st.unique}`} label={`obs → unique · ×${st.redundancy.toFixed(2)}`} />
+        <Metric value={Number.isFinite(v.dMin) ? `${v.dMin.toFixed(3)} Å` : "—"} label={`d_min · ${v.sinThetaOverLambdaMax.toFixed(2)} Å⁻¹`} />
+        <span style={{ alignSelf: "center" }}><InfoBadge text={DATA_INFO} width={300} align="right" /></span>
+      </MetricStrip>
 
       <Row>
-        <Section title="Fo² vs Fc²" style={col(5, 300)}>
-          <FobsFcalc rows={rows} selected={props.selected} onHighlight={props.onSelect} maxWidth={440} />
-        </Section>
-        <Section title="By intensity" subtitle="equal-count bins, weak → strong" style={col(5, 300)}>
-          <span style={{ fontSize: fz.micro, fontWeight: 600, color: color.ink }}>K = ⟨Fo²⟩/⟨Fc²⟩ <span style={{ fontWeight: 400, color: color.secondary }}>· deviation from 1</span></span>
+        <VerdictPanel verdict={verdict} style={col(6, 330)} />
+        <Section title="By intensity" info={INTENSITY_INFO} subtitle="weak → strong" style={col(5, 300)}>
+          <span style={{ fontSize: fz.micro, fontWeight: 600, color: color.ink }}>K = ⟨Fo²⟩/⟨Fc²⟩</span>
           <DivergingBars
             centre={1}
             span={Math.max(0.2, ...v.bins.slice(1).map((b) => Math.abs(b.k - 1)))}
@@ -127,105 +126,108 @@ export function SingleCrystalValidationView(props: SingleCrystalValidationProps)
               flagged: i === strongest ? ext.strongBinK < 0.95 : Math.abs(b.k - 1) > 0.1 && i > 0,
             }))}
           />
-          <span style={{ fontSize: fz.micro, fontWeight: 600, color: color.ink, marginTop: 4 }}>GooF</span>
+          <span style={{ fontSize: fz.micro, fontWeight: 600, color: color.ink, marginTop: 2 }}>GooF</span>
           <Bars
             items={v.bins.map((b) => ({ label: b.fcRatioMax.toFixed(2), value: b.goof, title: `${b.n} reflections`, flagged: b.goof > 1.3 }))}
             max={1.2 * Math.max(1.3, ...v.bins.map((b) => b.goof))}
             reference={1}
             referenceLabel="1.0"
             axisLabel="bin upper edge, Fc/Fc(max)"
-            height={104}
+            height={84}
           />
-          <p style={caption}>
-            SHELXL's analysis of variance. A flat GooF near 1 means the weights describe the scatter. K below 1 in the strongest bin is extinction; GooF rising with intensity alone means the weighting scheme. The weakest bin's K is noisy because Fo² there is close to zero.
-          </p>
         </Section>
       </Row>
 
-      <Section title="Resolution shells" subtitle="equal-count shells, low angle first · data quality | model quality">
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ ...tableStyle, minWidth: 560 }}>
-            <thead>
-              <tr>
-                <th style={{ ...th, textAlign: "left" }}>d (Å)</th>
-                <th style={th}>N</th>
-                <th style={th}>Compl.</th>
-                <th style={th}>⟨I/σ⟩</th>
-                <th style={{ ...th, borderRight: `1px solid ${color.border}` }}>R_int</th>
-                <th style={th}>K</th>
-                <th style={th}>GooF</th>
-                <th style={th}>R1</th>
-              </tr>
-            </thead>
-            <tbody>
-              {v.shells.map((s, i) => {
-                const kOff = Math.abs(s.k - 1) > 0.05;
-                const gOff = s.goof > 1.3;
-                return (
-                  <tr key={i}>
-                    <td style={{ ...td, textAlign: "left" }}>{i === 0 ? "∞" : s.dMax.toFixed(2)} – {s.dMin.toFixed(2)}</td>
-                    <td style={td}>{s.n}</td>
-                    <td style={{ ...td, ...(s.completeness !== undefined && s.completeness < 0.95 ? flagCell : {}) }}>{s.completeness !== undefined ? pct(s.completeness, 1) : "—"}</td>
-                    <td style={td}>{s.iOverSigma.toFixed(1)}</td>
-                    <td style={{ ...td, borderRight: `1px solid ${color.border}` }}>{s.rInt !== undefined ? pct(s.rInt, 1) : "—"}</td>
-                    <td style={{ ...td, ...(kOff ? flagCell : {}) }}>{s.k.toFixed(3)}</td>
-                    <td style={{ ...td, ...(gOff ? flagCell : {}) }}>{s.goof.toFixed(2)}</td>
-                    <td style={td}>{pct(s.r1)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <p style={caption}>
-          K = ⟨Fo²⟩/⟨Fc²⟩. K below 1 with a high GooF only at low angle is extinction (or the beamstop); K drifting across every shell points to the ADPs, absorption or scattering factors. R_int and ⟨I/σ⟩ show where the data run out.
-        </p>
-      </Section>
-
-      <Section title="Largest outliers" subtitle="(Fo² − Fc²)/σ">
-        {pattern ? (
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: color.noteBg, border: `1px solid ${color.noteBorder}`, borderRadius: 8, padding: "7px 10px", fontSize: fz.small, color: color.noteInk, lineHeight: 1.45 }}>
-            <span><b>Pattern:</b> {pattern}</span>
+      <Row>
+        <Section title="Fo² vs Fc²" style={col(4, 280)}>
+          <FobsFcalc rows={rows} selected={props.selected} onHighlight={props.onSelect} maxWidth={360} />
+        </Section>
+        <Section
+        style={col(7, 440)}
+        title={<Tabs options={[{ id: "shells", label: "Resolution shells" }, { id: "outliers", label: pattern ? <>Outliers <span title="The outliers share a pattern" style={{ display: "inline-block", width: 7, height: 7, borderRadius: 999, background: color.flag, verticalAlign: 2 }} /></> : "Outliers" }] as const} value={table} onChange={setTable} />}
+        info={table === "shells" ? SHELLS_INFO : OUTLIERS_INFO}
+        subtitle={table === "shells" ? "data quality | model quality" : "(Fo² − Fc²)/σ"}
+      >
+        {table === "shells" ? (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ ...tableStyle, minWidth: 470 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...th, textAlign: "left" }}>d (Å)</th>
+                  <th style={th}>N</th>
+                  <th style={th}>Compl.</th>
+                  <th style={th}>⟨I/σ⟩</th>
+                  <th style={{ ...th, borderRight: `1px solid ${color.border}` }}>R_int</th>
+                  <th style={th}>K</th>
+                  <th style={th}>GooF</th>
+                  <th style={th}>R1</th>
+                </tr>
+              </thead>
+              <tbody>
+                {v.shells.map((s, i) => {
+                  const kOff = Math.abs(s.k - 1) > 0.05;
+                  const gOff = s.goof > 1.3;
+                  return (
+                    <tr key={i}>
+                      <td style={{ ...td, textAlign: "left" }}>{i === 0 ? "∞" : s.dMax.toFixed(2)} – {s.dMin.toFixed(2)}</td>
+                      <td style={td}>{s.n}</td>
+                      <td style={{ ...td, ...(s.completeness !== undefined && s.completeness < 0.95 ? flagCell : {}) }}>{s.completeness !== undefined ? pct(s.completeness, 1) : "—"}</td>
+                      <td style={td}>{s.iOverSigma.toFixed(1)}</td>
+                      <td style={{ ...td, borderRight: `1px solid ${color.border}` }}>{s.rInt !== undefined ? pct(s.rInt, 1) : "—"}</td>
+                      <td style={{ ...td, ...(kOff ? flagCell : {}) }}>{s.k.toFixed(3)}</td>
+                      <td style={{ ...td, ...(gOff ? flagCell : {}) }}>{s.goof.toFixed(2)}</td>
+                      <td style={td}>{pct(s.r1)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        ) : null}
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ ...tableStyle, minWidth: 520 }}>
-            <thead>
-              <tr>
-                <th style={{ ...th, textAlign: "left" }}>hkl</th>
-                <th style={th}>sinθ/λ</th>
-                <th style={th}>Fc/Fc(max)</th>
-                <th style={th}>Fo²</th>
-                <th style={th}>Fc²</th>
-                <th style={th}>Δ/σ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {v.outliers.map((o) => {
-                const isSel = props.selected?.kind !== "magnetic" && props.selected?.hkl === hkl(o);
-                return (
-                  <tr
-                    key={hkl(o)}
-                    onClick={() => props.onSelect(isSel ? null : { hkl: hkl(o), kind: "nuclear" })}
-                    style={{ cursor: "pointer", background: isSel ? color.primaryTintBg : undefined }}
-                    aria-selected={isSel}
-                  >
-                    <td style={{ ...td, textAlign: "left" }}>({hkl(o)})</td>
-                    <td style={td}>{o.sinThetaOverLambda.toFixed(3)}</td>
-                    <td style={td}>{o.fcRatio.toFixed(3)}</td>
-                    <td style={td}>{o.foSq.toFixed(1)}</td>
-                    <td style={td}>{o.fcSq.toFixed(1)}</td>
-                    <td style={{ ...td, fontWeight: 600, color: Math.abs(o.z) > 5 ? color.warnInk : Math.abs(o.z) > 3 ? color.noteInk : color.secondary }}>{o.z >= 0 ? "+" : "−"}{Math.abs(o.z).toFixed(1)}</td>
+        ) : (
+          <>
+            {pattern ? (
+              <div style={{ background: color.noteBg, border: `1px solid ${color.noteBorder}`, borderRadius: 7, padding: "5px 9px", fontSize: fz.micro, color: color.noteInk, lineHeight: 1.45 }}>
+                <b>Pattern:</b> {pattern}
+              </div>
+            ) : null}
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ ...tableStyle, minWidth: 420 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...th, textAlign: "left" }}>hkl</th>
+                    <th style={th}>sinθ/λ</th>
+                    <th style={th}>Fc/Fc(max)</th>
+                    <th style={th}>Fo²</th>
+                    <th style={th}>Fc²</th>
+                    <th style={th}>Δ/σ</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <p style={caption}>Click a row to find it in the Fo² vs Fc² plot. Before omitting a reflection, check the pattern: outliers explained by extinction or absorption should be modelled, not rejected.</p>
+                </thead>
+                <tbody>
+                  {v.outliers.slice(0, 8).map((o) => {
+                    const isSel = props.selected?.kind !== "magnetic" && props.selected?.hkl === hkl(o);
+                    return (
+                      <tr
+                        key={hkl(o)}
+                        onClick={() => props.onSelect(isSel ? null : { hkl: hkl(o), kind: "nuclear" })}
+                        style={{ cursor: "pointer", background: isSel ? color.primaryTintBg : undefined }}
+                        aria-selected={isSel}
+                      >
+                        <td style={{ ...td, textAlign: "left" }}>({hkl(o)})</td>
+                        <td style={td}>{o.sinThetaOverLambda.toFixed(3)}</td>
+                        <td style={td}>{o.fcRatio.toFixed(3)}</td>
+                        <td style={td}>{o.foSq.toFixed(1)}</td>
+                        <td style={td}>{o.fcSq.toFixed(1)}</td>
+                        <td style={{ ...td, fontWeight: 600, color: Math.abs(o.z) > 5 ? color.warnInk : Math.abs(o.z) > 3 ? color.noteInk : color.secondary }}>{o.z >= 0 ? "+" : "−"}{Math.abs(o.z).toFixed(1)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </Section>
-
-      <ConvergenceCard result={result} parameters={parameters} />
+      </Row>
     </div>
   );
 }

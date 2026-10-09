@@ -55,7 +55,7 @@ describe("powderChecks", () => {
     expect(byId.get("durbin-watson")!.detail).toMatch(/0\.88 < Q_D 1\.93/);
     expect(byId.get("unindexed")!.title).toMatch(/2\.952/);
     expect(byId.get("unindexed")!.actions).toEqual(["show-unindexed"]);
-    expect(byId.get("cross-check")!.actions).toEqual(["export-gsas2", "export-fullprof"]);
+    expect(byId.get("cross-check")!.actions).toEqual(["posterior", "export-gsas2", "export-fullprof"]);
     expect(v.tone).toBe("warn");
     expect(v.headline).toBe("3 things to check");
   });

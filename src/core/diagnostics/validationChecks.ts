@@ -194,7 +194,7 @@ export function powderChecks(input: PowderCheckInput): ValidationVerdict {
   }
   checks.push(...correlationChecks(result, parameters));
   if (input.canExport) {
-    checks.push({ id: "cross-check", status: "info", title: "External cross-check", detail: "refine the same model in GSAS-II and FullProf and compare values and esds", actions: ["export-gsas2", "export-fullprof"] });
+    checks.push({ id: "cross-check", status: "info", title: "Cross-check the esds", actions: ["posterior", "export-gsas2", "export-fullprof"] });
   }
   return verdictFrom(checks);
 }
