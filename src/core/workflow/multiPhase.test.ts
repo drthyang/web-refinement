@@ -103,3 +103,21 @@ describe("multi-phase powder — fit range restricts the refinement", () => {
     expect(full.parameters.scale1!).toBeGreaterThan(windowed.parameters.scale1! + 2);
   });
 });
+
+describe("multiPhaseCurves — shared background", () => {
+  it("returns the background alone, and the calc sits on it", () => {
+    const params: RefinementParameter[] = [
+      { id: "scale1", label: "s1", kind: "scale", value: 60, initialValue: 60, fixed: true },
+      { id: "scale2", label: "s2", kind: "scale", value: 25, initialValue: 25, fixed: true },
+      { id: "width", label: "w", kind: "peakWidth", value: 0.5, initialValue: 0.5, fixed: true },
+      { id: "bkg0", label: "b0", kind: "background", value: 120, initialValue: 120, fixed: true },
+    ];
+    const withBkg: ParameterBinding[] = [...bindings, { parameterId: "bkg0", kind: "background", targetId: "pat", targetKey: "0" }];
+    const c = multiPhaseCurves(phases, pattern(grid.map((x) => ({ x, yObs: 0 }))), params, withBkg);
+    expect(c.yBackground).toBeDefined();
+    expect(c.yBackground!.length).toBe(grid.length);
+    for (let i = 0; i < grid.length; i++) expect(c.yCalc[i]!).toBeGreaterThanOrEqual(c.yBackground![i]! - 1e-9);
+    // Without background terms there is no background curve.
+    expect(multiPhaseCurves(phases, pattern(grid.map((x) => ({ x, yObs: 0 }))), params.slice(0, 3), bindings).yBackground).toBeUndefined();
+  });
+});

@@ -162,6 +162,14 @@ Web resources accessed **2026-07-08**; DOIs verified against Crossref **2026-07-
   → [`refinement/factors.ts`](../src/core/refinement/factors.ts).
 - **Normal probability plot** — Abrahams, S. C. & Keve, E. T. (1971).
   *Acta Cryst.* **A27**, 157. → [`refinement/diagnostics.ts`](../src/core/refinement/diagnostics.ts).
+- **Durbin–Watson d in Rietveld analysis, critical value Q_D** — Hill, R. J. &
+  Flack, H. D. (1987). *J. Appl. Cryst.* **20**, 356–361;
+  Durbin, J. & Watson, G. S. (1950, 1951). *Biometrika* **37**, 409; **38**, 159.
+  → [`diagnostics/powderValidation.ts`](../src/core/diagnostics/powderValidation.ts).
+- **Analysis of variance by intensity and resolution (K, GooF), extinction
+  signature** — Sheldrick, G. M. (2008). *Acta Cryst.* **A64**, 112, and the
+  SHELXL manual; data/parameter and completeness thresholds after IUCr
+  checkCIF. → [`diagnostics/singleCrystalValidation.ts`](../src/core/diagnostics/singleCrystalValidation.ts).
 - **Affine-invariant ensemble MCMC (stretch move)** — Goodman, J. & Weare, J.
   (2010). "Ensemble samplers with affine invariance." *Commun. Appl. Math.
   Comput. Sci.* **5**, 65–80.

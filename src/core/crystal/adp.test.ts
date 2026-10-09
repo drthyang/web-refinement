@@ -7,6 +7,7 @@ import {
   toIsotropic,
   uIsoFromBIso,
   withAdpModel,
+  isPositiveDefiniteU,
 } from "@/core/crystal/adp";
 import { buildSpaceGroup } from "@/core/crystal/spaceGroups";
 import { buildStructureRefinement } from "@/core/workflow/structureRefinement";
@@ -75,5 +76,16 @@ describe("withAdpModel + refinement wiring", () => {
     expect(uModes.length).toBe(1);
     // Its seed equals the promoted U_iso.
     expect(uModes[0]!.value).toBeCloseTo(0.6 / EIGHT_PI_SQUARED, 6);
+  });
+});
+
+describe("isPositiveDefiniteU", () => {
+  it("accepts a physical ellipsoid and rejects a non-positive-definite tensor", () => {
+    expect(isPositiveDefiniteU([0.01, 0.012, 0.009, 0.002, -0.001, 0.0005])).toBe(true);
+    expect(isPositiveDefiniteU([0.01, 0.01, 0.01, 0, 0, 0])).toBe(true);
+    // A negative principal axis.
+    expect(isPositiveDefiniteU([0.01, -0.002, 0.01, 0, 0, 0])).toBe(false);
+    // Positive diagonal, but an off-diagonal larger than the axes allow.
+    expect(isPositiveDefiniteU([0.01, 0.01, 0.01, 0.012, 0, 0])).toBe(false);
   });
 });

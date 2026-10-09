@@ -91,3 +91,25 @@ export function adpForOperation(adp: DisplacementParameters, rotation: readonly 
   if (adp.kind === "isotropic") return adp;
   return { kind: "anisotropic", uAniso: rotateUAniso(adp.uAniso, rotation) };
 }
+
+/**
+ * Whether an anisotropic U tensor (U11, U22, U33, U12, U13, U23) is
+ * positive-definite, by Sylvester's criterion. Taking U to Cartesian axes is a
+ * congruence transform, which preserves definiteness, so the CIF-convention
+ * components are tested as they are. A tensor that is not positive-definite
+ * describes no physical vibration ellipsoid (checkCIF's "NPD" alert).
+ */
+export function isPositiveDefiniteU(u: readonly [number, number, number, number, number, number]): boolean {
+  const [u11, u22, u33, u12, u13, u23] = u;
+  if (!(u11 > 0)) return false;
+  if (!(u11 * u22 - u12 * u12 > 0)) return false;
+  const det = u11 * (u22 * u33 - u23 * u23) - u12 * (u12 * u33 - u23 * u13) + u13 * (u12 * u23 - u22 * u13);
+  return det > 0;
+}
+
+/** Labels of the sites whose ADP is unphysical: an anisotropic tensor that is not positive-definite. */
+export function nonPositiveDefiniteSites(structure: StructureModel): string[] {
+  return structure.sites
+    .filter((s) => s.adp.kind === "anisotropic" && !isPositiveDefiniteU(s.adp.uAniso))
+    .map((s) => s.label);
+}

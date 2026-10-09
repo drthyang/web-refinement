@@ -8,7 +8,7 @@ import { exampleMagnetic, magneticParameters, magneticBindings } from "@/example
 import { buildStructureRefinement } from "@/core/workflow/structureRefinement";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import { magneticPowderComponents } from "@/core/workflow/magneticPowder";
-import { powderReflectionObsCalc } from "@/core/workflow/obsCalc";
+import { powderReflectionObsCalc, type ReflectionObsCalc } from "@/core/workflow/obsCalc";
 
 /**
  * The Rietveld obs/calc decomposition must return I_obs = I_calc when the
@@ -242,5 +242,73 @@ describe("powderReflectionObsCalc — magnetic satellites", () => {
     expect(mag.length).toBeGreaterThan(0);
     const strongest = mag.reduce((a, r) => (r.iCalc > a.iCalc ? r : a), mag[0]!);
     expect(Math.abs(strongest.iObs / strongest.iCalc - 1)).toBeLessThan(0.1);
+  });
+});
+
+/**
+ * χ² attribution: the fit's misfit is shared among the reflections in
+ * proportion to their calculated intensity at each point, and the residual's
+ * shape under a peak tells an intensity error from a position/shape error.
+ */
+describe("powderReflectionObsCalc — χ² attribution", () => {
+  const structure = exampleStructure();
+  const grid = Array.from({ length: 1400 }, (_, i) => 10 + (i * (120 - 10)) / 1399);
+  const profile: PowderProfile = { shape: "gaussian" };
+  const empty: PowderPattern = {
+    id: "pat", name: "p", xUnit: "twoTheta",
+    radiation: { kind: "neutron", wavelength: 1.54 }, wavelength: 1.54,
+    points: grid.map((x) => ({ x, yObs: 0 })),
+  };
+  const spec = buildStructureRefinement(structure, empty, {
+    scale: 100, backgroundTerms: 2, width: 0.3, refineAdp: false, refinePositions: false,
+  });
+  const yCalc = powderCurves(structure, empty, spec.params, spec.bindings, profile).yCalc;
+  const twoThetaOf = (d: number): number => (2 * Math.asin(Math.min(1, 1.54 / (2 * d))) * 180) / Math.PI;
+  const self: PowderPattern = { ...empty, points: grid.map((x, i) => ({ x, yObs: yCalc[i] ?? 0 })) };
+  const strongest = powderReflectionObsCalc(structure, self, spec.params, spec.bindings, profile)
+    .reduce((a, r) => (r.iCalc > a.iCalc ? r : a));
+  const centre = twoThetaOf(strongest.d);
+
+  const attribute = (yObs: number[]): { rows: ReflectionObsCalc[]; total: number } => {
+    const pat: PowderPattern = { ...empty, points: grid.map((x, i) => ({ x, yObs: yObs[i]! })) };
+    const sigma = yObs.map((y) => Math.sqrt(Math.max(y, 1)));
+    const include = grid.map(() => true);
+    const rows = powderReflectionObsCalc(structure, pat, spec.params, spec.bindings, profile, null, null, [], "rietveld", { yCalc, sigma, include });
+    let total = 0;
+    for (let i = 0; i < grid.length; i++) total += ((yObs[i]! - yCalc[i]!) / sigma[i]!) ** 2;
+    return { rows, total };
+  };
+
+  it("an under-calculated peak carries the most χ² and reads as 'under'", () => {
+    const yObs = yCalc.map((c, i) => c * (1 + 0.15 * Math.exp(-0.5 * ((grid[i]! - centre) / 0.2) ** 2)));
+    const { rows, total } = attribute(yObs);
+    const top = rows.reduce((a, r) => ((r.chi2 ?? 0) > (a.chi2 ?? 0) ? r : a));
+    expect(Math.abs(top.d - strongest.d)).toBeLessThan(1e-3);
+    expect(top.misfitMean!).toBeGreaterThan(0);
+    expect(Math.abs(top.misfitLobe!)).toBeLessThan(Math.abs(top.misfitMean!));
+    // Attribution never exceeds the total, and the misfit is under the peaks.
+    const attributed = rows.reduce((a, r) => a + (r.chi2 ?? 0), 0);
+    expect(attributed).toBeLessThanOrEqual(total * (1 + 1e-9));
+    expect(attributed).toBeGreaterThan(0.5 * total);
+  });
+
+  it("a shifted pattern reads as a shape (± lobe) misfit", () => {
+    const shift = 0.05;
+    const at = (x: number): number => {
+      const t = ((x - 10) / (120 - 10)) * 1399;
+      const i = Math.max(0, Math.min(1398, Math.floor(t)));
+      const f = t - i;
+      return yCalc[i]! * (1 - f) + yCalc[i + 1]! * f;
+    };
+    const yObs = grid.map((x) => at(x - shift));
+    const { rows } = attribute(yObs);
+    const ranked = [...rows].sort((a, b) => (b.chi2 ?? 0) - (a.chi2 ?? 0)).slice(0, 5);
+    const shape = ranked.filter((r) => Math.abs(r.misfitLobe!) > Math.abs(r.misfitMean!));
+    expect(shape.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("adds no attribution unless asked", () => {
+    const rows = powderReflectionObsCalc(structure, self, spec.params, spec.bindings, profile);
+    expect(rows.every((r) => r.chi2 === undefined)).toBe(true);
   });
 });

@@ -30,8 +30,10 @@ X-ray PDF fit.
   reciprocal and real space: one engine, one UI, on any OS with a browser. It
   reads the files you already have and complements GSAS-II, Jana2020 and
   FullProf rather than replacing them. See [docs/COMPARISON.md](docs/COMPARISON.md).
-- **Transparent by design.** Fit quality is judged with F_obs vs F_calc and
-  normal-probability plots, not wR alone. Every result is cross-checked against
+- **Transparent by design.** Fit quality is judged in a Validation view, not by
+  wR alone: a verdict checklist, residual analysis (Durbin–Watson, cumulative
+  χ², worst peaks) for powder, and SHELXL's analysis of variance for single
+  crystal. Every result is cross-checked against
   established tools where possible, and the code is readable, tested TypeScript.
   See [docs/VALIDATION.md](docs/VALIDATION.md).
 

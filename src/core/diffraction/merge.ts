@@ -103,7 +103,7 @@ export function laueRotations(operations: readonly SymmetryOperation[]): Symmetr
  * lexicographically largest (h, k, l) among all Laue images. Stable and cheap —
  * used only as a grouping key.
  */
-function canonicalKey(rotations: readonly SymmetryOperation["rotation"][], h: number, k: number, l: number): string {
+export function canonicalKey(rotations: readonly SymmetryOperation["rotation"][], h: number, k: number, l: number): string {
   let best: Vec3 = [h, k, l];
   for (const R of rotations) {
     const t = transformIndices(R, h, k, l);

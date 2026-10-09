@@ -416,17 +416,36 @@ Never judge a fit by its R value alone. The definitions are in
 | Single crystal | R1, wR2, GooF | SHELX-style agreement factors on F² |
 | PDF | Rw | A relative measure: a PDF Rw runs higher than a Bragg wR for an equally good fit |
 
-- **F_obs vs F_calc**, in the powder **Validation** view: points should lie on
-  the dashed line. Click a point for its (hkl). On powder, click its chip to
-  jump to the peak.
-- **Normal probability**: a straight line with slope 1 and intercept 0 means
-  both the model and the uncertainties are right.
+- **Validation**, a view of the powder plot card and of the single-crystal
+  quality card, opens with a **Verdict**: one line per check, each passing,
+  worth a look, or to fix. The checks are the goodness of fit (below 1 is a
+  warning too), convergence (max shift/esd below 0.1), physical values, the
+  correlations and undetermined directions of the last refinement, and the
+  technique's own tests below.
+- On **powder**: the agreement set (Rp, Rwp, Rexp, GoF, and Rwp′/Rexp′ with
+  the background subtracted, which judge the peaks rather than the
+  background); the **Durbin–Watson** d against its critical value Q_D (d
+  below Q_D means neighbouring points miss together: a profile misfit, and
+  esds that are too small); R_Bragg and R_F per phase; the normalized residual
+  (y_obs − y_calc)/σ along the pattern with the **cumulative χ²** below it;
+  χ² per point in d-shells; and the **Worst peaks**, the reflections carrying
+  the most χ² with whether the residual under each is a shape or an intensity
+  error. A residual peak where no reflection of any phase lies is listed as
+  **unindexed**. Click the strip or a **view →** to open that spot in the
+  Refinement view.
+- On **single crystal**: R1 (I > 2σ and all), wR2, GooF, reflections per
+  parameter and completeness beside R_int and R_σ; **Fo² vs Fc²** (log axes by
+  default; switch to linear or |F|), coloured by |Δ|/σ; K = ⟨Fo²⟩/⟨Fc²⟩ and
+  GooF in equal-count bins of intensity and of resolution (SHELXL's analysis
+  of variance); and the largest outliers with sinθ/λ and Fc/Fc(max). Strong
+  reflections with Fo² < Fc² and K below 1 in the strongest bin are flagged as
+  extinction.
 - **Result**, in the panel footer, gives the status and cycles on one line,
   with ⚠ when there is a note. Click it to open the notes and χ² and wR per
   cycle. A note is **SVD dropped** (undetermined combinations, whose esds mean
   nothing), **High correlation:** (consider fixing one) or **At bound:**.
-- **Largest outliers · (Fo²−Fc²)/σ**, on the single-crystal page, lists the
-  worst reflections.
+- **Largest outliers · (Fo²−Fc²)/σ**, in the single-crystal Refinement view,
+  lists the worst reflections beside Fo² vs Fc² and the 3D model.
 - **Bond lengths**, in any 3D model, labels the bonds. **View** with a, b or c
   looks down that axis.
 

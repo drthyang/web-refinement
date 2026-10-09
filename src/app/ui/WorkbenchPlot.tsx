@@ -49,6 +49,9 @@ interface Props {
   /** Increment to zoom in on the currently-highlighted reflection, centred, at a
    *  moderate zoom (from "Show in pattern" in the F_obs/F_calc plot). */
   readonly focusPeakToken?: number;
+  /** Zoom in on this display-unit x, centred (from the Validation view's
+   *  residual strip). A new token re-runs the zoom; it also runs on mount. */
+  readonly focusPoint?: { readonly x: number; readonly token: number } | null;
   /**
    * A reflection spotlighted from elsewhere (e.g. a point clicked in the
    * F_obs/F_calc plot): its hkl ("h k l") and kind. Draws an arrow + guide line
@@ -193,6 +196,7 @@ export function WorkbenchPlot({
   showBackground = true,
   focusFitToken = 0,
   focusPeakToken = 0,
+  focusPoint = null,
   highlight: highlightSel = null,
   onHighlight,
   onPlotClick,
@@ -475,6 +479,16 @@ export function WorkbenchPlot({
     setView({ min: highlight.x - hw, max: highlight.x + hw });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on the command token only
   }, [focusPeakToken]);
+
+  // "Open this spot" command from the Validation view: the same moderate zoom
+  // as a reflection, centred on an arbitrary x (an unindexed peak, or wherever
+  // the residual strip was clicked).
+  useEffect(() => {
+    if (!focusPoint || !Number.isFinite(focusPoint.x)) return;
+    const hw = Math.max((fullMax - fullMin) * 0.04, 1e-9);
+    setView({ min: Math.max(fullMin, focusPoint.x - hw), max: Math.min(fullMax, focusPoint.x + hw) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on the command token only
+  }, [focusPoint?.token]);
 
   // --- pointer helpers -------------------------------------------------------
   const clientToX = useCallback(
