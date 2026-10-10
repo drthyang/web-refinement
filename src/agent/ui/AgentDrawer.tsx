@@ -1,5 +1,5 @@
 /**
- * The Agent drawer: the conversation with Claude (in-app chat) or the feed of
+ * The Agent drawer: the conversation with the model (in-app chat) or the feed of
  * Claude Code's calls (bridge), every tool call as a card, and an approval
  * card for each change waiting on the user. It sits beside the page, not over
  * it, so the plot and the parameter panel stay in view while Claude works.
@@ -10,23 +10,25 @@ import { color, fz, mono, radius } from "@/app/theme";
 import type { ActivityEntry } from "@/agent/executor";
 import type { AgentController, AgentMode, TranscriptItem } from "@/agent/useAgent";
 import { CHAT_MODELS, hasRefusalFallback } from "@/agent/chat-models";
+import { MIN_AGENT_CONTEXT, listOllamaModels, unreachableHint, type OllamaModel } from "@/agent/ollama";
+import { MATH_SPAN_SOURCE, mathInside, texPieces } from "@/agent/ui/texText";
 
 interface Props {
   readonly agent: AgentController;
   readonly onClose: () => void;
 }
 
-const MODE_LABEL: Record<AgentMode, string> = { "claude-code": "Claude Code", "api-key": "API key", proxy: "Local proxy" };
+const MODE_LABEL: Record<AgentMode, string> = { "claude-code": "Claude Code", "api-key": "API key", proxy: "Local proxy", ollama: "Ollama" };
 
 export function AgentDrawer({ agent, onClose }: Props): JSX.Element {
   const { settings } = agent;
   const [showSettings, setShowSettings] = useState(false);
   const chatMode = settings.mode !== "claude-code";
-  const needsKey = settings.mode === "api-key" && !agent.apiKey;
+  const needsSetup = (settings.mode === "api-key" && !agent.apiKey) || (settings.mode === "ollama" && !settings.ollamaModel);
   // First open with nothing set up: show the settings.
   useEffect(() => {
-    if (needsKey) setShowSettings(true);
-  }, [needsKey]);
+    if (needsSetup) setShowSettings(true);
+  }, [needsSetup]);
 
   return (
     <aside className="wb-agent" style={drawer} aria-label="Agent">
@@ -44,7 +46,7 @@ export function AgentDrawer({ agent, onClose }: Props): JSX.Element {
       </div>
       {showSettings && <Settings agent={agent} />}
       <Transcript agent={agent} />
-      {chatMode ? <Composer agent={agent} disabled={needsKey} /> : <BridgeHint agent={agent} />}
+      {chatMode ? <Composer agent={agent} disabled={needsSetup} /> : <BridgeHint agent={agent} />}
     </aside>
   );
 }
@@ -62,6 +64,9 @@ function StatusChip({ agent }: { agent: AgentController }): JSX.Element {
   } else if (settings.mode === "api-key" && !agent.apiKey) {
     text = "API key · not set";
     tone = "off";
+  } else if (settings.mode === "ollama") {
+    text = settings.ollamaModel ? `Ollama · ${settings.ollamaModel}` : "Ollama · no model";
+    if (!settings.ollamaModel) tone = "off";
   }
   const palette = tone === "ok" ? { bg: color.okBg, bd: color.okBorder, ink: color.okInk } : tone === "wait" ? { bg: color.noteBg, bd: color.noteBorder, ink: color.noteInk } : { bg: color.chipBg, bd: color.border, ink: color.secondary };
   return (
@@ -77,7 +82,7 @@ function Settings({ agent }: { agent: AgentController }): JSX.Element {
   const { settings, updateSettings } = agent;
   return (
     <div style={settingsBox}>
-      <div style={{ display: "flex", gap: 0, border: `1px solid ${color.control}`, borderRadius: radius.button, overflow: "hidden" }} role="radiogroup" aria-label="How the Agent reaches Claude">
+      <div style={{ display: "flex", gap: 0, border: `1px solid ${color.control}`, borderRadius: radius.button, overflow: "hidden" }} role="radiogroup" aria-label="How the Agent reaches a model">
         {(Object.keys(MODE_LABEL) as AgentMode[]).map((m) => (
           <button
             key={m}
@@ -119,7 +124,8 @@ function Settings({ agent }: { agent: AgentController }): JSX.Element {
           The dev server forwards to the API with <code style={code}>ANTHROPIC_API_KEY</code> from where you ran <code style={code}>npm run dev</code> (or <code style={code}>.env.local</code>), so the key never reaches this page. Local only: the published site has no proxy.
         </p>
       )}
-      {settings.mode !== "claude-code" && (
+      {settings.mode === "ollama" && <OllamaSettings agent={agent} />}
+      {(settings.mode === "api-key" || settings.mode === "proxy") && (
         <div style={{ display: "flex", gap: 8 }}>
           <label style={{ ...field, flex: 1 }}>
             <span style={fieldLabel}>Model</span>
@@ -135,7 +141,7 @@ function Settings({ agent }: { agent: AgentController }): JSX.Element {
           </label>
         </div>
       )}
-      {settings.mode !== "claude-code" && hasRefusalFallback(settings.model) && (
+      {(settings.mode === "api-key" || settings.mode === "proxy") && hasRefusalFallback(settings.model) && (
         <label style={{ ...field, flexDirection: "row", alignItems: "center", gap: 6 }} title="Off: every turn stays on the chosen model, so a session can be reproduced. On: if the model declines a turn, the API answers it with another model, and the conversation says which.">
           <input type="checkbox" checked={settings.fallback} onChange={(e) => updateSettings({ fallback: e.target.checked })} />
           <span style={{ fontSize: 12.5 }}>Fall back to another model if this one declines</span>
@@ -146,6 +152,76 @@ function Settings({ agent }: { agent: AgentController }): JSX.Element {
         <span style={{ fontSize: 12.5 }}>Auto-approve changes (this session)</span>
       </label>
     </div>
+  );
+}
+
+type ModelList = { readonly status: "loading" } | { readonly status: "ok"; readonly models: readonly OllamaModel[] } | { readonly status: "error"; readonly message: string };
+
+/** The Ollama server and a model on it, listed from the server itself. */
+function OllamaSettings({ agent }: { agent: AgentController }): JSX.Element {
+  const { settings, updateSettings } = agent;
+  const [list, setList] = useState<ModelList>({ status: "loading" });
+  const [refresh, setRefresh] = useState(0);
+  const chosen = useRef(settings.ollamaModel);
+  chosen.current = settings.ollamaModel;
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    setList({ status: "loading" });
+    // Wait for typing in the address to pause before asking the server.
+    const timer = setTimeout(() => {
+      listOllamaModels(settings.ollamaUrl, ctrl.signal).then(
+        (models) => {
+          if (ctrl.signal.aborted) return;
+          setList({ status: "ok", models });
+          // Nothing chosen yet, or the choice is gone: take the first that can call tools.
+          if (!models.some((m) => m.tools && m.name === chosen.current)) updateSettings({ ollamaModel: models.find((m) => m.tools)?.name ?? "" });
+        },
+        () => {
+          if (!ctrl.signal.aborted) setList({ status: "error", message: unreachableHint(settings.ollamaUrl, window.location.origin) });
+        },
+      );
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [settings.ollamaUrl, refresh, updateSettings]);
+
+  const models = list.status === "ok" ? list.models : [];
+  const picked = models.find((m) => m.name === settings.ollamaModel);
+  return (
+    <>
+      <label style={field}>
+        <span style={fieldLabel}>Ollama server</span>
+        <input style={input} value={settings.ollamaUrl} onChange={(e) => updateSettings({ ollamaUrl: e.target.value })} spellCheck={false} placeholder="http://localhost:11434" />
+      </label>
+      <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+        <label style={{ ...field, flex: 1, minWidth: 0 }}>
+          <span style={fieldLabel}>Model</span>
+          <select style={input} value={picked ? settings.ollamaModel : ""} disabled={models.length === 0} onChange={(e) => updateSettings({ ollamaModel: e.target.value })} aria-label="Ollama model">
+            {models.length === 0 && <option value="">{list.status === "loading" ? "Asking the server…" : "No models"}</option>}
+            {models.map((m) => (
+              <option key={m.name} value={m.name} disabled={!m.tools}>
+                {[m.name, m.parameterSize, m.context ? `${Math.round(m.context / 1024)}k context` : null, m.tools ? null : "no tools"].filter(Boolean).join(" · ")}
+              </option>
+            ))}
+          </select>
+        </label>
+        <IconButton title="List the server's models again" onClick={() => setRefresh((n) => n + 1)}>↻</IconButton>
+      </div>
+      {list.status === "error" && <p style={{ ...note, color: color.warnInk }}>{list.message}</p>}
+      {list.status === "ok" && models.length > 0 && !models.some((m) => m.tools) && (
+        <p style={{ ...note, color: color.warnInk }}>None of these models can call tools, and the Agent works only through them. Pull one that can (e.g. <code style={code}>ollama pull qwen3</code>).</p>
+      )}
+      {list.status === "ok" && models.length === 0 && <p style={{ ...note, color: color.warnInk }}>The server has no models. Pull one that can call tools (e.g. <code style={code}>ollama pull qwen3</code>).</p>}
+      {picked?.context != null && picked.context < MIN_AGENT_CONTEXT && (
+        <p style={{ ...note, color: color.noteInk }}>This model takes {Math.round(picked.context / 1024)}k tokens of context; the Agent's instructions alone are about 15k. Expect it to lose track in a long session.</p>
+      )}
+      <p style={note}>
+        The conversation goes only to this server. Local models follow the method less reliably than Claude: watch the approval cards. A page not served from this machine (the published site) also needs <code style={code}>OLLAMA_ORIGINS</code> set to its address where Ollama runs.
+      </p>
+    </>
   );
 }
 
@@ -177,7 +253,7 @@ function EmptyState({ mode }: { mode: AgentMode }): JSX.Element {
         </>
       ) : (
         <>
-          <p style={{ margin: "0 0 8px" }}>Ask about the fit on screen, or ask Claude to take the next step. It reads the analysis, judges it with MATERIA's tools, and asks before it changes anything.</p>
+          <p style={{ margin: "0 0 8px" }}>Ask about the fit on screen, or ask {mode === "ollama" ? "the model" : "Claude"} to take the next step. It reads the analysis, judges it with MATERIA's tools, and asks before it changes anything.</p>
           <p style={{ margin: 0 }}>For example: <i>“Assess the fit and suggest what to free next.”</i></p>
         </>
       )}
@@ -215,7 +291,7 @@ function ToolCard({ entry, onDecide }: { entry: ActivityEntry; onDecide: (id: st
   const tone = entry.status === "failed" ? color.warnInk : entry.status === "declined" ? color.faint : entry.status === "done" ? color.okInk : color.primary;
   const statusText = { waiting: "Needs approval", running: "Running…", done: "Done", declined: "Declined", failed: "Failed" }[entry.status];
   return (
-    <div style={{ ...toolCard, ...(waiting ? { borderColor: color.primaryTintBorder, background: color.primaryTintBg } : {}) }} data-tool={entry.tool} data-status={entry.status}>
+    <div style={{ ...toolCard, ...(waiting ? { border: `1px solid ${color.primaryTintBorder}`, background: color.primaryTintBg } : {}) }} data-tool={entry.tool} data-status={entry.status}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
         <span style={{ fontWeight: 600, fontSize: 12.5, color: color.ink }}>
           {entry.effect === "read" ? "◦ " : "● "}{entry.title}
@@ -250,7 +326,7 @@ function Composer({ agent, disabled }: { agent: AgentController; disabled: boole
       <textarea
         aria-label="Message the Agent"
         style={{ ...input, resize: "none", minHeight: 58, fontFamily: "inherit", lineHeight: 1.4 }}
-        placeholder={disabled ? "Add your API key in the settings first" : "Ask about the fit, or ask for the next step…"}
+        placeholder={disabled ? (agent.settings.mode === "ollama" ? "Pick a model in the settings first" : "Add your API key in the settings first") : "Ask about the fit, or ask for the next step…"}
         value={text}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}
@@ -293,7 +369,7 @@ function BridgeHint({ agent }: { agent: AgentController }): JSX.Element {
 
 // ── small pieces ────────────────────────────────────────────────────────────
 
-/** A safe, minimal Markdown subset: paragraphs, bullet/numbered lists, **bold**, `code`. */
+/** A safe, minimal Markdown subset: paragraphs, bullet/numbered lists, **bold**, `code`, and inline $math$ read as text. */
 function Markdown({ text }: { text: string }): JSX.Element {
   const blocks = text.split(/\n{2,}/);
   return (
@@ -312,20 +388,33 @@ function Markdown({ text }: { text: string }): JSX.Element {
   );
 }
 
+const INLINE_SOURCE = String.raw`(\*\*[^*]+\*\*|\`[^\`]+\`|${MATH_SPAN_SOURCE})`;
+
 function inline(s: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  const re = new RegExp(INLINE_SOURCE, "g");
   let last = 0;
   let m: RegExpExecArray | null;
   let k = 0;
   while ((m = re.exec(s))) {
     if (m.index > last) out.push(s.slice(last, m.index));
     const t = m[0];
-    out.push(t.startsWith("**") ? <b key={k++}>{t.slice(2, -2)}</b> : <code key={k++} style={code}>{t.slice(1, -1)}</code>);
+    if (t.startsWith("**")) out.push(<b key={k++}>{inline(t.slice(2, -2))}</b>);
+    else if (t.startsWith("`")) out.push(<code key={k++} style={code}>{t.slice(1, -1)}</code>);
+    else out.push(<TexText key={k++} tex={mathInside(t)} />);
     last = m.index + t.length;
   }
   if (last < s.length) out.push(s.slice(last));
   return out;
+}
+
+/** Inline TeX as plain text with sub- and superscripts (texText.ts). */
+function TexText({ tex }: { tex: string }): JSX.Element {
+  return (
+    <>
+      {texPieces(tex).map((p, i) => (p.script === "sub" ? <sub key={i}>{p.text}</sub> : p.script === "sup" ? <sup key={i}>{p.text}</sup> : <span key={i}>{p.text}</span>))}
+    </>
+  );
 }
 
 function fmtTokens(n: number): string {

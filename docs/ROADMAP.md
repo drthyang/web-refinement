@@ -425,7 +425,7 @@ the design and the generated tool list.
 - **Tools:** an MCP server delivers them, and its registry doubles as the
   headless API.
 - **In-app Agent:** Claude acts on the live powder page, through Claude Code, an
-  API key, or a local proxy; every change is an approved, undoable agent step
+  API key, or a local proxy, and so can a local model on Ollama; every change is an approved, undoable agent step
   ([AGENT_TOOLS.md](./AGENT_TOOLS.md#the-in-app-agent)). The other pages
   are next.
 - **Skills:** a powder Rietveld skill ships

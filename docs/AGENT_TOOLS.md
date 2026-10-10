@@ -350,7 +350,8 @@ external comparison records it.
 
 ## The in-app Agent
 
-The Agent puts Claude beside the analysis open in the browser. It reads the
+The Agent puts a model — Claude, or a local model on Ollama — beside the
+analysis open in the browser. It reads the
 live page, judges the fit with the tools above, and makes changes through the
 page's own controls. Open it with the **Agent** button in the header.
 
@@ -377,13 +378,14 @@ model learns when the user declines. "Auto-approve" skips the cards for the
 rest of the session. Every change is a step in History tagged `agent`
 (`HistoryStep.actor`), so ⌘Z undoes it like any other step.
 
-**Three ways to reach Claude.**
+**Four ways to reach a model.**
 
 | Mode | Where the model runs | Credentials | Works on |
 |---|---|---|---|
 | Claude Code | your Claude Code session, through the `materia-live` MCP server | your Claude Code login | `npm run dev` |
 | API key | the browser, with the Anthropic SDK | your Anthropic API key, kept in this browser | the dev server and the published site |
 | Local proxy | the browser; the dev server forwards to the API | `ANTHROPIC_API_KEY` where the dev server runs (or `.env.local`) | `npm run dev`, `npm run preview` |
+| Ollama | your Ollama server (a local model) | none | the dev server; the published site once Ollama allows its origin |
 
 - **Claude Code.** `.mcp.json` starts `materia-live` (`npm run mcp:live`) next
   to `materia`. It listens on `127.0.0.1:5199` (`MATERIA_LIVE_PORT`); the page
@@ -400,6 +402,19 @@ rest of the session. Every change is a step in History tagged `agent`
 - **Local proxy.** `<base>api/anthropic/` on the dev and preview servers
   ([`src/agent/proxy.ts`](../src/agent/proxy.ts)). Only the app's own
   pages may use it. The static build has no proxy.
+- **Ollama.** Ollama answers the Anthropic Messages API at
+  `<server>/v1/messages`, so the same chat loop, tools and approvals drive a
+  local model ([`src/agent/ollama.ts`](../src/agent/ollama.ts)). The page
+  talks to the server directly (default `http://localhost:11434`) and lists
+  its models from `/api/tags`; models that cannot call tools are shown but
+  not offered. Requests carry only plain headers, which Ollama's CORS rules
+  admit, and only the fields Ollama reads (no caching, effort or fallback).
+  Ollama's defaults allow pages on `localhost`; for the published site, start
+  Ollama with `OLLAMA_ORIGINS` set to its address. The instructions alone are
+  about 15k tokens, so pick a model with at least a 32k context. Checked with
+  `gemma4:26b` on Ollama 0.40: it read the fit, refined after approval,
+  assessed the result and stopped at the method's gate. Local models follow
+  the method less reliably than Claude; the approval cards are the guard.
 
 `node scripts/live-bridge-demo.mjs` drives an open page through the bridge
 the way Claude Code does, as a smoke test without a model.
@@ -407,7 +422,8 @@ the way Claude Code does, as a smoke test without a model.
 **How it is tested.** [`src/agent/`](../src/agent) tests run the tools on
 a real powder fit (the refinement engine, the assessment), the bridge through
 an MCP client, the chat loop against a stand-in API that streams scripted
-turns, and the proxy against a stubbed upstream.
+turns (as Claude and as Ollama), the Ollama model listing against a stand-in
+server, and the proxy against a stubbed upstream.
 
 ## Planned
 

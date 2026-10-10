@@ -8,11 +8,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityEntry, AgentExecutor, AgentHost, ToolRunner } from "@/agent/executor";
 import { BridgeClient, DEFAULT_BRIDGE_URL, type BridgeStatus } from "@/agent/bridgeClient";
-import type { ChatEffort, AgentChat } from "@/agent/chat";
+import type { ChatConfig, ChatEffort, AgentChat } from "@/agent/chat";
 import { API_KEY_KEY, SETTINGS_KEY, migrateLegacyKeys } from "@/agent/storage";
+import { DEFAULT_OLLAMA_URL } from "@/agent/ollama";
 
-/** How the Agent reaches Claude. */
-export type AgentMode = "claude-code" | "api-key" | "proxy";
+/** How the Agent reaches a model: Claude three ways, or a local model on Ollama. */
+export type AgentMode = "claude-code" | "api-key" | "proxy" | "ollama";
 
 export interface AgentSettings {
   readonly mode: AgentMode;
@@ -25,6 +26,9 @@ export interface AgentSettings {
   /** Let the API answer a declined turn with another model (off: every turn stays on `model`). */
   readonly fallback: boolean;
   readonly bridgeUrl: string;
+  /** The Ollama server, and the model on it (kept apart from `model`, the Claude choice). */
+  readonly ollamaUrl: string;
+  readonly ollamaModel: string;
 }
 
 export type TranscriptItem =
@@ -61,6 +65,8 @@ const DEFAULTS: AgentSettings = {
   rememberKey: false,
   fallback: false,
   bridgeUrl: DEFAULT_BRIDGE_URL,
+  ollamaUrl: DEFAULT_OLLAMA_URL,
+  ollamaModel: "",
 };
 
 let nextItem = 1;
@@ -101,10 +107,10 @@ export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => v
             },
             onActivity: (entry) => {
               setActivity((a) => ({ ...a, [entry.id]: entry }));
-              // A call from Claude Code has no chat turn to sit in: list it as it arrives.
-              if (entry.source === "claude-code") {
-                setTranscript((t) => (t.some((i) => i.kind === "tool" && i.entryId === entry.id) ? t : [...t, { kind: "tool", id: itemId(), entryId: entry.id }]));
-              }
+              // A card joins the conversation as its call starts, in the same update
+              // queue as the chat text: an effect would run after the next turn has
+              // already begun and put the card below that turn's reply.
+              setTranscript((t) => (t.some((i) => i.kind === "tool" && i.entryId === entry.id) ? t : [...t, { kind: "tool", id: itemId(), entryId: entry.id }]));
             },
           }),
       ));
@@ -148,6 +154,7 @@ export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => v
     if (!message || turn.current) return;
     const s = settingsRef.current;
     if (s.mode === "claude-code") return;
+    const config = chatConfig(s, apiKeyRef.current);
     const ctrl = new AbortController();
     turn.current = ctrl;
     setThinking(true);
@@ -165,7 +172,7 @@ export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => v
         chat.current ??= new mod.AgentChat(executor);
         await chat.current.send(
           message,
-          { transport: s.mode === "proxy" ? "proxy" : "api-key", apiKey: apiKeyRef.current, model: s.model, effort: s.effort, fallback: s.fallback },
+          config,
           {
             onAssistantStart: () => {
               const id = itemId();
@@ -185,7 +192,7 @@ export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => v
           ctrl.signal,
         );
       } catch (e) {
-        setTranscript((t) => [...t, { kind: "notice", id: itemId(), text: mod.describeChatError(e, s.mode === "proxy" ? "proxy" : "api-key"), tone: "error" }]);
+        setTranscript((t) => [...t, { kind: "notice", id: itemId(), text: mod.describeChatError(e, config), tone: "error" }]);
       } finally {
         turn.current = null;
         setThinking(false);
@@ -194,16 +201,6 @@ export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => v
       }
     })();
   }, [executor]);
-
-  // Tool cards join the chat as their calls start.
-  useEffect(() => {
-    const chatEntries = Object.values(activity).filter((e) => e.source === "chat");
-    setTranscript((t) => {
-      const shown = new Set(t.filter((i) => i.kind === "tool").map((i) => (i as { entryId: string }).entryId));
-      const fresh = chatEntries.filter((e) => !shown.has(e.id));
-      return fresh.length ? [...t, ...fresh.map((e) => ({ kind: "tool" as const, id: itemId(), entryId: e.id }))] : t;
-    });
-  }, [activity]);
 
   const stop = useCallback(() => {
     turn.current?.abort();
@@ -229,6 +226,12 @@ export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => v
   const pending = Object.values(activity).filter((e) => e.status === "waiting");
 
   return { settings, updateSettings, apiKey, setApiKey, transcript, activity, pending, decide, bridge, thinking, send, stop, clear, usage };
+}
+
+/** What one chat message runs on, from the settings. */
+function chatConfig(s: AgentSettings, apiKey: string): ChatConfig {
+  if (s.mode === "ollama") return { transport: "ollama", ollamaUrl: s.ollamaUrl, model: s.ollamaModel, effort: s.effort };
+  return { transport: s.mode === "proxy" ? "proxy" : "api-key", apiKey, model: s.model, effort: s.effort, fallback: s.fallback };
 }
 
 // ── storage (guarded: private windows and blocked site data throw) ─────────
