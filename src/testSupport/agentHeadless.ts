@@ -16,11 +16,12 @@ import { refine as refineProblem } from "@/core/refinement/engine";
 import { boxcarWindows } from "@/core/workflow/pdfBoxcar";
 import type { Session } from "@/app/powderSession";
 import { powderRestraints } from "@/app/powderSpec";
-import { powderCurves } from "@/core/workflow/powder";
 import { runPowderRefinement } from "@/workers/runPowder";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
 import { excludedPointMask } from "@/core/refinement/factors";
-import type { RefinementResult } from "@/core/refinement/types";
+import type { RefinementOptions, RefinementResult } from "@/core/refinement/types";
+import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
+import { magneticHandle, sessionCurves } from "@/testSupport/magneticHeadless";
 import type { StepKind } from "@/core/project/history";
 
 /**
@@ -33,7 +34,7 @@ export function sessionPort(start: Session): { port: PowderAgentPort; calls: str
   let fitRange: { min: number; max: number } | null = null;
   const calls: string[] = [];
   const state = (): PowderLiveState => {
-    const curves = powderCurves(s.structure, s.pattern, s.powderParams, s.powderBindings, s.powderProfile);
+    const curves = sessionCurves(s);
     const xs = curves.x;
     const excluded = excludedPointMask(curves.yObs);
     let num = 0;
@@ -54,7 +55,7 @@ export function sessionPort(start: Session): { port: PowderAgentPort; calls: str
       parameters: s.powderParams,
       bindings: s.powderBindings,
       profile: s.powderProfile,
-      magnetic: null,
+      magnetic: s.magnetic ?? null,
       result,
       instrument: null,
       fitRange,
@@ -71,8 +72,29 @@ export function sessionPort(start: Session): { port: PowderAgentPort; calls: str
       restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
     };
   };
+  /** The fit as the page runs it: nuclear + magnetic once a magnetic model is on the session. */
+  const fitOnce = (options: Partial<RefinementOptions>): RefinementResult =>
+    s.magnetic
+      ? refineProblem(buildMagneticPowderProblem(s.structure, s.magnetic, s.pattern, s.powderParams, s.powderBindings, { shape: s.powderProfile.shape, ...(s.powderProfile.eta !== undefined ? { eta: s.powderProfile.eta } : {}) }), options)
+      : runPowderRefinement({
+        type: "refinePowder",
+        requestId: 0,
+        structure: s.structure,
+        pattern: s.pattern,
+        parameters: s.powderParams,
+        bindings: s.powderBindings,
+        shape: s.powderProfile.shape,
+        restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
+        options,
+      });
   const refine = async (): Promise<string | null> => {
     calls.push("refine");
+    if (s.magnetic) {
+      const r = fitOnce({ maxIterations: 20 });
+      s = { ...s, powderParams: s.powderParams.map((p) => ({ ...p, value: r.parameters[p.id] ?? p.value })) };
+      result = r;
+      return null;
+    }
     const r = runPowderRefinement({
       type: "refinePowder",
       requestId: 0,
@@ -113,21 +135,17 @@ export function sessionPort(start: Session): { port: PowderAgentPort; calls: str
     thorough: refine,
     probe: async (options) => {
       calls.push("probe");
-      return runPowderRefinement({
-        type: "refinePowder",
-        requestId: 0,
-        structure: s.structure,
-        pattern: s.pattern,
-        parameters: s.powderParams,
-        bindings: s.powderBindings,
-        shape: s.powderProfile.shape,
-        restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
-        options,
-      });
+      return fitOnce(options);
     },
     cancel: () => calls.push("cancel"),
     reset: () => calls.push("reset"),
+    magnetic: () => magnetic,
+    openStep: (step) => calls.push(`step ${step}`),
   };
+  const magnetic = magneticHandle(() => s, (next) => {
+    s = next;
+    result = null;
+  }, (step) => calls.push(`step ${step}`));
   return { port, calls, session: () => s };
 }
 

@@ -230,9 +230,10 @@ Report the outcome as: GoF + the key refined values with ESDs + which correction
   when it fights back. Report each phase's **weight fraction** (Hill–Howard, from the
   refined scales: `get_state` gives `phaseFractions` with esds) and say what it rests on —
   the crystalline phases in the model only, no microabsorption correction.
-- **Magnetic**: once the nuclear structure is converged, hand off to the magnetic-analysis
-  flow (`build_magnetic_model`, `list_magnetic_subgroups`, `search_propagation_vector`,
-  `refine_magnetic_powder`) — that's a separate methodology, not this one.
+- **Magnetic**: once the nuclear structure is converged, hand off to the `magnetic-analysis`
+  skill (in the app, the powder page's magnetic analysis step; over MCP,
+  `search_propagation_vector`, `list_magnetic_subgroups`, `build_magnetic_model`,
+  `refine_magnetic_powder`) — a separate method, not this one.
 
 ## MCP tool map (quick reference)
 

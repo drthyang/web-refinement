@@ -4,7 +4,7 @@
  * own data, with the checks that say whether it got it right this time.
  */
 
-import { impurityD, mn3gaImpuritySession, mn3gaMisfitSession, mn3gaSession, pdfPage, powderPage } from "@/agent/evals/pages";
+import { MAGNETIC_TRUTH, impurityD, mn3gaImpuritySession, mn3gaMagneticSession, mn3gaMisfitSession, mn3gaSession, pdfPage, powderPage } from "@/agent/evals/pages";
 import {
   adaptsAfterRefusal,
   coversStages,
@@ -12,6 +12,8 @@ import {
   explains,
   fitWindowIs,
   liftsNoRule,
+  magneticGroupIs,
+  magneticKIs,
   mentionsD,
   noPhantomPeaks,
   noStall,
@@ -86,6 +88,15 @@ export const SCENARIOS: readonly EvalScenario[] = [
     messages: ["Restrict the fit to d-spacings from 1.2 to 3 Å."],
     autonomy: "ask",
     checks: [fitWindowIs("dSpacing", 1.2, 3, 0.01), noStall],
+  },
+  {
+    id: "magnetic-structure",
+    title: "Solves a magnetic structure on the magnetic step",
+    origin: "User report: the Agent could not act on the magnetic analysis step.",
+    page: () => powderPage(mn3gaMagneticSession()),
+    messages: ["The nuclear structure is refined. Find the magnetic structure."],
+    autonomy: "auto",
+    checks: [readsMethodFirst, ran("search_propagation_vector"), magneticKIs([MAGNETIC_TRUTH.k[0], MAGNETIC_TRUTH.k[1], MAGNETIC_TRUTH.k[2]]), magneticGroupIs(MAGNETIC_TRUTH.id), ran("refine_moments"), noStall],
   },
   {
     id: "pdf-method",

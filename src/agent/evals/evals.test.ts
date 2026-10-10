@@ -108,6 +108,20 @@ const REPLAYS: Readonly<Record<string, Replay>> = {
     ],
     catches: ["sets the fit window to 1.2–3 (dSpacing)"],
   },
+  "magnetic-structure": {
+    good: [
+      { text: "The magnetic step's method first.", calls: [{ name: "read_skill", input: { name: "magnetic-analysis" } }, { name: "magnetic_state" }] },
+      { calls: [{ name: "search_propagation_vector" }] },
+      { text: "Several k fit the three satellites; the simplest is (0 0 ½).", calls: [{ name: "set_propagation_vector", input: { k: [0, 0, "1/2"] } }] },
+      { calls: [{ name: "rank_magnetic_groups" }] },
+      { calls: [{ name: "choose_magnetic_group", input: { id: "G2" } }, { name: "refine_moments" }] },
+      { text: "k = (0 0 ½), group G2 (the best of the maximal groups), with the Mn moment fitted; the powder fixes only its angle to c." },
+    ],
+    bad: [
+      { text: "I can't act on the magnetic analysis step: open the Magnetic tab and run the k-search there." },
+    ],
+    catches: ["calls search_propagation_vector", "sets k = (0, 0, 0.5) on the magnetic step", "chooses the magnetic group G2", "calls refine_moments"],
+  },
   "pdf-method": {
     good: [
       { calls: [PDF, { name: "refine" }] },

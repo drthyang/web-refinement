@@ -12,6 +12,7 @@ import { z } from "zod";
 import { PAGE_LABEL, liveTool, type LiveToolSpec, type ToolEffect } from "@/agent/tools";
 import type { AgentPort, LiveState, PdfLiveState, PowderLiveState } from "@/agent/port";
 import { changePowder, describePowderChange, powderNoOp, readPowderTool } from "@/agent/powderTools";
+import { changeMagnetic, describeMagneticChange, isMagneticTool, magneticNoOp, magneticOutcome, readMagneticTool } from "@/agent/magneticTools";
 import { changePdf, describePdfChange, pdfNoOp, readPdfTool } from "@/agent/pdfTools";
 import type { LiveToolHost } from "@/agent/liveCommon";
 import { PROBE_OPTIONS, correlationRefusal, pairText, readCorrelations, refusalLine } from "@/agent/correlationCheck";
@@ -178,7 +179,9 @@ export class AgentExecutor implements ToolRunner {
         }
         // Let the drawer paint "running" before a heavy synchronous analysis.
         await new Promise((r) => setTimeout(r, 0));
-        let out = port.technique === "pdf" ? readPdfTool(spec.name, input, port, this.host) : readPowderTool(spec.name, input, port, this.host);
+        let out = port.technique === "pdf" ? readPdfTool(spec.name, input, port, this.host)
+          : isMagneticTool(spec.name) ? await readMagneticTool(spec.name, input, port)
+            : readPowderTool(spec.name, input, port, this.host);
         if (spec.name === "check_cell_symmetry") this.noteCellCheck(port, out as { passed?: boolean; unindexedPeaks?: unknown[]; absences?: { violated?: unknown[] } });
         if (spec.name === "review_symmetry") this.noteSymmetryReview(port, out as { observedForbidden?: unknown[]; candidates?: { name: string }[] });
         if (spec.name === "get_state") out = { ...(out as object), method: this.methodView(port) };
@@ -188,19 +191,25 @@ export class AgentExecutor implements ToolRunner {
 
       // A change: only once the page's method has been read, never while a fit
       // runs; then ask, then act as the agent.
-      const method = PAGE_METHOD[port.technique];
+      const method = spec.skill ?? PAGE_METHOD[port.technique];
       if (!this.skillsRead.has(method)) {
-        throw new Error(`read the method first: call read_skill with name "${method}" — it is how the user works on this page, and changes wait until it has been read in this conversation`);
+        const what = spec.skill ? `it is how the user works on this step` : `it is how the user works on this page`;
+        throw new Error(`read the method first: call read_skill with name "${method}" — ${what}, and changes wait until it has been read in this conversation`);
       }
       if (spec.name === "allow_exception") return await this.allowException(port, input as { rule: MethodRule; reason: string }, entry, update);
       const before = port.state();
       if (before.busy) throw new Error("a refinement is running — wait for it to finish, or call cancel_refinement");
-      const noOp = port.technique === "pdf" ? pdfNoOp(spec, input, before as PdfLiveState) : powderNoOp(spec, input, before as PowderLiveState);
+      const magnetic = port.technique === "powder" && isMagneticTool(spec.name);
+      const noOp = port.technique === "pdf" ? pdfNoOp(spec, input, before as PdfLiveState)
+        : magnetic ? magneticNoOp(spec.name, input, port)
+          : powderNoOp(spec, input, before as PowderLiveState);
       if (noOp) {
         update({ status: "done", outcome: "No change" });
         return this.respond({ unchanged: true, note: noOp });
       }
-      let preview = port.technique === "pdf" ? describePdfChange(spec, input, before as PdfLiveState) : describePowderChange(spec, input, before as PowderLiveState);
+      let preview = port.technique === "pdf" ? describePdfChange(spec, input, before as PdfLiveState)
+        : magnetic ? describeMagneticChange(spec.name, input, port)
+          : describePowderChange(spec, input, before as PowderLiveState);
       // The method's firm rules, then its order (a note, not a refusal).
       const key = keyOfState(port.technique, before);
       const freeBefore = before.parameters.filter((p) => !p.fixed && !p.expression);
@@ -242,7 +251,9 @@ export class AgentExecutor implements ToolRunner {
       // step holds only what the agent changed.
       this.host.recordNow("edit");
       const changed = await this.host.asAgent(async () => {
-        const n = port.technique === "pdf" ? await changePdf(spec.name, input, port, this.host) : await changePowder(spec.name, input, port, this.host);
+        const n = port.technique === "pdf" ? await changePdf(spec.name, input, port, this.host)
+          : magnetic ? await changeMagnetic(spec.name, input, port)
+            : await changePowder(spec.name, input, port, this.host);
         await this.host.settle();
         const kind = STEP_KIND[spec.name];
         if (kind) {
@@ -261,6 +272,7 @@ export class AgentExecutor implements ToolRunner {
         ...changeOutcome(spec.name, before, after, this.currentStep(), note),
         ...(typeof changed === "object" ? changed.data : {}),
         ...(orderNote ? { methodNote: orderNote } : {}),
+        ...(magnetic ? magneticOutcome(spec.name, this.requirePort() as typeof port) : {}),
       };
       update({ status: "done", outcome: outcomeLine(spec.name, before, after, note) });
       return this.respond(out);

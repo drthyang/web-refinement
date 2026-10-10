@@ -13,6 +13,7 @@
  * to the page until it gets its own.
  */
 
+import type { MagneticAgentHandle } from "@/agent/magneticPort";
 import type { MutableRefObject } from "react";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PdfPattern, PowderPattern } from "@/core/diffraction/types";
@@ -101,6 +102,10 @@ export interface PowderAgentPort {
   readonly cancel: () => void;
   /** Every parameter back to its starting value. */
   readonly reset: () => void;
+  /** The magnetic analysis step's controls (agent/magneticPort.ts); null while it has none. */
+  readonly magnetic?: () => MagneticAgentHandle | null;
+  /** Show a step of the page: 0 the refinement, 1 the magnetic analysis. */
+  readonly openStep?: (step: 0 | 1) => void;
 }
 
 /** The PDF page as the Agent reads it — one render's state. */

@@ -10,6 +10,12 @@ import { exampleStructure } from "@/examples/mn3ga";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { pdfPort, sessionPort } from "@/testSupport/agentHeadless";
 import { runPowderRefinement } from "@/workers/runPowder";
+import { magneticSubgroupLattice, latticeRepresentatives, latticeCandidateLabel } from "@/core/magnetic/subgroupLattice";
+import { buildMagneticModel } from "@/core/magnetic/momentModel";
+import { applyMagneticMoments } from "@/core/workflow/magnetic";
+import { magneticComponentCurve } from "@/core/workflow/magneticPowder";
+import { powderCurves } from "@/core/workflow/powder";
+import type { Vec3 } from "@/core/math/types";
 import { powderRestraints } from "@/app/powderSpec";
 
 const WAVELENGTH = 1.54;
@@ -108,6 +114,35 @@ export function mn3gaImpuritySession(): Session {
   });
   const withLine = { ...s, pattern: { ...s.pattern, points } };
   return prefit(withLine, scaleAndBackground(withLine));
+}
+
+/** The magnetic structure behind `mn3gaMagneticSession`: k, the group (its id on the page) and the Mn moment. */
+export const MAGNETIC_TRUTH = { k: [0, 0, 0.5] as Vec3, id: "G2", moment: 2.5 } as const;
+
+/**
+ * Mn₃Ga below an (invented) ordering temperature: the nuclear pattern at the
+ * page's own parameters (peak width at its true 0.5°) plus the magnetic
+ * scattering of MAGNETIC_TRUTH, with seeded counting noise. The nuclear model
+ * is right from the start, so what the fit leaves is the magnetic satellites
+ * at l = ½.
+ */
+export function mn3gaMagneticSession(): Session & { readonly truthGroup: string } {
+  const s0 = newSession(exampleStructure());
+  const params = s0.powderParams.map((p) => (p.id === "width" ? { ...p, value: TRUE_WIDTH } : p));
+  const reps = latticeRepresentatives(magneticSubgroupLattice(s0.structure.spaceGroup.operations, MAGNETIC_TRUTH.k));
+  const truth = reps[Number(MAGNETIC_TRUTH.id.slice(1)) - 1]!;
+  const built = buildMagneticModel(s0.structure, MAGNETIC_TRUTH.k, ["Mn1"], [...truth.candidate.operations], { moment: 2, tieSameSite: true, tieEqualMagnitude: false, flippedUnits: [] });
+  const amplitudes = Object.fromEntries(built.params.map((p) => [p.id, MAGNETIC_TRUTH.moment]));
+  const magnetic = applyMagneticMoments(built.magnetic, built.bindings, amplitudes);
+  const nuclear = powderCurves(s0.structure, s0.pattern, params, s0.powderBindings, s0.powderProfile).yCalc;
+  const mag = magneticComponentCurve(s0.structure, magnetic, s0.pattern, params, s0.powderBindings, s0.powderProfile);
+  const noise = gaussian(7);
+  const points = s0.pattern.points.map((p, i) => {
+    const y = nuclear[i]! + mag[i]!;
+    const sigma = Math.sqrt(Math.max(y, 1));
+    return { ...p, yObs: y + sigma * noise(), sigma };
+  });
+  return { ...s0, powderParams: params, pattern: { ...s0.pattern, points }, truthGroup: latticeCandidateLabel(truth).symbol };
 }
 
 export function powderPage(session: Session): PowderAgentPort {

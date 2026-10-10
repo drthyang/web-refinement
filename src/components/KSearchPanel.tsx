@@ -59,6 +59,7 @@ import type { MagneticExploration } from "@/app/reportInputs";
 import { structureToCif, magneticStructureToMcif } from "@/core/export/cif";
 import { downloadText } from "@/app/download";
 import { card as themeCard, color as theme, mono as themeMono, uppercaseLabel as themeLabel, resetRangeBtn, space, toolbarBtn } from "@/app/theme";
+import { candidateId, candidateIndex, candidateView, selectionView, type KCandidateView, type MagneticAgentHandle } from "@/agent/magneticPort";
 
 // Lazy so three.js stays in its own chunk (only loaded when a group is previewed).
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
@@ -204,6 +205,7 @@ export function KSearchPanel({
   allowRefineK = false,
   baselineAgreement = null,
   preselect = null, onReportModel,
+  agentHandleRef,
 }: {
   structure: StructureModel;
   /** The BASE (as-loaded) primary structure for the powder moments fit — the
@@ -274,6 +276,8 @@ export function KSearchPanel({
    * model under exploration. Called with null when no candidate is selected.
    */
   onReportModel?: (model: MagneticExploration | null) => void;
+  /** Where this page publishes its controls for the Agent (agent/magneticPort.ts). */
+  agentHandleRef?: { current: MagneticAgentHandle | null };
 }): JSX.Element {
   const ions = useMemo(() => magneticIonCandidates(structure), [structure]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(ions.map((i) => i.siteLabel)));
@@ -867,8 +871,8 @@ export function KSearchPanel({
     setRank((s) => ({ ...s, running: false }));
   }
 
-  async function runRefine(): Promise<void> {
-    if (!canRefine || !magBuild) return;
+  async function runRefine(): Promise<number | null> {
+    if (!canRefine || !magBuild) return null;
     setRefining(true);
     setRefineWR(null);
     try {
@@ -879,6 +883,7 @@ export function KSearchPanel({
         return next;
       });
       setRefineWR(agreement);
+      return agreement;
     } finally {
       setRefining(false);
     }
@@ -889,13 +894,15 @@ export function KSearchPanel({
    *  maxQ is disabled: the curated checkbox list is now the authoritative
    *  criterion — a hidden low-Q cut would silently drop peaks the user ticked
    *  and desynchronize the matched counts from the "N used" chip. */
-  function runKSearch(): void {
+  function runKSearch(): KCandidate[] {
     const weights = hasSignificance ? includedPeaks.map((p) => Math.min(p.significance ?? 1, 20)) : undefined;
-    setResults(searchPropagationVector(structure.cell, includedPeaks.map((p) => p.d), {
+    const found = searchPropagationVector(structure.cell, includedPeaks.map((p) => p.d), {
       tolerance: 0.02,
       maxQ: 0,
       ...(weights ? { weights } : {}),
-    }));
+    });
+    setResults(found);
+    return found;
   }
 
   function toggleIon(label: string): void {
@@ -906,6 +913,102 @@ export function KSearchPanel({
     });
   }
 
+
+  // The Agent drives this page through the same state and handlers the
+  // controls use (agent/magneticPort.ts). Republished every render, so a call
+  // sees what is on screen.
+  useEffect(() => {
+    if (!agentHandleRef) return;
+    const kView = (c: KCandidate): KCandidateView => ({ k: [c.k[0], c.k[1], c.k[2]], label: c.label, matched: c.matched, total: c.total, rmsd: c.rmsd });
+    const chosen = framework === "msg" && selIdx != null ? reps[selIdx] : undefined;
+    agentHandleRef.current = {
+      state: () => ({
+        ions: ions.map((i) => ({ label: i.siteLabel, element: i.element, selected: selected.has(i.siteLabel) })),
+        peaks: peakRows.map((p) => ({
+          n: p.idx,
+          d: p.d,
+          ...(p.significance !== undefined ? { sigmas: p.significance } : {}),
+          ...(p.nearNuclear ? { near: `${p.nearNuclear.phaseLabel} ${p.nearNuclear.hkl}` } : {}),
+          included: p.included,
+          manual: !!p.manual,
+        })),
+        kSearch: results ? results.slice(0, 8).map(kView) : null,
+        k: [k[0], k[1], k[2]],
+        kDescription: describePropagation(kClass),
+        kUnsupported,
+        candidates: reps.map((r, i) => candidateView(r, i, repMomentDims[i] ?? 0, rank.results[r.candidate.id])),
+        selected: chosen && magBuild && appliedMagnetic ? selectionView(chosen, selIdx!, structure, magBuild.params, resolvedAmps, appliedMagnetic, refineWR) : null,
+        ties: { sameSite: tieMoments, magnitudes: tieMagnitudes ? tieScope : false },
+        baselineAgreement,
+        best: bestRankedId ? candidateId(reps.findIndex((r) => r.candidate.id === bestRankedId)) : null,
+        canFit,
+        canRefineK,
+      }),
+      searchK: () => {
+        if (includedPeaks.length === 0) throw new Error("no residual peak is included for the k-search — the nuclear fit leaves none, or every one sits on a nuclear reflection");
+        return runKSearch().slice(0, 8).map(kView);
+      },
+      setK: (kk) => applyK([kk[0], kk[1], kk[2]]),
+      selectIons: (labels) => {
+        const known = new Set(ions.map((i) => i.siteLabel));
+        const unknown = labels.filter((l) => !known.has(l));
+        if (unknown.length > 0) throw new Error(`not a magnetic ion site: ${unknown.join(", ")} — the sites are ${[...known].join(", ")}`);
+        setSelected(new Set(labels));
+      },
+      setTies: (t) => {
+        if (t.sameSite !== undefined) setTieMoments(t.sameSite);
+        if (t.magnitudes !== undefined) {
+          setTieMagnitudes(t.magnitudes !== false);
+          if (t.magnitudes) setTieScope(t.magnitudes);
+        }
+      },
+      rank: async (scope) => {
+        if (!canFit) throw new Error(kUnsupported ?? "the moments cannot be fitted on this page (no refinable pattern)");
+        await rankCandidates(scope);
+      },
+      choose: (id) => {
+        const i = candidateIndex(id, reps.length);
+        const r = reps[i]!;
+        const entry = rank.results[r.candidate.id];
+        setFramework("msg");
+        if (entry?.status === "ok") pendingSeed.current = { sig: magOpsSignature(r.candidate.operations), values: entry.values };
+        setSelIdx(i);
+        setOpenIndices((open) => new Set([...open, r.index]));
+      },
+      refineMoments: async () => {
+        if (!magBuild) throw new Error("choose a magnetic group first");
+        if (magBuild.params.length === 0) throw new Error("the chosen group allows no moment on the chosen ions");
+        if (!canRefine) throw new Error(kUnsupported ?? "the moments cannot be fitted on this page");
+        return runRefine();
+      },
+      apply: (show) => {
+        if (!onApply) throw new Error("this page cannot show a model on the refinement pattern");
+        if (!show) {
+          onApply(null);
+          return;
+        }
+        if (!magBuild) throw new Error("choose a magnetic group first");
+        onApply(applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps));
+      },
+      continueToRefinement: (withK) => {
+        if (!onContinue) throw new Error("this page cannot hand a model to the refinement page");
+        if (!magBuild) throw new Error("choose a magnetic group first");
+        if (kUnsupported) throw new Error(kUnsupported);
+        if (withK && !canRefineK) throw new Error(kRows?.notes.join(" ") || "k cannot refine with this model");
+        onContinue(
+          applyMagneticMoments(magBuild.magnetic, magBuild.bindings, resolvedAmps),
+          [
+            ...magBuild.params.map((p) => ({ ...p, value: resolvedAmps[p.id] ?? p.value, initialValue: resolvedAmps[p.id] ?? p.value })),
+            ...(withK ? kRows!.params : []),
+          ],
+          [...magBuild.bindings, ...(withK ? kRows!.bindings : [])],
+        );
+      },
+    };
+  });
+  useEffect(() => () => {
+    if (agentHandleRef) agentHandleRef.current = null;
+  }, [agentHandleRef]);
 
   // The candidate drawn ON the pattern: the nuclear fit plus this model's
   // magnetic contribution at the current amplitudes, the magnetic part also as

@@ -88,6 +88,7 @@ import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { type Session, buildSpecFor, DEFAULT_INSTRUMENT, SYNTHETIC_SOURCE, EMPTY_SOURCE } from "@/app/powderSession";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { AgentLink } from "@/agent/link";
+import type { MagneticAgentHandle } from "@/agent/magneticPort";
 
 // Lazy so three.js (~550 kB) only loads when the user opens the 3D view.
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
@@ -1216,6 +1217,8 @@ export function PowderWorkbench({
   // The magnetic page's current candidate, for the report — published by
   // KSearchPanel; null when nothing is selected there or the page is closed.
   const exploredMagnetic = useRef<MagneticExploration | null>(null);
+  // The magnetic page's controls for the Agent, published by KSearchPanel.
+  const magneticHandle = useRef<MagneticAgentHandle | null>(null);
   const publishExploration = useCallback((m: MagneticExploration | null): void => {
     exploredMagnetic.current = m;
   }, []);
@@ -1334,6 +1337,8 @@ export function PowderWorkbench({
       probe: (options) => powderFit(options),
       cancel: cancelPowder,
       reset: resetPowderParams,
+      magnetic: () => magneticHandle.current,
+      openStep: (which) => onStep(which),
     });
   });
   useEffect(() => () => agentLink?.release("powder"), [agentLink]);
@@ -1832,6 +1837,7 @@ export function PowderWorkbench({
               onContinue={continueRefinementWithMagnetic}
               allowRefineK
               onReportModel={publishExploration}
+              agentHandleRef={magneticHandle}
             />
           </div>
         );

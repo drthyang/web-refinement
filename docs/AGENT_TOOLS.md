@@ -397,7 +397,8 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
 - Read tools run at once: `get_state`, `assess_refinement`,
   `suggest_next_steps`, `rank_next_parameters`, `check_cell_symmetry`,
   `find_unexplained_peaks`, `review_symmetry`, `bond_geometry`,
-  `interpret_structure`, `read_skill`, `read_ref`. The analysis tools are the MCP handlers above, fed
+  `interpret_structure`, `read_skill`, `read_ref`, and on the magnetic step
+  `magnetic_state`, `search_propagation_vector`, `rank_magnetic_groups`. The analysis tools are the MCP handlers above, fed
   from what is on screen.
 - `read_skill` returns a skill whole, as Markdown (not cut to the ref budget),
   with the names of its references; with `reference` it returns one of them.
@@ -448,8 +449,25 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   untouched.
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
   `set_adp_model`, `set_site_ties`, `set_fit_range`, `refine`,
-  `reset_parameters`, `go_to_step`.
+  `reset_parameters`, `go_to_step`, and on the magnetic step
+  `set_propagation_vector`, `select_magnetic_ions`, `set_moment_ties`,
+  `choose_magnetic_group`, `refine_moments`, `show_magnetic_model`,
+  `continue_magnetic_refinement`.
   Each is the page's own handler — the Agent's `refine` is the Refine button.
+- **The magnetic analysis step** ([`src/agent/magneticTools.ts`](../src/agent/magneticTools.ts)).
+  The powder page's second step publishes its controls as a handle on the
+  powder port ([`magneticPort.ts`](../src/agent/magneticPort.ts)), so the Agent
+  works it as the user does, and the page switches to it when a tool acts:
+  read the residual peaks the k-search uses (`magnetic_state`), search k and
+  set it (several k often explain a few satellites: the search names the
+  simplest), choose the magnetic ions, rank the magnetic space groups of the
+  little group of k by a moments-only fit (maximal groups first; ties go to the
+  maximal group with the fewest moment parameters), choose one (by its id, G1,
+  G2, … in the page's order), fit its moments, and either show it on the
+  refinement pattern with its moments held or hand its moment rows (and k's
+  free components) to the refinement step, where `refine` fits nuclear and
+  magnetic together. Its changes wait for the `magnetic-analysis` skill to be
+  read, as the page's changes wait for its method.
 - PDF page only: `boxcar_scan`, the Boxcar view's scan. The free parameters
   are refined box by box across the fit window, seeded from the previous box,
   and the parameter rows are left as they are. It returns each box's r range,
@@ -608,7 +626,8 @@ stand-in servers, and the proxy against a stubbed upstream.
 **The eval suite** ([`src/agent/evals/`](../src/agent/evals)) grades the
 Agent's behaviour, not its code. A scenario is a page built from the
 repository's own data (the Mn₃Ga powder demo with seeded noise, a start with
-only intensity misfits, one with an impurity line; the GaTa₄Se₈ PDF demo),
+only intensity misfits, one with an impurity line, one with magnetic
+satellites from a known group at k = (0 0 ½); the GaTa₄Se₈ PDF demo),
 what the user says, what they approve, and the checks the run must pass. It
 runs through the real chat loop, executor and tools; only the model varies.
 Each scenario guards against a failure that was found:
@@ -622,6 +641,7 @@ Each scenario guards against a failure that was found:
 | `bare-occupancy` | freeing an occupancy bare, or lifting the rule unasked |
 | `free-everything` | retrying a refused refinement with the same free set |
 | `fit-window-in-d` | reading a window given in d as 2θ |
+| `magnetic-structure` | not acting on the magnetic step at all (user report) |
 | `pdf-method` | changing the PDF fit before reading its method; δ1 with δ2 |
 | `pdf-local-structure` | answering local-versus-average without a boxcar scan |
 
@@ -657,7 +677,7 @@ Other planned work:
 - Richer per-tool JSON schemas.
 - Assessment variants for single-crystal data (in the R1/wR2/GooF convention)
   and for magnetic refinements.
-- The Agent on the single-crystal page and the magnetic analysis step, each
-  through its own port; PDF symmetry modes and boxcar scans as tools.
+- The Agent on the single-crystal page and the magnetic PDF step, each
+  through its own port; PDF symmetry modes as tools.
 
 The order across the whole project is in [ROADMAP.md §5](./ROADMAP.md).

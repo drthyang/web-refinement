@@ -43,6 +43,8 @@ export interface LiveToolSpec {
   readonly pages: readonly AgentPage[];
   /** A change only the user may make: it asks them even in Auto. */
   readonly alwaysAsk?: boolean;
+  /** The skill to have read before a change with this tool (default: the page's method). */
+  readonly skill?: string;
 }
 
 const ids = z.array(z.string().min(1)).describe("Parameter ids, or globs such as \"bkg*\" or \"*Fe1*\"");
@@ -119,6 +121,116 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     inputSchema: {},
     effect: "read",
     pages: ["powder"],
+  },
+  {
+    name: "magnetic_state",
+    title: "Read the magnetic analysis",
+    description:
+      "Powder page only. The magnetic analysis step as it stands: the magnetic ions (✓ chosen), the residual peaks the nuclear fit leaves (d, σ, any nuclear reflection they sit on, whether the k-search uses them), the last k-search, the propagation vector k and its kind, the magnetic space groups of the little group of k that allow a moment on the chosen ions (ids G1, G2, … in the page's order; index, domains, moment components, and the moments-only fit once ranked), the chosen group with its amplitudes and moments, and the nuclear-only wR they are compared with.",
+    inputSchema: {},
+    effect: "read",
+    pages: ["powder"],
+  },
+  {
+    name: "search_propagation_vector",
+    title: "Search the propagation vector",
+    description:
+      "Powder page only. Search commensurate propagation vectors k (denominators 2, 3, 4, 6) that put magnetic satellites G ± k on the residual peaks the k-search uses (magnetic_state lists them; peaks on nuclear reflections are left out). Ranked by how many peaks each explains and how closely. Shows the list on the magnetic step. It does not set k: set_propagation_vector does.",
+    inputSchema: {},
+    effect: "read",
+    pages: ["powder"],
+  },
+  {
+    name: "set_propagation_vector",
+    title: "Set the propagation vector",
+    description:
+      "Powder page only. Set k on the magnetic step (reciprocal-lattice units; fractions as \"1/2\" or 0.5). The magnetic space groups are recomputed for this k and any group pick is dropped; the outcome lists them.",
+    inputSchema: {
+      k: z.array(z.union([z.number(), z.string()])).length(3).describe("The three components, e.g. [\"1/2\", 0, 0]"),
+    },
+    effect: "change",
+    pages: ["powder"],
+    skill: "magnetic-analysis",
+  },
+  {
+    name: "select_magnetic_ions",
+    title: "Choose the magnetic ions",
+    description: "Powder page only. The sites that carry a moment (magnetic_state lists the candidates, e.g. Mn1). The groups' allowed moment components are counted on these sites.",
+    inputSchema: {
+      sites: z.array(z.string().min(1)).min(1).describe("Site labels"),
+    },
+    effect: "change",
+    pages: ["powder"],
+    skill: "magnetic-analysis",
+  },
+  {
+    name: "set_moment_ties",
+    title: "Tie the moments",
+    description:
+      "Powder page only. How the moment amplitudes are tied in the model built for a group: `sameSite` (default on) gives co-located ions on a mixed site one moment; `magnitudes` ties |M| across sublattices, within each element or across all chosen sites (\"off\" to release). Fewer free amplitudes when the powder cannot separate them.",
+    inputSchema: {
+      sameSite: z.boolean().optional(),
+      magnitudes: z.enum(["off", "element", "all"]).optional(),
+    },
+    effect: "change",
+    pages: ["powder"],
+    skill: "magnetic-analysis",
+  },
+  {
+    name: "rank_magnetic_groups",
+    title: "Rank the magnetic groups",
+    description:
+      "Powder page only. Fit the moments of each magnetic group that allows a moment (the nuclear model held) and rank them by wR: `scope` \"open\" (default) fits the groups in the index sections open on the page (the maximal, index-2 groups at first: the top-down start), \"all\" every group. Returns the fitted groups, best first, with the best marked (ties go to the maximal group with the fewest moment parameters). Several seconds per group.",
+    inputSchema: {
+      scope: z.enum(["open", "all"]).optional(),
+    },
+    effect: "read",
+    pages: ["powder"],
+  },
+  {
+    name: "choose_magnetic_group",
+    title: "Choose a magnetic group",
+    description:
+      "Powder page only. Choose one magnetic space group by its id (G1, G2, … from magnetic_state or rank_magnetic_groups): its symmetry-allowed moment model is built on the chosen ions and drawn on the pattern and in 3D. A ranked group starts from its fitted moments.",
+    inputSchema: {
+      id: z.string().min(1).describe("The group's id, e.g. \"G3\""),
+    },
+    effect: "change",
+    pages: ["powder"],
+    skill: "magnetic-analysis",
+  },
+  {
+    name: "refine_moments",
+    title: "Fit the moments",
+    description: "Powder page only. Fit the chosen group's moment amplitudes against the pattern, the nuclear model held fixed. Returns wR and the moments (µB).",
+    inputSchema: {},
+    effect: "change",
+    pages: ["powder"],
+    skill: "magnetic-analysis",
+  },
+  {
+    name: "show_magnetic_model",
+    title: "Show the model on the refinement pattern",
+    description:
+      "Powder page only. Put the chosen magnetic model on the refinement step with its moments held (`show` false removes it): the nuclear refinement then fits against nuclear + magnetic. continue_magnetic_refinement instead adds the moments as parameters.",
+    inputSchema: {
+      show: z.boolean().optional(),
+    },
+    effect: "change",
+    pages: ["powder"],
+    skill: "magnetic-analysis",
+  },
+  {
+    name: "continue_magnetic_refinement",
+    title: "Refine nuclear and magnetic together",
+    description:
+      "Powder page only. Hand the chosen model to the refinement step: its moment amplitudes become free parameter rows (and the allowed k components too with `refineK`, when canRefineK). The page switches to the refinement step; refine then fits nuclear and magnetic together — choose the free set with set_free as usual.",
+    inputSchema: {
+      refineK: z.boolean().optional(),
+    },
+    effect: "change",
+    pages: ["powder"],
+    skill: "magnetic-analysis",
   },
   {
     name: "bond_geometry",

@@ -9,9 +9,9 @@
 import { PAGE_METHOD } from "@/agent/skills";
 import { keyOfState } from "@/agent/method";
 import { announcedTool } from "@/agent/chat";
-import { LIVE_TOOLS } from "@/agent/tools";
+import { LIVE_TOOLS, liveTool } from "@/agent/tools";
 import { convertInterval } from "@/visualization/axisUnits";
-import type { PowderLiveState } from "@/agent/port";
+import type { PowderAgentPort, PowderLiveState } from "@/agent/port";
 import { calls, isChange, replies, type Check, type EvalRun } from "@/agent/evals/harness";
 
 const ok = (detail: string) => ({ pass: true, detail });
@@ -48,11 +48,12 @@ export function asserted(run: EvalRun, what: RegExp, upTo = Infinity): string[] 
 export const readsMethodFirst: Check = {
   name: "reads the page's method before its first change",
   grade: (run) => {
-    const method = PAGE_METHOD[run.port.technique];
     const all = calls(run);
     // An attempt counts, refused or not: the executor refuses it, but the Agent did not follow its method.
     const first = all.findIndex((c) => isChange(c.name));
     if (first < 0) return ok("made no change");
+    // A step with its own method (the magnetic step) needs that one.
+    const method = liveTool(all[first]!.name)?.skill ?? PAGE_METHOD[run.port.technique];
     const read = all.slice(0, first).some((c) => c.name === "read_skill" && c.input.name === method && c.input.reference === undefined && !c.isError);
     return read ? ok(`read ${method}, then ${all[first]!.name}`) : fail(`${all[first]!.name} before reading ${method}`);
   },
@@ -214,3 +215,28 @@ export const oneMotionTerm: Check = {
     return both ? fail("refined δ1 and δ2 together") : ok("one motion term at a time");
   },
 };
+
+/** The magnetic step ends at this k (the "Agent can't do magnetic analysis" report). */
+export function magneticKIs(k: readonly [number, number, number]): Check {
+  return {
+    name: `sets k = (${k.join(", ")}) on the magnetic step`,
+    grade: (run) => {
+      const h = (run.port as PowderAgentPort).magnetic?.();
+      if (!h) return fail("no magnetic step");
+      const now = h.state().k;
+      return now.every((c, i) => Math.abs(c - k[i]!) < 1e-9) ? ok(`k = (${now.join(", ")})`) : fail(`k is (${now.join(", ")})`);
+    },
+  };
+}
+
+/** The chosen magnetic group, or one the ranking ties with it (the powder's degeneracy). */
+export function magneticGroupIs(id: string): Check {
+  return {
+    name: `chooses the magnetic group ${id}`,
+    grade: (run) => {
+      const h = (run.port as PowderAgentPort).magnetic?.();
+      const chosen = h?.state().selected?.id;
+      return chosen === id ? ok(`chose ${id}`) : fail(chosen ? `chose ${chosen}` : "chose none");
+    },
+  };
+}

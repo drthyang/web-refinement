@@ -9,10 +9,22 @@ release fixes bugs.
 
 ### Added
 
-- **An eval suite for the Agent** (`src/agent/evals/`). Nine scenarios, each
+- **The Agent works the magnetic analysis step.** On the powder page it can
+  now read the step (the residual peaks the k-search uses, k, the magnetic
+  space groups of the little group of k), search and set k, choose the
+  magnetic ions and the moment ties, rank the groups by a moments-only fit,
+  choose one, fit its moments, and show the model on the refinement pattern
+  or hand its moment rows to the refinement step to refine nuclear and
+  magnetic together — the step's own controls, with the page switching to it
+  as it acts. A `magnetic-analysis` skill holds the method (a first draft, to
+  confirm with the user); its changes wait until it has been read. When
+  several k explain a few satellites, the search says so and names the
+  simplest.
+- **An eval suite for the Agent** (`src/agent/evals/`). Ten scenarios, each
   written against a failure the researcher rounds or a user found (the
   refused full refinement, misfits called extra peaks, a lower symmetry
-  proposed first, a bare occupancy, a window given in d, the PDF method), run
+  proposed first, a bare occupancy, a window given in d, the magnetic step,
+  the PDF method), run
   through the real chat loop and tools on pages built from the repository's
   data, and graded. CI replays each with a scripted model, once as the Agent
   should behave and once as it failed, so every check is shown to catch its
