@@ -50,6 +50,13 @@ export interface RefinementProblem {
     freeParams: readonly RefinementParameter[],
     freeValues: readonly number[],
   ) => (Float64Array | null)[];
+  /**
+   * How many leading observations are data. Those after it are restraint
+   * pseudo-observations: they steer the fit (χ²) but are left out of the
+   * agreement factors, which describe the data alone (R, wR, GoF). Default:
+   * every observation.
+   */
+  readonly dataLength?: number;
 }
 
 const DEFAULT_OPTIONS: RefinementOptions = {
@@ -538,6 +545,10 @@ function* refineCore(
   for (let i = 0; i < problem.weights.length; i++) if (problem.weights[i]! > 0) nUsed++;
   const dof = Math.max(nUsed - n, 1);
 
+  // Agreement factors over the data alone, not the restraint rows after it.
+  const dataLength = problem.dataLength ?? problem.observations.length;
+  const dataAgreement = (yCalc: Float64Array, nParams: number): AgreementFactors =>
+    computeAgreementFactors(problem.observations.subarray(0, dataLength), yCalc.subarray(0, dataLength), problem.weights.subarray(0, dataLength), nParams);
   const withChi = (yCalc: Float64Array): { yCalc: Float64Array; chi: number } => ({
     yCalc,
     chi: chiSquared(problem.observations, yCalc, problem.weights),
@@ -545,7 +556,7 @@ function* refineCore(
 
   if (n === 0) {
     const { yCalc, chi } = withChi((yield [valuesRecord(problem.parameters, freeIds, freeValues)])[0]!);
-    const agreement = computeAgreementFactors(problem.observations, yCalc, problem.weights, 0);
+    const agreement = dataAgreement(yCalc, 0);
     return {
       status: "converged",
       parameters: valuesRecord(problem.parameters, [], []),
@@ -637,12 +648,7 @@ function* refineCore(
       }
     }
 
-    const agreement = computeAgreementFactors(
-      problem.observations,
-      current.yCalc,
-      problem.weights,
-      n,
-    );
+    const agreement = dataAgreement(current.yCalc, n);
     history.push({ iteration: iter + 1, chiSquared: current.chi, agreement });
     opts.onIteration?.(current.yCalc, agreement);
 
@@ -693,12 +699,7 @@ function* refineCore(
   );
   const esds = esdsFrom(covarianceBase, reducedChi);
   for (let j = 0; j < n; j++) esd[freeIds[j]!] = esds[j]!;
-  const agreement: AgreementFactors = computeAgreementFactors(
-    problem.observations,
-    current.yCalc,
-    problem.weights,
-    n,
-  );
+  const agreement: AgreementFactors = dataAgreement(current.yCalc, n);
   // The last accepted step against the esds reported with it — unless the fit
   // is exact, where both are round-off and their ratio means nothing.
   const exactFit = agreement.rWeighted !== undefined && agreement.rWeighted < EXACT_FIT_RWP;

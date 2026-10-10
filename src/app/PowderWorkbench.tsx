@@ -33,7 +33,7 @@ import { resolveTies } from "@/core/refinement/constraints";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
 import { extractSizeStrain } from "@/core/diffraction/microstructure";
-import type { SiteTies, MustrainModel } from "@/app/powderSpec";
+import { powderRestraints, type SiteTies, type MustrainModel } from "@/app/powderSpec";
 import { multiPhaseCurves } from "@/core/workflow/multiPhase";
 import { siteGroups } from "@/core/workflow/structureRefinement";
 import { powderPatternCsv } from "@/core/export/exporters";
@@ -246,6 +246,12 @@ export function PowderWorkbench({
   // pattern keeps the shape at "gaussian" and stays view-only.
   const tofViewOnly = powderIsTof && session.powderProfile.shape !== "tof";
   const pBindings = session.powderBindings;
+  // The occupancy restraints the site ties ask for, with every nuclear refinement
+  // (the magnetic path takes none).
+  const restraintReq = useMemo(() => {
+    const restraints = powderRestraints([structure, ...session.extraPhases], session.siteTies, powderParams);
+    return restraints.length > 0 ? { restraints } : {};
+  }, [structure, session.extraPhases, session.siteTies, powderParams]);
   // A magnetic model on the session is part of the CALCULATED pattern, whether or
   // not its moments are refinable — the plot below draws nuclear + magnetic, so
   // every fit path has to score against that same model or the wR it reports
@@ -741,7 +747,7 @@ export function PowderWorkbench({
       }, options);
     }
     return client.refinePowderParallel({
-      structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(),
+      structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(), ...restraintReq,
       ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
       ...window,
       options,
@@ -843,7 +849,7 @@ export function PowderWorkbench({
         rerun = (init) => client.sampleMagneticPowderPosterior(spec, { ...baseOptions, ...(init ? { init } : {}) });
       } else {
         const req = {
-          structure, pattern, parameters: [...powderParams], bindings: pBindings, ...profileReq(),
+          structure, pattern, parameters: [...powderParams], bindings: pBindings, ...profileReq(), ...restraintReq,
           ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
           ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         };
@@ -950,7 +956,7 @@ export function PowderWorkbench({
       // light nudge around an already-refined fit (few restarts, tight ~1.5σ kick).
       const msOptions = mode === "prefit" ? { restarts: 8 } : { restarts: 3, escapeSigma: 1.5 };
       const ms = await client.refinePowderMultiStart({
-        structure, pattern, parameters: workingParams, bindings: pBindings, ...profileReq(),
+        structure, pattern, parameters: workingParams, bindings: pBindings, ...profileReq(), ...restraintReq,
         ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
         ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         options: { maxIterations: 20 },
@@ -1306,6 +1312,7 @@ export function PowderWorkbench({
           observationCount: observations,
           axis: axisCtx,
           source: session.rawData?.name ?? powderSource,
+          restraints: restraintReq.restraints ?? [],
         };
       },
       setFixed: (changes) => {
@@ -1316,6 +1323,7 @@ export function PowderWorkbench({
       setBackgroundType,
       setMustrain,
       setAnisotropicAdp,
+      setSiteTies,
       setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : null),
       showPeaks: (peaks) => {
         setAgentPeaks(peaks.length > 0 ? peaks.map((p) => ({ d: p.d, height: p.height, ...(p.near ? { near: p.near } : {}) })) : null);
@@ -1708,6 +1716,10 @@ export function PowderWorkbench({
                         <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Constrain the total occupancy of the shared site to 1 (fully occupied)">
                           <input type="checkbox" checked={session.siteTies.occupancyToUnity ?? false} onChange={(e) => setSiteTies({ occupancyToUnity: e.target.checked })} />
                           Σ occ = 1
+                        </label>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Each element on two or more sites keeps its total in the cell, so atoms exchange between sites (anti-site disorder, spinel inversion) while the formula stays">
+                          <input type="checkbox" checked={session.siteTies.composition ?? false} onChange={(e) => setSiteTies({ composition: e.target.checked })} />
+                          hold composition
                         </label>
                       </div>
                     )}

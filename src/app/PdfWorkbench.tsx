@@ -1171,6 +1171,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           spinModel: spinFit !== null,
           warnings: [motionConflict, adpWarning].filter((w): w is string => w !== null),
           source: pattern.name,
+          restraints: spec.restraints,
         };
       },
       setFixed: (changes) => {

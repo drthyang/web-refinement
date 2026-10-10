@@ -185,6 +185,20 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     pages: ["powder"],
   },
   {
+    name: "set_site_ties",
+    title: "Change the site ties",
+    description:
+      "Powder page only. The Shared site settings, for atoms that share a crystallographic site or an element spread over several sites. `positions`/`adp`: one position / one ADP per shared site (default on). `occupancyToUnity`: a shared site's Σ occupancy is restrained to 1 instead of its starting sum. `composition`: each element on two or more sites keeps its total in the cell, so atoms exchange between sites while the formula stays (anti-site disorder, spinel inversion). With the shared-site Σ and the composition held, freeing the occupancies of two mixed sites refines one exchange fraction, and refine's correlation check does not count occupancies tied by one restraint against each other (scale and ADPs still count). The restraints act only while one of their occupancies is free; get_state lists them. Multi-phase too; not with a magnetic model applied.",
+    inputSchema: {
+      positions: z.boolean().optional(),
+      adp: z.boolean().optional(),
+      occupancyToUnity: z.boolean().optional(),
+      composition: z.boolean().optional(),
+    },
+    effect: "change",
+    pages: ["powder"],
+  },
+  {
     name: "set_fit_range",
     title: "Change the fit window",
     description:

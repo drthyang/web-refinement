@@ -9,6 +9,11 @@ release fixes bugs.
 
 ### Added
 
+- **Hold the composition** (Shared site row, and the Agent's new
+  `set_site_ties`): each element on two or more sites keeps its total in the
+  cell, so atoms exchange between sites while the formula stays (anti-site
+  disorder, spinel inversion). A normal-spinel start on neutron data of
+  MgAl₂O₄ with 22% inversion refined to 0.25(4).
 - **Phase fractions.** After a multi-phase powder refinement, each phase's
   weight fraction (Hill–Howard, from its refined scale, cell-contents mass and
   volume, with an esd from the scale esds) shows on the Structure card and in
@@ -24,6 +29,20 @@ release fixes bugs.
 
 ### Fixed
 
+- **Occupancy restraints reach the Rietveld fit.** The powder page never sent
+  them, so a shared site's occupancies refined with no Σ restraint (the site
+  could empty or over-fill) and "Σ occ = 1" did nothing. They now go with
+  every nuclear refinement whose occupancies are free, single- or multi-phase.
+- **R, wR and GoF describe the data alone.** Restraint pseudo-observations were
+  counted in them, which understated wR (by about 3% of its value on a
+  restrained spinel fit, and on PDF fits with a shared site).
+- **Loading an instrument file first** (before any structure or data) no
+  longer blanks the page.
+- The Agent's correlation check no longer refuses the Caglioti U, V, W
+  together, nor two occupancies one restraint ties: like the background
+  coefficients, they move together by construction. The assessment notes them
+  once instead of warning per pair, and for a displacement parameter at a
+  bound on a shared site it points to the site's mixing first.
 - **The cell gate on a sloped 2θ background.** Its Le Bail fit had a flat
   background at constant wavelength, so a lab pattern's slope stayed in the
   residual (wR 50%) and read as unindexed intensity; it now has three

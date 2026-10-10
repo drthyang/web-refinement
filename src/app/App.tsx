@@ -1034,6 +1034,10 @@ export function App(): JSX.Element {
         // otherwise loading structure-then-instrument would leave the old
         // (default) profile in place, making load order matter.
         setSession((s) => {
+          // Nothing loaded yet: there is no model to rebuild (the placeholder
+          // has no pattern to seed from). The next CIF or data load uses the
+          // instrument.
+          if (s.powderSource === EMPTY_SOURCE) return { ...s, rawInstrument: { name: file.name, text } };
           // For a constant-wavelength instrument on a non-TOF pattern, adopt its
           // radiation (X-ray vs neutron) and wavelength so the physics is correct
           // regardless of whether the data or the instrument was loaded first.

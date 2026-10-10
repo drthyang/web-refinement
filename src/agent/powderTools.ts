@@ -18,7 +18,7 @@ import {
 } from "@/mcp/tools";
 import type { StructureModel } from "@/core/crystal/types";
 import type { BackgroundType } from "@/core/diffraction/background";
-import type { MustrainModel } from "@/app/powderSpec";
+import type { MustrainModel, SiteTies } from "@/app/powderSpec";
 import type { PowderXUnit } from "@/core/diffraction/types";
 import { availableDisplayUnits, convertAxisValue, convertInterval } from "@/visualization/axisUnits";
 import { K0_MAGNETIC, k0MagneticHint, residualPeaks } from "@/core/diagnostics/assessment";
@@ -147,7 +147,6 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
     case "set_free":
       return applyFree(s.parameters, input, port.setFixed);
     case "set_background":
-      if (input.terms === undefined && input.type === undefined) throw new Error("pass `terms`, `type`, or both");
       if (input.terms !== undefined) port.setBackgroundTerms(input.terms);
       if (input.type !== undefined) port.setBackgroundType(input.type as BackgroundType);
       return undefined;
@@ -156,6 +155,9 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
       return undefined;
     case "set_adp_model":
       port.setAnisotropicAdp(!!input.anisotropic);
+      return undefined;
+    case "set_site_ties":
+      port.setSiteTies(siteTieUpdate(input));
       return undefined;
     case "set_fit_range": {
       if (input.whole) {
@@ -190,7 +192,26 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
  * no-op never asks the user for approval.
  */
 export function powderNoOp(spec: LiveToolSpec, input: Input, s: PowderLiveState): string | null {
+  // An empty change is an error before anyone is asked.
+  if (spec.name === "set_background" && input.terms === undefined && input.type === undefined) throw new Error("pass `terms`, `type`, or both");
+  if (spec.name === "set_site_ties") {
+    const update = siteTieUpdate(input);
+    const keys = Object.keys(update) as (keyof SiteTies)[];
+    if (keys.length === 0) throw new Error("pass at least one of `positions`, `adp`, `occupancyToUnity`, `composition`");
+    return keys.every((k) => tieOn(s.settings.siteTies, k) === update[k]) ? "the site ties are already set so" : null;
+  }
   return spec.name === "set_free" ? freeNoOp(s.parameters, input) : null;
+}
+
+const SITE_TIE_KEYS = ["positions", "adp", "occupancyToUnity", "composition"] as const;
+const SITE_TIE_NAMES: Record<keyof SiteTies, string> = { positions: "tie position", adp: "tie ADP", occupancyToUnity: "Σ occ = 1", composition: "hold composition" };
+/** A tie's effective value: positions and ADPs are tied unless switched off. */
+const tieOn = (ties: SiteTies, k: keyof SiteTies): boolean => ties[k] ?? (k === "positions" || k === "adp");
+
+function siteTieUpdate(input: Input): Partial<Record<keyof SiteTies, boolean>> {
+  const update: Partial<Record<keyof SiteTies, boolean>> = {};
+  for (const k of SITE_TIE_KEYS) if (typeof input[k] === "boolean") update[k] = input[k] as boolean;
+  return update;
 }
 
 /** One line for the approval card: what this change will do, in the page's terms. */
@@ -207,6 +228,8 @@ export function describePowderChange(spec: LiveToolSpec, input: Input, s: Powder
       return `Microstrain ${s.settings.mustrain} → ${String(input.model)}`;
     case "set_adp_model":
       return `ADPs ${s.settings.anisotropicAdp ? "anisotropic" : "isotropic"} → ${input.anisotropic ? "anisotropic" : "isotropic"}`;
+    case "set_site_ties":
+      return Object.entries(siteTieUpdate(input)).map(([k, v]) => `${SITE_TIE_NAMES[k as keyof SiteTies]} ${v ? "on" : "off"}`).join(" · ");
     case "set_fit_range": {
       if (input.whole) return "Fit the whole pattern";
       const w = requestedWindow(s, input);
@@ -265,7 +288,11 @@ function stateView(s: PowderLiveState, history: ProjectHistory | null, select: r
         ? { kind: "constant wavelength", wavelength: s.instrument.wavelength }
         : { kind: "time of flight", difC: s.instrument.difC, difA: s.instrument.difA ?? 0, zero: s.instrument.zero ?? 0, note: "TOF = difC·d + difA·d² + zero; set_fit_range and find_unexplained_peaks convert for you" }
       : "none loaded (default CW, λ = 1.54 Å)",
-    settings: { ...s.settings, profileShape: s.profile.shape },
+    settings: {
+      ...s.settings,
+      profileShape: s.profile.shape,
+      ...(s.restraints.length > 0 ? { occupancyRestraints: s.restraints.map((r) => `${r.label} (${r.terms.map((t) => t.parameterId).join(", ")})`) } : {}),
+    },
     magneticModel: s.magnetic
       ? { propagation: s.magnetic.propagation, moments: s.magnetic.moments.length, refined: s.parameters.some((p) => p.kind === "momentMode") }
       : null,
@@ -355,5 +382,16 @@ function assessment(s: PowderLiveState): ReturnType<typeof assess_refinement> {
     observationCount: s.observationCount,
     ...(s.d ? { residual: residualOf(s) } : {}),
     mode: "powder",
+    restraints: s.restraints,
+    sharedSiteAdps: sharedSiteAdps(s),
   });
+}
+
+/** ADP parameters bound to two or more sites: a shared (mixed) site's tied ADP. */
+function sharedSiteAdps(s: PowderLiveState): string[] {
+  const sites = new Map<string, Set<string>>();
+  for (const b of s.bindings) {
+    if ((b.kind === "bIso" || b.kind === "uAniso") && b.targetKey) sites.set(b.parameterId, (sites.get(b.parameterId) ?? new Set()).add(`${b.targetId}/${b.targetKey}`));
+  }
+  return [...sites].filter(([, set]) => set.size > 1).map(([id]) => id);
 }

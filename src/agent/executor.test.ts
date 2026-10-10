@@ -10,6 +10,7 @@ import { freePlan } from "@/agent/liveCommon";
 import { boxcarWindows } from "@/core/workflow/pdfBoxcar";
 import { LIVE_TOOLS, inputJsonSchema } from "@/agent/tools";
 import { newSession, type Session } from "@/app/powderSession";
+import { powderRestraints } from "@/app/powderSpec";
 import { exampleStructure } from "@/examples/mn3ga";
 import { powderCurves } from "@/core/workflow/powder";
 import { runPowderRefinement } from "@/workers/runPowder";
@@ -63,6 +64,7 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
       observationCount: n,
       axis: axisContext(s.pattern),
       source: "test",
+      restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
     };
   };
   const refine = async (): Promise<string | null> => {
@@ -75,6 +77,7 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
       parameters: s.powderParams,
       bindings: s.powderBindings,
       shape: s.powderProfile.shape,
+      restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
       options: { maxIterations: 20 },
     });
     s = { ...s, powderParams: s.powderParams.map((p) => ({ ...p, value: r.parameters[p.id] ?? p.value })) };
@@ -93,6 +96,10 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
     setBackgroundType: (t) => calls.push(`type ${t}`),
     setMustrain: (m) => calls.push(`mustrain ${m}`),
     setAnisotropicAdp: (on) => calls.push(`adp ${on}`),
+    setSiteTies: (update) => {
+      calls.push(`ties ${JSON.stringify(update)}`);
+      s = { ...s, siteTies: { ...s.siteTies, ...update } };
+    },
     setFitRange: (r) => {
       calls.push(`range ${r ? `${r.min}-${r.max}` : "whole"}`);
       fitRange = r ? { ...r } : null;
@@ -110,6 +117,7 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
         parameters: s.powderParams,
         bindings: s.powderBindings,
         shape: s.powderProfile.shape,
+        restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
         options,
       });
     },
@@ -405,6 +413,20 @@ describe("AgentExecutor on a live powder fit", () => {
     await ex.run("set_fit_range", { whole: true });
     expect(calls.at(-1)).toBe("range whole");
   });
+
+  it("sets the site ties as a settings step; a tie already set asks nothing", async () => {
+    const { port, calls } = sessionPort(newSession(exampleStructure()));
+    const { host, steps } = fakeHost(port);
+    const { ex, asked } = executor(host, true);
+    expect(parse((await ex.run("set_site_ties", { positions: true })).text).unchanged).toBe(true);
+    expect((await ex.run("set_site_ties", {})).text).toMatch(/at least one of/);
+    expect(asked).toEqual([]);
+    await ex.run("set_site_ties", { composition: true, occupancyToUnity: true });
+    expect(asked[0]!.preview).toBe("Σ occ = 1 on · hold composition on");
+    expect(calls).toEqual(['ties {"occupancyToUnity":true,"composition":true}']);
+    expect(port.state().settings.siteTies).toMatchObject({ composition: true, occupancyToUnity: true });
+    expect(steps.at(-1)).toEqual({ kind: "settings", agent: true });
+  });
 });
 
 /**
@@ -452,6 +474,7 @@ function pdfPort(): { port: PdfAgentPort; calls: string[] } {
       spinModel: false,
       warnings: [],
       source: "test",
+      restraints: spec.restraints,
     };
   };
   const refine = async (): Promise<string | null> => {

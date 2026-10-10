@@ -329,6 +329,9 @@ export function assess_refinement(args: {
   /** The residual, with each point's σ and every phase's reflections when known (see AssessmentInput). */
   residual?: NonNullable<AssessmentInput["residual"]>;
   mode?: AssessmentInput["mode"];
+  /** The restraints and mixed-site ADPs of the fit (see AssessmentInput). */
+  restraints?: AssessmentInput["restraints"];
+  sharedSiteAdps?: AssessmentInput["sharedSiteAdps"];
 }): RefinementAssessment {
   return assessRefinement({
     result: args.result,
@@ -336,6 +339,8 @@ export function assess_refinement(args: {
     observationCount: args.observationCount,
     ...(args.residual ? { residual: args.residual } : {}),
     ...(args.mode ? { mode: args.mode } : {}),
+    ...(args.restraints?.length ? { restraints: args.restraints } : {}),
+    ...(args.sharedSiteAdps?.length ? { sharedSiteAdps: args.sharedSiteAdps } : {}),
   });
 }
 

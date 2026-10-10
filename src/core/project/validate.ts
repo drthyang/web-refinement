@@ -301,7 +301,7 @@ function checkPowderWorkspace(ws: Rec, path: string, ctx: PhaseContext): void {
   opt(prof.backgroundType, `${path}.profile.backgroundType`, oneOf(BACKGROUND_TYPES));
   if (int(ws.backgroundTerms, `${path}.backgroundTerms`) < 1) fail(`${path}.backgroundTerms`, "needs at least one background term");
   const ties = rec(ws.siteTies, `${path}.siteTies`);
-  for (const k of ["positions", "adp", "occupancyToUnity"]) opt(ties[k], `${path}.siteTies.${k}`, bool);
+  for (const k of ["positions", "adp", "occupancyToUnity", "composition"]) opt(ties[k], `${path}.siteTies.${k}`, bool);
   opt(ws.anisotropicAdp, `${path}.anisotropicAdp`, bool);
   opt(ws.mustrain, `${path}.mustrain`, oneOf(MUSTRAIN_MODELS));
   if (ws.overlay !== undefined && ws.overlay !== null) {

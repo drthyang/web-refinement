@@ -382,7 +382,7 @@ export function buildPdfProblem(
     return { chi2, grad };
   };
 
-  return { parameters, observations, weights, calculate, analyticColumns: columnsFor, gradChi2 };
+  return { parameters, observations, weights, dataLength: rValues.length, calculate, analyticColumns: columnsFor, gradChi2 };
 }
 
 /** Structural alias for a 3×3 tensor built row-wise in the uAniso accumulation. */
@@ -504,7 +504,7 @@ export function buildMultiPhasePdfProblem(
     return out;
   };
 
-  return { parameters, observations, weights, calculate };
+  return { parameters, observations, weights, dataLength: rValues.length, calculate };
 }
 
 /** Obs/calc/difference curves for a multi-phase PDF at the current values. */
@@ -689,7 +689,7 @@ export function buildMultiDatasetPdfProblem(
     return out;
   };
 
-  return { parameters, observations, weights, calculate };
+  return { parameters, observations, weights, dataLength: nData, calculate };
 }
 
 /**
@@ -792,6 +792,7 @@ export interface PdfSiteTies {
   readonly positions?: boolean;
   readonly adp?: boolean;
   readonly occupancyToUnity?: boolean;
+  readonly composition?: boolean;
 }
 
 export interface PdfSpec {
@@ -834,6 +835,7 @@ export function buildPdfSpec(structure: StructureModel, pattern: PdfPattern, tie
     tieSharedPositions: ties.positions ?? true,
     tieSharedAdp: ties.adp ?? true,
     constrainOccupancyToUnity: ties.occupancyToUnity ?? false,
+    holdComposition: ties.composition ?? false,
   });
   const drop = new Set<ParameterKind>(["scale", "peakWidth"]);
   const keptIds = new Set(structural.params.filter((p) => !drop.has(p.kind)).map((p) => p.id));

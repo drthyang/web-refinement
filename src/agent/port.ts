@@ -17,7 +17,7 @@ import type { MutableRefObject } from "react";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PdfPattern, PowderPattern } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
-import type { ParameterBinding, RefinementOptions, RefinementParameter, RefinementResult } from "@/core/refinement/types";
+import type { LinearRestraint, ParameterBinding, RefinementOptions, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { BackgroundType } from "@/core/diffraction/background";
@@ -67,6 +67,9 @@ export interface PowderLiveState {
   readonly observationCount: number;
   /** Where the observed data came from (file name or demo). */
   readonly source: string;
+  /** The occupancy restraints the next refinement fits with: the site ties'
+   *  shared-site Σ and composition, those over a free occupancy. */
+  readonly restraints: readonly LinearRestraint[];
 }
 
 /** What the powder page lets the Agent do. Each call is the page's own handler. */
@@ -79,6 +82,8 @@ export interface PowderAgentPort {
   readonly setBackgroundType: (type: BackgroundType) => void;
   readonly setMustrain: (model: MustrainModel) => void;
   readonly setAnisotropicAdp: (on: boolean) => void;
+  /** The Shared site check boxes (tie position, tie ADP, Σ occ = 1, hold composition). */
+  readonly setSiteTies: (update: Partial<SiteTies>) => void;
   /** The fit window on the pattern's own axis; null restores the whole pattern. */
   readonly setFitRange: (range: { readonly min: number; readonly max: number } | null) => void;
   /** Mark these residual peaks on the plot (▽ with a guide line); cleared by
@@ -130,6 +135,8 @@ export interface PdfLiveState {
   /** The page's own warnings (correlated-motion conflict, zero ADPs). */
   readonly warnings: readonly string[];
   readonly source: string;
+  /** The restraints the fit runs with (a shared site's Σ occupancy). */
+  readonly restraints: readonly LinearRestraint[];
 }
 
 /** What the PDF page lets the Agent do. Each call is the page's own handler. */

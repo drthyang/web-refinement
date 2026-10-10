@@ -7,7 +7,7 @@
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
-import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
+import type { LinearRestraint, ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { RefinementProblem } from "@/core/refinement/engine";
 import type { ProfilePeak, ProfileOptions, PeakShape } from "@/core/diffraction/profile";
 import { weightsFromSigma, applyExclusionMask, fitRangeMask } from "@/core/refinement/factors";
@@ -84,15 +84,20 @@ export function buildMultiPhasePowderProblem(
   bindings: readonly ParameterBinding[],
   profile: { shape: PeakShape; eta?: number } = { shape: "gaussian" },
   fitRange?: FitRange,
+  restraints: readonly LinearRestraint[] = [],
 ): RefinementProblem {
   const xValues = pattern.points.map((p) => p.x);
-  const observations = Float64Array.from(pattern.points.map((p) => p.yObs));
+  // Restraints (occupancy ties, phase-prefixed ids) are pseudo-observations
+  // after the pattern, as in the single-phase problem.
+  const observations = Float64Array.from([...pattern.points.map((p) => p.yObs), ...restraints.map((r) => r.target)]);
   // A fit range zeroes the weight of every point outside it, so a multi-phase
   // refinement optimizes only the selected window.
-  const weights = applyExclusionMask(
+  const weights = new Float64Array(observations.length);
+  weights.set(applyExclusionMask(
     weightsFromSigma(pattern.points.map((p) => p.sigma ?? (p.yObs > 0 ? Math.sqrt(p.yObs) : 1))),
     fitRangeMask(xValues, fitRange),
-  );
+  ), 0);
+  restraints.forEach((r, i) => { weights[xValues.length + i] = 1 / Math.max(r.sigma, 1e-12) ** 2; });
   // Per-phase cached peak builders (see createPeakBuilder): each phase's
   // structure factors are reused whenever none of ITS geometry parameters
   // moved — a derivative column for phase A's cell leaves phase B's peaks
@@ -115,9 +120,16 @@ export function buildMultiPhasePowderProblem(
       ...(profile.eta !== undefined ? { eta: profile.eta } : {}),
       ...(background.length ? { background } : {}),
     };
-    return synthesizePattern(xValues, allPeaks, opts);
+    const yCalc = synthesizePattern(xValues, allPeaks, opts);
+    if (restraints.length === 0) return yCalc;
+    const withRestraints = new Float64Array(yCalc.length + restraints.length);
+    withRestraints.set(yCalc, 0);
+    restraints.forEach((r, i) => {
+      withRestraints[yCalc.length + i] = r.terms.reduce((acc, t) => acc + t.coefficient * (resolved[t.parameterId] ?? 0), 0);
+    });
+    return withRestraints;
   };
-  return { parameters, observations, weights, calculate };
+  return { parameters, observations, weights, dataLength: xValues.length, calculate };
 }
 
 export interface MultiPhaseCurves {

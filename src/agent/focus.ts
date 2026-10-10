@@ -24,6 +24,7 @@ export const TOOL_CARDS: Readonly<Record<string, readonly AgentCard[]>> = {
   set_background: ["parameters", "pattern"],
   set_microstrain: ["parameters"],
   set_adp_model: ["parameters"],
+  set_site_ties: ["parameters"],
   set_fit_range: ["pattern"],
   refine: ["parameters", "pattern"],
   reset_parameters: ["parameters"],

@@ -187,6 +187,7 @@ function assessment(s: PdfLiveState): ReturnType<typeof assess_refinement> & { c
     parameters: [...s.parameters],
     observationCount: s.observationCount,
     mode: "pdf",
+    restraints: s.restraints,
   });
   return { ...out, convention: `${PDF_CONVENTION} The verdict reads convergence only; wRPercent is Rw. No residual-peak scan in real space.` };
 }

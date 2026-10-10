@@ -11,6 +11,8 @@ export interface SiteTies {
   readonly adp?: boolean;
   /** Constrain Σ(occupancy) on a shared site to exactly 1 (vs. the starting sum). */
   readonly occupancyToUnity?: boolean;
+  /** Hold the composition: each element on two or more sites keeps its total in the cell. */
+  readonly composition?: boolean;
 }
 
 /**

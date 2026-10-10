@@ -375,7 +375,8 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   `find_unexplained_peaks`, `bond_geometry`, `interpret_structure`, `read_ref`.
   The analysis tools are the MCP handlers above, fed from what is on screen.
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
-  `set_adp_model`, `set_fit_range`, `refine`, `reset_parameters`, `go_to_step`.
+  `set_adp_model`, `set_site_ties`, `set_fit_range`, `refine`,
+  `reset_parameters`, `go_to_step`.
   Each is the page's own handler — the Agent's `refine` is the Refine button.
 - PDF page only: `boxcar_scan`, the Boxcar view's scan. The free parameters
   are refined box by box across the fit window, seeded from the previous box,
@@ -384,7 +385,7 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   from the average.
 - Powder page only: `rank_next_parameters`, `check_cell_symmetry`,
   `find_unexplained_peaks`, `set_background`, `set_microstrain`,
-  `set_adp_model`. On the PDF page, `assess_refinement` judges convergence,
+  `set_adp_model`, `set_site_ties`. On the PDF page, `assess_refinement` judges convergence,
   correlations, bounds and physical values, without the GoF verdict or the
   Bragg-peak residual scan, and `set_fit_range` with `whole` restores the
   page's default r window.
@@ -394,6 +395,13 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   `find_unexplained_peaks` gives each peak in d, Q and the data's own axis.
   `set_fit_range` takes min/max in any of them (`unit`), converted by the page
   with its own calibration.
+- `set_site_ties` is the Shared site row: tie position, tie ADP, Σ occ = 1,
+  and hold composition (each element on two or more sites keeps its total in
+  the cell). With a mixed site's Σ and the composition held, freeing its
+  occupancies refines one exchange fraction (an anti-site or inversion
+  parameter). `get_state` lists the restraints the next refinement fits with;
+  they act only while one of their occupancies is free, and not with a
+  magnetic model applied.
 - Multi-phase: after a refinement, `get_state` gives `phaseFractions`, each
   phase's weight fraction (Hill–Howard) with its esd and the basis it rests
   on (crystalline phases in the model only, no microabsorption correction).
@@ -416,9 +424,14 @@ two free parameters correlate at |ρ| ≥ 0.95 (the line the engine and
 of them at all (an SVD null direction, such as scale with every site
 occupancy), `refine` refuses and names them, with the physical reason for
 known pairs. The model must fix one of each pair, or refine them in separate
-stages. Background coefficients are exempt among themselves: they describe one
-curve in a basis whose terms trade off by construction, while the curve is
-determined. A background term against the scale still counts. A passing check puts the strongest remaining pair on the approval card.
+stages. The terms of one curve are exempt among themselves: the background
+coefficients, and the Caglioti U, V, W of one FWHM²(θ). Their basis trades off
+by construction while the curve is determined, and none is a reported result;
+a combination the data cannot determine still stops the refinement (the null
+directions). A background or width term against the scale or a structural
+parameter still counts, and so does the Lorentzian X ↔ Y (size against
+strain). Two occupancies tied by one restraint the user set (a shared site's
+Σ, the composition) are not counted against each other either. A passing check puts the strongest remaining pair on the approval card.
 The check is measured on this data, so a pair the range separates (cell and
 zero over a wide 2θ range) is not refused. Pairs that tighten during the fit
 are listed in the outcome, and the next `refine` refuses them. The page's own

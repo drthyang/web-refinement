@@ -19,6 +19,7 @@
  */
 
 import type {
+  LinearRestraint,
   RefinementParameter,
   RefinementResult,
   ParameterKind,
@@ -101,6 +102,12 @@ export interface AssessmentInput {
     readonly magneticNeutron?: boolean;
   };
   readonly mode?: "powder" | "single-crystal" | "pdf";
+  /** The restraints the fit ran with: two parameters in one move together by
+   *  construction, so their correlation is noted once, not warned about. */
+  readonly restraints?: readonly LinearRestraint[];
+  /** Displacement parameters of sites several atoms share (a mixed site): at a
+   *  bound, the mixing is the first suspect. */
+  readonly sharedSiteAdps?: readonly string[];
 }
 
 /**
@@ -127,7 +134,7 @@ export function correlationInsight(a: ParameterKind, b: ParameterKind): string |
   if (has("scale", "bIso")) return "Scale and isotropic B correlate through the overall fall-off of intensity with angle. Fix one (usually B) until the scale and cell are stable.";
   if (has("scale", "occupancy")) return "Scale and site occupancy are near-degenerate on a single site (both multiply intensity). Constrain occupancy (e.g. full, or a Σ=1 tie) unless a second contrast breaks the tie.";
   if (has("cellLength", "zeroShift")) return "Cell length and zero shift both move peak positions; they separate only across a wide 2θ/TOF range. Refine the zero from a well-characterized standard, or fix it.";
-  if (has("profileU", "profileV") || has("profileV", "profileW") || has("profileU", "profileW")) return "The Caglioti U/V/W are mutually correlated (they parameterize one FWHM(θ) curve). Free them together only with good angular coverage; otherwise refine W first.";
+  if (has("profileU", "profileV") || has("profileV", "profileW") || has("profileU", "profileW")) return "The Caglioti U/V/W parameterize one FWHM²(θ) curve, so they trade off by construction; the curve is what the data determine. Refine W first, then U and V once the peaks are fitted across the range.";
   if (has("profileX", "profileY")) return "The Lorentzian X (size, 1/cosθ) and Y (strain, tanθ) widths differ only in how they grow with angle, so over a short or low-angle range they describe the same broadening. Refine Y (or X) alone, and free the other only with data to high angle.";
   if (has("mustrainPerp", "mustrainPar") || has("anisoSizePerp", "anisoSizePar")) return "Anisotropic microstructure components correlate along directions the data barely resolves. Free them only after the isotropic profile has converged.";
   // Time of flight: the back-to-back-exponential rise (α) moves each peak apex
@@ -143,6 +150,32 @@ export function correlationInsight(a: ParameterKind, b: ParameterKind): string |
   if (fromCorrection) return fromCorrection;
   return undefined;
 }
+
+const CAGLIOTI: ReadonlySet<ParameterKind> = new Set<ParameterKind>(["profileU", "profileV", "profileW"]);
+
+/**
+ * Two parameters of one curve in a correlated basis: the background
+ * coefficients, or the Caglioti U, V, W of one FWHM²(θ). The terms trade off by
+ * construction while the curve itself is determined, and no coefficient is a
+ * result anyone reports, so their mutual correlation is expected (the data's
+ * null directions are caught apart, by the SVD).
+ */
+export function oneCurve(a: ParameterKind | undefined, b: ParameterKind | undefined): "background" | "caglioti" | null {
+  if (a === "background" && b === "background") return "background";
+  if (a && b && CAGLIOTI.has(a) && CAGLIOTI.has(b)) return "caglioti";
+  return null;
+}
+
+const ONE_CURVE_NOTE = {
+  background: {
+    summary: (top: string) => `The background coefficients correlate among themselves (up to ${top}).`,
+    detail: "Expected for a polynomial background: its terms trade off, while the background curve itself is determined. Their individual esds mean little; nothing to fix unless a background term also correlates with the scale or a structural parameter.",
+  },
+  caglioti: {
+    summary: (top: string) => `The Caglioti U, V, W correlate among themselves (up to ${top}).`,
+    detail: "Expected: they parameterize one FWHM²(θ) = U tan²θ + V tanθ + W, which the data determine across the angular range while the coefficients trade off. Their individual esds mean little; nothing to fix unless one also correlates with a structural parameter.",
+  },
+} as const;
 
 /** Why excess intensity on nuclear reflections may be magnetic, for a neutron pattern of a phase with magnetic ions. */
 export const K0_MAGNETIC =
@@ -308,7 +341,9 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
       severity: isStructural ? "critical" : "warning",
       summary: `${p?.label ?? b.parameterId} is resting on its ${b.bound} bound (${b.value}).`,
       detail: p && ADP_KINDS.has(p.kind)
-        ? input.mode === "pdf"
+        ? input.sharedSiteAdps?.includes(b.parameterId)
+          ? `This displacement parameter belongs to a site several atoms share, so the site's scattering power is the first suspect: ${b.bound === "min" ? "B → 0 makes up for a site that scatters more than the model puts on it" : "a large B makes up for a site that scatters less than the model puts on it"}, i.e. the mixing is off (anti-site disorder, spinel inversion). Refine the site's occupancies with its Σ held (and the composition, when the formula is known) before trusting the ADP.`
+          : input.mode === "pdf"
           ? "In real space a displacement parameter at 0 usually means the near-neighbour peaks are sharper than the model's: correlated motion sharpens them, and with δ1/δ2 (or sratio) held, U takes up the sharpening. Free one correlated-motion term (δ2 at low temperature, δ1 at high), or fit a window long enough to pin U, rather than trusting the value. In a short low-r window it can also mean the local structure differs from the model."
           : "A displacement parameter pinned at a bound (often B→0) usually means the model is over-damping high-angle intensity — check the background, an absorption/extinction effect, or a correlation, rather than trusting the value."
         : "A free parameter at a bound has a meaningless esd and signals the fit wanted to go where physics forbids — hold it fixed and find the upstream cause (correlation, wrong background, bad starting value).",
@@ -321,24 +356,41 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
   findings.push(...physicalFindings(parameters));
 
   // --- correlations ------------------------------------------------------
-  // Background coefficients are one curve in a correlated basis: their mutual
-  // correlation is expected and says nothing about the curve. One note, not a
+  // The terms of one curve (the background, the Caglioti width) trade off by
+  // construction and say nothing about the curve: one note per curve, not a
   // warning per pair.
-  const isBkg = (id: string): boolean => byId.get(id)?.kind === "background";
-  const bkgPairs = (diag?.highCorrelations ?? []).filter((c) => isBkg(c.parameterIdA) && isBkg(c.parameterIdB));
-  if (bkgPairs.length > 0) {
-    const top = Math.max(...bkgPairs.map((c) => Math.abs(c.coefficient)));
+  const curveOf = (c: { parameterIdA: string; parameterIdB: string }) => oneCurve(byId.get(c.parameterIdA)?.kind, byId.get(c.parameterIdB)?.kind);
+  // Two parameters in one restraint move together by construction.
+  const restraints = input.restraints ?? [];
+  const tiedBy = (c: { parameterIdA: string; parameterIdB: string }) =>
+    restraints.find((r) => r.terms.some((t) => t.parameterId === c.parameterIdA) && r.terms.some((t) => t.parameterId === c.parameterIdB));
+  const tiedPairs = (diag?.highCorrelations ?? []).filter((c) => !curveOf(c) && tiedBy(c));
+  if (tiedPairs.length > 0) {
+    const top = Math.max(...tiedPairs.map((c) => Math.abs(c.coefficient)));
     findings.push({
       category: "correlation",
       severity: "info",
-      summary: `The background coefficients correlate among themselves (up to ${top.toFixed(3)}).`,
-      detail: "Expected for a polynomial background: its terms trade off, while the background curve itself is determined. Their individual esds mean little; nothing to fix unless a background term also correlates with the scale or a structural parameter.",
-      parameterIds: [...new Set(bkgPairs.flatMap((c) => [c.parameterIdA, c.parameterIdB]))],
-      evidence: { pairs: bkgPairs.length, maxCoefficient: top },
+      summary: `Parameters tied by a restraint correlate (up to ${top.toFixed(3)}): ${[...new Set(tiedPairs.map((c) => tiedBy(c)!.label))].join("; ")}.`,
+      detail: "Expected: the restraint moves them together, and the data decide only what it leaves free (for a mixed site with its Σ and the composition held, the exchange fraction). Read that quantity's esd, not each occupancy's.",
+      parameterIds: [...new Set(tiedPairs.flatMap((c) => [c.parameterIdA, c.parameterIdB]))],
+      evidence: { pairs: tiedPairs.length, maxCoefficient: top },
+    });
+  }
+  for (const curve of ["background", "caglioti"] as const) {
+    const pairs = (diag?.highCorrelations ?? []).filter((c) => curveOf(c) === curve);
+    if (pairs.length === 0) continue;
+    const top = Math.max(...pairs.map((c) => Math.abs(c.coefficient)));
+    findings.push({
+      category: "correlation",
+      severity: "info",
+      summary: ONE_CURVE_NOTE[curve].summary(top.toFixed(3)),
+      detail: ONE_CURVE_NOTE[curve].detail,
+      parameterIds: [...new Set(pairs.flatMap((c) => [c.parameterIdA, c.parameterIdB]))],
+      evidence: { pairs: pairs.length, maxCoefficient: top },
     });
   }
   for (const c of diag?.highCorrelations ?? []) {
-    if (isBkg(c.parameterIdA) && isBkg(c.parameterIdB)) continue;
+    if (curveOf(c) || tiedBy(c)) continue;
     const a = byId.get(c.parameterIdA);
     const b = byId.get(c.parameterIdB);
     const insight = a && b ? correlationInsight(a.kind, b.kind) : undefined;

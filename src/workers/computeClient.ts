@@ -379,6 +379,7 @@ export class ComputeClient {
           pattern: req.pattern,
           parameters: req.parameters,
           bindings: req.bindings,
+          ...(req.restraints ? { restraints: req.restraints } : {}),
           shape: req.shape,
           ...(req.eta !== undefined ? { eta: req.eta } : {}),
           ...(req.fitRange ? { fitRange: req.fitRange } : {}),

@@ -55,6 +55,21 @@ describe("correlation check", () => {
     expect(readCorrelations(probe([["bkg0", "bkg1", 0.995]]), params).correlated).toEqual([]);
   });
 
+  it("does not count two occupancies one restraint ties against each other", () => {
+    const occ = [param("scale", "scale"), param("occ_Mg1", "occupancy"), param("occ_Al1", "occupancy"), param("occ_Mg2", "occupancy")];
+    const restraint = { id: "occ_sum_Mg1", label: "Σ occ @ Mg1 site", target: 1, sigma: 0.01, terms: [{ parameterId: "occ_Mg1", coefficient: 1 }, { parameterId: "occ_Al1", coefficient: 1 }] };
+    const pairs: [string, string, number][] = [["occ_Mg1", "occ_Al1", -0.999], ["occ_Mg1", "occ_Mg2", 0.97], ["scale", "occ_Al1", 0.96]];
+    const check = readCorrelations(probe(pairs), occ, [restraint]);
+    expect(check.correlated.map((p) => [p.a, p.b])).toEqual([["occ_Mg1", "occ_Mg2"], ["scale", "occ_Al1"]]);
+    expect(readCorrelations(probe(pairs), occ).correlated).toHaveLength(3);
+  });
+
+  it("lets the Caglioti U, V, W correlate among themselves, but not with a structural parameter", () => {
+    const width = [param("profU", "profileU"), param("profV", "profileV"), param("profW", "profileW"), param("B_Mn1", "bIso")];
+    const check = readCorrelations(probe([["profV", "profW", -0.967], ["profU", "profV", -0.955], ["profW", "B_Mn1", 0.96]]), width);
+    expect(check.correlated.map((p) => [p.a, p.b])).toEqual([["profW", "B_Mn1"]]);
+  });
+
   it("explains the Lorentzian X ↔ Y pair", () => {
     const check = readCorrelations(probe([["profX", "profY", -0.97]]), [param("profX", "profileX"), param("profY", "profileY")]);
     expect(check.correlated[0]!.reason).toMatch(/Refine Y \(or X\) alone/);
