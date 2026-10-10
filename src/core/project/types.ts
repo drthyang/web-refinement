@@ -54,7 +54,7 @@ import type { PdfPattern, PowderPattern, PowderXUnit, SingleCrystalDataset } fro
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { ParameterBinding, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
-import type { MustrainModel, SiteTies } from "@/core/workflow/powderModelOptions";
+import type { MustrainModel, SampleCorrections, SiteTies } from "@/core/workflow/powderModelOptions";
 import type { BoxcarPlan, BoxcarRun } from "@/core/workflow/pdfBoxcar";
 import type { ProjectHistory } from "@/core/project/history";
 
@@ -127,6 +127,8 @@ export interface PowderWorkspace {
   readonly anisotropicAdp?: boolean;
   /** Sample microstrain model. Absent ⇒ isotropic. */
   readonly mustrain?: MustrainModel;
+  /** Sample and geometry corrections switched on. Absent ⇒ none. */
+  readonly corrections?: SampleCorrections;
   /** A reference calc/background overlay for a view-only pattern (GSAS-II CSV). */
   readonly overlay?: { readonly calc: readonly number[]; readonly background: readonly number[] };
   /** Provenance of the observed data (file name or the demo marker). */

@@ -27,7 +27,7 @@ import {
   SINGLE_CRYSTAL_PROBES,
   PDF_POSITION_MODES,
 } from "@/core/project/types";
-import { MUSTRAIN_MODELS } from "@/core/workflow/powderModelOptions";
+import { MUSTRAIN_MODELS, PEAK_CORRECTION_IDS } from "@/core/workflow/powderModelOptions";
 
 export class ProjectFileError extends Error {
   constructor(message: string, readonly path?: string) {
@@ -304,6 +304,15 @@ function checkPowderWorkspace(ws: Rec, path: string, ctx: PhaseContext): void {
   for (const k of ["positions", "adp", "occupancyToUnity", "composition"]) opt(ties[k], `${path}.siteTies.${k}`, bool);
   opt(ws.anisotropicAdp, `${path}.anisotropicAdp`, bool);
   opt(ws.mustrain, `${path}.mustrain`, oneOf(MUSTRAIN_MODELS));
+  if (ws.corrections !== undefined && ws.corrections !== null) {
+    const c = rec(ws.corrections, `${path}.corrections`);
+    opt(c.asymmetry, `${path}.corrections.asymmetry`, bool);
+    if (c.preferredOrientation !== undefined && c.preferredOrientation !== null) {
+      const axis = each(c.preferredOrientation, `${path}.corrections.preferredOrientation`, (x, p) => int(x, p));
+      if (axis.length !== 3) fail(`${path}.corrections.preferredOrientation`, "needs three indices h k l");
+    }
+    if (c.peak !== undefined && c.peak !== null) each(c.peak, `${path}.corrections.peak`, (x, p) => oneOf(PEAK_CORRECTION_IDS)(x, p));
+  }
   if (ws.overlay !== undefined && ws.overlay !== null) {
     const ov = rec(ws.overlay, `${path}.overlay`);
     const calc = each(ov.calc, `${path}.overlay.calc`, (x, p) => num(x, p));

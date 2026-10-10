@@ -309,6 +309,56 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(calls).toContain("cancel");
   });
 
+  it("diagnoses the fit, switches corrections on, reports the structure, and resets one parameter", async () => {
+    const D1A = { kind: "constantWavelength" as const, radiationKind: "neutron" as const, wavelength: 1.54, zero: 0, u: 1963, v: -4217, w: 3613, x: 0, y: 0 };
+    const start = newSession(exampleStructure(), D1A);
+    const { port, session } = sessionPort(start, D1A);
+    const { ex, asked } = executor(fakeHost(port).host, true);
+    const dx = parse((await ex.run("diagnose_fit", {})).text);
+    expect(String(dx.reading)).toMatch(/^GoF [\d.]+ \(Rwp/);
+    expect(Array.isArray(dx.causes)).toBe(true);
+    expect((dx.dShells as unknown[]).length).toBeGreaterThan(2);
+
+    // Asymmetry and texture: their rows come in fixed, H/L tied to S/L.
+    expect(parse((await ex.run("set_corrections", { asymmetry: true, preferredOrientation: [0, 0, 1], peak: ["absorption"] })).text).freeCount).toBeGreaterThan(0);
+    expect(asked.at(-1)!.preview).toBe("asymmetry on · preferred orientation along 0 0 1 · peak corrections: absorption");
+    const rows = new Map(session().powderParams.map((p) => [p.id, p]));
+    expect(rows.get("asymSL")).toMatchObject({ fixed: true });
+    expect(rows.get("asymHL")?.expression).toBe("= asymSL");
+    expect(rows.get("po")).toMatchObject({ kind: "poRatio", fixed: true, value: 1 });
+    expect([...rows.values()].some((p) => p.kind === "absorption")).toBe(true);
+    expect(parse((await ex.run("set_corrections", { asymmetry: true })).text)).toMatchObject({ unchanged: true });
+    expect(parse((await ex.run("get_state", {})).text).settings).toMatchObject({ corrections: { asymmetry: true, preferredOrientation: [0, 0, 1], peak: ["absorption"] } });
+    await ex.run("set_corrections", { preferredOrientation: null, peak: [] });
+    expect(session().powderParams.some((p) => p.kind === "poRatio" || p.kind === "absorption")).toBe(false);
+
+    // The structure as reported: coordinates and B with esds after a refinement.
+    await ex.run("set_free", { free: ["B_*"] });
+    await ex.run("refine", {});
+    const table = parse((await ex.run("structure_table", {})).text).phases as { cell: Record<string, string>; sites: { label: string; x: string; adp: string }[] }[];
+    expect(table[0]!.cell.a).toMatch(/^\d+\.\d+\(\d+\)$/);
+    expect(table[0]!.sites.find((s) => s.label === "Mn1")!.adp).toMatch(/^B \d+\.\d+\(\d+\)$/);
+
+    // One parameter back to its starting value, the others kept.
+    const scale = session().powderParams.find((p) => p.id === "scale")!.value;
+    await ex.run("reset_parameters", { parameters: ["B_Mn1"] });
+    const after = new Map(session().powderParams.map((p) => [p.id, p]));
+    expect(after.get("B_Mn1")!.value).toBe(after.get("B_Mn1")!.initialValue);
+    expect(after.get("scale")!.value).toBe(scale);
+    expect(asked.at(-1)!.preview).toBe("Reset B_Mn1 to the starting value");
+  }, 60_000);
+
+  it("refuses asymmetry without the instrument's profile, and any judgement with no structure loaded", async () => {
+    const { port } = sessionPort(newSession(exampleStructure()));
+    const { ex } = executor(fakeHost(port).host, true);
+    expect((await ex.run("set_corrections", { asymmetry: true })).text).toMatch(/needs the instrument's Caglioti U, V, W/);
+    const empty = sessionPort({ ...newSession(exampleStructure()), structure: { ...exampleStructure(), sites: [] } }).port;
+    const ex2 = executor(fakeHost(empty).host, true).ex;
+    expect((await ex2.run("check_cell_symmetry", {})).text).toMatch(/no structure is loaded/);
+    expect((await ex2.run("refine", {})).text).toMatch(/no structure is loaded/);
+    expect(parse((await ex2.run("get_state", {})).text).warning).toMatch(/^No structure is loaded/);
+  });
+
   it("keeps big answers small and opens them with read_ref", async () => {
     const { port } = sessionPort(newSession(exampleStructure()));
     const { ex } = executor(fakeHost(port).host);

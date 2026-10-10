@@ -409,8 +409,9 @@ The page-specific handlers are [`powderTools.ts`](../src/agent/powderTools.ts)
 and [`pdfTools.ts`](../src/agent/pdfTools.ts).
 - Read tools run at once: `get_state`, `assess_refinement`,
   `suggest_next_steps`, `rank_next_parameters`, `check_cell_symmetry`,
-  `find_unexplained_peaks`, `review_symmetry`, `bond_geometry`,
-  `interpret_structure`, `read_skill`, `read_ref`, and on the magnetic step
+  `find_unexplained_peaks`, `review_symmetry`, `diagnose_fit`,
+  `structure_table`, `bond_geometry`, `interpret_structure`, `read_skill`,
+  `read_ref`, and on the magnetic step
   `magnetic_state`, `search_propagation_vector`, `rank_magnetic_groups`. The analysis tools are the MCP handlers above, fed
   from what is on screen.
 - `read_skill` returns a skill whole, as Markdown (not cut to the ref budget),
@@ -461,12 +462,26 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   results replaced by a line naming the tool to call again, the stored history
   untouched.
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
-  `set_adp_model`, `set_site_ties`, `set_fit_range`, `refine`,
-  `reset_parameters`, `go_to_step`, and on the magnetic step
+  `set_adp_model`, `set_site_ties`, `set_corrections`, `set_fit_range`,
+  `refine`, `reset_parameters` (all, or the ids given), `go_to_step`, and on
+  the magnetic step
   `set_propagation_vector`, `select_magnetic_ions`, `set_moment_ties`,
   `choose_magnetic_group`, `refine_moments`, `show_magnetic_model`,
   `continue_magnetic_refinement`.
   Each is the page's own handler — the Agent's `refine` is the Refine button.
+- **Why a fit is poor** ([`src/core/diagnostics/fitDiagnosis.ts`](../src/core/diagnostics/fitDiagnosis.ts)).
+  `diagnose_fit` reads the residual cause by cause, each with its share of χ²
+  and the action: background (misfit between the peaks), peak positions
+  (residual on one side of every peak), asymmetry (one-sided at low angle),
+  width/shape (± lobes everywhere), intensity falling off with angle wrongly
+  (ln(I_obs/I_calc) against sin²θ/λ²: a ΔB), texture (the intensity misfit
+  against the angle to a low-index direction), and what is left for the
+  structure; with the background-subtracted Rwp′, Durbin–Watson, χ² by d
+  shell and the worst reflections. `set_corrections` switches on what it
+  names — FCJ asymmetry (S/L, H/L tied), March–Dollase texture along h k l,
+  displacement, transparency, μR absorption, roughness — as the profile
+  group's corrections boxes do; their rows come in fixed. `structure_table`
+  gives the refined cell, coordinates, occupancies and B as value(esd).
 - **The magnetic analysis step** ([`src/agent/magneticTools.ts`](../src/agent/magneticTools.ts)).
   The powder page's second step publishes its controls as a handle on the
   powder port ([`magneticPort.ts`](../src/agent/magneticPort.ts)), so the Agent

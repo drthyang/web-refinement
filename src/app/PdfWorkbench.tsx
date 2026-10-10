@@ -1131,11 +1131,12 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   }
 
   /** Values back to their starting values, every row and free/fixed choice kept — as on the powder page. */
-  function reset(): void {
-    setParams((prev) => prev.map((p) => ({ ...p, value: p.initialValue })));
+  function reset(ids?: readonly string[]): void {
+    const only = ids ? new Set(ids) : null;
+    setParams((prev) => prev.map((p) => (only && !only.has(p.id) ? p : { ...p, value: p.initialValue })));
     setResult(null);
     setLive(null);
-    stepHistory?.requestStep("edit", "Reset to starting values");
+    stepHistory?.requestStep("edit", only ? `Reset ${[...only].join(", ")}` : "Reset to starting values");
   }
 
   /** Stop the running refinement or multi-start; the parameters keep their values. */

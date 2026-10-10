@@ -22,7 +22,7 @@ import type { LinearRestraint, ParameterBinding, RefinementOptions, RefinementPa
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { BackgroundType } from "@/core/diffraction/background";
-import type { MustrainModel, SiteTies } from "@/app/powderSpec";
+import type { CorrectionsUpdate, MustrainModel, SampleCorrections, SiteTies } from "@/app/powderSpec";
 import type { AxisContext } from "@/visualization/axisUnits";
 import type { BoxcarDirectionChoice, BoxcarRun } from "@/core/workflow/pdfBoxcar";
 
@@ -57,9 +57,11 @@ export interface PowderLiveState {
     readonly mustrain: MustrainModel;
     readonly anisotropicAdp: boolean;
     readonly siteTies: SiteTies;
+    /** Sample and geometry corrections switched on. */
+    readonly corrections: SampleCorrections;
   };
-  /** The plotted curves (nuclear + any applied magnetic model), as fitted. */
-  readonly curves: { readonly x: readonly number[]; readonly yObs: readonly number[]; readonly yCalc: readonly number[] };
+  /** The plotted curves (nuclear + any applied magnetic model), as fitted, with the background when known. */
+  readonly curves: { readonly x: readonly number[]; readonly yObs: readonly number[]; readonly yCalc: readonly number[]; readonly yBackground?: readonly number[] };
   /** `curves.x` as d-spacings (Å); null when the axis cannot convert. */
   readonly d: readonly number[] | null;
   /** The page's axis calibration (wavelength, TOF constants), for converting positions between units. */
@@ -85,6 +87,8 @@ export interface PowderAgentPort {
   readonly setAnisotropicAdp: (on: boolean) => void;
   /** The Shared site check boxes (tie position, tie ADP, Σ occ = 1, hold composition). */
   readonly setSiteTies: (update: Partial<SiteTies>) => void;
+  /** The profile group's corrections boxes (asymmetry, texture axis, displacement, …). */
+  readonly setCorrections?: (update: CorrectionsUpdate) => void;
   /** The fit window on the pattern's own axis; null restores the whole pattern. */
   readonly setFitRange: (range: { readonly min: number; readonly max: number } | null) => void;
   /** Mark these residual peaks on the plot (▽ with a guide line); cleared by
@@ -100,8 +104,8 @@ export interface PowderAgentPort {
    *  current values (the correlation check, correlationCheck.ts). */
   readonly probe: (options: Partial<RefinementOptions>) => Promise<RefinementResult>;
   readonly cancel: () => void;
-  /** Every parameter back to its starting value. */
-  readonly reset: () => void;
+  /** Parameters back to their starting values: these ids, or every one. */
+  readonly reset: (ids?: readonly string[]) => void;
   /** The magnetic analysis step's controls (agent/magneticPort.ts); null while it has none. */
   readonly magnetic?: () => MagneticAgentHandle | null;
   /** Show a step of the page: 0 the refinement, 1 the magnetic analysis. */
@@ -163,8 +167,8 @@ export interface PdfAgentPort {
    *  parameter rows are left as they are. Null when it was cancelled or failed. */
   readonly boxcar: (plan: { readonly width: number; readonly step: number; readonly direction: BoxcarDirectionChoice }) => Promise<BoxcarRun | null>;
   readonly cancel: () => void;
-  /** Every parameter back to its starting value. */
-  readonly reset: () => void;
+  /** Parameters back to their starting values: these ids, or every one. */
+  readonly reset: (ids?: readonly string[]) => void;
 }
 
 /** Any engine's port, told apart by `technique`. */

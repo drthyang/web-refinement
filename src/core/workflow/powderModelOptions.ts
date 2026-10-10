@@ -24,3 +24,28 @@ export interface SiteTies {
 export type MustrainModel = "isotropic" | "uniaxial" | "generalized";
 
 export const MUSTRAIN_MODELS: readonly MustrainModel[] = ["isotropic", "uniaxial", "generalized"];
+
+/** The registry's peak corrections the page can switch on (core/diffraction/corrections.ts). */
+export const PEAK_CORRECTION_IDS = ["displacement", "transparency", "absorption", "roughness"] as const;
+export type PeakCorrectionId = (typeof PEAK_CORRECTION_IDS)[number];
+
+/**
+ * Sample and geometry corrections switched on for a pattern; each adds its
+ * parameter rows, fixed on load (free them in the Corrections / profile
+ * groups). Off by default: corrections are end-stage polish.
+ */
+export interface SampleCorrections {
+  /** Finger–Cox–Jephcoat axial-divergence asymmetry (S/L, H/L); constant wavelength. */
+  readonly asymmetry?: boolean;
+  /** March–Dollase preferred orientation along this reciprocal-lattice direction (hkl). */
+  readonly preferredOrientation?: readonly [number, number, number];
+  /** Sample displacement, transparency, Debye–Scherrer absorption μR, Suortti roughness. */
+  readonly peak?: readonly PeakCorrectionId[];
+}
+
+/** A change of the corrections: what is given changes (a null axis turns texture off). */
+export interface CorrectionsUpdate {
+  readonly asymmetry?: boolean;
+  readonly preferredOrientation?: readonly [number, number, number] | null;
+  readonly peak?: readonly PeakCorrectionId[];
+}

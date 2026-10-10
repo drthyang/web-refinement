@@ -167,6 +167,14 @@ export function freePlan(
   return { changes, ...(tied.length ? { note: `skipped tied parameter${tied.length === 1 ? "" : "s"} ${tied.join(", ")} (they follow their tie)` } : {}) };
 }
 
+/** The ids these globs match, in the parameters' order; an unmatched glob is an error naming the ids. */
+export function matchIds(params: readonly RefinementParameter[], globs: readonly string[]): string[] {
+  const res = globs.map((g) => ({ g, re: globRegExp(g) }));
+  const unmatched = res.filter(({ re }) => !params.some((p) => re.test(p.id))).map(({ g }) => `"${g}"`);
+  if (unmatched.length) throw new Error(`nothing matches ${unmatched.join(", ")}. Parameter ids: ${params.map((p) => p.id).join(", ")}`);
+  return params.filter((p) => res.some(({ re }) => re.test(p.id))).map((p) => p.id);
+}
+
 export function globRegExp(pattern: string): RegExp {
   return new RegExp("^" + pattern.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
 }

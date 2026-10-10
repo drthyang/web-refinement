@@ -28,7 +28,7 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { FitRange } from "@/core/workflow/powder";
 import { applyParameters } from "@/core/workflow/apply";
-import { leBailExtract, tofFwhmAt, tofShapeAt, type LeBailPhase, type LeBailTofProfile, type TofCalibration } from "@/core/workflow/leBail";
+import { leBailExtract, tofFwhmAt, tofShapeAt, type Caglioti, type LeBailPhase, type LeBailTofProfile, type TofCalibration } from "@/core/workflow/leBail";
 import { resolveTies } from "@/core/refinement/constraints";
 import { weightsFromSigma, applyExclusionMask, fitRangeMask } from "@/core/refinement/factors";
 import { refine, type RefinementProblem } from "@/core/refinement/engine";
@@ -71,6 +71,8 @@ export interface LeBailPrefitOptions {
    *  (lengths × (1 + ε), |ε| ≤ 3 %), enough to follow thermal expansion, and
    *  one width factor (0.5–4×), since each phase has its own microstructure. */
   readonly extraPhases?: readonly LeBailPhase[];
+  /** Constant wavelength: the instrument's resolution curve (leBail.ts `caglioti`). */
+  readonly caglioti?: Caglioti;
 }
 
 export interface LeBailPrefitResult {
@@ -181,7 +183,11 @@ export function leBailCellPrefit(
   const shape = options.shape ?? "gaussian";
   const eta = options.eta ?? 0.5;
   const cycles = options.cycles ?? 6;
-  const fwhm0 = options.fwhm0 ?? Math.max(4 * medianStep(x), 1e-3);
+  // With the instrument's curve, start at its width at the middle angle.
+  const xSorted = [...x].sort((a, b) => a - b);
+  const tMid = Math.tan(((xSorted[xSorted.length >> 1] ?? 0) * Math.PI) / 360);
+  const curveMid = options.caglioti && pattern.xUnit === "twoTheta" ? options.caglioti.u * tMid * tMid + options.caglioti.v * tMid + options.caglioti.w : 0;
+  const fwhm0 = options.fwhm0 ?? (curveMid > 0 ? Math.sqrt(curveMid) : Math.max(4 * medianStep(x), 1e-3));
   // A low percentile of the counted points, not the minimum: one dead point
   // (y = 0) started the background at zero, and the free-intensity fit then
   // filled it with peaks broadened across the whole pattern.
@@ -296,6 +302,7 @@ export function leBailCellPrefit(
       const tofProfile = tofAt(resolved);
       const lb = leBailExtract(pattern, cell, structure.spaceGroup, {
         fwhm, fwhmU, shape, eta: resolved[ETA_ID] ?? eta, cycles, background,
+        ...(options.caglioti ? { caglioti: options.caglioti } : {}),
         ...(options.tof ? { tof: options.tof } : {}),
         ...(tofProfile ? { tofProfile } : {}),
         ...(extras.length ? { extraPhases: extraAt(resolved) } : {}),

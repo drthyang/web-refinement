@@ -9,6 +9,23 @@ release fixes bugs.
 
 ### Added
 
+- **Why a fit is poor, cause by cause** (`diagnose_fit`, for the Agent). The
+  residual read as a crystallographer reads a difference curve: background,
+  peak positions, asymmetry, width/shape, intensity falling off with angle (a
+  ΔB), texture along a low-index direction, and what is left for the
+  structure — each with its share of χ² and what to do — plus Rwp′,
+  Durbin–Watson, χ² by d shell and the worst reflections. On real PbSO₄ D1A
+  data it found the missing peak asymmetry that held the fit at wR 12%.
+- **Corrections on the powder page.** The profile group's corrections boxes
+  (and the Agent's `set_corrections`) switch on Finger–Cox–Jephcoat
+  asymmetry (S/L with H/L tied to it, as GSAS-II's SH/L), March–Dollase
+  preferred orientation along h k l, sample displacement, transparency, μR
+  absorption and surface roughness. The core had them; the page could not
+  add them. They are saved with the project.
+- **The refined structure as reported** (`structure_table`): cell,
+  coordinates, occupancies and B as value(esd), powder and PDF.
+- **Reset one parameter** (`reset_parameters` with ids): back to its
+  starting value, e.g. a Lorentzian term that refined negative.
 - **The Agent works the magnetic analysis step.** On the powder page it can
   now read the step (the residual peaks the k-search uses, k, the magnetic
   space groups of the little group of k), search and set k, choose the
@@ -80,6 +97,21 @@ release fixes bugs.
   pointer. With reduced motion the edge is steady.
 
 ### Fixed
+
+- **The cell check on a constant-wavelength neutron instrument.** Its Le Bail
+  fit used two width terms, which cannot follow a resolution curve that falls
+  then rises with angle (D1A: V < 0); on real PbSO₄ data the high-angle
+  flanks read as four unindexed peaks. The check now takes the curve's shape
+  from the instrument file's U, V, W.
+- **GSAS raw histograms over MCP and in the file picker.** `parse_powder_data`
+  read a `.CWN`/`.XRA` (BANK, STD) as columns, giving nonsense x values; it
+  now reads them as the app does. The data picker accepts `.raw`, `.cwn`,
+  `.xra`, `.gsas`.
+- **Data loaded before a structure.** The page showed the empty placeholder
+  model as a parsed structure (P1, a = 1 Å) and the Agent judged it; the card
+  now says no structure is loaded, the Agent's tools refuse with what to do,
+  and the cell check refuses a cell that places no reflection.
+- **A negative Lorentzian X or Y** is flagged by the assessment as unphysical.
 
 - **The Agent no longer refuses a refinement on the cell check, calls
   intensity misfit extra peaks, or proposes a lower symmetry first.** The cell

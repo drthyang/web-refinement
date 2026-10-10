@@ -74,6 +74,14 @@ export interface LeBailOptions {
    * flanks then read as unindexed peaks. Default 0 (one width).
    */
   readonly fwhmU?: number;
+  /**
+   * Constant wavelength, 2θ axis: the instrument's resolution curve, Caglioti
+   * FWHM² = u·tan²θ + v·tanθ + w (deg²), from its parameter file. When given,
+   * the width follows this curve's shape, scaled so `fwhm` is the width at the
+   * middle angle (`fwhmU` still adds growth). Two terms cannot follow an
+   * instrument whose width falls then rises with angle (D1A: V < 0).
+   */
+  readonly caglioti?: Caglioti;
   readonly shape?: PeakShape;
   readonly eta?: number;
   readonly cycles?: number;
@@ -97,13 +105,36 @@ const FWHM_PER_SIGMA = 2 * Math.sqrt(2 * Math.LN2);
  * grown (or shrunk) by `u` as FWHM² = fwhm² + u·(tan²θ − tan²θ_mid), never
  * below a fifth of `fwhm`. One width everywhere off a 2θ axis, or when u is 0.
  */
-export function cwWidth(pattern: PowderPattern, fwhm: number, u: number): (x: number) => number {
-  if (u === 0 || pattern.xUnit !== "twoTheta" || pattern.points.length === 0) return () => fwhm;
+export function cwWidth(pattern: PowderPattern, fwhm: number, u: number, caglioti?: Caglioti): (x: number) => number {
+  if (pattern.xUnit !== "twoTheta" || pattern.points.length === 0) return () => fwhm;
   const xs = pattern.points.map((p) => p.x).sort((a, b) => a - b);
-  const tan2 = (x: number): number => Math.tan((x * Math.PI) / 360) ** 2;
-  const mid = tan2(xs[xs.length >> 1]!);
+  const tan = (x: number): number => Math.tan((x * Math.PI) / 360);
+  const xMid = xs[xs.length >> 1]!;
+  const mid = tan(xMid) ** 2;
   const floor = (0.2 * fwhm) ** 2;
-  return (x) => Math.sqrt(Math.max(fwhm * fwhm + u * (tan2(x) - mid), floor));
+  const curve = caglioti ? (x: number): number => caglioti.u * tan(x) ** 2 + caglioti.v * tan(x) + caglioti.w : null;
+  const curveMid = curve?.(xMid) ?? 0;
+  if (curve && curveMid > 0) {
+    // The instrument's shape, its value at the middle angle scaled to fwhm.
+    const k = (fwhm * fwhm) / curveMid;
+    return (x) => Math.sqrt(Math.max(k * curve(x) + u * (tan(x) ** 2 - mid), floor));
+  }
+  if (u === 0) return () => fwhm;
+  return (x) => Math.sqrt(Math.max(fwhm * fwhm + u * (tan(x) ** 2 - mid), floor));
+}
+
+/** A constant-wavelength resolution curve: FWHM² = u·tan²θ + v·tanθ + w (deg²). */
+export interface Caglioti {
+  readonly u: number;
+  readonly v: number;
+  readonly w: number;
+}
+
+/** The instrument's curve from its U, V, W (FWHM², centidegrees²), or undefined when it has none. */
+export function cagliotiOf(instrument: { readonly kind: string; readonly u?: number; readonly v?: number; readonly w?: number } | null | undefined): Caglioti | undefined {
+  if (!instrument || instrument.kind !== "constantWavelength") return undefined;
+  const { u = 0, v = 0, w = 0 } = instrument;
+  return u === 0 && v === 0 && w === 0 ? undefined : { u: u / 1e4, v: v / 1e4, w: w / 1e4 };
 }
 
 /** The back-to-back-exponential coefficients at d. */
@@ -222,7 +253,7 @@ export function leBailExtract(
   const shape = options.shape ?? "gaussian";
   const eta = options.eta ?? 0.5;
   const fwhm = Math.max(options.fwhm, 1e-4);
-  const widthAt = cwWidth(pattern, fwhm, options.fwhmU ?? 0);
+  const widthAt = cwWidth(pattern, fwhm, options.fwhmU ?? 0, options.caglioti);
   const bkgOpt = options.background ?? 0;
   const bkgAt = (i: number): number => (typeof bkgOpt === "number" ? bkgOpt : bkgOpt[i] ?? 0);
   const cycles = options.cycles ?? 8;

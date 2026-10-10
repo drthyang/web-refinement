@@ -101,7 +101,17 @@ stable and hasn't railed to a bound.
 
 If the fit stalls between blocks, use `rank_next_parameters` / `assess_refinement` to see
 what is limiting it, but keep the block order — don't jump ahead to occupancy or
-corrections to chase a number.
+corrections to chase a number. When the verdict is poor or fair and you need to know *why*,
+`diagnose_fit` reads the residual cause by cause (background, peak positions, asymmetry,
+width/shape, intensity fall-off with angle, texture, structure), with the share of χ² each
+carries and the action. Act on the largest first, and re-run it after each change.
+
+**Peak asymmetry is part of the profile, not polish.** On constant-wavelength data a
+one-sided residual at low angle (`diagnose_fit` says asymmetry) is axial divergence: switch
+it on (`set_corrections` asymmetry; S/L refines, H/L follows it) and refine it with the
+Caglioti terms. On PbSO₄ (D1A) it took wR from 12% to 6%. A Lorentzian X or Y that
+refines negative is unphysical: reset it (`reset_parameters` with its id), hold it, refine
+the rest.
 
 ## The occupancy guardrail (do not skip)
 
@@ -165,6 +175,11 @@ Watch the correlations `assess_refinement` reports — displacement correlates w
 and the zero; roughness SRA/SRB correlate with each other and with scale/background. Free
 at most what the angular range can actually separate.
 
+In the app, `set_corrections` switches each on (their rows come in fixed: free them, then
+refine): `preferredOrientation` [h, k, l] when `diagnose_fit` finds the intensity misfit
+following one direction, `peak` absorption (capillary), displacement / transparency /
+roughness (flat plate).
+
 ## The symmetry review — the last step, if at all
 
 Only when every block above has been refined to convergence (scale/background/cell,
@@ -216,7 +231,15 @@ find and resolve the discrepancy before calling it. This makes the cross-check (
 item 3) the actual terminator of the loop, not just a final rubber-stamp.
 
 Report the outcome as: GoF + the key refined values with ESDs + which corrections were on
-+ any correlations/at-bounds worth knowing — not just "converged, wR = X%".
++ any correlations/at-bounds worth knowing — not just "converged, wR = X%". `structure_table`
+gives the cell and the coordinates, occupancies and B as value(esd); compare them with a
+published structure when there is one.
+
+**The cell is only as good as the wavelength.** On constant-wavelength neutron data the
+wavelength is a calibration, not a constant: a cell uniformly off by a fraction of a percent
+from the literature says the wavelength is (PbSO₄ on D1A: 0.13% small, λ ≈ 1.9115 Å rather
+than the nominal 1.909 Å). Quote such a cell as uncalibrated, or calibrate λ against a
+standard or an X-ray cell.
 
 ## Multi-phase and magnetic
 

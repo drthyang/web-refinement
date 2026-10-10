@@ -33,7 +33,7 @@ import { resolveTies } from "@/core/refinement/constraints";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
 import { extractSizeStrain } from "@/core/diffraction/microstructure";
-import { powderRestraints, type SiteTies, type MustrainModel } from "@/app/powderSpec";
+import { powderRestraints, PEAK_CORRECTION_IDS, type CorrectionsUpdate, type SiteTies, type MustrainModel, type SampleCorrections, type PeakCorrectionId } from "@/app/powderSpec";
 import { multiPhaseCurves } from "@/core/workflow/multiPhase";
 import { siteGroups } from "@/core/workflow/structureRefinement";
 import { powderPatternCsv } from "@/core/export/exporters";
@@ -231,6 +231,8 @@ export function PowderWorkbench({
   // Clean, data-less start: the workbench renders its chrome (the Structure/Data/
   // Instrument cards + Load buttons) with an empty-state where the plot goes.
   const hasContent = powderSource !== EMPTY_SOURCE;
+  // Data loaded before a structure: the placeholder model (no atoms).
+  const noStructure = session.structure.sites.length === 0;
   // A freshly-loaded pattern is a new object; drop the window and axis choice.
   useEffect(() => {
     setFitRange(null);
@@ -611,7 +613,7 @@ export function PowderWorkbench({
   function setBackgroundTerms(n: number): void {
     const count = Math.max(0, Math.min(24, Math.trunc(n)));
     setSession((s) => {
-      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, count, s.siteTies, s.mustrain ?? "isotropic");
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, count, s.siteTies, s.mustrain ?? "isotropic", s.corrections);
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -631,7 +633,7 @@ export function PowderWorkbench({
   function setSiteTies(update: Partial<SiteTies>): void {
     setSession((s) => {
       const ties = { ...s.siteTies, ...update };
-      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, ties, s.mustrain ?? "isotropic");
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, ties, s.mustrain ?? "isotropic", s.corrections);
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -655,7 +657,7 @@ export function PowderWorkbench({
    */
   function setMustrain(model: MustrainModel): void {
     setSession((s) => {
-      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, model);
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, model, s.corrections);
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -677,6 +679,43 @@ export function PowderWorkbench({
   }
 
   /**
+   * Switch sample and geometry corrections on or off (peak asymmetry,
+   * preferred orientation, displacement, transparency, absorption,
+   * roughness). Rebuilds the spec: the rows a correction adds come in fixed at
+   * their seeds, every other row keeps its value and state.
+   */
+  function setCorrections(update: CorrectionsUpdate): void {
+    setSession((s) => {
+      const was = s.corrections ?? {};
+      const asymmetry = update.asymmetry ?? was.asymmetry ?? false;
+      const preferredOrientation = update.preferredOrientation === undefined ? was.preferredOrientation : update.preferredOrientation ?? undefined;
+      const peak = update.peak ?? was.peak ?? [];
+      const corrections: SampleCorrections = {
+        ...(asymmetry ? { asymmetry: true } : {}),
+        ...(preferredOrientation ? { preferredOrientation } : {}),
+        ...(peak.length > 0 ? { peak } : {}),
+      };
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic", corrections);
+      const previous = new Map(s.powderParams.map((p) => [p.id, p]));
+      // A changed preferred-orientation axis restarts its ratio at 1.
+      const axisChanged = update.preferredOrientation !== undefined;
+      return {
+        ...s,
+        corrections,
+        powderParams: spec.params.map((p) => {
+          const old = previous.get(p.id);
+          if (!old || (axisChanged && p.kind === "poRatio")) return { ...p, fixed: true };
+          return { ...p, value: old.value, initialValue: old.initialValue, fixed: old.fixed };
+        }),
+        powderBindings: spec.bindings,
+        powderProfile: { ...spec.profile, ...(s.powderProfile.backgroundType ? { backgroundType: s.powderProfile.backgroundType } : {}) },
+      };
+    });
+    setPowderResult(null);
+    stepHistory?.requestStep("settings", "Corrections changed");
+  }
+
+  /**
    * Switch the ADP model between isotropic (B_iso) and anisotropic (U tensor)
    * and rebuild the spec. Promotion seeds each site's spherical U from its
    * *current* (refined) B_iso — so an isotropic fit is the starting point for
@@ -695,7 +734,7 @@ export function PowderWorkbench({
       const refinedAdp = new Map(refined.sites.map((rs) => [rs.label, rs.adp]));
       const seeded = { ...s.structure, sites: s.structure.sites.map((site) => ({ ...site, adp: refinedAdp.get(site.label) ?? site.adp })) };
       const promoted = withAdpModel(seeded, on ? "anisotropic" : "isotropic");
-      const spec = buildSpecFor(promoted, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic");
+      const spec = buildSpecFor(promoted, s.extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic", s.corrections);
       const previous = new Map(s.powderParams.map((p) => [p.id, p]));
       return {
         ...s,
@@ -719,14 +758,19 @@ export function PowderWorkbench({
   }
 
   /** Reset every powder parameter to its initial value and clear the result. */
-  function resetPowderParams(): void {
+  function resetPowderParams(ids?: readonly string[]): void {
+    const only = ids ? new Set(ids) : null;
     setSession((s) => ({
       ...s,
-      powderParams: s.powderParams.map(({ esd: _esd, ...p }) => ({ ...p, value: p.initialValue })),
+      powderParams: s.powderParams.map((p) => {
+        if (only && !only.has(p.id)) return p;
+        const { esd: _esd, ...rest } = p;
+        return { ...rest, value: p.initialValue };
+      }),
     }));
     setPowderResult(null);
-    setMessage("Parameters reset to initial values.");
-    stepHistory?.requestStep("edit", "Reset to starting values");
+    setMessage(only ? `Reset ${[...only].join(", ")} to the starting value${only.size === 1 ? "" : "s"}.` : "Parameters reset to initial values.");
+    stepHistory?.requestStep("edit", only ? `Reset ${[...only].join(", ")}` : "Reset to starting values");
   }
 
   /** Flat co-refinement of the currently-freed parameters. Resolves to why it
@@ -1307,6 +1351,7 @@ export function PowderWorkbench({
             mustrain: session.mustrain ?? "isotropic",
             anisotropicAdp: !!session.anisotropicAdp,
             siteTies: session.siteTies,
+            corrections: session.corrections ?? {},
           },
           curves,
           d: displayUnits.includes("dSpacing")
@@ -1327,6 +1372,7 @@ export function PowderWorkbench({
       setMustrain,
       setAnisotropicAdp,
       setSiteTies,
+      setCorrections,
       setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : null),
       showPeaks: (peaks) => {
         setAgentPeaks(peaks.length > 0 ? peaks.map((p) => ({ d: p.d, height: p.height, ...(p.near ? { near: p.near } : {}) })) : null);
@@ -1336,7 +1382,7 @@ export function PowderWorkbench({
       thorough: runThorough,
       probe: (options) => powderFit(options),
       cancel: cancelPowder,
-      reset: resetPowderParams,
+      reset: (ids) => resetPowderParams(ids),
       magnetic: () => magneticHandle.current,
       openStep: (which) => onStep(which),
     });
@@ -1417,15 +1463,17 @@ export function PowderWorkbench({
       loadLabel: ownStructure ? "Add CIF…" : "Load CIF…",
       accept: ".cif,.mcif,text/plain",
       onFile: ownStructure ? onAddPhase : onLoadCif,
-      muted: !hasContent,
-      chip: session.extraPhases.length > 0 ? `✓ ${session.extraPhases.length + 1} phases` : "✓ parsed",
-      title: !hasContent
+      muted: !hasContent || noStructure,
+      // Data loaded before any CIF: the placeholder model has no atoms and
+      // places no reflection — say so, rather than show it as a parsed phase.
+      chip: noStructure ? "⚠ none" : session.extraPhases.length > 0 ? `✓ ${session.extraPhases.length + 1} phases` : "✓ parsed",
+      title: !hasContent || noStructure
         ? "No structure loaded"
         : session.extraPhases.length > 0
         ? `${structure.name} + ${session.extraPhases.map((p) => p.name).join(" + ")}`
         : `${structure.name}${structure.spaceGroup.hermannMauguin ? ` · ${structure.spaceGroup.hermannMauguin}` : ""}`,
-      meta: !hasContent
-        ? "Load a CIF to begin, or pick a demo"
+      meta: !hasContent || noStructure
+        ? noStructure ? "Load a CIF: the data have no model to refine yet" : "Load a CIF to begin, or pick a demo"
         : session.extraPhases.length > 0
         ? [structure, ...session.extraPhases].map((p, i) => {
           // After a refinement, each phase's weight fraction (Hill & Howard).
@@ -1452,7 +1500,7 @@ export function PowderWorkbench({
     {
       label: "Data",
       help: "Loads most powder and single-crystal formats from the major facilities (POWGEN/GSAS, FullProf, ILL, .xye, .hkl, …). If your file isn't recognized, contact the author.",
-      loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.sgr,.fgr,.sq,.fq,.hkl,.fcf,.int,.csv,.gsa,.gss,.fxye,text/plain", onFile: onLoadData,
+      loadLabel: "Load data…", accept: ".xye,.xy,.dat,.txt,.gr,.sgr,.fgr,.sq,.fq,.hkl,.fcf,.int,.csv,.gsa,.gss,.gsas,.fxye,.raw,.cwn,.xra,.rawd,text/plain", onFile: onLoadData,
       muted: !hasContent,
       chip: isSynthetic ? "⚠ synthetic" : "✓ loaded",
       chipTone: isSynthetic ? "warn" : "ok",
@@ -1751,6 +1799,9 @@ export function PowderWorkbench({
                 result={powderResult}
                 disabled={tofViewOnly}
                 groupControls={tofViewOnly ? undefined : {
+                  "Instrument / profile": (
+                    <CorrectionControls corrections={session.corrections} twoTheta={session.pattern.xUnit === "twoTheta"} onChange={setCorrections} />
+                  ),
                   "Background": (
                     <>
                       <span style={themeLabel}>function</span>
@@ -2010,6 +2061,52 @@ function ViewModeToggle({
 
 const h2: React.CSSProperties = { margin: "0 0 12px", fontSize: 16, fontWeight: 700, color: theme.ink };
 const clearStructuresBtn: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "3px 10px", fontSize: 11.5, color: theme.secondary, cursor: "pointer" };
+/** Sample and geometry corrections: each box adds its rows (fixed; free them to refine). */
+function CorrectionControls({ corrections, twoTheta, onChange }: {
+  corrections: SampleCorrections | undefined;
+  twoTheta: boolean;
+  onChange: (update: CorrectionsUpdate) => void;
+}): JSX.Element {
+  const peak = new Set(corrections?.peak ?? []);
+  const [axisText, setAxisText] = useState((corrections?.preferredOrientation ?? [0, 0, 1]).join(" "));
+  const axis = (): [number, number, number] | null => {
+    const v = axisText.trim().split(/[\s,]+/).map(Number);
+    return v.length === 3 && v.every((x) => Number.isInteger(x)) && v.some((x) => x !== 0) ? [v[0]!, v[1]!, v[2]!] : null;
+  };
+  const togglePeak = (id: PeakCorrectionId, on: boolean): void => {
+    const next = new Set(peak);
+    if (on) next.add(id); else next.delete(id);
+    onChange({ peak: PEAK_CORRECTION_IDS.filter((x) => next.has(x)) });
+  };
+  const LABEL: Record<PeakCorrectionId, [string, string]> = {
+    displacement: ["displacement", "Flat-plate sample displacement: Δ2θ ∝ cosθ (correlates with the zero and the cell)"],
+    transparency: ["transparency", "Flat-plate transparency: Δ2θ ∝ sin2θ, for a weakly absorbing sample"],
+    absorption: ["μR", "Debye–Scherrer (capillary) absorption μR: low-angle intensity"],
+    roughness: ["roughness", "Suortti surface roughness: a flat-plate X-ray low-angle intensity deficit"],
+  };
+  const box = (checked: boolean, label: string, title: string, set: (on: boolean) => void): JSX.Element => (
+    <label key={label} style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title={title}>
+      <input type="checkbox" checked={checked} onChange={(e) => set(e.target.checked)} />
+      {label}
+    </label>
+  );
+  return (
+    <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+      <span style={themeLabel}>corrections</span>
+      {twoTheta && box(!!corrections?.asymmetry, "asymmetry", "Finger–Cox–Jephcoat axial-divergence asymmetry (S/L, H/L): low-angle peaks", (on) => onChange({ asymmetry: on }))}
+      {PEAK_CORRECTION_IDS.filter((id) => twoTheta || id === "absorption").map((id) => box(peak.has(id), LABEL[id][0], LABEL[id][1], (on) => togglePeak(id, on)))}
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title="March–Dollase preferred orientation along a reciprocal-lattice direction h k l">
+        {box(!!corrections?.preferredOrientation, "texture", "March–Dollase preferred orientation", (on) => {
+          const a = axis();
+          if (on && a) onChange({ preferredOrientation: a });
+          if (!on) onChange({ preferredOrientation: null });
+        })}
+        <input value={axisText} onChange={(e) => setAxisText(e.target.value)} onBlur={() => { const a = axis(); if (a && corrections?.preferredOrientation) onChange({ preferredOrientation: a }); }} style={{ ...bgTermsInput, width: 52 }} aria-label="Preferred-orientation axis h k l" />
+      </span>
+    </span>
+  );
+}
+
 const bgSelect: React.CSSProperties = { border: `1px solid ${theme.control}`, background: "#fff", borderRadius: 7, padding: "2px 6px", fontSize: 12, color: theme.ink, cursor: "pointer" };
 const bgTermsInput: React.CSSProperties = { width: 44, border: `1px solid ${theme.control}`, borderRadius: 7, padding: "2px 6px", fontSize: 12, fontFamily: themeMono };
 

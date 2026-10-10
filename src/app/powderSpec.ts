@@ -64,7 +64,8 @@ export interface PowderSpec {
 // The session-level option types live in the core so the project file can
 // carry them without importing the app layer; re-exported here for the callers
 // that always imported them from the spec builder.
-import type { SiteTies, MustrainModel } from "@/core/workflow/powderModelOptions";
+import type { SiteTies, MustrainModel, SampleCorrections } from "@/core/workflow/powderModelOptions";
+export { PEAK_CORRECTION_IDS, type CorrectionsUpdate, type PeakCorrectionId, type SampleCorrections } from "@/core/workflow/powderModelOptions";
 export type { SiteTies, MustrainModel };
 
 /**
@@ -151,6 +152,17 @@ function applySeeds(
   });
 }
 
+/** The corrections as the structure builder takes them, for this pattern and instrument. */
+function correctionOptions(corrections: SampleCorrections | undefined, pattern: PowderPattern, cwProfile: boolean): Record<string, unknown> {
+  if (!corrections) return {};
+  return {
+    // FCJ needs the CW pseudo-Voigt profile; seeded small (S/L = H/L = 0.01).
+    ...(corrections.asymmetry && cwProfile && pattern.xUnit === "twoTheta" ? { axial: { sl: 0.01, hl: 0.01 } } : {}),
+    ...(corrections.preferredOrientation ? { preferredOrientation: { axis: [...corrections.preferredOrientation] as [number, number, number], ratio: 1 } } : {}),
+    ...(corrections.peak && corrections.peak.length > 0 ? { corrections: corrections.peak.map((id) => ({ id, refine: false })) } : {}),
+  };
+}
+
 export function buildPowderSpec(
   structure: StructureModel,
   pattern: PowderPattern,
@@ -159,6 +171,7 @@ export function buildPowderSpec(
   backgroundTerms = 4,
   ties: SiteTies = {},
   mustrain: MustrainModel = "isotropic",
+  corrections?: SampleCorrections,
 ): PowderSpec {
   const tieOpts = {
     tieSharedPositions: ties.positions ?? true,
@@ -203,9 +216,10 @@ export function buildPowderSpec(
       : {};
     const zero = instrument.zero ?? 0;
     const profile: PowderProfile = { shape: "tof" };
+    const corr = correctionOptions(corrections, pattern, false);
     const seed = buildStructureRefinement(structure, pattern, { scale: 1, backgroundTerms, zero, tof, ...microOpt, refineOccupancy: true, ...tieOpts });
     const seeds = seedStartingValues(structure, pattern, seed.params, seed.bindings, profile, backgroundTerms, false);
-    const spec = buildStructureRefinement(structure, pattern, { scale: seeds.scale, backgroundTerms, zero, tof, ...microOpt, refineOccupancy: true, ...tieOpts });
+    const spec = buildStructureRefinement(structure, pattern, { scale: seeds.scale, backgroundTerms, zero, tof, ...microOpt, ...corr, refineOccupancy: true, ...tieOpts });
     const params = applySeeds(spec.params, seeds).map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
     return { params, bindings: spec.bindings, profile };
   }
@@ -243,7 +257,11 @@ export function buildPowderSpec(
   const microOpt = caglioti && mustrain === "generalized" ? { stephensStrain: true }
     : caglioti && mustrain === "uniaxial" ? { uniaxialStrain: { axis: [0, 0, 1] as [number, number, number] } }
     : {};
-  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, ...microOpt, refineOccupancy: true, ...tieOpts });
-  const params = applySeeds(spec.params, seeds).map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
+  const corr = correctionOptions(corrections, pattern, !!caglioti);
+  const spec = buildStructureRefinement(structure, pattern, { scale: s, backgroundTerms, zero, ...profOpt, ...microOpt, ...corr, refineOccupancy: true, ...tieOpts });
+  // S/L and H/L enter the FCJ profile symmetrically: the data determine their
+  // sum, not each (GSAS-II refines one SH/L). H/L follows S/L.
+  const params = applySeeds(spec.params, seeds).map((p) => (p.kind === "asymHL" ? { ...p, expression: "= asymSL" } : p))
+    .map((p) => (FIXED_ON_LOAD_KINDS.has(p.kind) ? { ...p, fixed: true } : p));
   return { params, bindings: spec.bindings, profile };
 }

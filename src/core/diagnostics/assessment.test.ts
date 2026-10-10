@@ -61,6 +61,18 @@ describe("assessRefinement — findings", () => {
     expect(f?.evidence?.origin).toBe("refined");
   });
 
+  it("flags a free Lorentzian width refined negative, and not a held one", () => {
+    const a = assessRefinement({
+      result: result(),
+      parameters: [param("profileY", "profileY", -7.2, { label: "Lorentzian Y" }), param("profileX", "profileX", -0.5, { fixed: true })],
+      observationCount: 4000,
+    });
+    const f = a.findings.filter((x) => x.category === "physical");
+    expect(f.map((x) => x.parameterIds)).toEqual([["profileY"]]);
+    expect(f[0]?.summary).toMatch(/Lorentzian Y refined negative.*no physical meaning/);
+    expect(f[0]?.detail).toMatch(/Fix it at 0 and refine U, V, W/);
+  });
+
   it("words a held negative B_iso as an input value, not a refinement result", () => {
     const a = assessRefinement({
       result: result(),

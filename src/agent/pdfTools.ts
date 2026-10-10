@@ -15,7 +15,8 @@ import type { PdfAgentPort, PdfLiveState } from "@/agent/port";
 import type { LiveToolSpec } from "@/agent/tools";
 import type { ProjectHistory } from "@/core/project/history";
 import { assess_refinement, bond_geometry, interpret_structure, suggest_next_steps } from "@/mcp/tools";
-import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, parameterSummary, pct, sig, type ChangeResult, type LiveToolHost } from "@/agent/liveCommon";
+import { structureTable } from "@/agent/structureTable";
+import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, matchIds, parameterSummary, pct, sig, type ChangeResult, type LiveToolHost } from "@/agent/liveCommon";
 import { boxcarStepIndex, boxcarWindows, type BoxcarRun } from "@/core/workflow/pdfBoxcar";
 import type { RefinementParameter } from "@/core/refinement/types";
 
@@ -36,6 +37,8 @@ export function readPdfTool(name: string, input: Input, port: PdfAgentPort, host
       return assessment(s);
     case "suggest_next_steps":
       return { steps: suggest_next_steps({ assessment: assessment(s) }) };
+    case "structure_table":
+      return { phases: s.refinedPhases.map((ph, k) => structureTable(ph, k, s.parameters, s.bindings, s.result?.esd ?? {})), ...(s.result ? {} : { note: "No refinement on screen: the values carry no esds." }) };
     case "bond_geometry":
       return bondsOf(s.refinedPhases, input, bond_geometry);
     case "interpret_structure":
@@ -84,7 +87,7 @@ export async function changePdf(name: string, input: Input, port: PdfAgentPort, 
       return { note: boxcarLine(run), data: boxcarView(run, s.parameters) };
     }
     case "reset_parameters":
-      port.reset();
+      port.reset(input.parameters ? matchIds(s.parameters, input.parameters as string[]) : undefined);
       return undefined;
     case "go_to_step":
       goToStep(host, input.step);
@@ -123,7 +126,7 @@ export function describePdfChange(spec: LiveToolSpec, input: Input, s: PdfLiveSt
         : `Refine ${what}, ${free} free parameter${free === 1 ? "" : "s"}`;
     }
     case "reset_parameters":
-      return "Reset every parameter to its starting value";
+      return input.parameters ? `Reset ${matchIds(s.parameters, input.parameters as string[]).join(", ")} to the starting value` : "Reset every parameter to its starting value";
     case "go_to_step":
       return `Go to step ${String(input.step)}`;
     default:

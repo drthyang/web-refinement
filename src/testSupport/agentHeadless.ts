@@ -14,7 +14,8 @@ import { buildPdfProblem, buildPdfSpec, pdfCurves } from "@/core/workflow/pdf";
 import { applyParameters } from "@/core/workflow/apply";
 import { refine as refineProblem } from "@/core/refinement/engine";
 import { boxcarWindows } from "@/core/workflow/pdfBoxcar";
-import type { Session } from "@/app/powderSession";
+import { DEFAULT_INSTRUMENT, buildSpecFor, type Session } from "@/app/powderSession";
+import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { powderRestraints } from "@/app/powderSpec";
 import { runPowderRefinement } from "@/workers/runPowder";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
@@ -28,7 +29,7 @@ import type { StepKind } from "@/core/project/history";
  * A powder page without React: a session, the real curves and the real
  * engine behind the port, so the tools judge an actual fit.
  */
-export function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; session: () => Session } {
+export function sessionPort(start: Session, instrument: InstrumentParameters = DEFAULT_INSTRUMENT): { port: PowderAgentPort; calls: string[]; session: () => Session } {
   let s = start;
   let result: RefinementResult | null = null;
   let fitRange: { min: number; max: number } | null = null;
@@ -63,7 +64,7 @@ export function sessionPort(start: Session): { port: PowderAgentPort; calls: str
       busy: false,
       viewOnly: false,
       wR: Math.sqrt(num / den),
-      settings: { backgroundTerms: s.backgroundTerms, backgroundType: "chebyshev", mustrain: "isotropic", anisotropicAdp: false, siteTies: s.siteTies },
+      settings: { backgroundTerms: s.backgroundTerms, backgroundType: "chebyshev", mustrain: "isotropic", anisotropicAdp: false, siteTies: s.siteTies, corrections: s.corrections ?? {} },
       curves,
       d: convertAxisArray(curves.x, s.pattern.xUnit, "dSpacing", axisContext(s.pattern)),
       observationCount: n,
@@ -126,6 +127,26 @@ export function sessionPort(start: Session): { port: PowderAgentPort; calls: str
       calls.push(`ties ${JSON.stringify(update)}`);
       s = { ...s, siteTies: { ...s.siteTies, ...update } };
     },
+    setCorrections: (update) => {
+      calls.push(`corrections ${JSON.stringify(update)}`);
+      const was = s.corrections ?? {};
+      const po = update.preferredOrientation === undefined ? was.preferredOrientation : update.preferredOrientation ?? undefined;
+      const peak = update.peak ?? was.peak ?? [];
+      const corrections = { ...((update.asymmetry ?? was.asymmetry) ? { asymmetry: true } : {}), ...(po ? { preferredOrientation: po } : {}), ...(peak.length ? { peak } : {}) };
+      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrument, true, s.backgroundTerms, s.siteTies, "isotropic", corrections);
+      const previous = new Map(s.powderParams.map((p) => [p.id, p]));
+      s = {
+        ...s,
+        corrections,
+        powderParams: spec.params.map((p) => {
+          const old = previous.get(p.id);
+          return old ? { ...p, value: old.value, initialValue: old.initialValue, fixed: old.fixed } : { ...p, fixed: true };
+        }),
+        powderBindings: spec.bindings,
+        powderProfile: spec.profile,
+      };
+      result = null;
+    },
     setFitRange: (r) => {
       calls.push(`range ${r ? `${r.min}-${r.max}` : "whole"}`);
       fitRange = r ? { ...r } : null;
@@ -138,7 +159,12 @@ export function sessionPort(start: Session): { port: PowderAgentPort; calls: str
       return fitOnce(options);
     },
     cancel: () => calls.push("cancel"),
-    reset: () => calls.push("reset"),
+    reset: (ids) => {
+      calls.push(ids ? `reset ${ids.join(",")}` : "reset");
+      const only = ids ? new Set(ids) : null;
+      s = { ...s, powderParams: s.powderParams.map((p) => (only && !only.has(p.id) ? p : { ...p, value: p.initialValue })) };
+      result = null;
+    },
     magnetic: () => magnetic,
     openStep: (step) => calls.push(`step ${step}`),
   };

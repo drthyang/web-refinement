@@ -18,7 +18,7 @@ import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { PowderPhase } from "@/core/workflow/multiPhase";
-import { buildPowderSpec, type SiteTies, type MustrainModel } from "@/app/powderSpec";
+import { buildPowderSpec, type SiteTies, type MustrainModel, type SampleCorrections } from "@/app/powderSpec";
 import { SHARED_CORRECTION_KINDS } from "@/core/diffraction/corrections";
 
 /** Instrument rows shared across phases (one beam illuminates every phase). The
@@ -45,12 +45,16 @@ export function buildMultiPhaseSpec(
   backgroundTerms = 6,
   ties: SiteTies = {},
   mustrain: MustrainModel = "isotropic",
+  corrections?: SampleCorrections,
 ): MultiPhaseSpec {
   const params: RefinementParameter[] = [];
   const bindings: ParameterBinding[] = [];
   let profile: PowderProfile | undefined;
   structures.forEach((structure, i) => {
-    const spec = buildPowderSpec(structure, pattern, instrument, true, backgroundTerms, ties, mustrain);
+    // Preferred orientation is the primary phase's (a per-phase ratio; the
+    // axis is given in its lattice); the sample corrections are shared.
+    const own = i === 0 || !corrections ? corrections : (({ preferredOrientation: _po, ...shared }) => shared)(corrections);
+    const spec = buildPowderSpec(structure, pattern, instrument, true, backgroundTerms, ties, mustrain, own);
     if (i === 0) profile = spec.profile;
     for (const p of spec.params) {
       if (SHARED_KINDS.has(p.kind)) { if (i === 0) params.push(p); continue; }

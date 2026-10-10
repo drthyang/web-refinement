@@ -18,7 +18,7 @@ import {
 } from "@/mcp/tools";
 import type { StructureModel } from "@/core/crystal/types";
 import type { BackgroundType } from "@/core/diffraction/background";
-import type { MustrainModel, SiteTies } from "@/app/powderSpec";
+import type { CorrectionsUpdate, MustrainModel, PeakCorrectionId, SiteTies } from "@/app/powderSpec";
 import type { PowderXUnit } from "@/core/diffraction/types";
 import { availableDisplayUnits, convertAxisValue, convertInterval } from "@/visualization/axisUnits";
 import { K0_MAGNETIC, k0MagneticHint, residualPeaks } from "@/core/diagnostics/assessment";
@@ -26,15 +26,30 @@ import { reviewSymmetry } from "@/core/diagnostics/symmetryReview";
 import { formatWt, fractionsOf } from "@/core/diagnostics/phaseFractions";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { generateReflections } from "@/core/diffraction/reflections";
-import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, parameterSummary, pct, sig, type LiveToolHost } from "@/agent/liveCommon";
+import { diagnoseFit } from "@/core/diagnostics/fitDiagnosis";
+import { structureTable } from "@/agent/structureTable";
+import { powderReflectionObsCalc } from "@/core/workflow/obsCalc";
+import { excludedPointMask } from "@/core/refinement/factors";
+import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, matchIds, parameterSummary, pct, sig, type LiveToolHost } from "@/agent/liveCommon";
 
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- inputs are validated against the spec's zod schema before a handler runs */
 type Input = any;
 
 /** Run a read or control tool. Returns the JSON result the model sees. */
+/** The tools that need a model with atoms: on the placeholder they would judge nothing. */
+const NEEDS_STRUCTURE = new Set(["assess_refinement", "suggest_next_steps", "rank_next_parameters", "check_cell_symmetry", "find_unexplained_peaks", "review_symmetry", "diagnose_fit", "bond_geometry", "interpret_structure", "refine"]);
+
+/** Refuse a tool that needs a structure when only data are loaded. */
+export function requireStructure(name: string, s: PowderLiveState): void {
+  if (NEEDS_STRUCTURE.has(name) && s.structure.sites.length === 0) {
+    throw new Error("no structure is loaded: the data sit on an empty placeholder model (no atoms, no reflections). Ask the user to load the CIF of the phase (Load CIF…) before refining or judging anything");
+  }
+}
+
 export function readPowderTool(name: string, input: Input, port: PowderAgentPort, host: LiveToolHost): unknown {
   const s = port.state();
+  requireStructure(name, s);
   switch (name) {
     case "get_state":
       return stateView(s, host.history(), input.parameters);
@@ -154,6 +169,10 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
         ...(marks.length > 0 ? { markedOnPlot: "The forbidden reflections with intensity are marked on the plot (filled ▽, labelled forbidden h k l)." } : {}),
       };
     }
+    case "diagnose_fit":
+      return fitDiagnosisView(s);
+    case "structure_table":
+      return { phases: s.refinedPhases.map((ph, i) => structureTable(ph, i, s.parameters, s.bindings, s.result?.esd ?? {})), ...(s.result ? {} : { note: "No refinement on screen: the values carry no esds." }) };
     case "bond_geometry":
       return bondsOf(s.refinedPhases, input, bond_geometry);
     case "interpret_structure": {
@@ -178,6 +197,7 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
  */
 export async function changePowder(name: string, input: Input, port: PowderAgentPort, host: LiveToolHost): Promise<string | undefined> {
   const s = port.state();
+  requireStructure(name, s);
   switch (name) {
     case "set_free":
       return applyFree(s.parameters, input, port.setFixed);
@@ -194,6 +214,11 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
     case "set_site_ties":
       port.setSiteTies(siteTieUpdate(input));
       return undefined;
+    case "set_corrections": {
+      if (!port.setCorrections) throw new Error("this page has no corrections to set");
+      port.setCorrections(correctionUpdate(input));
+      return undefined;
+    }
     case "set_fit_range": {
       if (input.whole) {
         port.setFitRange(null);
@@ -212,7 +237,7 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
         return why ? `The refinement did not finish (${why}); the parameters keep their values from before it.` : undefined;
       }
     case "reset_parameters":
-      port.reset();
+      port.reset(input.parameters ? matchIds(s.parameters, input.parameters as string[]) : undefined);
       return undefined;
     case "go_to_step":
       goToStep(host, input.step);
@@ -227,6 +252,8 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
  * no-op never asks the user for approval.
  */
 export function powderNoOp(spec: LiveToolSpec, input: Input, s: PowderLiveState): string | null {
+  // Checked before the correlation probe: on the placeholder it would misread.
+  requireStructure(spec.name, s);
   // An empty change is an error before anyone is asked.
   if (spec.name === "set_background" && input.terms === undefined && input.type === undefined) throw new Error("pass `terms`, `type`, or both");
   if (spec.name === "set_site_ties") {
@@ -235,7 +262,26 @@ export function powderNoOp(spec: LiveToolSpec, input: Input, s: PowderLiveState)
     if (keys.length === 0) throw new Error("pass at least one of `positions`, `adp`, `occupancyToUnity`, `composition`");
     return keys.every((k) => tieOn(s.settings.siteTies, k) === update[k]) ? "the site ties are already set so" : null;
   }
+  if (spec.name === "set_corrections") {
+    const update = correctionUpdate(input);
+    if (Object.keys(update).length === 0) throw new Error("pass `asymmetry`, `preferredOrientation`, `peak`, or several");
+    if (update.asymmetry && s.pattern.xUnit !== "twoTheta") throw new Error("peak asymmetry (FCJ) is for constant-wavelength 2θ data; a TOF peak's asymmetry is its back-to-back exponentials");
+    if (update.asymmetry && s.profile.shape !== "pseudoVoigt") throw new Error("peak asymmetry (FCJ) works on the pseudo-Voigt profile, which needs the instrument's Caglioti U, V, W: ask the user to load the instrument file");
+    const now = s.settings.corrections;
+    const same = (update.asymmetry === undefined || !!now.asymmetry === update.asymmetry)
+      && (update.preferredOrientation === undefined || (update.preferredOrientation === null ? !now.preferredOrientation : now.preferredOrientation?.join() === update.preferredOrientation.join()))
+      && (update.peak === undefined || [...update.peak].sort().join() === [...(now.peak ?? [])].sort().join());
+    return same ? "the corrections are already set so" : null;
+  }
   return spec.name === "set_free" ? freeNoOp(s.parameters, input) : null;
+}
+
+function correctionUpdate(input: Input): CorrectionsUpdate {
+  return {
+    ...(typeof input.asymmetry === "boolean" ? { asymmetry: input.asymmetry as boolean } : {}),
+    ...(input.preferredOrientation !== undefined ? { preferredOrientation: input.preferredOrientation as [number, number, number] | null } : {}),
+    ...(Array.isArray(input.peak) ? { peak: input.peak as PeakCorrectionId[] } : {}),
+  };
 }
 
 const SITE_TIE_KEYS = ["positions", "adp", "occupancyToUnity", "composition"] as const;
@@ -265,6 +311,14 @@ export function describePowderChange(spec: LiveToolSpec, input: Input, s: Powder
       return `ADPs ${s.settings.anisotropicAdp ? "anisotropic" : "isotropic"} → ${input.anisotropic ? "anisotropic" : "isotropic"}`;
     case "set_site_ties":
       return Object.entries(siteTieUpdate(input)).map(([k, v]) => `${SITE_TIE_NAMES[k as keyof SiteTies]} ${v ? "on" : "off"}`).join(" · ");
+    case "set_corrections": {
+      const u = correctionUpdate(input);
+      return [
+        ...(u.asymmetry !== undefined ? [`asymmetry ${u.asymmetry ? "on" : "off"}`] : []),
+        ...(u.preferredOrientation !== undefined ? [u.preferredOrientation ? `preferred orientation along ${u.preferredOrientation.join(" ")}` : "preferred orientation off"] : []),
+        ...(u.peak !== undefined ? [`peak corrections: ${u.peak.length ? u.peak.join(", ") : "none"}`] : []),
+      ].join(" · ");
+    }
     case "set_fit_range": {
       if (input.whole) return "Fit the whole pattern";
       const w = requestedWindow(s, input);
@@ -279,7 +333,7 @@ export function describePowderChange(spec: LiveToolSpec, input: Input, s: Powder
         : `Refine ${free} free parameter${free === 1 ? "" : "s"}`;
     }
     case "reset_parameters":
-      return "Reset every parameter to its starting value";
+      return input.parameters ? `Reset ${matchIds(s.parameters, input.parameters as string[]).join(", ")} to the starting value` : "Reset every parameter to its starting value";
     case "go_to_step":
       return `Go to step ${String(input.step)}`;
     default:
@@ -290,6 +344,14 @@ export function describePowderChange(spec: LiveToolSpec, input: Input, s: Powder
 // ── state view ──────────────────────────────────────────────────────────────
 
 function stateView(s: PowderLiveState, history: ProjectHistory | null, select: readonly string[] | undefined): Record<string, unknown> {
+  if (s.structure.sites.length === 0) {
+    return {
+      technique: "powder",
+      source: s.source,
+      warning: "No structure is loaded: the data sit on an empty placeholder model (no atoms, no reflections). Nothing can be refined or judged until the user loads the phase's CIF (Load CIF…).",
+      data: { points: s.pattern.points.length, axis: s.pattern.xUnit, extent: [sig(s.extent.min, 6), sig(s.extent.max, 6)], radiation: s.pattern.radiation.kind },
+    };
+  }
   const xs = s.pattern.points;
   return {
     technique: "powder",
@@ -429,4 +491,49 @@ function sharedSiteAdps(s: PowderLiveState): string[] {
     if ((b.kind === "bIso" || b.kind === "uAniso") && b.targetKey) sites.set(b.parameterId, (sites.get(b.parameterId) ?? new Set()).add(`${b.targetId}/${b.targetKey}`));
   }
   return [...sites].filter(([, set]) => set.size > 1).map(([id]) => id);
+}
+
+/** diagnose_fit: the residual read cause by cause (core/diagnostics/fitDiagnosis.ts). */
+function fitDiagnosisView(s: PowderLiveState): Record<string, unknown> {
+  if (!s.d) throw new Error("this pattern's axis cannot be converted to d-spacing (no wavelength or TOF calibration)");
+  const curves = s.curves;
+  const points = s.pattern.points.length === curves.x.length ? s.pattern.points : null;
+  const sigma = curves.yObs.map((y, i) => {
+    const given = points?.[i]?.sigma;
+    return given !== undefined && given > 0 ? given : Math.sqrt(Math.max(y, 1));
+  });
+  const excluded = excludedPointMask(curves.yObs);
+  const include = curves.x.map((x, i) => !excluded[i] && (!s.fitRange || (x >= s.fitRange.min && x <= s.fitRange.max)));
+  const reflections = powderReflectionObsCalc(s.structure, s.pattern, [...s.parameters], [...s.bindings], s.profile, s.magnetic, s.fitRange, s.extraPhases, "rietveld", {
+    yCalc: [...curves.yCalc], sigma, include,
+  });
+  const dx = diagnoseFit({
+    x: curves.x, yObs: curves.yObs, yCalc: curves.yCalc,
+    ...(curves.yBackground && curves.yBackground.length === curves.x.length ? { yBackground: curves.yBackground } : {}),
+    sigma, include,
+    nParams: s.parameters.filter((p) => !p.fixed && !p.expression).length,
+    d: s.d,
+    reflections,
+    cells: s.refinedPhases.map((p) => p.cell),
+    twoTheta: s.pattern.xUnit === "twoTheta",
+    xOf: (d) => convertAxisValue(d, "dSpacing", s.pattern.xUnit, s.axis),
+  });
+  const v = dx.validation;
+  return {
+    reading: dx.reading,
+    causes: dx.causes.map((c) => ({ cause: c.id, chi2Share: pct(c.share), evidence: c.evidence, action: c.action })),
+    agreement: {
+      rwp: pct(v.agreement.rwp), rexp: pct(v.agreement.rexp), gof: sig(v.agreement.gof, 3),
+      ...(v.agreement.rwpBkg !== undefined ? { rwpBackgroundSubtracted: pct(v.agreement.rwpBkg) } : {}),
+      ...(v.durbinWatson ? { durbinWatson: sig(v.durbinWatson.d, 3), durbinWatsonCritical: sig(v.durbinWatson.qd, 3) } : {}),
+    },
+    ...(dx.betweenPeaks ? { betweenPeaks: { chi2Share: pct(dx.betweenPeaks.share), chi2PerPoint: sig(dx.betweenPeaks.chi2PerPoint, 3), points: dx.betweenPeaks.points } } : {}),
+    dShells: v.shells.map((sh) => ({ d: `${sig(Math.min(sh.lo, sh.hi), 3)}–${sig(Math.max(sh.lo, sh.hi), 3)} Å`, chi2PerPoint: sig(sh.chi2PerPoint, 3), chi2Share: pct(sh.share) })),
+    worstReflections: dx.worst.map((w) => ({
+      hkl: `${w.phase ? `${w.phase} ` : ""}${w.hkl}`, d: sig(w.d, 4), [s.pattern.xUnit]: sig(w.x, 5), chi2Share: pct(w.share),
+      misfit: w.signature === "shape" ? `shape (residual ${w.lobe > 0 ? "on the high" : "on the low"}-${s.pattern.xUnit === "twoTheta" ? "angle" : "x"} side)` : w.signature === "under" ? "calculated too weak" : "calculated too strong",
+    })),
+    ...(dx.wilson ? { intensityFalloff: { deltaB: sig(dx.wilson.deltaB, 3), r: sig(dx.wilson.r, 2), reflections: dx.wilson.n } } : {}),
+    ...(dx.texture ? { textureTest: { axis: dx.texture.axis.join(" "), r: sig(dx.texture.r, 2), reflections: dx.texture.n } } : {}),
+  };
 }

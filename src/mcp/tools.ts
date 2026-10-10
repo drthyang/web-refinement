@@ -52,6 +52,8 @@ import { analyzeSiteSymmetry, type SiteSymmetry } from "@/core/crystal/siteSymme
 import { classifyPointGroup } from "@/core/crystal/pointGroup";
 import { detectExtraPeaks, type ExtraPeakOptions } from "@/core/magnetic/extraPeaks";
 import { reviewSymmetry, type SymmetryReview } from "@/core/diagnostics/symmetryReview";
+import { isGsasHistogram, parseGsasHistogramPattern } from "@/parsers/gsasHistogram";
+import { cagliotiOf } from "@/core/workflow/leBail";
 import { searchPropagationVector, type KSearchOptions } from "@/core/magnetic/kSearch";
 import { magneticSubgroupLattice, latticeRepresentatives } from "@/core/magnetic/subgroupLattice";
 import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
@@ -133,13 +135,17 @@ export function parse_powder_data(args: { text: string; filename?: string }): {
 } {
   const fmt = detectDataFormat({ text: args.text, filename: args.filename ?? "data" });
   if (fmt.dataType !== "powder") throw new Error(`detected ${fmt.dataType} data, not powder — use the single-crystal path`);
-  const pattern = parsePowderData(args.text, {
-    id: "data",
-    name: args.filename ?? "data",
-    xUnit: fmt.xUnit,
-    radiation: fmt.radiation,
-    ...(fmt.radiation.kind !== "neutron-tof" ? { wavelength: fmt.radiation.wavelength } : {}),
-  });
+  // A GSAS histogram (BANK records: STD/ESD/ALT/FXYE, CONST or TOF binning)
+  // is read as the app reads it; its packed rows are not columns.
+  const pattern = isGsasHistogram(args.text)
+    ? parseGsasHistogramPattern(args.text, "data", args.filename ?? "data", { radiation: fmt.radiation })
+    : parsePowderData(args.text, {
+      id: "data",
+      name: args.filename ?? "data",
+      xUnit: fmt.xUnit,
+      radiation: fmt.radiation,
+      ...(fmt.radiation.kind !== "neutron-tof" ? { wavelength: fmt.radiation.wavelength } : {}),
+    });
   const xs = pattern.points.map((p) => p.x);
   return {
     detected: { dataType: fmt.dataType, ...(fmt.xUnit ? { xUnit: fmt.xUnit } : {}), source: fmt.source, confidence: fmt.confidence, ...(fmt.note ? { note: fmt.note } : {}) },
@@ -219,6 +225,9 @@ export function check_cell_symmetry(args: {
       ...(instrument.sigQ !== undefined ? { sigQ: instrument.sigQ } : {}),
     }
     : undefined;
+  // A loaded instrument's resolution curve shapes the Le Bail widths (the
+  // default instrument's generic one would mislead).
+  const caglioti = args.instrument ? cagliotiOf(args.instrument) : undefined;
   return checkCellSymmetry(
     args.structure,
     args.pattern,
@@ -226,6 +235,7 @@ export function check_cell_symmetry(args: {
     spec.bindings.filter((b) => isCell(b.kind)),
     {
       ...(tof ? { tof } : {}),
+      ...(caglioti ? { caglioti } : {}),
       ...(tofProfile ? { tofProfile } : {}),
       ...(args.extraPhases ? { extraPhases: args.extraPhases } : {}),
       ...(args.fitRange ? { fitRange: args.fitRange } : {}),

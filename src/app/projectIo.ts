@@ -145,6 +145,7 @@ export function powderWorkspaceFrom(
     siteTies: session.siteTies,
     ...(session.anisotropicAdp !== undefined ? { anisotropicAdp: session.anisotropicAdp } : {}),
     ...(session.mustrain !== undefined ? { mustrain: session.mustrain } : {}),
+    ...(session.corrections && Object.keys(session.corrections).length > 0 ? { corrections: session.corrections } : {}),
     ...(session.powderOverlay ? { overlay: session.powderOverlay } : {}),
     source: session.powderSource,
     ...(session.rawInstrument ? { rawInstrument: session.rawInstrument } : {}),
@@ -189,6 +190,7 @@ export function sessionFromPowderWorkspace(ws: PowderWorkspace, structures: read
     siteTies: ws.siteTies,
     ...(ws.anisotropicAdp !== undefined ? { anisotropicAdp: ws.anisotropicAdp } : {}),
     ...(ws.mustrain !== undefined ? { mustrain: ws.mustrain } : {}),
+    ...(ws.corrections ? { corrections: ws.corrections } : {}),
     ...(ws.overlay ? { powderOverlay: { calc: [...ws.overlay.calc], background: [...ws.overlay.background] } } : {}),
     // A hand-edited source equal to the landing marker would hide the loaded
     // data behind the empty state; fall back to the pattern's name.

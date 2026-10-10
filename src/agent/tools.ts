@@ -123,6 +123,37 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     pages: ["powder"],
   },
   {
+    name: "diagnose_fit",
+    title: "Diagnose the fit",
+    description:
+      "Powder page only. Why the fit on screen is not good, cause by cause, each with the share of χ² it carries and what to do: background (misfit between the peaks), peak positions (residual on one side of every peak: zero, cell, displacement), asymmetry (one-sided residual at low angle), peak width/shape (± lobes everywhere), intensity falling off with angle wrongly (a Wilson-type ΔB: ADPs, absorption, roughness), texture (intensity misfit following the angle to a low-index direction: preferred orientation), and what is left for the structure. Also the background-subtracted Rwp′, the Durbin–Watson statistic, χ² by d shell, and the reflections that carry the most χ². Call it when assess_refinement says the fit is poor or fair and you need to know what to free next; it reads the curves on screen, refined or not.",
+    inputSchema: {},
+    effect: "read",
+    pages: ["powder"],
+  },
+  {
+    name: "set_corrections",
+    title: "Set the corrections",
+    description:
+      "Powder page only. Switch sample and geometry corrections on or off, as the profile group's corrections boxes do: `asymmetry` (Finger–Cox–Jephcoat axial divergence, S/L and H/L; constant wavelength), `preferredOrientation` (March–Dollase along a reciprocal-lattice direction [h, k, l]; null turns it off), and `peak` — the set of displacement (flat plate, Δ2θ ∝ cosθ), transparency (flat plate, ∝ sin2θ), absorption (Debye–Scherrer μR, capillary), roughness (Suortti, flat-plate X-ray). Their rows come in fixed: free them with set_free and refine. Match the correction to the geometry and to what diagnose_fit found; they are polish after the structure, never a substitute for it.",
+    inputSchema: {
+      asymmetry: z.boolean().optional(),
+      preferredOrientation: z.array(z.number().int()).length(3).nullable().optional().describe("[h, k, l], or null to turn texture off"),
+      peak: z.array(z.enum(["displacement", "transparency", "absorption", "roughness"])).optional().describe("The full set of peak corrections wanted on (the others go off)"),
+    },
+    effect: "change",
+    pages: ["powder"],
+  },
+  {
+    name: "structure_table",
+    title: "The refined structure",
+    description:
+      "The refined structure as it is reported: per phase the cell (a, b, c, angles, volume) and per site the fractional coordinates, occupancy and B_iso (U_eq when anisotropic), each as value(esd) in the last digits, from the last refinement's esds (no esd on a fixed value). Call it for the final report, or to compare with a published structure; get_state shows parameter shifts, not coordinates.",
+    inputSchema: {},
+    effect: "read",
+    pages: ["powder", "pdf"],
+  },
+  {
     name: "magnetic_state",
     title: "Read the magnetic analysis",
     description:
@@ -399,8 +430,10 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
   {
     name: "reset_parameters",
     title: "Reset to starting values",
-    description: "Put every parameter back to its starting value and clear the result (the Reset control). Recorded as a step, so it can be undone.",
-    inputSchema: {},
+    description: "Put parameters back to their starting values (the values the model was loaded with) and clear the result: `parameters` (ids or globs) for only those — e.g. a profile term that refined to an unphysical value — or every parameter when omitted (the Reset control). Recorded as a step, so it can be undone. It sets no value of your choosing.",
+    inputSchema: {
+      parameters: ids.optional().describe("Only these parameters (ids or globs); omit for all"),
+    },
     effect: "change",
     pages: ["powder", "pdf"],
   },

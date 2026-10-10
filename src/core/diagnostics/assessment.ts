@@ -271,6 +271,17 @@ export function physicalFindings(parameters: readonly RefinementParameter[]): As
         evidence: { value: p.value, origin: p.fixed ? "input" : "refined" },
       });
     }
+    if ((p.kind === "profileX" || p.kind === "profileY") && p.value < -1e-6 && !p.fixed) {
+      const what = p.kind === "profileX" ? "size (Lorentzian X)" : "microstrain (Lorentzian Y)";
+      findings.push({
+        category: "physical",
+        severity: "warning",
+        summary: `${p.label} refined negative (${p.value.toFixed(3)}): a negative ${what} has no physical meaning.`,
+        detail: "It narrows the peaks below the Gaussian width, compensating Caglioti U, V, W that make them too broad (or a wrong peak-shape mix). Fix it at 0 and refine U, V, W, then free it again; quote no size or strain from it.",
+        parameterIds: [p.id],
+        evidence: { value: p.value },
+      });
+    }
     if (p.kind === "occupancy" && (p.value < -1e-6 || p.value > 1 + 1e-6)) {
       findings.push({
         category: "physical",

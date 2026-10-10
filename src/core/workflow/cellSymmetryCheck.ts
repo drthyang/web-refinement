@@ -52,7 +52,7 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { FitRange } from "@/core/workflow/powder";
 import { generateReflections } from "@/core/diffraction/reflections";
-import { cwWidth, dRange, dToX, leBailExtract, tofFwhmAt, type LeBailTofProfile, type TofCalibration } from "@/core/workflow/leBail";
+import { cwWidth, dRange, dToX, leBailExtract, tofFwhmAt, type Caglioti, type LeBailTofProfile, type TofCalibration } from "@/core/workflow/leBail";
 import { leBailCellPrefit } from "@/core/workflow/leBailPrefit";
 
 export interface CellSymmetryCheckOptions {
@@ -62,6 +62,8 @@ export interface CellSymmetryCheckOptions {
   readonly tof?: TofCalibration;
   /** Starting TOF peak coefficients, e.g. from the instrument file. */
   readonly tofProfile?: LeBailTofProfile;
+  /** Constant wavelength: the instrument's resolution curve, from its file (leBail.ts). */
+  readonly caglioti?: Caglioti;
   readonly fitRange?: FitRange;
   /** Smallest d-spacing (Å) the check reads. Default 0.7. */
   readonly dMin?: number;
@@ -193,6 +195,7 @@ export function checkCellSymmetry(
     shape, eta,
     ...(tof ? { tof } : {}),
     ...(options.tofProfile ? { tofProfile: options.tofProfile } : {}),
+    ...(options.caglioti ? { caglioti: options.caglioti } : {}),
     ...(extraPhases.length ? { extraPhases } : {}),
   });
   const cell = pre.cell;
@@ -200,6 +203,7 @@ export function checkCellSymmetry(
   // 2. What the allowed reflections (and the extra phases') cannot account for.
   const lb = leBailExtract(pattern, cell, structure.spaceGroup, {
     fwhm: pre.fwhm, ...(pre.fwhmU !== undefined ? { fwhmU: pre.fwhmU } : {}), shape, eta: pre.eta ?? eta, background: pre.backgroundCurve,
+    ...(options.caglioti ? { caglioti: options.caglioti } : {}),
     ...(tof ? { tof } : {}),
     ...(pre.tofProfile ? { tofProfile: pre.tofProfile } : {}),
     ...(extraPhases.length ? { extraPhases: extraPhases.map((ph, i) => ({ cell: pre.extraCells[i] ?? ph.cell, spaceGroup: ph.spaceGroup, widthScale: pre.extraWidthScales[i] ?? 1 })) } : {}),
@@ -214,7 +218,7 @@ export function checkCellSymmetry(
   // Le Bail width (grown with TOF when the fit had no TOF peak shape).
   const xMid = median(x);
   const tofProfile = pre.tofProfile;
-  const cw = cwWidth(pattern, pre.fwhm, pre.fwhmU ?? 0);
+  const cw = cwWidth(pattern, pre.fwhm, pre.fwhmU ?? 0, options.caglioti);
   const width = (xi: number): number =>
     tofProfile && tof ? tofFwhmAt((xi - tof.zero) / tof.difC, tofProfile)
       : pattern.xUnit === "tof" && xMid > 0 ? pre.fwhm * (xi / xMid) : cw(xi);
@@ -276,6 +280,9 @@ export function checkCellSymmetry(
   // forbidden family below the first allowed one (bcc's 100) must be tested too.
   const { dMin: dLo, dMax: dHi } = dRange(pattern, tof);
   const allowed: HklAt[] = lb.reflections.filter((r) => inside(r.center)).map((r) => ({ h: r.h, k: r.k, l: r.l, d: r.d, x: r.center }));
+  if (allowed.length === 0) {
+    throw new Error("the cell places no reflection inside the data's range — a wrong cell or wavelength, or no structure loaded");
+  }
   // The extra phases' reflections, at their refined cells.
   const others: { x: number; label: string }[] = extraPhases.flatMap((phase, i) =>
     (lb.extraReflections[i] ?? []).filter((r) => inside(r.center)).map((r) => ({ x: r.center, label: `${phase.name || phase.id} ${hkl(r)}` })));

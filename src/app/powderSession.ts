@@ -11,7 +11,7 @@ import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { MagneticModel } from "@/core/magnetic/types";
-import { buildPowderSpec, type SiteTies, type PowderSpec, type MustrainModel } from "@/app/powderSpec";
+import { buildPowderSpec, type SiteTies, type PowderSpec, type MustrainModel, type SampleCorrections } from "@/app/powderSpec";
 import { buildMultiPhaseSpec } from "@/app/multiPhaseSpec";
 import { buildSyntheticPowder } from "@/examples/synthetic";
 import { parseSymmetryOperation } from "@/core/crystal/symmetry";
@@ -44,6 +44,8 @@ export interface Session {
   anisotropicAdp?: boolean;
   /** Sample microstrain (Mustrain) model: isotropic | uniaxial | generalized. */
   mustrain?: MustrainModel;
+  /** Sample and geometry corrections switched on (asymmetry, preferred orientation, displacement, …). */
+  corrections?: SampleCorrections;
   /** GSAS-II's own calc/background overlay for a view-only (TOF) pattern. */
   powderOverlay?: { calc: number[]; background: number[] } | null;
   /** Provenance of the observed data driving the refinement. */
@@ -105,12 +107,18 @@ export function newSession(structure: StructureModel, instrument: InstrumentPara
   };
 }
 
+/** The session with its corrections cleared: new data starts without them. */
+export function withoutCorrections(s: Session): Session {
+  const { corrections: _cleared, ...rest } = s;
+  return rest;
+}
+
 /** Build the powder spec for a session, branching to the multi-phase builder when
  *  the session carries extra phases (so every rebuild preserves all phases). */
-export function buildSpecFor(structure: StructureModel, extraPhases: readonly StructureModel[], pattern: PowderPattern, instrument: InstrumentParameters, lorentz: boolean, backgroundTerms: number, ties: SiteTies, mustrain: MustrainModel): PowderSpec {
+export function buildSpecFor(structure: StructureModel, extraPhases: readonly StructureModel[], pattern: PowderPattern, instrument: InstrumentParameters, lorentz: boolean, backgroundTerms: number, ties: SiteTies, mustrain: MustrainModel, corrections?: SampleCorrections): PowderSpec {
   return extraPhases.length > 0
-    ? buildMultiPhaseSpec([structure, ...extraPhases], pattern, instrument, backgroundTerms, ties, mustrain)
-    : buildPowderSpec(structure, pattern, instrument, lorentz, backgroundTerms, ties, mustrain);
+    ? buildMultiPhaseSpec([structure, ...extraPhases], pattern, instrument, backgroundTerms, ties, mustrain, corrections)
+    : buildPowderSpec(structure, pattern, instrument, lorentz, backgroundTerms, ties, mustrain, corrections);
 }
 
 /**

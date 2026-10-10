@@ -75,6 +75,22 @@ describe("powder capture / restore", () => {
     expect(back.view).toEqual(view);
   });
 
+  it("keeps the sample corrections, and refuses one the app does not know", () => {
+    const corrections = { asymmetry: true, preferredOrientation: [0, 0, 1] as const, peak: ["absorption" as const] };
+    const session = { ...newSession(structure, DEFAULT_INSTRUMENT), corrections };
+    const ws = powderWorkspaceFrom(session, null, DEFAULT_INSTRUMENT, false, { fitRange: null, displayUnit: null, manualPeakD: [] });
+    const file = roundTrip(projectFileFor({ structures: [session.structure], workspace: ws, title: "t" }));
+    if (file.workspace.technique !== "powder") throw new Error("technique");
+    expect(sessionFromPowderWorkspace(file.workspace, file.structures).session.corrections).toEqual(corrections);
+    // None switched on: no block in the file.
+    expect(powderWorkspaceFrom({ ...session, corrections: {} }, null, DEFAULT_INSTRUMENT, false, { fitRange: null, displayUnit: null, manualPeakD: [] }).corrections).toBeUndefined();
+    const bad = JSON.parse(serializeProject(file as never));
+    bad.workspace.corrections.peak = ["extinction"];
+    expect(() => parseProject(JSON.stringify(bad))).toThrow(/corrections\.peak\[0\]/);
+    bad.workspace.corrections = { preferredOrientation: [0, 1] };
+    expect(() => parseProject(JSON.stringify(bad))).toThrow(/three indices/);
+  });
+
   it("carries extra phases as structures[1..] and the magnetic model with the primary phase", () => {
     const extra = { ...structure, id: "mno", name: "MnO" };
     const magnetic: MagneticModel = {
