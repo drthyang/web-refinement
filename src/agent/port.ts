@@ -9,13 +9,13 @@
  * — so a Agent action is indistinguishable from a click, and the step history
  * records it the same way (tagged `actor: "agent"` by the shell).
  *
- * Powder only for now. Single crystal and PDF keep their state private to the
- * page; each will publish its own port when the Agent reaches it.
+ * The powder and PDF pages publish one. Single crystal keeps its state private
+ * to the page until it gets its own.
  */
 
 import type { MutableRefObject } from "react";
 import type { StructureModel } from "@/core/crystal/types";
-import type { PowderPattern } from "@/core/diffraction/types";
+import type { PdfPattern, PowderPattern } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import type { ParameterBinding, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
@@ -87,8 +87,62 @@ export interface PowderAgentPort {
   readonly reset: () => void;
 }
 
-/** Any engine's port. A union as more techniques join. */
-export type AgentPort = PowderAgentPort;
+/** The PDF page as the Agent reads it — one render's state. */
+export interface PdfLiveState {
+  /** The phases as fitted (primary first; in irreps mode the parent setting). */
+  readonly phases: readonly StructureModel[];
+  /** Every phase with the current parameter values applied (primary first). */
+  readonly refinedPhases: readonly StructureModel[];
+  readonly pattern: PdfPattern;
+  readonly parameters: readonly RefinementParameter[];
+  readonly bindings: readonly ParameterBinding[];
+  /** The last refinement's result; null before the first fit or after a model change. */
+  readonly result: RefinementResult | null;
+  /** The fit window over r (Å). The PDF page always fits a window. */
+  readonly fitRange: { readonly min: number; readonly max: number };
+  /** The window the page opens with (Reset range). */
+  readonly defaultRange: { readonly min: number; readonly max: number };
+  /** The data's full r extent (Å). */
+  readonly extent: { readonly min: number; readonly max: number };
+  /** A refinement, scan or posterior run is going: wait for it, or cancel it, before acting. */
+  readonly busy: boolean;
+  /** Rw over G(r) inside the window (fraction), live. Uniform weights: relative only. */
+  readonly rw: number;
+  /** The plotted curves (with any applied spin model), as fitted. */
+  readonly curves: { readonly x: readonly number[]; readonly yObs: readonly number[]; readonly yCalc: readonly number[] };
+  /** Points inside the fit window. */
+  readonly observationCount: number;
+  /** "atomic" (constrained coordinates) or "irreps" (symmetry-mode amplitudes). */
+  readonly positionMode: "atomic" | "irreps";
+  /** A spin model is part of the fit (mPDF co-refinement). */
+  readonly spinModel: boolean;
+  /** The page's own warnings (correlated-motion conflict, zero ADPs). */
+  readonly warnings: readonly string[];
+  readonly source: string;
+}
+
+/** What the PDF page lets the Agent do. Each call is the page's own handler. */
+export interface PdfAgentPort {
+  readonly technique: "pdf";
+  readonly state: () => PdfLiveState;
+  /** Free or fix parameters by id (the parameter panel's check boxes). */
+  readonly setFixed: (changes: readonly { readonly id: string; readonly fixed: boolean }[]) => void;
+  /** The fit window over r (Å); null restores the page's default window. */
+  readonly setFitRange: (range: { readonly min: number; readonly max: number } | null) => void;
+  /** The Refine button. Resolves to why it did not finish, or null when it did. */
+  readonly refine: () => Promise<string | null>;
+  /** The Prefit / Escape-minimum button (prefit with no fit yet, escape after). */
+  readonly thorough: () => Promise<string | null>;
+  readonly cancel: () => void;
+  /** Every parameter back to its starting value. */
+  readonly reset: () => void;
+}
+
+/** Any engine's port, told apart by `technique`. */
+export type AgentPort = PowderAgentPort | PdfAgentPort;
+
+/** Any page's live state. */
+export type LiveState = PowderLiveState | PdfLiveState;
 
 /** The shell-owned ref an engine publishes its port into (null when unmounted or inactive). */
 export type AgentPortRef = MutableRefObject<AgentPort | null>;

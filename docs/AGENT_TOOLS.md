@@ -356,13 +356,20 @@ live page, judges the fit with the tools above, and makes changes through the
 page's own controls. Open it with the **Agent** button in the header.
 
 **Where it works.**
-- Supported: the powder page (Rietveld), single- and multi-phase, with or
-  without an applied magnetic model.
-- Not yet: the magnetic page, single crystal, and PDF. Their state is private
-  to the page; each needs its own port.
+- The powder page (Rietveld), single- and multi-phase, with or without an
+  applied magnetic model.
+- The PDF page (a real-space fit of G(r)), single- and multi-phase, with or
+  without an applied spin model. Rw is its agreement; the fit weights every
+  point equally, so the answers carry no GoF and say the esds are not
+  statistical.
+- Not yet: single crystal, and the magnetic analysis step. Their state is
+  private to the page; each needs its own port.
 
 **Its tools.** One list ([`src/agent/tools.ts`](../src/agent/tools.ts))
-serves every way in, so a model sees the same names everywhere.
+serves every way in, so a model sees the same names everywhere. Each tool names
+the pages it works on; on another page it answers with an error that says so.
+The page-specific handlers are [`powderTools.ts`](../src/agent/powderTools.ts)
+and [`pdfTools.ts`](../src/agent/pdfTools.ts).
 - Read tools run at once: `get_state`, `assess_refinement`,
   `suggest_next_steps`, `rank_next_parameters`, `check_cell_symmetry`,
   `find_unexplained_peaks`, `bond_geometry`, `interpret_structure`, `read_ref`.
@@ -370,6 +377,12 @@ serves every way in, so a model sees the same names everywhere.
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
   `set_adp_model`, `set_fit_range`, `refine`, `reset_parameters`, `go_to_step`.
   Each is the page's own handler — the Agent's `refine` is the Refine button.
+- Powder page only: `rank_next_parameters`, `check_cell_symmetry`,
+  `find_unexplained_peaks`, `set_background`, `set_microstrain`,
+  `set_adp_model`. On the PDF page, `assess_refinement` judges convergence,
+  correlations, bounds and physical values, without the GoF verdict or the
+  Bragg-peak residual scan, and `set_fit_range` with `whole` restores the
+  page's default r window.
 - `cancel_refinement` never asks.
 - There is no tool that sets a parameter value. The guardrails above hold.
 
@@ -420,7 +433,7 @@ rest of the session. Every change is a step in History tagged `agent`
 the way Claude Code does, as a smoke test without a model.
 
 **How it is tested.** [`src/agent/`](../src/agent) tests run the tools on
-a real powder fit (the refinement engine, the assessment), the bridge through
+a real powder fit and a real PDF fit (the refinement engine, the assessment), the bridge through
 an MCP client, the chat loop against a stand-in API that streams scripted
 turns (as Claude and as Ollama), the Ollama model listing against a stand-in
 server, and the proxy against a stubbed upstream.
@@ -444,7 +457,7 @@ Other planned work:
 - Richer per-tool JSON schemas.
 - Assessment variants for single-crystal data (in the R1/wR2/GooF convention)
   and for magnetic refinements.
-- The Agent on the magnetic, single-crystal and PDF pages, each through its
-  own port.
+- The Agent on the single-crystal page and the magnetic analysis step, each
+  through its own port; PDF symmetry modes and boxcar scans as tools.
 
 The order across the whole project is in [ROADMAP.md §5](./ROADMAP.md).

@@ -1237,7 +1237,8 @@ export function PowderWorkbench({
   useEffect(() => {
     if (!agentLink) return;
     if (!active || !hasContent) {
-      agentLink.publish(null);
+      // Inactive under the PDF page, this page still renders: leave its port alone.
+      agentLink.release("powder");
       return;
     }
     agentLink.publish({
@@ -1294,7 +1295,7 @@ export function PowderWorkbench({
       reset: resetPowderParams,
     });
   });
-  useEffect(() => () => agentLink?.publish(null), [agentLink]);
+  useEffect(() => () => agentLink?.release("powder"), [agentLink]);
 
   // Summary-card content (Structure / Data / Instrument).
   const cell = structure.cell;

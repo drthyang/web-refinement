@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { AgentExecutor, type ActivityEntry, type AgentHost } from "@/agent/executor";
-import type { PowderAgentPort, PowderLiveState } from "@/agent/port";
-import { freePlan } from "@/agent/powderTools";
+import type { AgentPort, PdfAgentPort, PdfLiveState, PowderAgentPort, PowderLiveState } from "@/agent/port";
+import { AgentLink } from "@/agent/link";
+import { gata4se8PdfExample } from "@/examples/gata4se8Pdf";
+import { buildPdfProblem, buildPdfSpec, pdfCurves } from "@/core/workflow/pdf";
+import { applyParameters } from "@/core/workflow/apply";
+import { refine as refineProblem } from "@/core/refinement/engine";
+import { freePlan } from "@/agent/liveCommon";
 import { LIVE_TOOLS, inputJsonSchema } from "@/agent/tools";
 import { newSession, type Session } from "@/app/powderSession";
 import { exampleStructure } from "@/examples/mn3ga";
@@ -98,12 +103,12 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
   return { port, calls, session: () => s };
 }
 
-function fakeHost(port: PowderAgentPort | null): { host: AgentHost; steps: { kind: StepKind; agent: boolean }[] } {
+function fakeHost(port: AgentPort | null): { host: AgentHost; steps: { kind: StepKind; agent: boolean }[] } {
   const steps: { kind: StepKind; agent: boolean }[] = [];
   let agent = false;
   const host: AgentHost = {
     port: () => port,
-    technique: () => (port ? "powder" : null),
+    technique: () => port?.technique ?? null,
     settle: async () => undefined,
     asAgent: async (fn) => {
       agent = true;
@@ -315,5 +320,156 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(calls.at(-1)).toBe(`range ${extent.min + 5}-${extent.max - 5}`);
     await ex.run("set_fit_range", { whole: true }, "chat");
     expect(calls.at(-1)).toBe("range whole");
+  });
+});
+
+/**
+ * A PDF page without React: the bundled demo's structure and G(r) at its
+ * converged values, the real curves and the real engine behind the port, over
+ * a short r window so the fit is quick.
+ */
+function pdfPort(): { port: PdfAgentPort; calls: string[] } {
+  const demo = gata4se8PdfExample();
+  const spec = buildPdfSpec(demo.structure, demo.pattern);
+  let params = spec.params.map((p) => ({ ...p, value: demo.refinedParams[p.id] ?? p.value }));
+  let result: RefinementResult | null = null;
+  const defaultRange = { min: 1.5, max: 6 };
+  let fitRange = { ...defaultRange };
+  const rs = demo.pattern.points.map((p) => p.r);
+  const calls: string[] = [];
+  const state = (): PdfLiveState => {
+    const curves = pdfCurves(demo.structure, demo.pattern, params, spec.bindings, fitRange);
+    let num = 0;
+    let den = 0;
+    let n = 0;
+    curves.x.forEach((r, i) => {
+      if (r < fitRange.min || r > fitRange.max) return;
+      n++;
+      num += (curves.yObs[i]! - curves.yCalc[i]!) ** 2;
+      den += curves.yObs[i]! ** 2;
+    });
+    const values: Record<string, number> = {};
+    for (const p of params) values[p.id] = p.value;
+    return {
+      phases: [demo.structure],
+      refinedPhases: [applyParameters(demo.structure, spec.bindings, values).model],
+      pattern: demo.pattern,
+      parameters: params,
+      bindings: spec.bindings,
+      result,
+      fitRange,
+      defaultRange,
+      extent: { min: rs[0]!, max: rs.at(-1)! },
+      busy: false,
+      rw: Math.sqrt(num / den),
+      curves,
+      observationCount: n,
+      positionMode: "atomic",
+      spinModel: false,
+      warnings: [],
+      source: "test",
+    };
+  };
+  const refine = async (): Promise<string | null> => {
+    calls.push("refine");
+    const r = refineProblem(buildPdfProblem(demo.structure, demo.pattern, params, spec.bindings, spec.restraints, fitRange), { maxIterations: 4, analyticDerivatives: true });
+    params = params.map((p) => ({ ...p, value: r.parameters[p.id] ?? p.value }));
+    result = r;
+    return null;
+  };
+  const port: PdfAgentPort = {
+    technique: "pdf",
+    state,
+    setFixed: (changes) => {
+      calls.push(`setFixed ${changes.map((c) => `${c.id}=${c.fixed}`).join(",")}`);
+      const m = new Map(changes.map((c) => [c.id, c.fixed]));
+      params = params.map((p) => (m.has(p.id) ? { ...p, fixed: m.get(p.id)! } : p));
+    },
+    setFitRange: (r) => {
+      calls.push(`range ${r ? `${r.min}-${r.max}` : "default"}`);
+      fitRange = r ? { ...r } : { ...defaultRange };
+    },
+    refine,
+    thorough: async () => {
+      calls.push("thorough");
+      return "cancelled";
+    },
+    cancel: () => calls.push("cancel"),
+    reset: () => calls.push("reset"),
+  };
+  return { port, calls };
+}
+
+describe("AgentExecutor on a live PDF fit", () => {
+  it("reads the PDF page in its own terms: r window, Rw, no GoF", async () => {
+    const { port } = pdfPort();
+    const { ex, asked } = executor(fakeHost(port).host);
+    const view = parse((await ex.run("get_state", {}, "chat")).text);
+    expect(view.technique).toBe("pdf");
+    expect((view.data as { axis: string; fitWindow: number[] }).axis).toBe("r (Å)");
+    expect((view.data as { fitWindow: number[] }).fitWindow).toEqual([1.5, 6]);
+    expect(typeof view.Rw).toBe("number");
+    expect(String(view.convention)).toMatch(/no GoF/);
+    expect(JSON.stringify(view)).not.toMatch(/"gof"|"wR"/);
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses a powder-only tool, naming the page", async () => {
+    const { ex } = executor(fakeHost(pdfPort().port).host, "auto");
+    for (const name of ["check_cell_symmetry", "set_background", "rank_next_parameters"]) {
+      const out = await ex.run(name, name === "set_background" ? { terms: 3 } : {}, "chat");
+      expect(out.isError).toBe(true);
+      expect(out.text).toMatch(new RegExp(`${name} works on the powder page only; the PDF page is open`));
+    }
+  });
+
+  it("frees, refines as the agent, and reports Rw; the assessment drops the GoF verdict", async () => {
+    const { port, calls } = pdfPort();
+    const { host, steps } = fakeHost(port);
+    const { ex, asked, seen } = executor(host);
+    expect((await ex.run("assess_refinement", {}, "chat")).text).toMatch(/refine first/);
+
+    await ex.run("set_free", { free: ["delta2"] }, "chat");
+    expect(calls).toContain("setFixed delta2=false");
+    const out = parse((await ex.run("refine", {}, "chat")).text);
+    expect(asked.at(-1)!.preview).toMatch(/^Refine G\(r\), \d+ free parameters$/);
+    expect(out.refined).toBe(true);
+    expect(typeof out.Rw).toBe("number");
+    expect(typeof out.RwBefore).toBe("number");
+    expect(out.gof).toBeUndefined();
+    expect(seen.filter((e) => e.tool === "refine").at(-1)!.outcome).toMatch(/· Rw \d+\.\d\d%$/);
+    expect(steps.some((st) => st.agent)).toBe(true);
+
+    const verdict = parse((await ex.run("assess_refinement", {}, "chat")).text);
+    expect(JSON.stringify(verdict.verdict)).not.toMatch(/"gof"/);
+    expect(String(verdict.convention)).toMatch(/no GoF/);
+    const next = parse((await ex.run("suggest_next_steps", {}, "chat")).text);
+    expect(next.steps).toBeDefined();
+  });
+
+  it("restores the default r window and passes on why a run did not finish", async () => {
+    const { port, calls } = pdfPort();
+    const { ex, asked } = executor(fakeHost(port).host);
+    await ex.run("set_fit_range", { min: 2, max: 5 }, "chat");
+    expect(calls.at(-1)).toBe("range 2-5");
+    await ex.run("set_fit_range", { whole: true }, "chat");
+    expect(asked.at(-1)!.preview).toBe("Fit the default window, r 1.5 – 6 Å");
+    expect(calls.at(-1)).toBe("range default");
+    const out = parse((await ex.run("refine", { mode: "thorough" }, "chat")).text);
+    expect(out.refined).toBe(false);
+    expect(String(out.note)).toMatch(/did not finish \(cancelled\)/);
+  });
+});
+
+describe("AgentLink", () => {
+  it("lets a page clear only its own port", () => {
+    const link = new AgentLink();
+    const pdf = pdfPort().port;
+    link.publish(pdf);
+    // The powder page, inactive under the PDF page, re-renders.
+    link.release("powder");
+    expect(link.port()).toBe(pdf);
+    link.release("pdf");
+    expect(link.port()).toBeNull();
   });
 });

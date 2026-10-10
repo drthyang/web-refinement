@@ -10,14 +10,16 @@
  */
 
 import { z } from "zod";
-import { liveTool, type LiveToolSpec, type ToolEffect } from "@/agent/tools";
-import type { AgentPort, PowderLiveState } from "@/agent/port";
-import { changePowder, describePowderChange, powderNoOp, readPowderTool, type PowderToolHost } from "@/agent/powderTools";
+import { PAGE_LABEL, liveTool, type LiveToolSpec, type ToolEffect } from "@/agent/tools";
+import type { AgentPort, LiveState, PdfLiveState, PowderLiveState } from "@/agent/port";
+import { changePowder, describePowderChange, powderNoOp, readPowderTool } from "@/agent/powderTools";
+import { changePdf, describePdfChange, pdfNoOp, readPdfTool } from "@/agent/pdfTools";
+import type { LiveToolHost } from "@/agent/liveCommon";
 import { REF_KEY, RefStore, buildView } from "@/mcp/refs";
 import type { StepKind } from "@/core/project/history";
 
 /** What the executor needs from the app shell. */
-export interface AgentHost extends PowderToolHost {
+export interface AgentHost extends LiveToolHost {
   /** The active engine's port; null with nothing loaded. */
   readonly port: () => AgentPort | null;
   /** The page on screen, to explain why a tool is unavailable there. */
@@ -117,6 +119,10 @@ export class AgentExecutor implements ToolRunner {
       }
 
       const port = this.requirePort();
+      if (!spec.pages.includes(port.technique)) {
+        const where = spec.pages.map((p) => PAGE_LABEL[p]).join(" and ");
+        throw new Error(`${spec.name} works on the ${where} page${spec.pages.length === 1 ? "" : "s"} only; the ${PAGE_LABEL[port.technique]} page is open`);
+      }
       if (spec.effect === "control") {
         update({});
         port.cancel();
@@ -128,7 +134,7 @@ export class AgentExecutor implements ToolRunner {
         update({});
         // Let the drawer paint "running" before a heavy synchronous analysis.
         await new Promise((r) => setTimeout(r, 0));
-        const out = readPowderTool(spec.name, input, port, this.host);
+        const out = port.technique === "pdf" ? readPdfTool(spec.name, input, port, this.host) : readPowderTool(spec.name, input, port, this.host);
         update({ status: "done" });
         return this.respond(out);
       }
@@ -136,12 +142,12 @@ export class AgentExecutor implements ToolRunner {
       // A change: refuse while a fit runs, then ask, then act as the agent.
       const before = port.state();
       if (before.busy) throw new Error("a refinement is running — wait for it to finish, or call cancel_refinement");
-      const noOp = powderNoOp(spec, input, before);
+      const noOp = port.technique === "pdf" ? pdfNoOp(spec, input, before as PdfLiveState) : powderNoOp(spec, input, before as PowderLiveState);
       if (noOp) {
         update({ status: "done", outcome: "No change" });
         return this.respond({ unchanged: true, note: noOp });
       }
-      update({ status: "waiting", preview: describePowderChange(spec, input, before) });
+      update({ status: "waiting", preview: port.technique === "pdf" ? describePdfChange(spec, input, before as PdfLiveState) : describePowderChange(spec, input, before as PowderLiveState) });
       if (!(await this.opts.approve(entry))) {
         update({ status: "declined", outcome: "Declined" });
         return this.respond({ declined: true, note: "The user declined this change. Ask what they would prefer, or propose something else." });
@@ -151,7 +157,7 @@ export class AgentExecutor implements ToolRunner {
       // step holds only what the agent changed.
       this.host.recordNow("edit");
       const note = await this.host.asAgent(async () => {
-        const n = await changePowder(spec.name, input, port, this.host);
+        const n = port.technique === "pdf" ? await changePdf(spec.name, input, port, this.host) : await changePowder(spec.name, input, port, this.host);
         await this.host.settle();
         const kind = STEP_KIND[spec.name];
         if (kind) {
@@ -176,8 +182,8 @@ export class AgentExecutor implements ToolRunner {
     if (port) return port;
     const technique = this.host.technique();
     throw new Error(
-      technique === "singleCrystal" || technique === "pdf"
-        ? `the Agent works on the powder page for now; the ${technique === "pdf" ? "PDF" : "single-crystal"} page is not connected yet`
+      technique === "singleCrystal"
+        ? "the Agent works on the powder and PDF pages for now; the single-crystal page is not connected yet"
         : "no analysis is open — ask the user to load a structure and data, or a demo",
     );
   }
@@ -218,14 +224,23 @@ function error(message: string): ToolOutcome {
   return { isError: true, text: `Error: ${message}` };
 }
 
+/**
+ * A page's agreement: wR on powder; Rw on PDF, which has no GoF (uniform
+ * weights). The model sees the name the page shows.
+ */
+function agreement(s: LiveState): { key: "wR" | "Rw"; live: number } {
+  return "rw" in s ? { key: "Rw", live: s.rw } : { key: "wR", live: s.wR };
+}
+
 /** What the model learns after a change: the effect on the fit and the step it became. */
 function changeOutcome(
   name: string,
-  before: PowderLiveState,
-  after: PowderLiveState,
+  before: LiveState,
+  after: LiveState,
   step: { id: string; label: string } | null,
   note: string | undefined,
 ): Record<string, unknown> {
+  const { key } = agreement(after);
   const free = after.parameters.filter((p) => !p.fixed && !p.expression).map((p) => p.id);
   const base = { step, ...(note ? { note } : {}), freeCount: free.length };
   if (name === "refine") {
@@ -237,23 +252,23 @@ function changeOutcome(
       ...base,
       refined: true,
       status: r.status,
-      wR: pct(r.agreement.rWeighted ?? 0),
-      wRBefore: pct(before.wR),
-      gof: r.agreement.goodnessOfFit !== undefined ? Number(r.agreement.goodnessOfFit.toPrecision(4)) : null,
+      [key]: pct(r.agreement.rWeighted ?? 0),
+      [`${key}Before`]: pct(agreement(before).live),
+      ...(key === "wR" ? { gof: r.agreement.goodnessOfFit !== undefined ? Number(r.agreement.goodnessOfFit.toPrecision(4)) : null } : {}),
       iterations: r.history.length,
       ...(r.diagnostics ? { atBounds: r.diagnostics.atBounds.map((b) => b.parameterId), maxShiftOverEsd: Number(r.diagnostics.maxShiftOverEsd.toPrecision(3)) } : {}),
       ...(r.message ? { message: r.message } : {}),
     };
   }
   if (name === "set_free") return { ...base, free };
-  return { ...base, wR: pct(after.wR), lastResultCleared: before.result !== null && after.result === null };
+  return { ...base, [key]: pct(agreement(after).live), lastResultCleared: before.result !== null && after.result === null };
 }
 
-function outcomeLine(name: string, before: PowderLiveState, after: PowderLiveState, note: string | undefined): string {
+function outcomeLine(name: string, before: LiveState, after: LiveState, note: string | undefined): string {
   if (name === "refine") {
     const r = after.result;
     if (!r || r === before.result) return "Did not finish";
-    return `${r.status} · wR ${pct(r.agreement.rWeighted ?? 0).toFixed(2)}%`;
+    return `${r.status} · ${agreement(after).key} ${pct(r.agreement.rWeighted ?? 0).toFixed(2)}%`;
   }
   return note ?? "Done";
 }

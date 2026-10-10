@@ -26,6 +26,15 @@ export class AgentLink {
     this.wake();
   }
 
+  /**
+   * An engine leaves: clear the port only if it is still that engine's. The
+   * powder page stays mounted (inactive) under the PDF page, and must not clear
+   * the PDF page's port when it re-renders.
+   */
+  release(technique: AgentPort["technique"]): void {
+    if (this.current?.technique === technique) this.current = null;
+  }
+
   port(): AgentPort | null {
     return this.current;
   }

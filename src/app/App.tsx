@@ -1217,7 +1217,7 @@ export function App(): JSX.Element {
         // id so a new file remounts with a fresh parameter set.
         <WorkbenchErrorBoundary resetKeys={[pdfDataset, structure, session.extraPhases, restore.token]} onClear={clearWorkbench}>
         <main className="wb-main" style={{ flex: 1 }}>
-          <PdfWorkbench onMagneticPresent={setPdfMagnetic} key={`${pdfDataset.id}#${restore.token}`} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} {...(restore.pdf ? { restore: restore.pdf } : {})} stepHistory={stepHistory} />
+          <PdfWorkbench onMagneticPresent={setPdfMagnetic} key={`${pdfDataset.id}#${restore.token}`} structure={structure} pattern={pdfDataset} extraPhases={session.extraPhases} ownStructure={ownStructure} client={client.current} step={step} onStep={setStep} exportsRef={pdfExports} onLoadData={onLoadData} onLoadCif={onLoadCif} onAddPhase={onAddPhase} onRemovePhase={onRemovePhase} {...(demo === "pdf" ? { presetValues: gata4se8PdfExample().refinedParams, presetFitRange: gata4se8PdfExample().fitRange } : {})} {...(restore.pdf ? { restore: restore.pdf } : {})} stepHistory={stepHistory} agentLink={agentLink} />
         </main>
         </WorkbenchErrorBoundary>
       )}

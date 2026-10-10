@@ -51,7 +51,7 @@ what is missing. [VALIDATION.md](./VALIDATION.md) records the evidence.
 | PDF symmetry modes | ✅ | Γ distortion modes and the translationengleiche subgroup tree | [Track A plan](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md) |
 | Track A: PDF supercells | ⬜ | Klassengleiche subgroups, zone-boundary modes, child-cell PDF model | [Track A plan](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md) |
 | Track B: incommensurate | 🚧 | Refine k ✅ (powder; FullProf golden on DyMn₆Ge₆); Fourier-loop mCIF, star of k, harmonics open | [Track B plan](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md) |
-| [Agent layer](#5-agent-tools-skills-and-llm-guided-refinement) | 🚧 | MCP tools per milestone; a powder Rietveld skill; the in-app Agent (powder page) | [AGENT_TOOLS.md](./AGENT_TOOLS.md) |
+| [Agent layer](#5-agent-tools-skills-and-llm-guided-refinement) | 🚧 | MCP tools per milestone; a powder Rietveld skill; the in-app Agent (powder and PDF pages) | [AGENT_TOOLS.md](./AGENT_TOOLS.md) |
 
 ## 3. Foundations
 
@@ -424,10 +424,10 @@ the design and the generated tool list.
 
 - **Tools:** an MCP server delivers them, and its registry doubles as the
   headless API.
-- **In-app Agent:** Claude acts on the live powder page, through Claude Code, an
-  API key, or a local proxy, and so can a local model on Ollama; every change is an approved, undoable agent step
-  ([AGENT_TOOLS.md](./AGENT_TOOLS.md#the-in-app-agent)). The other pages
-  are next.
+- **In-app Agent:** Claude acts on the live powder and PDF pages, through Claude
+  Code, an API key, or a local proxy, and so can a local model on Ollama; every change is an approved, undoable agent step
+  ([AGENT_TOOLS.md](./AGENT_TOOLS.md#the-in-app-agent)). Single crystal
+  is next.
 - **Skills:** a powder Rietveld skill ships
   ([SKILL.md](../.claude/skills/my-rietveld-workflow/SKILL.md)); a magnetic
   structure determination skill (M2 → M3 → M4) is planned.
