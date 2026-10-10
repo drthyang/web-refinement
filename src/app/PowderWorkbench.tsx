@@ -196,7 +196,7 @@ export function PowderWorkbench({
   const [highlight, setHighlight] = useState<{ hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null>(null);
   // Residual peaks the Agent found (find_unexplained_peaks), marked on the
   // plot until the user clears them or the next refinement changes the residual.
-  const [agentPeaks, setAgentPeaks] = useState<readonly { d: number; height: number }[] | null>(null);
+  const [agentPeaks, setAgentPeaks] = useState<readonly { d: number; height: number; near?: string }[] | null>(null);
   useEffect(() => setAgentPeaks(null), [powderResult]);
   // Which phase the 3D model shows (0 = primary structure, 1.. = extra phases).
   const [viewPhaseIdx, setViewPhaseIdx] = useState(0);
@@ -417,7 +417,7 @@ export function PowderWorkbench({
   // The Agent's unexplained peaks on the plot's axis (strongest first, as found).
   const agentPeakMarks = useMemo(
     () => (agentPeaks ?? [])
-      .map((p) => ({ x: convertAxisValue(p.d, "dSpacing", effectiveUnit, axisCtx), d: p.d }))
+      .map((p) => ({ x: convertAxisValue(p.d, "dSpacing", effectiveUnit, axisCtx), d: p.d, ...(p.near ? { near: p.near } : {}) }))
       .filter((p) => Number.isFinite(p.x)),
     [agentPeaks, effectiveUnit, axisCtx],
   );
@@ -1317,7 +1317,7 @@ export function PowderWorkbench({
       setAnisotropicAdp,
       setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : null),
       showPeaks: (peaks) => {
-        setAgentPeaks(peaks.length > 0 ? peaks.map((p) => ({ d: p.d, height: p.height })) : null);
+        setAgentPeaks(peaks.length > 0 ? peaks.map((p) => ({ d: p.d, height: p.height, ...(p.near ? { near: p.near } : {}) })) : null);
         if (peaks.length > 0) setPlotMode("curves");
       },
       refine: runPowder,
@@ -1640,23 +1640,28 @@ export function PowderWorkbench({
                       focusPoint={focusPoint}
                       highlight={highlight}
                       onHighlight={setHighlight}
-                      {...(agentPeakMarks.length > 0 ? { foundPeaks: agentPeakMarks, foundStyle: { label: "unexplained", color: theme.flag, guides: true } } : {})}
+                      {...(agentPeakMarks.length > 0 ? { foundPeaks: agentPeakMarks, foundStyle: { label: agentPeakMarks.some((p) => !p.near) ? "unexplained" : "residual peak", color: theme.flag, guides: true } } : {})}
                       {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                     />
                     {agentPeakMarks.length > 0 && (
                       <div style={{ display: "flex", alignItems: "center", gap: 6, rowGap: 4, marginTop: 6, fontSize: 12, color: theme.secondary, flexWrap: "wrap" }}>
-                        <span style={{ color: theme.flag, fontWeight: 600 }} title="Residual peaks the Agent found (find_unexplained_peaks): intensity the model does not explain. Cleared at the next refinement.">
-                          ▽ {agentPeakMarks.length} unexplained peak{agentPeakMarks.length === 1 ? "" : "s"}
+                        <span style={{ color: theme.flag, fontWeight: 600 }} title="Residual peaks the Agent found (find_unexplained_peaks). Filled ▽: between every phase's reflections — intensity no phase explains. Hollow ▽: on a known reflection — a misfit of that reflection. Cleared at the next refinement.">
+                          {(() => {
+                            const beside = agentPeakMarks.filter((p) => p.near?.startsWith("beside")).length;
+                            const on = agentPeakMarks.filter((p) => p.near && !p.near.startsWith("beside")).length;
+                            const free = agentPeakMarks.length - on - beside;
+                            return [free > 0 ? `▼ ${free} unexplained` : null, on > 0 ? `▽ ${on} on a known reflection` : null, beside > 0 ? `▽ ${beside} beside one` : null].filter(Boolean).join(" · ");
+                          })()}
                         </span>
                         {agentPeakMarks.map((p) => (
                           <button
                             key={p.d}
                             type="button"
-                            title={`Zoom to d = ${p.d.toFixed(4)} Å`}
+                            title={`Zoom to d = ${p.d.toFixed(4)} Å${p.near ? ` — on ${p.near}, a misfit of that reflection` : " — between the reflections"}`}
                             onClick={() => setFocusPoint((f) => ({ x: p.x, token: (f?.token ?? 0) + 1 }))}
-                            style={{ border: `1px solid ${theme.border}`, background: theme.surface, borderRadius: 999, padding: "1px 8px", fontSize: 12, fontFamily: themeMono, color: theme.ink, cursor: "pointer" }}
+                            style={{ border: `1px solid ${p.near ? theme.border : theme.flag}`, background: theme.surface, borderRadius: 999, padding: "1px 8px", fontSize: 12, fontFamily: themeMono, color: p.near ? theme.secondary : theme.ink, cursor: "pointer" }}
                           >
-                            d {p.d.toFixed(3)} Å
+                            d {p.d.toFixed(3)} Å{p.near ? ` · ${p.near}` : ""}
                           </button>
                         ))}
                         <button type="button" onClick={() => setAgentPeaks(null)} style={{ ...resetRangeBtn }}>Clear</button>

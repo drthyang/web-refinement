@@ -356,7 +356,12 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(shown).toBeDefined();
     expect(shown!.split(" ")[1]?.split(",").filter(Boolean).length ?? 0).toBe(peaks.count as number);
     if ((peaks.count as number) > 0) expect(String(peaks.markedOnPlot)).toMatch(/marked on the plot/);
-    for (const p of peaks.peaks as { d: number; q: number; twoTheta: number }[]) {
+    type Listed = { d: number; q: number; twoTheta: number; near?: string };
+    const listed = [...(peaks.unexplained as Listed[]), ...(peaks.besideKnownReflections as Listed[]), ...(peaks.onKnownReflections as Listed[])];
+    expect(listed.length).toBe(peaks.count as number);
+    for (const p of peaks.onKnownReflections as Listed[]) expect(p.near).toMatch(/^\S+ -?\d+ -?\d+ -?\d+$/);
+    for (const p of peaks.besideKnownReflections as Listed[]) expect(p.near).toMatch(/^beside \S+ -?\d+ -?\d+ -?\d+ \(-?\d+\.\d% in d\)$/);
+    for (const p of listed) {
       expect(p.q).toBeCloseTo((2 * Math.PI) / p.d, 3);
       expect(1.54 / (2 * Math.sin((p.twoTheta / 2) * Math.PI / 180))).toBeCloseTo(p.d, 4);
     }

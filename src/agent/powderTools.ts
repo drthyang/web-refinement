@@ -12,7 +12,6 @@ import {
   assess_refinement,
   bond_geometry,
   check_cell_symmetry,
-  find_unexplained_peaks,
   interpret_structure,
   rank_next_parameters,
   suggest_next_steps,
@@ -22,6 +21,8 @@ import type { BackgroundType } from "@/core/diffraction/background";
 import type { MustrainModel } from "@/app/powderSpec";
 import type { PowderXUnit } from "@/core/diffraction/types";
 import { availableDisplayUnits, convertAxisValue, convertInterval } from "@/visualization/axisUnits";
+import { residualPeaks } from "@/core/diagnostics/assessment";
+import { generateReflections } from "@/core/diffraction/reflections";
 import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, parameterSummary, pct, sig, type LiveToolHost } from "@/agent/liveCommon";
 
 
@@ -69,23 +70,36 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
         ...(input.significance !== undefined ? { significance: input.significance } : {}),
       });
     case "find_unexplained_peaks": {
-      const residual = residualOf(s);
-      const found = find_unexplained_peaks({
-        residual,
-        options: { ...(input.sigma !== undefined ? { sigma: input.sigma } : {}), limit: input.limit ?? 12 },
-      });
+      // Each peak must stand 5σ above its own counting noise, and is checked
+      // against every phase's reflections: on one, it is that reflection's misfit.
+      const { between, beside, onReflection } = residualPeaks(residualOf(s), { ...(input.sigma !== undefined ? { sigma: input.sigma } : {}), limit: input.limit ?? 12 });
+      const all = [...between, ...beside, ...onReflection].sort((a, b) => b.height - a.height);
+      const isBeside = new Set(beside);
+      const near = (p: (typeof all)[number]): string | undefined => {
+        if (!p.nearNuclear) return undefined;
+        const ref = `${p.nearNuclear.phaseLabel} ${p.nearNuclear.hkl}`;
+        return isBeside.has(p) ? `beside ${ref} (${((p.d / p.nearNuclear.d - 1) * 100).toFixed(1)}% in d)` : ref;
+      };
       // Shown to the user too: ▽ marks with guide lines on the plot.
-      port.showPeaks(found.peaks);
+      port.showPeaks(all.map((p) => ({ d: p.d, height: p.height, ...(near(p) ? { near: near(p)! } : {}) })));
+      const view = (p: (typeof all)[number]): Record<string, unknown> => ({
+        d: sig(p.d, 5),
+        q: sig((2 * Math.PI) / p.d, 5),
+        // The data's own axis (TOF or 2θ), from the page's calibration.
+        ...(s.pattern.xUnit !== "dSpacing" && s.pattern.xUnit !== "q" ? { [s.pattern.xUnit]: sig(convertAxisValue(p.d, "dSpacing", s.pattern.xUnit, s.axis), 6) } : {}),
+        height: sig(p.height, 3),
+        ...(p.significance !== undefined ? { sigmas: sig(p.significance, 3) } : {}),
+        ...(near(p) ? { near: near(p) } : {}),
+      });
       return {
-        count: found.count,
-        // Each position in d, Q and the data's own axis (TOF or 2θ), from the page's calibration.
-        peaks: found.peaks.map((p) => ({
-          d: sig(p.d, 5),
-          q: sig((2 * Math.PI) / p.d, 5),
-          ...(s.pattern.xUnit !== "dSpacing" && s.pattern.xUnit !== "q" ? { [s.pattern.xUnit]: sig(convertAxisValue(p.d, "dSpacing", s.pattern.xUnit, s.axis), 6) } : {}),
-          height: sig(p.height, 3),
-        })),
-        ...(found.count > 0 ? { markedOnPlot: "The user sees these peaks marked on the plot (▽ with a guide line, listed under it); refer to them by d." } : {}),
+        count: all.length,
+        unexplained: between.map(view),
+        besideKnownReflections: beside.map(view),
+        onKnownReflections: onReflection.map(view),
+        reading: all.length === 0
+          ? "No residual peak stands 5σ above its own noise."
+          : `${between.length} away from every phase's reflections (intensity no phase accounts for: an impurity, magnetic order, or an unmodelled feature); ${beside.length} within 2% in d of a reflection (most often its shoulder or tail: check the profile first); ${onReflection.length} on a reflection (calculated too weak: the atoms, ADPs or an intensity correction, not a new phase).`,
+        ...(all.length > 0 ? { markedOnPlot: "The user sees these marked on the plot (filled ▽ unexplained, hollow ▽ on or beside a known reflection, listed under it); refer to them by d." } : {}),
       };
     }
     case "bond_geometry":
@@ -279,12 +293,25 @@ function requestedWindow(s: PowderLiveState, input: Input): { min: number; max: 
   return w;
 }
 
-function residualOf(s: PowderLiveState): { d: number[]; yObs: number[]; yCalc: number[] } {
+function residualOf(s: PowderLiveState): { d: number[]; yObs: number[]; yCalc: number[]; sigma: number[]; reflections: { d: number; hkl: string; phaseLabel: string }[] } {
   if (!s.d) throw new Error("this pattern's axis cannot be converted to d-spacing (no wavelength or TOF calibration)");
   // Inside the fit window only: outside it the model is not being fitted.
   const keep = s.curves.x.map((x) => !s.fitRange || (x >= s.fitRange.min && x <= s.fitRange.max));
   const pick = (a: readonly number[]): number[] => a.filter((_, i) => keep[i]);
-  return { d: pick(s.d), yObs: pick(s.curves.yObs), yCalc: pick(s.curves.yCalc) };
+  // Each point's own σ (counting statistics when the file gives none).
+  const points = s.pattern.points.length === s.curves.x.length ? s.pattern.points : null;
+  const sigma = s.curves.yObs.map((y, i) => {
+    const given = points?.[i]?.sigma;
+    return given !== undefined && given > 0 ? given : Math.sqrt(Math.max(y, 1));
+  });
+  const d = pick(s.d);
+  const finite = d.filter((v) => Number.isFinite(v) && v > 0);
+  const dMin = Math.min(...finite) * 0.99;
+  const dMax = Math.max(...finite) * 1.01;
+  const reflections = s.refinedPhases.flatMap((ph) =>
+    generateReflections(ph.cell, ph.spaceGroup, dMin, dMax, { absences: true }).map((r) => ({ d: r.d, hkl: `${r.h} ${r.k} ${r.l}`, phaseLabel: ph.name || ph.id })),
+  );
+  return { d, yObs: pick(s.curves.yObs), yCalc: pick(s.curves.yCalc), sigma: pick(sigma), reflections };
 }
 
 function assessment(s: PowderLiveState): ReturnType<typeof assess_refinement> {

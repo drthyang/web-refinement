@@ -82,7 +82,7 @@ export interface PowderAgentPort {
   readonly setFitRange: (range: { readonly min: number; readonly max: number } | null) => void;
   /** Mark these residual peaks on the plot (▽ with a guide line); cleared by
    *  the user or the next refinement. A view change only: no history step. */
-  readonly showPeaks: (peaks: readonly { readonly d: number; readonly height: number }[]) => void;
+  readonly showPeaks: (peaks: readonly { readonly d: number; readonly height: number; readonly near?: string }[]) => void;
   /** The Refine button: a flat refinement of the freed parameters. Resolves to
    *  why it did not finish ("cancelled", "failed: …"), or null when it did. */
   readonly refine: () => Promise<string | null>;

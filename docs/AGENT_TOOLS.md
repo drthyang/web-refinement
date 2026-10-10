@@ -416,10 +416,20 @@ zero over a wide 2θ range) is not refused. Pairs that tighten during the fit
 are listed in the outcome, and the next `refine` refuses them. The page's own
 Refine button is unchanged.
 
-**Unexplained peaks on the plot.** `find_unexplained_peaks` marks what it
-finds on the Rietveld plot: a ▽ in the highlight colour with a dashed guide
-through the pattern, and a row under the plot listing each d (click to zoom)
-with a Clear button. The marks go at the next refinement, when the residual
+**Unexplained peaks on the plot.** `find_unexplained_peaks` keeps a residual
+peak only if it stands 5σ above that point's own uncertainty, so lone noisy
+points in a low-count region are not peaks. It checks each peak against every
+phase's reflections:
+- **on** one (within 0.5% in d): that reflection is calculated too weak;
+- **beside** one (within 2%): most often its shoulder or tail (TOF peaks tail
+  to larger d);
+- **unexplained** otherwise: an impurity, magnetic order or an unmodelled
+  feature.
+
+`assess_refinement` reports the same split. The peaks are marked on the
+Rietveld plot: a filled ▽ when unexplained, hollow when on or beside a
+reflection, each with a dashed guide through the pattern. A row under the plot
+lists each d and its reflection (click to zoom), with a Clear button. The marks go at the next refinement, when the residual
 changes. Viewing only: no approval card, no history step.
 
 **When a model stalls.** The chat loop watches for three ways a reply leaves

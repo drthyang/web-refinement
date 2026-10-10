@@ -7,6 +7,18 @@ release fixes bugs.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Residual peaks are judged against each point's uncertainty and the known
+  reflections.** Lone noisy points in a low-count TOF region were reported as
+  "unexplained peaks", and so were misfits of a phase's own reflections. Now
+  a peak must stand 5σ above its own noise, and each is reported as on a
+  reflection, beside one (a shoulder or tail), or unexplained, in the
+  assessment, the Agent and the plot marks.
+- The assessment reports background-coefficient correlations as one note
+  (they are expected), not a warning per pair, and no longer rounds 0.995 to
+  1.00.
+
 ### Added
 
 - **The Agent never refines correlated parameters together.** Before it
