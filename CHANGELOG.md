@@ -9,6 +9,11 @@ release fixes bugs.
 
 ### Added
 
+- **The Agent never refines correlated parameters together.** Before it
+  refines, it measures the free set at the current values with the page's own
+  fit; two parameters correlated at |ρ| ≥ 0.95, or a combination the data
+  cannot determine, stop the refinement until one of each pair is fixed. The
+  approval card shows the strongest pair left; the Refine button is unchanged.
 - **The Agent on LM Studio.** A fourth way to reach a model: a local model on
   your LM Studio server (0.4.1 or later, with CORS on), listed from the server
   with each model's loaded context.

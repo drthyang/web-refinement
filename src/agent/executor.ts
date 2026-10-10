@@ -14,7 +14,9 @@ import type { AgentPort, LiveState, PdfLiveState, PowderLiveState } from "@/agen
 import { changePowder, describePowderChange, powderNoOp, readPowderTool } from "@/agent/powderTools";
 import { changePdf, describePdfChange, pdfNoOp, readPdfTool } from "@/agent/pdfTools";
 import type { LiveToolHost } from "@/agent/liveCommon";
+import { PROBE_OPTIONS, correlationRefusal, pairText, readCorrelations, refusalLine } from "@/agent/correlationCheck";
 import { REF_KEY, RefStore, buildView } from "@/mcp/refs";
+import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { StepKind } from "@/core/project/history";
 
 /** What the executor needs from the app shell. */
@@ -142,7 +144,26 @@ export class AgentExecutor implements ToolRunner {
         update({ status: "done", outcome: "No change" });
         return this.respond({ unchanged: true, note: noOp });
       }
-      update({ status: "waiting", preview: port.technique === "pdf" ? describePdfChange(spec, input, before as PdfLiveState) : describePowderChange(spec, input, before as PowderLiveState) });
+      let preview = port.technique === "pdf" ? describePdfChange(spec, input, before as PdfLiveState) : describePowderChange(spec, input, before as PowderLiveState);
+      if (spec.name === "refine") {
+        // Correlated parameters are never refined together: measure the free
+        // set first, and ask the user only about a set that may run.
+        update({ preview: "Checking correlations…" });
+        let probe: RefinementResult;
+        try {
+          probe = await port.probe(PROBE_OPTIONS);
+        } catch (e) {
+          throw new Error(`could not check the free parameters' correlations before refining (${e instanceof Error ? e.message : String(e)}); nothing was refined`, { cause: e });
+        }
+        const check = readCorrelations(probe, before.parameters);
+        const refusal = correlationRefusal(check);
+        if (refusal) {
+          update({ status: "failed", preview, outcome: refusalLine(check) });
+          return error(refusal);
+        }
+        preview += check.strongest ? ` · strongest correlation ${pairText(check.strongest)}` : " · no correlation above 0.5";
+      }
+      update({ status: "waiting", preview });
       if (!(await this.opts.approve(entry))) {
         update({ status: "declined", outcome: "Declined" });
         return this.respond({ declined: true, note: "The user declined this change. Ask what they would prefer, or propose something else." });
@@ -252,11 +273,27 @@ function changeOutcome(
       ...(key === "wR" ? { gof: r.agreement.goodnessOfFit !== undefined ? Number(r.agreement.goodnessOfFit.toPrecision(4)) : null } : {}),
       iterations: r.history.length,
       ...(r.diagnostics ? { atBounds: r.diagnostics.atBounds.map((b) => b.parameterId), maxShiftOverEsd: Number(r.diagnostics.maxShiftOverEsd.toPrecision(3)) } : {}),
+      ...developedCorrelations(r, after.parameters),
       ...(r.message ? { message: r.message } : {}),
     };
   }
   if (name === "set_free") return { ...base, free };
   return { ...base, [key]: pct(agreement(after).live), lastResultCleared: before.result !== null && after.result === null };
+}
+
+/**
+ * Correlations at the minimum the refinement reached: the check before it ran
+ * read the starting values, and a pair can tighten on the way. The next
+ * refinement refuses the set until one of each pair is fixed.
+ */
+function developedCorrelations(r: RefinementResult, parameters: readonly RefinementParameter[]): Record<string, unknown> {
+  const check = readCorrelations(r, parameters);
+  if (check.correlated.length === 0 && check.undetermined.length === 0) return {};
+  return {
+    correlated: check.correlated.map(pairText),
+    ...(check.undetermined.length > 0 ? { undetermined: check.undetermined } : {}),
+    correlationNote: "These parameters correlate at the refined values. Fix one of each pair before the next refinement; refine will not run with them all free.",
+  };
 }
 
 function outcomeLine(name: string, before: LiveState, after: LiveState, note: string | undefined): string {

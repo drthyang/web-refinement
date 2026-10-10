@@ -24,7 +24,7 @@ import { zipStore } from "@/core/export/zip";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern, PowderXUnit } from "@/core/diffraction/types";
 import type { DetectedFormat, DetectionSource } from "@/parsers/detectFormat";
-import type { RefinementParameter, RefinementResult, ParameterBinding } from "@/core/refinement/types";
+import type { RefinementOptions, RefinementParameter, RefinementResult, ParameterBinding } from "@/core/refinement/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import { magneticComponentCurve } from "@/core/workflow/magneticPowder";
@@ -44,6 +44,7 @@ import { powderReportInput, reportFileName, type MagneticExploration } from "@/a
 import { isMagneticModelParameterKind, isMomentParameterKind } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
 import { CANCELLED } from "@/workers/computeClient";
+import type { PowderProgress } from "@/workers/runPowder";
 import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
 import type { SampleResult } from "@/core/refinement/bayes/sampler";
 import { KSearchPanel, type MagneticFit, type MagneticPatternView, type ResidualPeak } from "@/components/KSearchPanel";
@@ -711,6 +712,31 @@ export function PowderWorkbench({
 
   /** Flat co-refinement of the currently-freed parameters. Resolves to why it
    *  did not finish (cancelled, failed), or null when it did. */
+  /**
+   * The Refine button's fit of the current free set: with an applied magnetic
+   * model, nuclear + magnetic on the shared scale; otherwise the nuclear
+   * pattern (multi-phase when there are extra phases). Applies nothing — the
+   * caller does, or (the Agent's correlation probe) only reads it.
+   */
+  function powderFit(options: Partial<RefinementOptions>, gpu = false, onProgress?: PowderProgress): Promise<RefinementResult> {
+    const window = fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {};
+    if (magneticApplied) {
+      return client.refineMagneticPowderParallel({
+        structure, magnetic: session.magnetic!, pattern, parameters: [...powderParams], bindings: [...pBindings],
+        ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
+        ...profileReq(),
+        ...window,
+      }, options);
+    }
+    return client.refinePowderParallel({
+      structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(),
+      ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
+      ...window,
+      options,
+      useGpu: gpu,
+    }, onProgress);
+  }
+
   async function runPowder(): Promise<string | null> {
     // The starting point (freed parameters, edited values, settings) is a step
     // of its own, so going back lands before this refinement, not after it.
@@ -726,12 +752,7 @@ export function PowderWorkbench({
       if (magneticApplied) {
         await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
         const coRefined = momentRowsFree();
-        const result = await client.refineMagneticPowderParallel({
-          structure, magnetic: session.magnetic!, pattern, parameters: [...powderParams], bindings: [...pBindings],
-          ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
-          ...profileReq(),
-          ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
-        }, { maxIterations: 20 });
+        const result = await powderFit({ maxIterations: 20 });
         const refinedMag = applyMagneticMoments(session.magnetic!, pBindings, result.parameters);
         setSession((s) => ({
           ...s,
@@ -755,13 +776,7 @@ export function PowderWorkbench({
         && typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu;
       // Parallel-Jacobian path for the flat single-phase case; the client
       // falls back to the single-worker path for multi-phase requests.
-      const result = await client.refinePowderParallel({
-        structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(),
-        ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
-        ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
-        options: { maxIterations: 20 },
-        useGpu,
-      }, onPowderProgress);
+      const result = await powderFit({ maxIterations: 20 }, useGpu, onPowderProgress);
       setSession((s) => ({
         ...s,
         powderParams: s.powderParams.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value })),
@@ -1291,6 +1306,7 @@ export function PowderWorkbench({
       setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : null),
       refine: runPowder,
       thorough: runThorough,
+      probe: (options) => powderFit(options),
       cancel: cancelPowder,
       reset: resetPowderParams,
     });

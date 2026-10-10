@@ -391,6 +391,23 @@ model learns when the user declines. "Auto-approve" skips the cards for the
 rest of the session. Every change is a step in History tagged `agent`
 (`HistoryStep.actor`), so ⌘Z undoes it like any other step.
 
+**No correlated parameters refined together.** Before the Agent's `refine`
+runs, and before the approval card appears, the page runs its own fit of the
+free set with no iterations (the port's `probe`): the normal matrix at the
+current values, over the same fit window, which gives the covariance the
+refinement would report without moving anything
+([`src/agent/correlationCheck.ts`](../src/agent/correlationCheck.ts)). If
+two free parameters correlate at |ρ| ≥ 0.95 (the line the engine and
+`assess_refinement` already draw), or the data cannot determine a combination
+of them at all (an SVD null direction, such as scale with every site
+occupancy), `refine` refuses and names them, with the physical reason for
+known pairs. The model must fix one of each pair, or refine them in separate
+stages. A passing check puts the strongest remaining pair on the approval card.
+The check is measured on this data, so a pair the range separates (cell and
+zero over a wide 2θ range) is not refused. Pairs that tighten during the fit
+are listed in the outcome, and the next `refine` refuses them. The page's own
+Refine button is unchanged.
+
 **Four ways to reach a model.**
 
 | Mode | Where the model runs | Credentials | Works on |

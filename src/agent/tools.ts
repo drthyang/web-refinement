@@ -201,7 +201,7 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "refine",
     title: "Refine",
     description:
-      "Run the refinement of the free parameters, as the Refine button does, and wait for it. mode \"thorough\" is the Prefit / Escape-minimum button instead: with no fit yet, a multi-start search (on powder, after a Le Bail cell pre-fit); after a fit, a light multi-start nudge out of a local minimum. Returns the outcome (status; wR and GoF on powder, Rw on PDF; iterations, free count) and the step it recorded. Follow it with assess_refinement.",
+      "Run the refinement of the free parameters, as the Refine button does, and wait for it. mode \"thorough\" is the Prefit / Escape-minimum button instead: with no fit yet, a multi-start search (on powder, after a Le Bail cell pre-fit); after a fit, a light multi-start nudge out of a local minimum. Correlated parameters are never refined together: before it runs (and before the user is asked), it measures the free set at the current values, and refuses when two free parameters correlate at |ρ| ≥ 0.95 or the data cannot determine a combination of them, naming them with the physical reason; fix one of each pair with set_free, or refine them in separate stages. Returns the outcome (status; wR and GoF on powder, Rw on PDF; iterations, free count; any pair that correlates at the refined values) and the step it recorded. Follow it with assess_refinement.",
     inputSchema: {
       mode: z.enum(["refine", "thorough"]).optional().describe("Default \"refine\""),
     },

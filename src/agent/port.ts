@@ -17,7 +17,7 @@ import type { MutableRefObject } from "react";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PdfPattern, PowderPattern } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
-import type { ParameterBinding, RefinementParameter, RefinementResult } from "@/core/refinement/types";
+import type { ParameterBinding, RefinementOptions, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { BackgroundType } from "@/core/diffraction/background";
@@ -82,6 +82,10 @@ export interface PowderAgentPort {
   readonly refine: () => Promise<string | null>;
   /** The Prefit / Escape-minimum button (prefit with no fit yet, escape after). */
   readonly thorough: () => Promise<string | null>;
+  /** The Refine button's fit of the free set with these options, its result
+   *  returned and never applied: with no iterations, the covariance at the
+   *  current values (the correlation check, correlationCheck.ts). */
+  readonly probe: (options: Partial<RefinementOptions>) => Promise<RefinementResult>;
   readonly cancel: () => void;
   /** Every parameter back to its starting value. */
   readonly reset: () => void;
@@ -133,6 +137,8 @@ export interface PdfAgentPort {
   readonly refine: () => Promise<string | null>;
   /** The Prefit / Escape-minimum button (prefit with no fit yet, escape after). */
   readonly thorough: () => Promise<string | null>;
+  /** The Refine button's fit with these options, returned and never applied (see PowderAgentPort). */
+  readonly probe: (options: Partial<RefinementOptions>) => Promise<RefinementResult>;
   readonly cancel: () => void;
   /** Every parameter back to its starting value. */
   readonly reset: () => void;

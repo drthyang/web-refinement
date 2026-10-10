@@ -97,6 +97,19 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
     },
     refine,
     thorough: refine,
+    probe: async (options) => {
+      calls.push("probe");
+      return runPowderRefinement({
+        type: "refinePowder",
+        requestId: 0,
+        structure: s.structure,
+        pattern: s.pattern,
+        parameters: s.powderParams,
+        bindings: s.powderBindings,
+        shape: s.powderProfile.shape,
+        options,
+      });
+    },
     cancel: () => calls.push("cancel"),
     reset: () => calls.push("reset"),
   };
@@ -279,6 +292,36 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(String(out.note)).toMatch(/did not finish \(cancelled\)/);
   });
 
+  it("never refines correlated parameters together: the free set is checked before anyone is asked", async () => {
+    const start = newSession(exampleStructure());
+    // Scale with every site occupancy: an exact degeneracy (all three only scale intensity).
+    const { port, calls } = sessionPort({ ...start, powderParams: start.powderParams.map((p) => ({ ...p, fixed: !["scale", "occ_Mn1", "occ_Ga1"].includes(p.id) })) });
+    const { ex, asked, seen } = executor(fakeHost(port).host, true);
+    const out = await ex.run("refine", {});
+    expect(out.isError).toBe(true);
+    expect(out.text).toMatch(/Not refined: .*Not determined by the data at all, together: .*occ_Mn1.*Fix one of each pair with set_free/);
+    expect(asked).toEqual([]);
+    expect(calls).toEqual(["probe"]);
+    const card = seen.filter((e) => e.tool === "refine").at(-1)!;
+    expect(card.status).toBe("failed");
+    expect(card.outcome).toMatch(/^Not run: .* not determined$/);
+
+    // With the occupancies fixed again, the approval card names the strongest pair left.
+    await ex.run("set_free", { fix: ["occ_*"], free: ["bkg*"] });
+    const refined = parse((await ex.run("refine", {})).text);
+    expect(refined.refined).toBe(true);
+    expect(asked.at(-1)!.preview).toMatch(/^Refine .* · strongest correlation \S+ ↔ \S+ -?0\.\d{3}$/);
+  });
+
+  it("does not refine when the correlation check itself fails", async () => {
+    const { port, calls } = sessionPort(newSession(exampleStructure()));
+    const broken: PowderAgentPort = { ...port, probe: async () => { throw new Error("cancelled"); } };
+    const { ex, asked } = executor(fakeHost(broken).host, true);
+    expect((await ex.run("refine", {})).text).toMatch(/could not check the free parameters' correlations before refining \(cancelled\); nothing was refined/);
+    expect(asked).toEqual([]);
+    expect(calls).not.toContain("refine");
+  });
+
   it("refuses a change while a refinement runs, but lets a cancel through", async () => {
     const { port, calls } = sessionPort(newSession(exampleStructure()));
     const busy: PowderAgentPort = { ...port, state: () => ({ ...port.state(), busy: true }) };
@@ -394,6 +437,7 @@ function pdfPort(): { port: PdfAgentPort; calls: string[] } {
       calls.push("thorough");
       return "cancelled";
     },
+    probe: async (options) => refineProblem(buildPdfProblem(demo.structure, demo.pattern, params, spec.bindings, spec.restraints, fitRange), { ...options, analyticDerivatives: true }),
     cancel: () => calls.push("cancel"),
     reset: () => calls.push("reset"),
   };
@@ -432,7 +476,7 @@ describe("AgentExecutor on a live PDF fit", () => {
     await ex.run("set_free", { free: ["delta2"] });
     expect(calls).toContain("setFixed delta2=false");
     const out = parse((await ex.run("refine", {})).text);
-    expect(asked.at(-1)!.preview).toMatch(/^Refine G\(r\), \d+ free parameters$/);
+    expect(asked.at(-1)!.preview).toMatch(/^Refine G\(r\), \d+ free parameters · (strongest correlation \S+ ↔ \S+ -?\d\.\d{3}|no correlation above 0\.5)$/);
     expect(out.refined).toBe(true);
     expect(typeof out.Rw).toBe("number");
     expect(typeof out.RwBefore).toBe("number");
@@ -445,6 +489,18 @@ describe("AgentExecutor on a live PDF fit", () => {
     expect(String(verdict.convention)).toMatch(/no GoF/);
     const next = parse((await ex.run("suggest_next_steps", {})).text);
     expect(next.steps).toBeDefined();
+  });
+
+  it("refuses δ1 and δ2 together, which correlate on this G(r), and says why", async () => {
+    const { port, calls } = pdfPort();
+    const { ex, asked } = executor(fakeHost(port).host, true);
+    await ex.run("set_free", { free: ["delta1", "delta2"] });
+    const out = await ex.run("refine", {});
+    expect(out.isError).toBe(true);
+    expect(out.text).toMatch(/delta1 ↔ delta2 -0\.9\d\d \(δ1 and δ2 both sharpen the near-neighbour peaks/);
+    expect(calls).not.toContain("refine");
+    // Only the set_free was asked about.
+    expect(asked.map((e) => e.tool)).toEqual(["set_free"]);
   });
 
   it("restores the default r window and passes on why a run did not finish", async () => {
