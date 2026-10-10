@@ -7,6 +7,19 @@ release fixes bugs.
 
 ## [Unreleased]
 
+### Added
+
+- **The Agent on LM Studio.** A fourth way to reach a model: a local model on
+  your LM Studio server (0.4.1 or later, with CORS on), listed from the server
+  with each model's loaded context.
+
+### Removed
+
+- **The Agent's Claude Code mode**, with the `materia-live` MCP server, its
+  `mcp:live` / `build:mcp-live` scripts and its `.mcp.json` entry. The Agent
+  now starts on your own API key; a saved Claude Code choice falls back to it.
+  The `materia` MCP server is unchanged.
+
 ## [0.3.0] - 2026-10-09
 
 ### Added

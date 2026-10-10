@@ -1,16 +1,17 @@
 /**
  * The in-app Agent conversation: a model through the Anthropic SDK, from the
  * browser, with the Agent tools (tools.ts) run by the executor on the live
- * page. Three ways in, same loop:
+ * page. Four ways in, same loop:
  *
  *  - `api-key`: the user's own Anthropic API key, sent straight from this
  *    browser to the API (the SDK's `dangerouslyAllowBrowser`). The key stays in
  *    this browser's storage; it is never part of a project file or a report.
  *  - `proxy`: the dev server's /api/anthropic route (vite.config.ts) holds the
  *    key from ANTHROPIC_API_KEY, so it never reaches the page. Local only.
- *  - `ollama`: a local model on the user's Ollama server, which speaks the
- *    same Messages API (ollama.ts). It gets only the fields it reads: no
- *    caching, effort, adaptive thinking or fallback, which are Claude's.
+ *  - `ollama` / `lmstudio`: a local model on the user's Ollama or LM Studio
+ *    server, which speaks the same Messages API (ollama.ts, lmstudio.ts). It
+ *    gets only the fields it reads: no caching, effort, adaptive thinking or
+ *    fallback, which are Claude's.
  *
  * The loop is a manual tool loop over a stream, so text shows as it arrives
  * and an approval card can hold a tool call as long as the user needs. The
@@ -33,9 +34,11 @@ import { LIVE_TOOLS, inputJsonSchema } from "@/agent/tools";
 import type { ToolRunner } from "@/agent/executor";
 import { agentSystemPrompt } from "@/agent/systemPrompt";
 import { hasRefusalFallback } from "@/agent/chat-models";
-import { ollamaBase, plainFetch, unreachableHint } from "@/agent/ollama";
+import { ollamaBase, unreachableHint } from "@/agent/ollama";
+import { lmstudioBase, lmstudioUnreachableHint } from "@/agent/lmstudio";
+import { plainFetch } from "@/agent/localServer";
 
-export type ChatTransport = "api-key" | "proxy" | "ollama";
+export type ChatTransport = "api-key" | "proxy" | "ollama" | "lmstudio";
 export type ChatEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ChatConfig {
@@ -44,8 +47,8 @@ export interface ChatConfig {
   readonly apiKey?: string;
   /** Another API address for the api-key transport (default the Anthropic API). */
   readonly baseURL?: string;
-  /** The Ollama server (ollama transport only; default ollama.ts DEFAULT_OLLAMA_URL). */
-  readonly ollamaUrl?: string;
+  /** The local server (ollama and lmstudio transports; default that server's usual address). */
+  readonly serverUrl?: string;
   readonly model: string;
   readonly effort: ChatEffort;
   /**
@@ -73,8 +76,10 @@ const MAX_TURNS = 40;
 export const PROXY_PATH = "api/anthropic";
 
 
-/** Which API the history was written for: Claude's thinking is signed, Ollama's is not. */
-type Backend = "anthropic" | "ollama";
+/** Which API the history was written for: Claude's thinking is signed, a local server's is not. */
+type Backend = "anthropic" | "ollama" | "lmstudio";
+
+const isLocal = (t: ChatTransport): t is "ollama" | "lmstudio" => t === "ollama" || t === "lmstudio";
 
 export class AgentChat {
   private readonly messages: BetaMessageParam[] = [];
@@ -91,7 +96,7 @@ export class AgentChat {
   /** Send one user message and run the turns it leads to. */
   async send(text: string, config: ChatConfig, cb: ChatCallbacks, signal: AbortSignal): Promise<void> {
     const client = clientFor(config);
-    const backend: Backend = config.transport === "ollama" ? "ollama" : "anthropic";
+    const backend: Backend = isLocal(config.transport) ? config.transport : "anthropic";
     if (this.backend !== null && this.backend !== backend) this.keepPortableBlocks();
     this.backend = backend;
     this.messages.push({ role: "user", content: text });
@@ -140,7 +145,7 @@ export class AgentChat {
           results.push(toolError(call.id, "Stopped by the user before this ran."));
           continue;
         }
-        const out = await this.executor.run(call.name, call.input, "chat");
+        const out = await this.executor.run(call.name, call.input);
         results.push({ type: "tool_result", tool_use_id: call.id, content: out.text, ...(out.isError ? { is_error: true } : {}) });
       }
       // Every tool call is answered in ONE user message, even when stopped.
@@ -150,11 +155,11 @@ export class AgentChat {
     cb.onNotice(`Stopped after ${MAX_TURNS} model turns for one message. Say "continue" to go on.`, "info");
   }
 
-  /** One turn's request: everything Claude reads, or only what Ollama does. */
+  /** One turn's request: everything Claude reads, or only what a local server does. */
   private request(config: ChatConfig): BetaMessageStreamParams {
-    if (config.transport === "ollama") {
-      // A thinking-capable model thinks by default, and Ollama prefix-caches the
-      // prompt by itself.
+    if (isLocal(config.transport)) {
+      // A thinking-capable model thinks by default, and both servers reuse the
+      // cached prompt prefix by themselves.
       return { model: config.model, max_tokens: 64000, system: this.system, tools: this.tools, messages: this.messages };
     }
     return {
@@ -173,9 +178,10 @@ export class AgentChat {
   }
 
   /**
-   * The conversation moves to the other backend: earlier replies keep only
-   * their text and tool calls. The API rejects Ollama's unsigned thinking, and
-   * Claude's own blocks (signed thinking, fallback) mean nothing to Ollama.
+   * The conversation moves to another backend: earlier replies keep only
+   * their text and tool calls. The API rejects a local model's unsigned
+   * thinking, and Claude's own blocks (signed thinking, fallback) mean nothing
+   * to a local server.
    * Safe between messages: no tool loop is in flight.
    */
   private keepPortableBlocks(): void {
@@ -198,9 +204,10 @@ function toolError(id: string, text: string): BetaToolResultBlockParam {
 }
 
 function clientFor(config: ChatConfig): Anthropic {
-  if (config.transport === "ollama") {
-    // Ollama ignores the key, but the SDK wants one; plainFetch never sends it.
-    return new Anthropic({ apiKey: "ollama", baseURL: ollamaBase(config.ollamaUrl ?? ""), dangerouslyAllowBrowser: true, maxRetries: 1, fetch: plainFetch });
+  if (isLocal(config.transport)) {
+    // A local server ignores the key, but the SDK wants one; plainFetch never sends it.
+    const baseURL = config.transport === "ollama" ? ollamaBase(config.serverUrl ?? "") : lmstudioBase(config.serverUrl ?? "");
+    return new Anthropic({ apiKey: config.transport, baseURL, dangerouslyAllowBrowser: true, maxRetries: 1, fetch: plainFetch });
   }
   if (config.transport === "proxy") {
     const base = new URL(`${import.meta.env.BASE_URL}${PROXY_PATH}`, window.location.origin).href;
@@ -212,9 +219,10 @@ function clientFor(config: ChatConfig): Anthropic {
 }
 
 /** A readable sentence for an API error, for the conversation. */
-export function describeChatError(e: unknown, config: Pick<ChatConfig, "transport" | "model" | "ollamaUrl">): string {
+export function describeChatError(e: unknown, config: Pick<ChatConfig, "transport" | "model" | "serverUrl">): string {
   const { transport } = config;
   if (transport === "ollama") return describeOllamaError(e, config);
+  if (transport === "lmstudio") return describeLmStudioError(e, config);
   if (e instanceof Anthropic.AuthenticationError) {
     return transport === "proxy"
       ? "The proxy's API key was rejected. Check ANTHROPIC_API_KEY where the dev server runs."
@@ -235,9 +243,9 @@ export function describeChatError(e: unknown, config: Pick<ChatConfig, "transpor
   return e instanceof Error ? e.message : String(e);
 }
 
-function describeOllamaError(e: unknown, config: Pick<ChatConfig, "model" | "ollamaUrl">): string {
+function describeOllamaError(e: unknown, config: Pick<ChatConfig, "model" | "serverUrl">): string {
   if (e instanceof Anthropic.APIConnectionError) {
-    return unreachableHint(config.ollamaUrl ?? "", typeof window === "undefined" ? null : window.location.origin);
+    return unreachableHint(config.serverUrl ?? "", typeof window === "undefined" ? null : window.location.origin);
   }
   if (e instanceof Anthropic.APIError) {
     const body = e.error as { error?: { message?: string } } | undefined;
@@ -249,6 +257,25 @@ function describeOllamaError(e: unknown, config: Pick<ChatConfig, "model" | "oll
       return `"${config.model}" cannot call tools, and the Agent works only through them. Pick a model marked "tools" in the Agent settings.`;
     }
     return `Ollama error ${e.status ?? ""}: ${message}`;
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
+function describeLmStudioError(e: unknown, config: Pick<ChatConfig, "model" | "serverUrl">): string {
+  if (e instanceof Anthropic.APIConnectionError) return lmstudioUnreachableHint(config.serverUrl ?? "");
+  if (e instanceof Anthropic.AuthenticationError) {
+    return "LM Studio's server asks for an API token. Turn off Require Authentication in its server settings to use it from this page.";
+  }
+  if (e instanceof Anthropic.APIError) {
+    const body = e.error as { error?: { message?: string } | string; message?: string } | undefined;
+    const message = (typeof body?.error === "string" ? body.error : body?.error?.message) ?? body?.message ?? e.message;
+    if (/context/i.test(message) && /length|overflow|exceed|greater/i.test(message)) {
+      return `The conversation no longer fits the context LM Studio loaded "${config.model}" with. Reload it with a context length of at least 32k (lms load ${config.model} --context-length 32768), or clear the conversation.`;
+    }
+    if (/not (found|loaded)|no model|does not exist/i.test(message)) {
+      return `LM Studio could not run "${config.model}": ${message} Load it in LM Studio, or pick another in the Agent settings.`;
+    }
+    return `LM Studio error ${e.status ?? ""}: ${message}`;
   }
   return e instanceof Error ? e.message : String(e);
 }

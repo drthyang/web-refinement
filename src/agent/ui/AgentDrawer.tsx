@@ -1,16 +1,17 @@
 /**
- * The Agent drawer: the conversation with the model (in-app chat) or the feed of
- * Claude Code's calls (bridge), every tool call as a card, and an approval
- * card for each change waiting on the user. It sits beside the page, not over
+ * The Agent drawer: the conversation with the model, every tool call as a
+ * card, and an approval card for each change waiting on the user. It sits beside the page, not over
  * it, so the plot and the parameter panel stay in view while Claude works.
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { color, fz, mono, radius } from "@/app/theme";
 import type { ActivityEntry } from "@/agent/executor";
-import type { AgentController, AgentMode, TranscriptItem } from "@/agent/useAgent";
+import { AGENT_MODES, type AgentController, type AgentMode, type AgentSettings, type TranscriptItem } from "@/agent/useAgent";
 import { CHAT_MODELS, hasRefusalFallback } from "@/agent/chat-models";
-import { MIN_AGENT_CONTEXT, listOllamaModels, unreachableHint, type OllamaModel } from "@/agent/ollama";
+import { listOllamaModels, unreachableHint, type OllamaModel } from "@/agent/ollama";
+import { listLmStudioModels, lmstudioUnreachableHint, type LmStudioModel } from "@/agent/lmstudio";
+import { MIN_AGENT_CONTEXT } from "@/agent/localServer";
 import { MATH_SPAN_SOURCE, mathInside, texPieces } from "@/agent/ui/texText";
 
 interface Props {
@@ -18,13 +19,17 @@ interface Props {
   readonly onClose: () => void;
 }
 
-const MODE_LABEL: Record<AgentMode, string> = { "claude-code": "Claude Code", "api-key": "API key", proxy: "Local proxy", ollama: "Ollama" };
+const MODE_LABEL: Record<AgentMode, string> = { "api-key": "API key", proxy: "Local proxy", ollama: "Ollama", lmstudio: "LM Studio" };
+
+/** The model a local mode will use ("" with none picked); null for the Claude modes. */
+function localModel(s: AgentSettings): string | null {
+  return s.mode === "ollama" ? s.ollamaModel : s.mode === "lmstudio" ? s.lmstudioModel : null;
+}
 
 export function AgentDrawer({ agent, onClose }: Props): JSX.Element {
   const { settings } = agent;
   const [showSettings, setShowSettings] = useState(false);
-  const chatMode = settings.mode !== "claude-code";
-  const needsSetup = (settings.mode === "api-key" && !agent.apiKey) || (settings.mode === "ollama" && !settings.ollamaModel);
+  const needsSetup = (settings.mode === "api-key" && !agent.apiKey) || localModel(settings) === "";
   // First open with nothing set up: show the settings.
   useEffect(() => {
     if (needsSetup) setShowSettings(true);
@@ -46,7 +51,7 @@ export function AgentDrawer({ agent, onClose }: Props): JSX.Element {
       </div>
       {showSettings && <Settings agent={agent} />}
       <Transcript agent={agent} />
-      {chatMode ? <Composer agent={agent} disabled={needsSetup} /> : <BridgeHint agent={agent} />}
+      <Composer agent={agent} disabled={needsSetup} />
     </aside>
   );
 }
@@ -54,21 +59,18 @@ export function AgentDrawer({ agent, onClose }: Props): JSX.Element {
 // ── status ──────────────────────────────────────────────────────────────────
 
 function StatusChip({ agent }: { agent: AgentController }): JSX.Element {
-  const { settings, bridge } = agent;
+  const { settings } = agent;
+  const local = localModel(settings);
   let text = MODE_LABEL[settings.mode];
-  let tone: "ok" | "wait" | "off" = "ok";
-  if (settings.mode === "claude-code") {
-    if (bridge.state === "connected") text = "Claude Code · connected";
-    else if (bridge.state === "replaced") { text = "Claude Code · another tab"; tone = "off"; }
-    else { text = "Claude Code · waiting"; tone = "wait"; }
-  } else if (settings.mode === "api-key" && !agent.apiKey) {
+  let ok = true;
+  if (settings.mode === "api-key" && !agent.apiKey) {
     text = "API key · not set";
-    tone = "off";
-  } else if (settings.mode === "ollama") {
-    text = settings.ollamaModel ? `Ollama · ${settings.ollamaModel}` : "Ollama · no model";
-    if (!settings.ollamaModel) tone = "off";
+    ok = false;
+  } else if (local !== null) {
+    text = `${MODE_LABEL[settings.mode]} · ${local || "no model"}`;
+    ok = local !== "";
   }
-  const palette = tone === "ok" ? { bg: color.okBg, bd: color.okBorder, ink: color.okInk } : tone === "wait" ? { bg: color.noteBg, bd: color.noteBorder, ink: color.noteInk } : { bg: color.chipBg, bd: color.border, ink: color.secondary };
+  const palette = ok ? { bg: color.okBg, bd: color.okBorder, ink: color.okInk } : { bg: color.chipBg, bd: color.border, ink: color.secondary };
   return (
     <span role="status" style={{ fontSize: fz.micro, padding: "2px 8px", borderRadius: 999, background: palette.bg, border: `1px solid ${palette.bd}`, color: palette.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
       {text}
@@ -83,7 +85,7 @@ function Settings({ agent }: { agent: AgentController }): JSX.Element {
   return (
     <div style={settingsBox}>
       <div style={{ display: "flex", gap: 0, border: `1px solid ${color.control}`, borderRadius: radius.button, overflow: "hidden" }} role="radiogroup" aria-label="How the Agent reaches a model">
-        {(Object.keys(MODE_LABEL) as AgentMode[]).map((m) => (
+        {AGENT_MODES.map((m) => (
           <button
             key={m}
             role="radio"
@@ -95,17 +97,6 @@ function Settings({ agent }: { agent: AgentController }): JSX.Element {
           </button>
         ))}
       </div>
-      {settings.mode === "claude-code" && (
-        <>
-          <p style={note}>
-            Claude Code drives this page through the <code style={code}>materia-live</code> MCP server. Open Claude Code in this repository; it starts the server from <code style={code}>.mcp.json</code> and this page connects to it.
-          </p>
-          <label style={field}>
-            <span style={fieldLabel}>Bridge address</span>
-            <input style={input} value={settings.bridgeUrl} onChange={(e) => updateSettings({ bridgeUrl: e.target.value })} spellCheck={false} />
-          </label>
-        </>
-      )}
       {settings.mode === "api-key" && (
         <>
           <label style={field}>
@@ -125,6 +116,7 @@ function Settings({ agent }: { agent: AgentController }): JSX.Element {
         </p>
       )}
       {settings.mode === "ollama" && <OllamaSettings agent={agent} />}
+      {settings.mode === "lmstudio" && <LmStudioSettings agent={agent} />}
       {(settings.mode === "api-key" || settings.mode === "proxy") && (
         <div style={{ display: "flex", gap: 8 }}>
           <label style={{ ...field, flex: 1 }}>
@@ -155,30 +147,33 @@ function Settings({ agent }: { agent: AgentController }): JSX.Element {
   );
 }
 
-type ModelList = { readonly status: "loading" } | { readonly status: "ok"; readonly models: readonly OllamaModel[] } | { readonly status: "error"; readonly message: string };
+type ModelList<T> = { readonly status: "loading" } | { readonly status: "ok"; readonly models: readonly T[] } | { readonly status: "error"; readonly message: string };
 
-/** The Ollama server and a model on it, listed from the server itself. */
-function OllamaSettings({ agent }: { agent: AgentController }): JSX.Element {
-  const { settings, updateSettings } = agent;
-  const [list, setList] = useState<ModelList>({ status: "loading" });
-  const [refresh, setRefresh] = useState(0);
-  const chosen = useRef(settings.ollamaModel);
-  chosen.current = settings.ollamaModel;
-
+/**
+ * A local server's models, asked of the server itself whenever its address
+ * changes (once typing pauses) or the user asks again. `onListed` gets each
+ * fresh list, to keep or replace the chosen model.
+ */
+function useModelList<T>(url: string, list: (url: string, signal: AbortSignal) => Promise<T[]>, hint: (url: string) => string, onListed: (models: T[]) => void): { list: ModelList<T>; refresh: () => void } {
+  const [state, setState] = useState<ModelList<T>>({ status: "loading" });
+  const [round, setRound] = useState(0);
+  const fresh = useRef({ list, hint, onListed });
+  fresh.current = { list, hint, onListed };
   useEffect(() => {
     const ctrl = new AbortController();
-    setList({ status: "loading" });
-    // Wait for typing in the address to pause before asking the server.
+    setState({ status: "loading" });
     const timer = setTimeout(() => {
-      listOllamaModels(settings.ollamaUrl, ctrl.signal).then(
+      fresh.current.list(url, ctrl.signal).then(
         (models) => {
           if (ctrl.signal.aborted) return;
-          setList({ status: "ok", models });
-          // Nothing chosen yet, or the choice is gone: take the first that can call tools.
-          if (!models.some((m) => m.tools && m.name === chosen.current)) updateSettings({ ollamaModel: models.find((m) => m.tools)?.name ?? "" });
+          setState({ status: "ok", models });
+          fresh.current.onListed(models);
         },
-        () => {
-          if (!ctrl.signal.aborted) setList({ status: "error", message: unreachableHint(settings.ollamaUrl, window.location.origin) });
+        (e: unknown) => {
+          if (ctrl.signal.aborted) return;
+          // A server that answered, but not as expected, says why; one that did not answer gets the setup hint.
+          const answered = e instanceof Error && /did not answer as|needs LM Studio/.test(e.message);
+          setState({ status: "error", message: answered ? (e as Error).message : fresh.current.hint(url) });
         },
       );
     }, 300);
@@ -186,8 +181,24 @@ function OllamaSettings({ agent }: { agent: AgentController }): JSX.Element {
       clearTimeout(timer);
       ctrl.abort();
     };
-  }, [settings.ollamaUrl, refresh, updateSettings]);
+  }, [url, round]);
+  return { list: state, refresh: () => setRound((n) => n + 1) };
+}
 
+const kTokens = (n: number): string => `${Math.round(n / 1024)}k`;
+
+/** The Ollama server and a model on it, listed from the server itself. */
+function OllamaSettings({ agent }: { agent: AgentController }): JSX.Element {
+  const { settings, updateSettings } = agent;
+  const { list, refresh } = useModelList<OllamaModel>(
+    settings.ollamaUrl,
+    listOllamaModels,
+    (url) => unreachableHint(url, window.location.origin),
+    // Nothing chosen yet, or the choice is gone: take the first that can call tools.
+    (models) => {
+      if (!models.some((m) => m.tools && m.name === settings.ollamaModel)) updateSettings({ ollamaModel: models.find((m) => m.tools)?.name ?? "" });
+    },
+  );
   const models = list.status === "ok" ? list.models : [];
   const picked = models.find((m) => m.name === settings.ollamaModel);
   return (
@@ -196,32 +207,92 @@ function OllamaSettings({ agent }: { agent: AgentController }): JSX.Element {
         <span style={fieldLabel}>Ollama server</span>
         <input style={input} value={settings.ollamaUrl} onChange={(e) => updateSettings({ ollamaUrl: e.target.value })} spellCheck={false} placeholder="http://localhost:11434" />
       </label>
-      <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
-        <label style={{ ...field, flex: 1, minWidth: 0 }}>
-          <span style={fieldLabel}>Model</span>
-          <select style={input} value={picked ? settings.ollamaModel : ""} disabled={models.length === 0} onChange={(e) => updateSettings({ ollamaModel: e.target.value })} aria-label="Ollama model">
-            {models.length === 0 && <option value="">{list.status === "loading" ? "Asking the server…" : "No models"}</option>}
-            {models.map((m) => (
-              <option key={m.name} value={m.name} disabled={!m.tools}>
-                {[m.name, m.parameterSize, m.context ? `${Math.round(m.context / 1024)}k context` : null, m.tools ? null : "no tools"].filter(Boolean).join(" · ")}
-              </option>
-            ))}
-          </select>
-        </label>
-        <IconButton title="List the server's models again" onClick={() => setRefresh((n) => n + 1)}>↻</IconButton>
-      </div>
+      <ModelPicker label="Ollama model" list={list} value={picked ? settings.ollamaModel : ""} onChange={(v) => updateSettings({ ollamaModel: v })} onRefresh={refresh}>
+        {models.map((m) => (
+          <option key={m.name} value={m.name} disabled={!m.tools}>
+            {[m.name, m.parameterSize, m.context ? `${kTokens(m.context)} context` : null, m.tools ? null : "no tools"].filter(Boolean).join(" · ")}
+          </option>
+        ))}
+      </ModelPicker>
       {list.status === "error" && <p style={{ ...note, color: color.warnInk }}>{list.message}</p>}
       {list.status === "ok" && models.length > 0 && !models.some((m) => m.tools) && (
         <p style={{ ...note, color: color.warnInk }}>None of these models can call tools, and the Agent works only through them. Pull one that can (e.g. <code style={code}>ollama pull qwen3</code>).</p>
       )}
       {list.status === "ok" && models.length === 0 && <p style={{ ...note, color: color.warnInk }}>The server has no models. Pull one that can call tools (e.g. <code style={code}>ollama pull qwen3</code>).</p>}
       {picked?.context != null && picked.context < MIN_AGENT_CONTEXT && (
-        <p style={{ ...note, color: color.noteInk }}>This model takes {Math.round(picked.context / 1024)}k tokens of context; the Agent's instructions alone are about 15k. Expect it to lose track in a long session.</p>
+        <p style={{ ...note, color: color.noteInk }}>This model takes {kTokens(picked.context)} tokens of context; the Agent's instructions alone are about 15k. Expect it to lose track in a long session.</p>
       )}
       <p style={note}>
         The conversation goes only to this server. Local models follow the method less reliably than Claude: watch the approval cards. A page not served from this machine (the published site) also needs <code style={code}>OLLAMA_ORIGINS</code> set to its address where Ollama runs.
       </p>
     </>
+  );
+}
+
+/** The LM Studio server and a model on it, listed from the server itself. */
+function LmStudioSettings({ agent }: { agent: AgentController }): JSX.Element {
+  const { settings, updateSettings } = agent;
+  const { list, refresh } = useModelList<LmStudioModel>(
+    settings.lmstudioUrl,
+    listLmStudioModels,
+    lmstudioUnreachableHint,
+    // Nothing chosen yet, or the choice is gone: take the first trained for tools
+    // and not loaded with too short a context (else the first trained, else the first).
+    (models) => {
+      if (models.some((m) => m.key === settings.lmstudioModel)) return;
+      const roomy = (m: LmStudioModel): boolean => m.loadedContext == null || m.loadedContext >= MIN_AGENT_CONTEXT;
+      updateSettings({ lmstudioModel: (models.find((m) => m.toolUse && roomy(m)) ?? models.find((m) => m.toolUse) ?? models[0])?.key ?? "" });
+    },
+  );
+  const models = list.status === "ok" ? list.models : [];
+  const picked = models.find((m) => m.key === settings.lmstudioModel);
+  return (
+    <>
+      <label style={field}>
+        <span style={fieldLabel}>LM Studio server</span>
+        <input style={input} value={settings.lmstudioUrl} onChange={(e) => updateSettings({ lmstudioUrl: e.target.value })} spellCheck={false} placeholder="http://localhost:1234" />
+      </label>
+      <ModelPicker label="LM Studio model" list={list} value={picked ? settings.lmstudioModel : ""} onChange={(v) => updateSettings({ lmstudioModel: v })} onRefresh={refresh}>
+        {models.map((m) => (
+          <option key={m.key} value={m.key}>
+            {[m.key, m.parameterSize, m.loadedContext != null ? `loaded, ${kTokens(m.loadedContext)} context` : "not loaded", m.toolUse ? null : "not trained for tools"].filter(Boolean).join(" · ")}
+          </option>
+        ))}
+      </ModelPicker>
+      {list.status === "error" && <p style={{ ...note, color: color.warnInk }}>{list.message}</p>}
+      {list.status === "ok" && models.length === 0 && <p style={{ ...note, color: color.warnInk }}>LM Studio has no language models. Download one trained for tool use (e.g. Qwen3) in its Discover tab.</p>}
+      {picked && !picked.toolUse && (
+        <p style={{ ...note, color: color.noteInk }}>This model was not trained for tool use. LM Studio still offers it the tools, but it may call them poorly; one marked for tool use works better.</p>
+      )}
+      {picked?.loadedContext != null && picked.loadedContext < MIN_AGENT_CONTEXT && (
+        <p style={{ ...note, color: color.noteInk }}>
+          LM Studio loaded this model with {kTokens(picked.loadedContext)} tokens of context; the Agent's instructions alone are about 15k. Reload it with at least 32k (<code style={code}>lms load {picked.key} --context-length 32768</code>{picked.maxContext != null && picked.maxContext < MIN_AGENT_CONTEXT ? `; it takes at most ${kTokens(picked.maxContext)}` : ""}).
+        </p>
+      )}
+      {picked && picked.loadedContext == null && (
+        <p style={note}>Not loaded yet: LM Studio loads it on the first message, with the context length set for it in LM Studio. The Agent needs at least 32k; to be sure, load it yourself (<code style={code}>lms load {picked.key} --context-length 32768</code>).</p>
+      )}
+      <p style={note}>
+        The conversation goes only to this server. Needs LM Studio 0.4.1 or later with its server running and <b>Enable CORS</b> on (Developer tab → server settings, or <code style={code}>lms server start --cors</code>). Local models follow the method less reliably than Claude: watch the approval cards.
+      </p>
+    </>
+  );
+}
+
+/** A local server's model list, with a button to ask again. */
+function ModelPicker<T>({ label, list, value, onChange, onRefresh, children }: { label: string; list: ModelList<T>; value: string; onChange: (v: string) => void; onRefresh: () => void; children: ReactNode }): JSX.Element {
+  const empty = list.status !== "ok" || list.models.length === 0;
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+      <label style={{ ...field, flex: 1, minWidth: 0 }}>
+        <span style={fieldLabel}>Model</span>
+        <select style={input} value={value} disabled={empty} onChange={(e) => onChange(e.target.value)} aria-label={label}>
+          {empty && <option value="">{list.status === "loading" ? "Asking the server…" : "No models"}</option>}
+          {children}
+        </select>
+      </label>
+      <IconButton title="List the server's models again" onClick={onRefresh}>↻</IconButton>
+    </div>
   );
 }
 
@@ -246,17 +317,8 @@ function Transcript({ agent }: { agent: AgentController }): JSX.Element {
 function EmptyState({ mode }: { mode: AgentMode }): JSX.Element {
   return (
     <div style={{ color: color.secondary, fontSize: fz.small, lineHeight: 1.5, padding: "6px 2px" }}>
-      {mode === "claude-code" ? (
-        <>
-          <p style={{ margin: "0 0 8px" }}>Claude Code's calls on this analysis will show here, and each change waits for your approval.</p>
-          <p style={{ margin: 0 }}>Try asking Claude Code: <i>“Use materia-live to look at the open fit and tell me what to refine next.”</i></p>
-        </>
-      ) : (
-        <>
-          <p style={{ margin: "0 0 8px" }}>Ask about the fit on screen, or ask {mode === "ollama" ? "the model" : "Claude"} to take the next step. It reads the analysis, judges it with MATERIA's tools, and asks before it changes anything.</p>
-          <p style={{ margin: 0 }}>For example: <i>“Assess the fit and suggest what to free next.”</i></p>
-        </>
-      )}
+      <p style={{ margin: "0 0 8px" }}>Ask about the fit on screen, or ask {mode === "ollama" || mode === "lmstudio" ? "the model" : "Claude"} to take the next step. It reads the analysis, judges it with MATERIA's tools, and asks before it changes anything.</p>
+      <p style={{ margin: 0 }}>For example: <i>“Assess the fit and suggest what to free next.”</i></p>
     </div>
   );
 }
@@ -297,7 +359,7 @@ function ToolCard({ entry, onDecide }: { entry: ActivityEntry; onDecide: (id: st
           {entry.effect === "read" ? "◦ " : "● "}{entry.title}
         </span>
         <span style={{ fontSize: fz.micro, color: tone, whiteSpace: "nowrap" }}>
-          {entry.source === "claude-code" ? "Claude Code · " : ""}{statusText}
+          {statusText}
         </span>
       </div>
       {entry.preview && <div style={{ fontSize: 12.5, color: color.ink, marginTop: 3 }}>{entry.preview}</div>}
@@ -326,7 +388,7 @@ function Composer({ agent, disabled }: { agent: AgentController; disabled: boole
       <textarea
         aria-label="Message the Agent"
         style={{ ...input, resize: "none", minHeight: 58, fontFamily: "inherit", lineHeight: 1.4 }}
-        placeholder={disabled ? (agent.settings.mode === "ollama" ? "Pick a model in the settings first" : "Add your API key in the settings first") : "Ask about the fit, or ask for the next step…"}
+        placeholder={disabled ? (localModel(agent.settings) !== null ? "Pick a model in the settings first" : "Add your API key in the settings first") : "Ask about the fit, or ask for the next step…"}
         value={text}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}
@@ -347,22 +409,6 @@ function Composer({ agent, disabled }: { agent: AgentController; disabled: boole
           ? <button style={secondaryButton} onClick={agent.stop}>Stop</button>
           : <button style={primaryButton} onClick={submit} disabled={disabled || !text.trim()}>Send</button>}
       </div>
-    </div>
-  );
-}
-
-function BridgeHint({ agent }: { agent: AgentController }): JSX.Element {
-  const { bridge } = agent;
-  return (
-    <div style={{ ...composer, fontSize: 12.5, color: color.secondary, lineHeight: 1.45 }}>
-      {bridge.state === "connected" && <span>Connected to Claude Code. Ask it in your terminal; its calls appear here.</span>}
-      {bridge.state === "searching" && (
-        <span>
-          Waiting for Claude Code. Start <code style={code}>claude</code> in this repository: it runs the <code style={code}>materia-live</code> server from <code style={code}>.mcp.json</code>, and this page connects to it.
-        </span>
-      )}
-      {bridge.state === "replaced" && <span>Another tab of the app is connected to Claude Code. Switch modes and back to take it over here.</span>}
-      {bridge.state === "off" && <span>Bridge off.</span>}
     </div>
   );
 }

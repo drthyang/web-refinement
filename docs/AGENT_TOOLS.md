@@ -350,7 +350,7 @@ external comparison records it.
 
 ## The in-app Agent
 
-The Agent puts a model — Claude, or a local model on Ollama — beside the
+The Agent puts a model — Claude, or a local model on Ollama or LM Studio — beside the
 analysis open in the browser. It reads the
 live page, judges the fit with the tools above, and makes changes through the
 page's own controls. Open it with the **Agent** button in the header.
@@ -395,16 +395,11 @@ rest of the session. Every change is a step in History tagged `agent`
 
 | Mode | Where the model runs | Credentials | Works on |
 |---|---|---|---|
-| Claude Code | your Claude Code session, through the `materia-live` MCP server | your Claude Code login | `npm run dev` |
 | API key | the browser, with the Anthropic SDK | your Anthropic API key, kept in this browser | the dev server and the published site |
 | Local proxy | the browser; the dev server forwards to the API | `ANTHROPIC_API_KEY` where the dev server runs (or `.env.local`) | `npm run dev`, `npm run preview` |
 | Ollama | your Ollama server (a local model) | none | the dev server; the published site once Ollama allows its origin |
+| LM Studio | your LM Studio server (a local model) | none | the dev server and the published site, with CORS on in LM Studio |
 
-- **Claude Code.** `.mcp.json` starts `materia-live` (`npm run mcp:live`) next
-  to `materia`. It listens on `127.0.0.1:5199` (`MATERIA_LIVE_PORT`); the page
-  long-polls it when the Agent is open in this mode. Only pages served from
-  this machine may connect. `materia` keeps the full headless toolset for
-  what-ifs on data the app has not opened.
 - **API key.** Claude Opus 5.5 by default (Sonnet 5.5 and Haiku 5.5 on offer),
   adaptive thinking, streamed. Every turn stays on the chosen model: the API's
   refusal fallback to another model is an opt-in setting, and a turn another
@@ -413,8 +408,10 @@ rest of the session. Every change is a step in History tagged `agent`
   prompt carries the `my-rietveld-workflow` skill and two `knowledge/` notes,
   and is cached across turns.
 - **Local proxy.** `<base>api/anthropic/` on the dev and preview servers
-  ([`src/agent/proxy.ts`](../src/agent/proxy.ts)). Only the app's own
-  pages may use it. The static build has no proxy.
+  ([`src/agent/proxy.ts`](../src/agent/proxy.ts)). The page sends its
+  requests there, and the server adds the key from `ANTHROPIC_API_KEY` and
+  forwards them to api.anthropic.com, so the key never reaches the browser.
+  Only the app's own pages may use it. The static build has no proxy.
 - **Ollama.** Ollama answers the Anthropic Messages API at
   `<server>/v1/messages`, so the same chat loop, tools and approvals drive a
   local model ([`src/agent/ollama.ts`](../src/agent/ollama.ts)). The page
@@ -428,15 +425,26 @@ rest of the session. Every change is a step in History tagged `agent`
   `gemma4:26b` on Ollama 0.40: it read the fit, refined after approval,
   assessed the result and stopped at the method's gate. Local models follow
   the method less reliably than Claude; the approval cards are the guard.
-
-`node scripts/live-bridge-demo.mjs` drives an open page through the bridge
-the way Claude Code does, as a smoke test without a model.
+- **LM Studio.** LM Studio 0.4.1 and later answer the same Messages API at
+  `<server>/v1/messages` ([`src/agent/lmstudio.ts`](../src/agent/lmstudio.ts)),
+  so it runs the same loop with the same plain headers and request fields as
+  Ollama. The page talks to the server directly (default
+  `http://localhost:1234`) and lists its language models from
+  `/api/v1/models`, those trained for tool use first; LM Studio can offer tools
+  to the others too, so they stay selectable with a note. LM Studio admits no
+  other origin until **Enable CORS** is on in its server settings (or
+  `lms server start --cors`), and its server has its own port, so this is
+  needed even for the dev server. A model loads with the context length set
+  for it in LM Studio; the drawer shows each loaded model's context and asks
+  for at least 32k (`lms load <model> --context-length 32768`). Tested against
+  a stand-in server built from LM Studio's documented responses, not yet
+  against LM Studio itself.
 
 **How it is tested.** [`src/agent/`](../src/agent) tests run the tools on
-a real powder fit and a real PDF fit (the refinement engine, the assessment), the bridge through
-an MCP client, the chat loop against a stand-in API that streams scripted
-turns (as Claude and as Ollama), the Ollama model listing against a stand-in
-server, and the proxy against a stubbed upstream.
+a real powder fit and a real PDF fit (the refinement engine, the assessment),
+the chat loop against a stand-in API that streams scripted turns (as Claude,
+Ollama and LM Studio), the Ollama and LM Studio model listings against
+stand-in servers, and the proxy against a stubbed upstream.
 
 ## Planned
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
-import { listOllamaModels, ollamaBase, plainFetch, unreachableHint } from "@/agent/ollama";
+import { listOllamaModels, ollamaBase, unreachableHint } from "@/agent/ollama";
+import { plainFetch } from "@/agent/localServer";
 
 /**
  * The Ollama helpers against a stand-in server that answers /api/tags and
