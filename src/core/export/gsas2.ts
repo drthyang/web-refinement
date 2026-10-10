@@ -49,13 +49,16 @@ function cwRows(inst: Extract<InstrumentParameters, { kind: "constantWavelength"
   const xray = inst.radiationKind !== "neutron";
   // PXC (X-ray CW) and PNC (neutron CW) share the profile keys; PXC adds
   // Polariz. and Source. The model's U,V,W are FWHM² → back to GSAS-II σ².
+  // A lab tube's doublet is Lam1, Lam2 and I(L2)/I(L1); a monochromatic beam is Lam.
+  const k2 = xray ? inst.kAlpha2 : undefined;
   const rows: Array<[string, number | string]> = [
     ["Type", xray ? "PXC" : "PNC"],
     ["Bank", 1.0],
-    ["Lam", inst.wavelength],
+    ...(k2 ? [["Lam1", inst.wavelength], ["Lam2", k2.wavelength]] as Array<[string, number]> : [["Lam", inst.wavelength]] as Array<[string, number]>),
     ["Zero", inst.zero ?? 0],
   ];
   if (xray) rows.push(["Polariz.", inst.polarization ?? 0.5]);
+  if (k2) rows.push(["I(L2)/I(L1)", k2.ratio]);
   rows.push(
     ["U", (inst.u ?? 0) / GSAS_SIG2_TO_FWHM2],
     ["V", (inst.v ?? 0) / GSAS_SIG2_TO_FWHM2],

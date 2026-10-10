@@ -113,6 +113,15 @@ Caglioti terms. On PbSO₄ (D1A) it took wR from 12% to 6%. A Lorentzian X or Y 
 refines negative is unphysical: reset it (`reset_parameters` with its id), hold it, refine
 the rest.
 
+**When the starting profile is far off, the profile comes before the positions.** The
+order above assumes the instrument's widths are roughly the sample's. When `diagnose_fit`
+measures the lines much broader (or narrower) than calculated (`peak-width`), refine the
+Caglioti terms first and say why: positions refined against lines that wrong absorb the
+width misfit. Then, if it says the lines are more Lorentzian than calculated
+(`peak-tails`: a Gaussian core widened to reach long tails), free X and Y. Fluorapatite on
+a Cu tube: lines 1.7× the instrument file's width, then η ≈ 0.8 — wR 37 → 18 → 9 %, with
+the positions barely moving until the shape was right.
+
 ## The occupancy guardrail (do not skip)
 
 **Never free occupancies bare.** Scale and site occupancy are near-degenerate on a single
@@ -234,6 +243,17 @@ Report the outcome as: GoF + the key refined values with ESDs + which correction
 + any correlations/at-bounds worth knowing — not just "converged, wR = X%". `structure_table`
 gives the cell and the coordinates, occupancies and B as value(esd); compare them with a
 published structure when there is one.
+
+**Lab X-ray data.** The instrument file says which lines the tube gives: a Cu or Co tube
+without a monochromator gives Kα₁ and Kα₂, and every reflection is drawn at both (the
+data card shows "λ 1.5405 / 1.5443 Å (Kα₂ 0.5)"). A Kα₂ peak is never an extra peak. The
+polarization fraction P of the Lorentz-polarization factor is an instrument constant the
+fit cannot determine: it changes intensity with angle as the ADPs do, so every B moves
+with it at the same wR (fluorapatite: P 0.7 → 0.5 lowered every B by ≈ 0.55 Å², and with
+0.5 they matched GSAS's own refinement of the data). Report the B values with the P they
+assume. If the instrument file's P does not fit the setup the user describes (0.5
+unpolarized; ≈ 0.56 for Cu with a graphite monochromator), propose
+`set_instrument_constants` — it always asks the user.
 
 **The cell is only as good as the wavelength.** On constant-wavelength neutron data the
 wavelength is a calibration, not a constant: a cell uniformly off by a fraction of a percent

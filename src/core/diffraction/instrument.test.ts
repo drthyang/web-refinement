@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tofFromD, dFromTof, twoThetaFromD, dFromTwoTheta } from "@/core/diffraction/instrument";
+import { tofFromD, dFromTof, twoThetaFromD, dFromTwoTheta, radiationOf } from "@/core/diffraction/instrument";
 import { parseInstrumentParameters } from "@/parsers/instrument";
 
 // POWGEN 30 K bank calibration from the GSAS-II .lst.
@@ -43,5 +43,16 @@ describe("parseInstrumentParameters", () => {
     const p = parseInstrumentParameters("Lam:1.5406\nZero:0.01\n");
     expect(p.kind).toBe("constantWavelength");
     if (p.kind === "constantWavelength") expect(p.wavelength).toBeCloseTo(1.5406, 4);
+  });
+});
+
+describe("radiationOf", () => {
+  it("carries an X-ray tube's polarization and Kα₂, whichever file was loaded first", () => {
+    const tube = { kind: "constantWavelength" as const, radiationKind: "xray" as const, wavelength: 1.5405, polarization: 0.7, kAlpha2: { wavelength: 1.5443, ratio: 0.5 } };
+    expect(radiationOf(tube)).toEqual({ kind: "xray", wavelength: 1.5405, polarization: 0.7, kAlpha2: { wavelength: 1.5443, ratio: 0.5 } });
+    expect(radiationOf({ ...tube, radiationKind: "neutron" })).toEqual({ kind: "neutron", wavelength: 1.5405 });
+    // A file that does not say: neutron for loaded data, X-ray for a simulation.
+    expect(radiationOf({ kind: "constantWavelength", wavelength: 1.54 }).kind).toBe("neutron");
+    expect(radiationOf({ kind: "constantWavelength", wavelength: 1.54 }, "xray").kind).toBe("xray");
   });
 });

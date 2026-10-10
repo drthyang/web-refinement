@@ -92,7 +92,7 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "check_cell_symmetry",
     title: "Check cell and space group",
     description:
-      "Powder page only. A sanity check at the START of a refinement, not a gate: a Le Bail fit refines the cell from peak positions alone, then reports leftover peaks no reflection can index (`unindexedPeaks`: a wrong cell or a missing phase — worth settling before refining) and forbidden reflections showing intensity (`absences.violated`). An absence flag is NOT a reason to change the space group: before the structure is refined it is as often profile misfit or an impurity line. Note it (write_note) and refine on; the space group is questioned only at the end, with review_symmetry. Never blocks a refinement. Uses the loaded phases, data, instrument and fit window; the other phases count as known impurities. Cannot catch a too-large cell. Takes several seconds.",
+      "Powder page only. A sanity check at the START of a refinement, not a gate: a Le Bail fit refines the cell from peak positions alone, then reports leftover peaks no reflection can index (`unindexedPeaks`: a wrong cell or a missing phase — worth settling before refining), small bumps on a strong line's flank (`shoulders`: a profile tail, not a phase) and forbidden reflections showing intensity (`absences.violated`). An absence flag is NOT a reason to change the space group: before the structure is refined it is as often profile misfit or an impurity line. Note it (write_note) and refine on; the space group is questioned only at the end, with review_symmetry. Never blocks a refinement. Uses the loaded phases, data, instrument and fit window; the other phases count as known impurities. Cannot catch a too-large cell. Takes several seconds.",
     inputSchema: {
       significance: z.number().positive().optional().describe("Leftover height, in σ, that counts as observed intensity (default 5)"),
       dMin: z.number().positive().optional().describe("Smallest d-spacing read, Å (default 0.7)"),
@@ -143,6 +143,19 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     },
     effect: "change",
     pages: ["powder"],
+  },
+  {
+    name: "set_instrument_constants",
+    title: "Set X-ray instrument constants",
+    description:
+      "Powder page, constant-wavelength X-ray only. The constants a fit cannot determine: the polarization fraction P of the Lorentz-polarization factor, (1−P)·cos²2θ + P (0.5 an unpolarized tube; ≈ 0.56 Cu Kα with a graphite monochromator; ≈ 0.9–0.95 a synchrotron), and a tube's Kα₂/Kα₁ intensity ratio (≈ 0.5). Neither is refined: P changes intensity smoothly with angle exactly as the ADPs do, so the fit cannot tell them apart and every B moves with it (fluorapatite on a Cu tube: P 0.7 → 0.5 lowered every B by ≈ 0.55 Å² at the same wR). Take them from the instrument; change them when the instrument file does not match the setup the user describes, or to show how much a result depends on them — then say so in the report. Always asks the user. Clears the last result.",
+    inputSchema: {
+      polarization: z.number().min(0.4).max(1).optional().describe("Polarization fraction P"),
+      kAlpha2Ratio: z.number().min(0).max(1).optional().describe("Kα₂/Kα₁ intensity ratio"),
+    },
+    effect: "change",
+    pages: ["powder"],
+    alwaysAsk: true,
   },
   {
     name: "structure_table",

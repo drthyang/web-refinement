@@ -166,6 +166,19 @@ describe("parseGsasHistogram — multi-bank and edge cases", () => {
     expect(bank.points).toHaveLength(2);
   });
 
+  it("drops channels without counts, as GSAS-II weights them zero — unless most have none", () => {
+    // A Cu Kα scan whose last record is padded past the end with zeros (FAP.XRA).
+    const line = [500, 480, 0, 0].map((v) => rj(1, 2) + rj(v.toFixed(0), 6)).join("");
+    const std = parseGsasHistogram(["t", "BANK 1 4 1 CONST 1500 2 0 0 STD", line].join("\n")).banks[0]!.points;
+    expect(std.map((p) => p.x)).toEqual([15, 15.02]);
+    // ESD: a zero esd is no measurement either.
+    const esdLine = rj("100.0", 8) + rj("10.0", 8) + rj("90.0", 8) + rj("0.0", 8) + rj("80.0", 8) + rj("9.0", 8);
+    expect(parseGsasHistogram(["t", "BANK 1 3 1 CONST 2000 500 0 0 ESD", esdLine].join("\n")).banks[0]!.points.map((p) => p.yObs)).toEqual([100, 80]);
+    // FXYE that is mostly ≤ 0 is not raw counts (background-subtracted): every channel is kept.
+    const subtracted = parseGsasHistogram(["t", "BANK 1 3 3 CONST 1000 100 0 0 FXYE", "1000 -5 2", "1100 12 2", "1200 -3 2"].join("\n")).banks[0]!.points;
+    expect(subtracted.map((p) => p.yObs)).toEqual([-5, 12, -3]);
+  });
+
   it("reads STD records wider than the nominal 80 columns (>10 fields)", () => {
     let line = "";
     for (let k = 0; k < 12; k++) line += rj(1, 2) + rj((100 + k).toFixed(0), 6); // 96 cols

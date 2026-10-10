@@ -84,7 +84,7 @@ import { color as theme, card as themeCard, uppercaseLabel as themeLabel, mono a
 import { SegmentedToggle } from "@/app/ui/SegmentedToggle";
 import { applyParameters } from "@/core/workflow/apply";
 import { excludedPointMask } from "@/core/refinement/factors";
-import type { InstrumentParameters } from "@/core/diffraction/instrument";
+import { secondLine, type InstrumentConstants, type InstrumentParameters } from "@/core/diffraction/instrument";
 import { type Session, buildSpecFor, DEFAULT_INSTRUMENT, SYNTHETIC_SOURCE, EMPTY_SOURCE } from "@/app/powderSession";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { AgentLink } from "@/agent/link";
@@ -139,6 +139,8 @@ export interface PowderWorkbenchProps {
    *  text is no longer held (a demo, or a restored project). */
   onOverrideXUnit?: (unit: PowderXUnit) => void;
   onLoadInstrument: (file: File) => void;
+  /** Set an X-ray instrument's polarization and Kα₂ ratio (the shell owns the instrument). */
+  onInstrumentConstants?: (update: InstrumentConstants) => void;
   /** Load a bundled demo (from the empty-state prompt). */
   onLoadDemo?: (kind: DemoId) => void;
   /** The demos on offer — the shell filters out local-data ones it cannot serve. */
@@ -164,7 +166,7 @@ export function PowderWorkbench({
   session, setSession, powderResult, setPowderResult, instrument, instrumentLoaded, ownStructure,
   client, active, step, onStep, setMessage, exportsRef,
   onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, detection, onOverrideXUnit,
-  onLoadInstrument, onLoadDemo, demos = [],
+  onLoadInstrument, onInstrumentConstants, onLoadDemo, demos = [],
   onOpenProject, viewRestore, useGpu = true,
   stepHistory, agentLink,
 }: PowderWorkbenchProps): JSX.Element {
@@ -993,7 +995,11 @@ export function PowderWorkbench({
           ...(tofCal ? { tof: tofCal } : {}),
         });
         if (pre.refined) {
-          workingParams = powderParams.map((p) => (pre.cellValues[p.id] !== undefined ? { ...p, value: pre.cellValues[p.id]! } : p));
+          // The Le Bail fit refines its own zero on a 2θ pattern, so its cell
+          // is free of the zero error: a free zero starts at the same value.
+          workingParams = powderParams.map((p) => (pre.cellValues[p.id] !== undefined
+            ? { ...p, value: pre.cellValues[p.id]! }
+            : p.kind === "zeroShift" && pre.zero !== undefined && !p.fixed && !p.expression ? { ...p, value: pre.zero } : p));
         }
       }
       // Stage 2 — multi-start from the (cell-seeded) parameters. Prefit casts a
@@ -1373,6 +1379,7 @@ export function PowderWorkbench({
       setAnisotropicAdp,
       setSiteTies,
       setCorrections,
+      ...(onInstrumentConstants ? { setInstrumentConstants: onInstrumentConstants } : {}),
       setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : null),
       showPeaks: (peaks) => {
         setAgentPeaks(peaks.length > 0 ? peaks.map((p) => ({ d: p.d, height: p.height, ...(p.near ? { near: p.near } : {}) })) : null);
@@ -1434,10 +1441,12 @@ export function PowderWorkbench({
       instrument: { x: px?.initialValue ?? 0, y: py?.initialValue ?? 0 },
     });
   }, [powderParams, pattern.xUnit, pattern.radiation, powderResult]);
+  // A lab tube's second line, as the model draws it (from the pattern's radiation).
+  const kAlpha2 = secondLine(pattern) ? (pattern.radiation as { kAlpha2?: { wavelength: number; ratio: number } }).kAlpha2 : undefined;
   const instParamMeta =
     instrument.kind === "tof"
       ? `difC ${instrument.difC.toFixed(1)}${instrument.difA ? ` · difA ${instrument.difA}` : ""}${instrument.difB ? ` · difB ${instrument.difB}` : ""} · Zero ${(instrument.zero ?? 0).toFixed(2)} µs`
-      : `λ ${instrument.wavelength} Å${instrument.zero ? ` · Zero ${instrument.zero}°` : ""}`;
+      : `λ ${instrument.wavelength}${kAlpha2 ? ` / ${kAlpha2.wavelength} Å (Kα₂ ${kAlpha2.ratio})` : " Å"}${instrument.zero ? ` · Zero ${instrument.zero}°` : ""}`;
   // Instrument identity: "Beamline · Facility" when the loaded file named a known
   // beamline (the common case). Fall back to the generic mode label + calibration
   // params only when no beamline/facility is recognised.

@@ -462,7 +462,8 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   results replaced by a line naming the tool to call again, the stored history
   untouched.
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
-  `set_adp_model`, `set_site_ties`, `set_corrections`, `set_fit_range`,
+  `set_adp_model`, `set_site_ties`, `set_corrections`,
+  `set_instrument_constants`, `set_fit_range`,
   `refine`, `reset_parameters` (all, or the ids given), `go_to_step`, and on
   the magnetic step
   `set_propagation_vector`, `select_magnetic_ions`, `set_moment_ties`,
@@ -471,7 +472,10 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   Each is the page's own handler — the Agent's `refine` is the Refine button.
 - **Why a fit is poor** ([`src/core/diagnostics/fitDiagnosis.ts`](../src/core/diagnostics/fitDiagnosis.ts)).
   `diagnose_fit` reads the residual cause by cause, each with its share of χ²
-  and the action: background (misfit between the peaks), peak positions
+  and the action: peak width (the half-maximum widths of observed against
+  calculated isolated lines), line shape (their Lorentzian fraction, read from
+  height × FWHM ÷ area), background (misfit where even a Lorentzian line of
+  the observed width puts less than half a σ), peak positions
   (residual on one side of every peak), asymmetry (one-sided at low angle),
   width/shape (± lobes everywhere), intensity falling off with angle wrongly
   (ln(I_obs/I_calc) against sin²θ/λ²: a ΔB), texture (the intensity misfit
@@ -482,6 +486,9 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   displacement, transparency, μR absorption, roughness — as the profile
   group's corrections boxes do; their rows come in fixed. `structure_table`
   gives the refined cell, coordinates, occupancies and B as value(esd).
+  `set_instrument_constants` sets an X-ray instrument's polarization fraction
+  and Kα₂/Kα₁ ratio — constants the fit cannot determine (the polarization
+  trades with every B at the same wR) — and always asks the user.
 - **The magnetic analysis step** ([`src/agent/magneticTools.ts`](../src/agent/magneticTools.ts)).
   The powder page's second step publishes its controls as a handle on the
   powder port ([`magneticPort.ts`](../src/agent/magneticPort.ts)), so the Agent

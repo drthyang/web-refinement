@@ -162,6 +162,24 @@ function pointFromYE(x: number, y: number, e: number): PowderPoint {
   return { x, yObs: y, sigma };
 }
 
+/**
+ * GSAS-II gives a channel with no counts (or no esd) zero weight — in a raw
+ * count histogram it is a channel without data (the record padding past the
+ * scan's end, a detector gap), not a measured zero. Weighted as one count it
+ * swamped a fit: two zeros past the end of a Cu Kα scan carried half the χ²
+ * of a GoF-1.85 refinement (fluorapatite, FAP.XRA). Such channels are dropped.
+ */
+function counted(p: PowderPoint, e?: number): boolean {
+  return p.yObs > 0 && (e === undefined || e > 0);
+}
+
+/** The counted channels — unless most have no counts: then the file is not raw
+ *  counts (a background-subtracted histogram), and every channel is kept. */
+function finish(points: PowderPoint[], dropped: readonly PowderPoint[]): PowderPoint[] {
+  if (dropped.length === 0 || dropped.length <= points.length) return points;
+  return [...points, ...dropped].sort((a, b) => a.x - b.x);
+}
+
 /** Parse the data records of one bank (raw, untrimmed lines) into points. */
 function parseBankData(
   binType: string,
@@ -171,6 +189,7 @@ function parseBankData(
   rawLines: readonly string[],
 ): PowderPoint[] {
   const points: PowderPoint[] = [];
+  const dropped: PowderPoint[] = [];
   const tof = isTofBin(binType);
   // CONST stores the abscissa in centidegrees; TOF stores µs (no scaling).
   const scaleExplicitX = tof ? 1 : 1 / 100;
@@ -186,8 +205,9 @@ function parseBankData(
       const y = v[1]!;
       const e = dataType === "FXYE" && Number.isFinite(v[2]!) ? v[2]! : 0;
       points.push(pointFromYE(x, y, e));
+      if (!counted(points.at(-1)!, dataType === "FXYE" ? e : undefined)) dropped.push(points.pop()!);
     }
-    return points;
+    return finish(points, dropped);
   }
 
   // Fixed-column formats: X is implicit, reconstructed per channel index.
@@ -203,12 +223,14 @@ function parseBankData(
         if (yStr.trim() === "") { broke = true; break; }
         const y = sfloat(yStr);
         const e = sfloat(line.slice(i + 8, i + 16));
-        points.push(pointFromYE(xs[j] ?? 0, y, e));
+        const p = pointFromYE(xs[j] ?? 0, y, e);
+        if (counted(p, e)) points.push(p);
+        else dropped.push(p);
         j++;
       }
       if (broke) continue;
     }
-    return points;
+    return finish(points, dropped);
   }
 
   if (dataType === "STD") {
@@ -221,12 +243,13 @@ function parseBankData(
         // GSAS count-packing: 2-col repeat count n, 6-col intensity I; esd = √(I/n).
         const n = Math.max(sint(field.slice(0, 2)), 1);
         const y = Math.max(sfloat(field.slice(2, 8)), 0);
-        const sigma = y > 0 ? Math.sqrt(y / n) : Math.sqrt(1);
-        points.push({ x: xs[j] ?? 0, yObs: y, sigma });
+        const p = { x: xs[j] ?? 0, yObs: y, sigma: Math.sqrt(Math.max(y, 1) / n) };
+        if (counted(p)) points.push(p);
+        else dropped.push(p);
         j++;
       }
     }
-    return points;
+    return finish(points, dropped);
   }
 
   throw new Error(`Unsupported GSAS data type "${dataType}" (supported: FXYE, FXY, STD, ESD).`);

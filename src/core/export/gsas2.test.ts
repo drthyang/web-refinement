@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { parseInstrumentParameters } from "@/parsers/instrument";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { instrumentToInstprm, buildGpxScript } from "@/core/export/gsas2";
 
@@ -27,6 +28,17 @@ describe("instrumentToInstprm", () => {
     // The model holds FWHM² (loader ×8 ln2); the file holds GSAS-II σ² again.
     const w = Number(out.match(/^W:(.*)$/m)![1]);
     expect(w).toBeCloseTo(1.2 / (8 * Math.log(2)), 10);
+  });
+
+  it("writes a lab tube's doublet as Lam1, Lam2 and I(L2)/I(L1), which the reader takes back", () => {
+    const cw: InstrumentParameters = { kind: "constantWavelength", radiationKind: "xray", wavelength: 1.5405, polarization: 0.7, kAlpha2: { wavelength: 1.5443, ratio: 0.5 } };
+    const out = instrumentToInstprm(cw);
+    expect(out).toContain("Lam1:1.5405");
+    expect(out).toContain("Lam2:1.5443");
+    expect(out).toContain("I(L2)/I(L1):0.5");
+    expect(out).not.toContain("Lam:");
+    const back = parseInstrumentParameters(out);
+    expect(back.kind === "constantWavelength" && back.kAlpha2).toEqual({ wavelength: 1.5443, ratio: 0.5 });
   });
 
   it("writes a CW neutron (PNC) file without X-ray-only keys", () => {

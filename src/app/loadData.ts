@@ -10,7 +10,7 @@
 
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern, SingleCrystalDataset, SingleCrystalReflection } from "@/core/diffraction/types";
-import type { InstrumentParameters } from "@/core/diffraction/instrument";
+import { radiationOf, type InstrumentParameters } from "@/core/diffraction/instrument";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
 import type { PowderParseOptions } from "@/parsers/powderData";
 import { powderParameters, singleCrystalParameters } from "@/examples/synthetic";
@@ -60,7 +60,7 @@ export function powderOptsFromInstrument(
     id,
     name,
     xUnit: "twoTheta",
-    radiation: { kind: instrument.radiationKind ?? "neutron", wavelength: instrument.wavelength },
+    radiation: radiationOf(instrument),
     wavelength: instrument.wavelength,
   };
 }

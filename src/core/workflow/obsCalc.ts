@@ -104,12 +104,14 @@ function peakValue(pk: ProfilePeak, x: number): number {
 }
 
 /** Intensity-weighted centre (pattern x-unit) of a placed peak's sub-peaks. */
-function peakCenter(sub: readonly ProfilePeak[]): number | undefined {
-  if (sub.length === 0) return undefined;
+function peakCenter(sub: readonly ProfilePeak[], second = false): number | undefined {
+  // A reflection sits where its first line does; a Kα₂ copy is not its position.
+  const line = sub.filter((pk) => !pk.secondLine === !second);
+  if (line.length === 0) return undefined;
   let w = 0;
   let c = 0;
-  for (const pk of sub) { w += pk.intensity; c += pk.intensity * pk.center; }
-  return w > 0 ? c / w : sub[0]!.center;
+  for (const pk of line) { w += pk.intensity; c += pk.intensity * pk.center; }
+  return w > 0 ? c / w : line[0]!.center;
 }
 
 /**
@@ -333,6 +335,8 @@ export function powderReflectionObsCalc(
   components.forEach((cmp, ri) => {
     if (cmp.kind === "nuclear" && cmp.iCalc <= (maxByPhase.get(cmp.phaseIndex) ?? 0) * 1e-6) return; // near-absent → F_obs not measurable
     const center = peakCenter(cmp.sub);
+    // A Kα₂ line has its own lobes: each point is read against the nearer line.
+    const center2 = peakCenter(cmp.sub, true);
     if (fitRange) {
       if (center === undefined || center < fitRange.min || center > fitRange.max) return; // outside the fit window
     }
@@ -351,7 +355,8 @@ export function powderReflectionObsCalc(
         chi2 += f * dl * dl;
         shareSum += f;
         meanSum += f * dl;
-        lobeSum += f * Math.sign(x[i]! - center) * dl;
+        const near = center2 !== undefined && Math.abs(x[i]! - center2) < Math.abs(x[i]! - center) ? center2 : center;
+        lobeSum += f * Math.sign(x[i]! - near) * dl;
       }
     }
     const attribution = misfit && method === "rietveld"

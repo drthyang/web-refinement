@@ -17,7 +17,7 @@ import type { MagneticAgentHandle } from "@/agent/magneticPort";
 import type { MutableRefObject } from "react";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PdfPattern, PowderPattern } from "@/core/diffraction/types";
-import type { InstrumentParameters } from "@/core/diffraction/instrument";
+import type { InstrumentConstants, InstrumentParameters } from "@/core/diffraction/instrument";
 import type { LinearRestraint, ParameterBinding, RefinementOptions, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { PowderProfile } from "@/core/workflow/powder";
 import type { MagneticModel } from "@/core/magnetic/types";
@@ -89,6 +89,9 @@ export interface PowderAgentPort {
   readonly setSiteTies: (update: Partial<SiteTies>) => void;
   /** The profile group's corrections boxes (asymmetry, texture axis, displacement, …). */
   readonly setCorrections?: (update: CorrectionsUpdate) => void;
+  /** An X-ray instrument's constants the fit cannot determine: the polarization
+   *  fraction and the Kα₂/Kα₁ ratio (the instrument and the pattern's radiation). */
+  readonly setInstrumentConstants?: (update: InstrumentConstants) => void;
   /** The fit window on the pattern's own axis; null restores the whole pattern. */
   readonly setFitRange: (range: { readonly min: number; readonly max: number } | null) => void;
   /** Mark these residual peaks on the plot (▽ with a guide line); cleared by
@@ -179,3 +182,5 @@ export type LiveState = PowderLiveState | PdfLiveState;
 
 /** The shell-owned ref an engine publishes its port into (null when unmounted or inactive). */
 export type AgentPortRef = MutableRefObject<AgentPort | null>;
+
+export type { InstrumentConstants } from "@/core/diffraction/instrument";

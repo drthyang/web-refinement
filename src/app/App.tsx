@@ -24,7 +24,7 @@ import { defaultProjectTitle, projectFileFor, sessionFromPowderWorkspace, type P
 import { downloadText } from "@/app/download";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { PdfPattern, SingleCrystalDataset } from "@/core/diffraction/types";
-import type { InstrumentParameters } from "@/core/diffraction/instrument";
+import { radiationOf, withConstants, type InstrumentConstants, type InstrumentParameters } from "@/core/diffraction/instrument";
 import { buildPowderSpec } from "@/app/powderSpec";
 import { parseMagneticCif, parseCif } from "@/parsers/cif";
 import { SpaceGroupSettingError, type SpaceGroupSettingInfo } from "@/core/crystal/spaceGroups";
@@ -58,6 +58,7 @@ import {
   emptySession,
   buildSpecFor,
   withoutCorrections,
+  carryRefinedStructure,
   DEFAULT_INSTRUMENT,
   EMPTY_SOURCE,
 } from "@/app/powderSession";
@@ -929,11 +930,12 @@ export function App(): JSX.Element {
     const wavelength = parsed.wavelength ?? cw?.wavelength ?? 2.5;
     const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
     const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
-    setSession((s) => ({ ...withoutCorrections(s), extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
+    const kept = carryRefinedStructure(session, spec.params);
+    setSession((s) => ({ ...withoutCorrections(s), extraPhases: [], pattern: parsed, powderParams: kept.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
     if (instrument.kind === "tof") { setInstrument(DEFAULT_INSTRUMENT); setInstrumentLoaded(false); }
     setPowderResult(null);
     const last = parsed.points[parsed.points.length - 1]!;
-    setMessage(`Loaded FullProf INSTRM=6 powder “${filename}” · ${parsed.points.length} pts · 2θ ${parsed.points[0]!.x.toFixed(2)}–${last.x.toFixed(2)}° · neutron λ=${wavelength} Å.`);
+    setMessage(`Loaded FullProf INSTRM=6 powder “${filename}” · ${parsed.points.length} pts · 2θ ${parsed.points[0]!.x.toFixed(2)}–${last.x.toFixed(2)}° · neutron λ=${wavelength} Å${carriedNote(kept.carried)}.`);
     requestStep("load", `Loaded data ${filename}`);
   }
 
@@ -948,13 +950,14 @@ export function App(): JSX.Element {
     setPdfDataset(null);
     const inst: InstrumentParameters = cw ?? { kind: "constantWavelength", radiationKind: "neutron", wavelength };
     const spec = buildPowderSpec(structure, parsed, inst, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
-    setSession((s) => ({ ...withoutCorrections(s), extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
+    const kept = carryRefinedStructure(session, spec.params);
+    setSession((s) => ({ ...withoutCorrections(s), extraPhases: [], pattern: parsed, powderParams: kept.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
     if (instrument.kind === "tof") { setInstrument(DEFAULT_INSTRUMENT); setInstrumentLoaded(false); }
     setPowderResult(null);
     const last = parsed.points[parsed.points.length - 1]!;
     setMessage(
       `Loaded ILL powder “${filename}” · ${parsed.points.length} pts · 2θ ${parsed.points[0]!.x.toFixed(2)}–${last.x.toFixed(2)}° · neutron λ=${wavelength} Å` +
-      `${cw ? " (Caglioti widths from instrument)" : " — load the .irf for Caglioti widths"}.`,
+      `${cw ? " (Caglioti widths from instrument)" : " — load the .irf for Caglioti widths"}${carriedNote(kept.carried)}.`,
     );
     requestStep("load", `Loaded data ${filename}`);
   }
@@ -1022,9 +1025,10 @@ export function App(): JSX.Element {
         return;
       }
       const spec = buildPowderSpec(structure, parsed, tofInstrument, true, session.backgroundTerms, session.siteTies);
-      setSession((s) => ({ ...withoutCorrections(s), extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
+      const kept = carryRefinedStructure(session, spec.params);
+      setSession((s) => ({ ...withoutCorrections(s), extraPhases: [], pattern: parsed, powderParams: kept.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
       setPowderResult(null);
-      setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag}. ${spec.params.length} parameters, back-to-back-exponential profile — click “Refine”. ${fmt.note}`);
+      setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · TOF ${tag}. ${spec.params.length} parameters, back-to-back-exponential profile${carriedNote(kept.carried)} — click “Refine”. ${fmt.note}`);
       return;
     }
     const parsed = isGsasHist
@@ -1037,14 +1041,15 @@ export function App(): JSX.Element {
     // workbench into the matching mode instead of staying view-only.
     const cwInstrument = instrumentLoaded && instrument.kind === "constantWavelength" ? instrument : DEFAULT_INSTRUMENT;
     const spec = buildPowderSpec(structure, parsed, cwInstrument, session.powderProfile.lorentz, session.backgroundTerms, session.siteTies);
-    setSession((s) => ({ ...withoutCorrections(s), extraPhases: [], pattern: parsed, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
+    const kept = carryRefinedStructure(session, spec.params);
+    setSession((s) => ({ ...withoutCorrections(s), extraPhases: [], pattern: parsed, powderParams: kept.params, powderBindings: spec.bindings, powderProfile: spec.profile, powderOverlay: null, powderSource: filename, rawData: { name: filename, text } }));
     if (instrument.kind === "tof") {
       setInstrument(DEFAULT_INSTRUMENT);
       setInstrumentLoaded(false);
     }
     setPowderResult(null);
     const nParams = spec.params.length;
-    setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · unit=${fmt.xUnit} ${tag}. ${nParams} symmetry-allowed parameters. Scale auto-estimated — click “Refine”. ${fmt.note}`);
+    setMessage(`Loaded powder “${filename}” · ${parsed.points.length} pts · unit=${fmt.xUnit} ${tag}. ${nParams} symmetry-allowed parameters${carriedNote(kept.carried)}. Scale auto-estimated — click “Refine”. ${fmt.note}`);
   }
 
   function onLoadInstrument(file: File): void {
@@ -1066,7 +1071,7 @@ export function App(): JSX.Element {
           // regardless of whether the data or the instrument was loaded first.
           const pattern =
             parsed.kind === "constantWavelength" && s.pattern.xUnit !== "tof"
-              ? { ...s.pattern, radiation: { kind: parsed.radiationKind ?? "neutron", wavelength: parsed.wavelength }, wavelength: parsed.wavelength }
+              ? { ...s.pattern, radiation: radiationOf(parsed), wavelength: parsed.wavelength }
               : s.pattern;
           const spec = buildSpecFor(s.structure, s.extraPhases, pattern, parsed, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic", s.corrections);
           return { ...s, pattern, powderParams: spec.params, powderBindings: spec.bindings, powderProfile: spec.profile, rawInstrument: { name: file.name, text } };
@@ -1082,6 +1087,16 @@ export function App(): JSX.Element {
         setMessage(`Instrument parse failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     });
+  }
+
+  /** An X-ray instrument's polarization and Kα₂ ratio, on the instrument and on
+   *  the pattern's radiation (which the model reads): constants the fit cannot
+   *  determine, so they are set, never refined. */
+  function onInstrumentConstants(update: InstrumentConstants): void {
+    setInstrument((inst) => (inst.kind === "constantWavelength" ? withConstants(inst, update) : inst));
+    setSession((s) => (s.pattern.radiation.kind === "xray" ? { ...s, pattern: { ...s.pattern, radiation: withConstants(s.pattern.radiation, update) } } : s));
+    setPowderResult(null);
+    requestStep("settings", "Instrument constants changed");
   }
 
   // Header export buttons follow the active mode, calling into the engine's
@@ -1247,6 +1262,7 @@ export function App(): JSX.Element {
         detection={detection}
         {...(session.rawData ? { onOverrideXUnit } : {})}
         onLoadInstrument={onLoadInstrument}
+        onInstrumentConstants={onInstrumentConstants}
         onLoadDemo={onLoadDemo}
         demos={demos}
         onOpenProject={onOpenProject}
@@ -1317,3 +1333,8 @@ const offerButton: React.CSSProperties = { border: `1px solid ${theme.noteBorder
 const disclaimerLink: React.CSSProperties = { color: theme.warnInk, textDecoration: "underline" };
 const copyrightBar: React.CSSProperties = { display: "flex", justifyContent: "center", alignItems: "center", gap: 8, padding: `10px ${space.edge}`, fontSize: 11, color: theme.faint, borderTop: `1px solid ${theme.border}`, background: theme.raised };
 const footerLink: React.CSSProperties = { color: theme.secondary, textDecoration: "none" };
+
+/** The load message's note on a structure carried from the previous fit. */
+function carriedNote(carried: number): string {
+  return carried > 0 ? ` · the structure starts where the last fit left it (${carried} cell, position, ADP and occupancy values; Reset returns to the CIF)` : "";
+}

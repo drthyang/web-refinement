@@ -25,6 +25,7 @@ export const TOOL_CARDS: Readonly<Record<string, readonly AgentCard[]>> = {
   diagnose_fit: ["pattern", "result"],
   structure_table: ["structure"],
   set_corrections: ["parameters"],
+  set_instrument_constants: ["instrument"],
   magnetic_state: [],
   search_propagation_vector: [],
   set_propagation_vector: [],

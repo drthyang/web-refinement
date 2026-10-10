@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { color, fz, mono, radius } from "@/app/theme";
+import { tableRows } from "@/agent/ui/markdownTable";
 import type { ActivityEntry } from "@/agent/executor";
 import type { MethodProgress } from "@/agent/method";
 import { AGENT_MODES, type AgentController, type AgentMode, type AgentSettings, type TranscriptItem } from "@/agent/useAgent";
@@ -478,13 +479,25 @@ function AutonomySwitch({ agent }: { agent: AgentController }): JSX.Element {
 
 // ── small pieces ────────────────────────────────────────────────────────────
 
-/** A safe, minimal Markdown subset: paragraphs, bullet/numbered lists, **bold**, `code`, and inline $math$ read as text. */
+/** A safe, minimal Markdown subset: paragraphs, bullet/numbered lists, tables, **bold**, `code`, and inline $math$ read as text. */
 function Markdown({ text }: { text: string }): JSX.Element {
   const blocks = text.split(/\n{2,}/);
   return (
     <>
       {blocks.map((block, i) => {
         const lines = block.split("\n");
+        const rows = tableRows(lines);
+        if (rows) {
+          const [head, ...body] = rows;
+          return (
+            <div key={i} style={{ overflowX: "auto", margin: "0 0 6px" }}>
+              <table style={table}>
+                <thead><tr>{head!.map((c, j) => <th key={j} style={th}>{inline(c)}</th>)}</tr></thead>
+                <tbody>{body.map((r, k) => <tr key={k}>{r.map((c, j) => <td key={j} style={td}>{inline(c)}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          );
+        }
         if (lines.every((l) => /^\s*([-*]|\d+\.)\s+/.test(l))) {
           const ordered = /^\s*\d+\./.test(lines[0]!);
           const items = lines.map((l, j) => <li key={j}>{inline(l.replace(/^\s*([-*]|\d+\.)\s+/, ""))}</li>);
@@ -576,6 +589,9 @@ const code: CSSProperties = { fontFamily: mono, fontSize: "0.92em", background: 
 const userBubble: CSSProperties = { alignSelf: "flex-end", maxWidth: "88%", background: color.primaryTintBg, border: `1px solid ${color.primaryTintBorder}`, color: color.ink, padding: "7px 10px", borderRadius: 10, fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.45 };
 const assistantText: CSSProperties = { fontSize: 13, color: color.ink, lineHeight: 1.5 };
 const list: CSSProperties = { margin: "0 0 6px", paddingLeft: 18 };
+const table: CSSProperties = { borderCollapse: "collapse", fontSize: 12, fontVariantNumeric: "tabular-nums" };
+const th: CSSProperties = { textAlign: "left", fontWeight: 600, padding: "2px 8px 3px 0", borderBottom: `1px solid ${color.border}`, whiteSpace: "nowrap" };
+const td: CSSProperties = { padding: "2px 8px 2px 0", borderBottom: `1px solid ${color.chipBg}`, whiteSpace: "nowrap" };
 const toolCard: CSSProperties = { border: `1px solid ${color.border}`, borderRadius: 8, padding: "8px 10px", background: color.surface };
 const primaryButton: CSSProperties = { border: `1px solid ${color.primary}`, background: color.primary, color: "#fff", borderRadius: 6, padding: "5px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" };
 const secondaryButton: CSSProperties = { border: `1px solid ${color.control}`, background: color.surface, color: color.ink, borderRadius: 6, padding: "5px 14px", fontSize: 12.5, cursor: "pointer" };

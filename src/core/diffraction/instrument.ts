@@ -11,6 +11,8 @@
  * (the difA·d²/difB·d⁻¹ terms are small) and the closed form for 2θ.
  */
 
+import type { KAlpha2, PowderPattern, Radiation } from "@/core/diffraction/types";
+
 export type InstrumentParameters =
   | {
       readonly kind: "constantWavelength";
@@ -33,6 +35,8 @@ export type InstrumentParameters =
       readonly y?: number;
       /** Polarization fraction (GSAS-II `Polariz.`), for the Lp correction. */
       readonly polarization?: number;
+      /** A lab tube's Kα₂ line (GSAS-II Lam2, I(L2)/I(L1)); absent ⇒ monochromatic. */
+      readonly kAlpha2?: KAlpha2;
     }
   | {
       readonly kind: "tof";
@@ -110,3 +114,56 @@ export function abscissaFromD(p: InstrumentParameters, d: number): number {
   return p.kind === "tof" ? tofFromD(p, d) : twoThetaFromD(p, d);
 }
 
+
+/**
+ * The second line of a lab tube on a 2θ pattern: λ₂/λ₁ and the Kα₂/Kα₁
+ * intensity ratio. Undefined for a monochromatic beam, another axis, or a
+ * "second line" at the first one's wavelength (FullProf writes λ₂ = λ₁ for a
+ * monochromator).
+ */
+export function secondLine(pattern: Pick<PowderPattern, "xUnit" | "radiation">): { readonly lambdaRatio: number; readonly ratio: number } | undefined {
+  const r = pattern.radiation;
+  if (pattern.xUnit !== "twoTheta" || r.kind !== "xray" || !r.kAlpha2) return undefined;
+  const { wavelength, ratio } = r.kAlpha2;
+  if (!(ratio > 0) || !(wavelength > 0) || Math.abs(wavelength - r.wavelength) <= 1e-6 * r.wavelength) return undefined;
+  return { lambdaRatio: wavelength / r.wavelength, ratio };
+}
+
+/** 2θ (degrees) of the second line for a reflection whose first line is at
+ *  twoTheta1 (degrees, the Bragg angle without shifts); NaN past back-scattering. */
+export function secondLineTwoTheta(twoTheta1: number, lambdaRatio: number): number {
+  const s = Math.sin((twoTheta1 * Math.PI) / 360) * lambdaRatio;
+  return s < 1 ? (2 * Math.asin(s) * 180) / Math.PI : NaN;
+}
+
+/**
+ * The radiation a constant-wavelength instrument gives: X-ray or neutron at
+ * its λ, and for X-rays its polarization and a tube's Kα₂. `fallback` is the
+ * kind when the file does not say.
+ */
+export function radiationOf(inst: Extract<InstrumentParameters, { kind: "constantWavelength" }>, fallback: "xray" | "neutron" = "neutron"): Radiation {
+  if ((inst.radiationKind ?? fallback) !== "xray") return { kind: "neutron", wavelength: inst.wavelength };
+  return {
+    kind: "xray",
+    wavelength: inst.wavelength,
+    ...(inst.polarization !== undefined ? { polarization: inst.polarization } : {}),
+    ...(inst.kAlpha2 ? { kAlpha2: inst.kAlpha2 } : {}),
+  };
+}
+
+/** X-ray instrument constants a fit cannot determine: the polarization
+ *  fraction P (Lp: (1−P)·cos²2θ + P) and the Kα₂/Kα₁ intensity ratio. */
+export interface InstrumentConstants {
+  readonly polarization?: number;
+  readonly kAlpha2Ratio?: number;
+}
+
+/** An instrument or an X-ray radiation with these constants set (a Kα₂ ratio
+ *  only where there is a Kα₂ line). */
+export function withConstants<T extends { readonly polarization?: number; readonly kAlpha2?: KAlpha2 }>(x: T, update: InstrumentConstants): T {
+  return {
+    ...x,
+    ...(update.polarization !== undefined ? { polarization: update.polarization } : {}),
+    ...(update.kAlpha2Ratio !== undefined && x.kAlpha2 ? { kAlpha2: { ...x.kAlpha2, ratio: update.kAlpha2Ratio } } : {}),
+  };
+}

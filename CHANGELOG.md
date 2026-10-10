@@ -9,6 +9,35 @@ release fixes bugs.
 
 ### Added
 
+- **A lab tube's Kα₂.** Every reflection is drawn at Kα₁ and Kα₂ (at the
+  intensity ratio, as GSAS-II and FullProf draw it), read from a GSAS
+  `.prm` (λ₂ and KRATIO), a GSAS-II `.instprm` (Lam1, Lam2, I(L2)/I(L1)) or
+  a FullProf `.irf` (WAVE λ₁ λ₂ ratio), shown on the instrument card,
+  written to both cross-check bundles, and used by the cell check. Without
+  it every high-angle Kα₂ peak of lab data was a misfit.
+- **The cell check on lab data.** Its Le Bail fit refines a zero shift and
+  the axial-divergence asymmetry (after the cell has converged without
+  them), and draws a background seeded from the curve under the peaks with
+  more terms over a wide 2θ range. Small bumps on a strong line's flank are
+  reported as `shoulders` — a profile tail, not a phase — and no longer as
+  unindexed peaks. On the GSAS-II fluorapatite data its cell agrees with
+  GSAS's refined one to 1 part in 10⁵.
+- **`diagnose_fit` measures the lines.** Observed against calculated
+  half-maximum widths and Lorentzian fractions of isolated lines name a
+  width or shape misfit directly (an instrument file's 0.05° lines against
+  the sample's 0.09°; a Gaussian core widened to reach Lorentzian tails),
+  and their flanks are no longer read as a background misfit.
+- **X-ray instrument constants for the Agent** (`set_instrument_constants`):
+  the polarization fraction and the Kα₂ ratio, which a fit cannot determine
+  — the polarization moves every B at the same wR. Always asks the user.
+- `parse_powder_data` (MCP) takes the instrument, so the pattern carries its
+  radiation: X-ray or neutron, λ, polarization and Kα₂.
+- Tables in the Agent's replies render as tables.
+- **New data of the same structure starts from the refined structure.** The
+  cell, positions, ADPs and occupancies carry over from the last fit (a
+  temperature series: the paramagnetic refinement seeds the ordered data);
+  scale, background and profile start afresh, and Reset returns to the CIF.
+
 - **Why a fit is poor, cause by cause** (`diagnose_fit`, for the Agent). The
   residual read as a crystallographer reads a difference curve: background,
   peak positions, asymmetry, width/shape, intensity falling off with angle (a
@@ -97,6 +126,13 @@ release fixes bugs.
   pointer. With reduced motion the edge is steady.
 
 ### Fixed
+
+- **Channels without counts in GSAS raw data are dropped**, as GSAS-II
+  weights them zero. Fitted as one count, the two zeros padding the end of
+  a Cu Kα scan (FAP.XRA) carried half the χ² of the refinement and pushed
+  every B up.
+- Loading the instrument file after the data kept only its wavelength and
+  X-ray/neutron kind: the polarization (and now the Kα₂) were lost.
 
 - **The cell check on a constant-wavelength neutron instrument.** Its Le Bail
   fit used two width terms, which cannot follow a resolution curve that falls

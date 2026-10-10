@@ -19,7 +19,7 @@
  */
 
 import type { PowderXUnit, Radiation } from "@/core/diffraction/types";
-import type { InstrumentParameters } from "@/core/diffraction/instrument";
+import { radiationOf, type InstrumentParameters } from "@/core/diffraction/instrument";
 import { gsasHistogramUnit } from "@/parsers/gsasHistogram";
 import { looksLikePdf } from "@/parsers/pdfData";
 import { looksLikeFgr } from "@/parsers/fgrData";
@@ -127,14 +127,8 @@ function unitFromRange(rows: number[][]): { xUnit: PowderXUnit; note: string } {
 function radiationFor(xUnit: PowderXUnit, instrument?: InstrumentParameters): Radiation {
   if (xUnit === "tof") return { kind: "neutron-tof" };
   const cw = instrument?.kind === "constantWavelength" ? instrument : undefined;
-  const wavelength = cw ? cw.wavelength : DEFAULT_WAVELENGTH;
-  if ((cw?.radiationKind ?? "neutron") === "xray") {
-    // Thread the instrument's polarization fraction into the Lp correction.
-    return cw?.polarization !== undefined
-      ? { kind: "xray", wavelength, polarization: cw.polarization }
-      : { kind: "xray", wavelength };
-  }
-  return { kind: "neutron", wavelength };
+  // The instrument's polarization (Lp) and a lab tube's Kα₂ travel with it.
+  return cw ? radiationOf(cw) : { kind: "neutron", wavelength: DEFAULT_WAVELENGTH };
 }
 
 /** Resolve data type + x-unit for a loaded file. Never throws. */

@@ -5,7 +5,7 @@
  * screen, so the Agent and a headless agent judge a fit the same way.
  */
 
-import type { PowderAgentPort, PowderLiveState } from "@/agent/port";
+import type { InstrumentConstants, PowderAgentPort, PowderLiveState } from "@/agent/port";
 import type { LiveToolSpec } from "@/agent/tools";
 import type { ProjectHistory } from "@/core/project/history";
 import {
@@ -26,7 +26,7 @@ import { reviewSymmetry } from "@/core/diagnostics/symmetryReview";
 import { formatWt, fractionsOf } from "@/core/diagnostics/phaseFractions";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { generateReflections } from "@/core/diffraction/reflections";
-import { diagnoseFit } from "@/core/diagnostics/fitDiagnosis";
+import { diagnoseFit, widthsComparable } from "@/core/diagnostics/fitDiagnosis";
 import { structureTable } from "@/agent/structureTable";
 import { powderReflectionObsCalc } from "@/core/workflow/obsCalc";
 import { excludedPointMask } from "@/core/refinement/factors";
@@ -100,12 +100,15 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
       const flags = violated.map((v) => `${v.h} ${v.k} ${v.l} at d ${v.d.toFixed(3)} Å`).join(", ");
       const readings = [
         ...(unindexed.length > 0 ? [`${unindexed.length} peak${unindexed.length === 1 ? "" : "s"} no reflection of the cell indexes: a missing phase (most often) or a wrong cell. Settle this with the user before refining the structure.`] : []),
+        ...(check.shoulders.length > 0 ? [shoulderReading(check.shoulders, s.pattern.xUnit)] : []),
         ...(violated.length > 0
           ? [`${violated.length} forbidden reflection${violated.length === 1 ? "" : "s"} show${violated.length === 1 ? "s" : ""} leftover intensity (${flags}). This is a flag, not a verdict: before the structure is refined, profile misfit${unindexed.length > 0 ? ", or a line of the unindexed phase," : ""} reads the same way. Do not change the space group now: note it (write_note) and refine the structure to the best; review_symmetry reads the refined residual at the end.`]
           : []),
       ];
       const reading = readings.length > 0 ? readings.join(" ") : "Every peak indexes and no forbidden reflection shows intensity: refine the structure.";
-      return { ...check, unindexedPeaks: unindexed, reading, ...(marks.length > 0 ? { markedOnPlot: "The unindexed peaks are marked on the plot (filled ▽, listed under it)." } : {}) };
+      // Shoulders in the pattern's own unit, rounded.
+      const shoulders = check.shoulders.map((sh) => ({ x: sig(sh.x, 6), significance: sig(sh.significance, 3), of: sh.of, offset: sig(sh.offset, 3), relativeHeight: sig(sh.relativeHeight, 2) }));
+      return { ...check, unindexedPeaks: unindexed, shoulders, reading, ...(marks.length > 0 ? { markedOnPlot: "The unindexed peaks are marked on the plot (filled ▽, listed under it)." } : {}) };
     }
     case "find_unexplained_peaks": {
       // Each peak must stand 5σ above its own counting noise, and is checked
@@ -219,6 +222,11 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
       port.setCorrections(correctionUpdate(input));
       return undefined;
     }
+    case "set_instrument_constants": {
+      if (!port.setInstrumentConstants) throw new Error("this page cannot change its instrument");
+      port.setInstrumentConstants(constantsUpdate(input));
+      return undefined;
+    }
     case "set_fit_range": {
       if (input.whole) {
         port.setFitRange(null);
@@ -273,7 +281,24 @@ export function powderNoOp(spec: LiveToolSpec, input: Input, s: PowderLiveState)
       && (update.peak === undefined || [...update.peak].sort().join() === [...(now.peak ?? [])].sort().join());
     return same ? "the corrections are already set so" : null;
   }
+  if (spec.name === "set_instrument_constants") {
+    const update = constantsUpdate(input);
+    if (Object.keys(update).length === 0) throw new Error("pass `polarization`, `kAlpha2Ratio`, or both");
+    const r = s.pattern.radiation;
+    if (r.kind !== "xray" || s.pattern.xUnit !== "twoTheta") throw new Error("the polarization and the Kα₂ ratio are constants of constant-wavelength X-ray data; this pattern is not");
+    if (update.kAlpha2Ratio !== undefined && !r.kAlpha2) throw new Error("this instrument has no Kα₂ line (a monochromatic beam): there is no ratio to set");
+    const same = (update.polarization === undefined || Math.abs((r.polarization ?? 0.5) - update.polarization) < 1e-9)
+      && (update.kAlpha2Ratio === undefined || Math.abs((r.kAlpha2?.ratio ?? 0) - update.kAlpha2Ratio) < 1e-9);
+    return same ? "the instrument constants are already so" : null;
+  }
   return spec.name === "set_free" ? freeNoOp(s.parameters, input) : null;
+}
+
+function constantsUpdate(input: Input): InstrumentConstants {
+  return {
+    ...(typeof input.polarization === "number" ? { polarization: input.polarization } : {}),
+    ...(typeof input.kAlpha2Ratio === "number" ? { kAlpha2Ratio: input.kAlpha2Ratio } : {}),
+  };
 }
 
 function correctionUpdate(input: Input): CorrectionsUpdate {
@@ -317,6 +342,14 @@ export function describePowderChange(spec: LiveToolSpec, input: Input, s: Powder
         ...(u.asymmetry !== undefined ? [`asymmetry ${u.asymmetry ? "on" : "off"}`] : []),
         ...(u.preferredOrientation !== undefined ? [u.preferredOrientation ? `preferred orientation along ${u.preferredOrientation.join(" ")}` : "preferred orientation off"] : []),
         ...(u.peak !== undefined ? [`peak corrections: ${u.peak.length ? u.peak.join(", ") : "none"}`] : []),
+      ].join(" · ");
+    }
+    case "set_instrument_constants": {
+      const u = constantsUpdate(input);
+      const r = s.pattern.radiation;
+      return [
+        ...(u.polarization !== undefined ? [`Polarization ${r.kind === "xray" ? r.polarization ?? 0.5 : "—"} → ${u.polarization}`] : []),
+        ...(u.kAlpha2Ratio !== undefined ? [`Kα₂/Kα₁ ${r.kind === "xray" ? r.kAlpha2?.ratio ?? "—" : "—"} → ${u.kAlpha2Ratio}`] : []),
       ].join(" · ");
     }
     case "set_fit_range": {
@@ -379,6 +412,14 @@ function stateView(s: PowderLiveState, history: ProjectHistory | null, select: r
       ),
       observations: s.observationCount,
       radiation: s.pattern.radiation.kind,
+      // X-ray constants the fit cannot determine (set_instrument_constants); a
+      // lab tube's Kα₂ is drawn with every reflection: no misfit and no phase.
+      ...(s.pattern.radiation.kind === "xray" ? {
+        polarization: s.pattern.radiation.polarization ?? 0.5,
+        ...(s.pattern.radiation.kAlpha2 && s.pattern.xUnit === "twoTheta"
+          ? { kAlpha2: { wavelength: s.pattern.radiation.kAlpha2.wavelength, ratio: s.pattern.radiation.kAlpha2.ratio, note: "every reflection is drawn at Kα₁ and Kα₂" } }
+          : {}),
+      } : {}),
     },
     instrument: s.instrument
       ? s.instrument.kind === "constantWavelength"
@@ -528,6 +569,7 @@ function fitDiagnosisView(s: PowderLiveState): Record<string, unknown> {
       ...(v.durbinWatson ? { durbinWatson: sig(v.durbinWatson.d, 3), durbinWatsonCritical: sig(v.durbinWatson.qd, 3) } : {}),
     },
     ...(dx.betweenPeaks ? { betweenPeaks: { chi2Share: pct(dx.betweenPeaks.share), chi2PerPoint: sig(dx.betweenPeaks.chi2PerPoint, 3), points: dx.betweenPeaks.points } } : {}),
+    ...(dx.width ? { lineWidths: { observedOverCalculated: sig(dx.width.median, 3), lowerThird: sig(dx.width.low, 3), upperThird: sig(dx.width.high, 3), isolatedLines: dx.width.lines, ...(dx.width.etaObs !== undefined && dx.width.etaCalc !== undefined && widthsComparable(dx.width) ? { lorentzianFraction: { observed: sig(dx.width.etaObs, 2), calculated: sig(dx.width.etaCalc, 2), lines: dx.width.shapeLines } } : {}) } } : {}),
     dShells: v.shells.map((sh) => ({ d: `${sig(Math.min(sh.lo, sh.hi), 3)}–${sig(Math.max(sh.lo, sh.hi), 3)} Å`, chi2PerPoint: sig(sh.chi2PerPoint, 3), chi2Share: pct(sh.share) })),
     worstReflections: dx.worst.map((w) => ({
       hkl: `${w.phase ? `${w.phase} ` : ""}${w.hkl}`, d: sig(w.d, 4), [s.pattern.xUnit]: sig(w.x, 5), chi2Share: pct(w.share),
@@ -536,4 +578,20 @@ function fitDiagnosisView(s: PowderLiveState): Record<string, unknown> {
     ...(dx.wilson ? { intensityFalloff: { deltaB: sig(dx.wilson.deltaB, 3), r: sig(dx.wilson.r, 2), reflections: dx.wilson.n } } : {}),
     ...(dx.texture ? { textureTest: { axis: dx.texture.axis.join(" "), r: sig(dx.texture.r, 2), reflections: dx.texture.n } } : {}),
   };
+}
+
+/**
+ * What the cell check's shoulders mean: tails of a profile the Le Bail fit
+ * draws simply, not a phase. Shoulders at one common offset from their lines
+ * are the instrument's; the Rietveld profile is the place to fit them.
+ */
+export function shoulderReading(shoulders: readonly { x: number; of: string; offset: number; relativeHeight: number }[], unit: string): string {
+  const n = shoulders.length;
+  const at = (x: number): string => (unit === "twoTheta" ? `${x.toFixed(2)}°` : `${x.toFixed(4)} ${unit}`);
+  const list = shoulders.slice(0, 4).map((sh) => `${at(sh.x)} beside ${sh.of}, ${(100 * sh.relativeHeight).toFixed(1)} %`).join("; ");
+  const offsets = shoulders.map((sh) => sh.offset);
+  const mean = offsets.reduce((a, b) => a + b, 0) / n;
+  const spread = Math.max(...offsets) - Math.min(...offsets);
+  const common = n >= 2 && spread <= 0.25 * Math.abs(mean);
+  return `${n} shoulder${n === 1 ? "" : "s"} on the flank of a strong line (${list}): the tail of a peak profile the Le Bail fit draws simply, not a missing phase${common ? `; ${n === 2 ? "both sit" : "they sit"} at one offset from their lines (${mean < 0 ? "−" : "+"}${Math.abs(mean).toFixed(2)}${unit === "twoTheta" ? "°" : ` ${unit}`}), an instrumental feature` : ""}. They do not count against the cell. The Rietveld profile (asymmetry, Lorentzian X and Y) fits such tails; look at them again on the refined residual, and name them to the user only if they outlive it.`;
 }

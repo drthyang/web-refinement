@@ -26,7 +26,11 @@
  *    within a peak width of an allowed reflection (or of an extra phase's), where
  *    intensity cannot be told apart;
  *  - each leftover peak reaching `significance` σ that is near NO reflection at
- *    all is *unindexed*.
+ *    all is *unindexed* — unless it hugs a strong line: within a few widths of
+ *    a reflection and a few per cent of its height, it is a *shoulder*, the
+ *    tail of a profile the Le Bail fit draws too simply (fluorapatite on a Cu
+ *    tube left 1 % bumps 0.27° below its two strongest lines). Shoulders are
+ *    reported, not counted against the cell.
  *
  * Limits, stated in the result: a cell that is too LARGE (a supercell) indexes
  * any pattern, so this check cannot catch one; a group with FEWER absences than
@@ -54,6 +58,7 @@ import type { FitRange } from "@/core/workflow/powder";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { cwWidth, dRange, dToX, leBailExtract, tofFwhmAt, type Caglioti, type LeBailTofProfile, type TofCalibration } from "@/core/workflow/leBail";
 import { leBailCellPrefit } from "@/core/workflow/leBailPrefit";
+import { secondLine, secondLineTwoTheta } from "@/core/diffraction/instrument";
 
 export interface CellSymmetryCheckOptions {
   readonly shape?: PeakShape;
@@ -111,6 +116,13 @@ export interface CellSymmetryCheck {
   readonly leBail: { readonly rWeighted: number; readonly fwhm: number; readonly background: number };
   /** Leftover peaks near no reflection (strongest first). */
   readonly unindexedPeaks: readonly { readonly x: number; readonly significance: number }[];
+  /**
+   * Leftover bumps on the flank of a strong line, a few per cent of its height
+   * (strongest first): a profile tail the simple Le Bail shape misses, not a
+   * phase. `of` names the line, `offset` is x − its position, `relativeHeight`
+   * the bump over the line's height.
+   */
+  readonly shoulders: readonly { readonly x: number; readonly significance: number; readonly of: string; readonly offset: number; readonly relativeHeight: number }[];
   readonly absences: {
     /** Forbidden families inside the data that could be tested. */
     readonly tested: number;
@@ -128,6 +140,11 @@ const LIMITS = [
 ];
 
 const hkl = (r: { h: number; k: number; l: number }): string => `${r.h} ${r.k} ${r.l}`;
+
+/** A shoulder lies within this many peak widths of its line … */
+const SHOULDER_WIDTHS = 6;
+/** … and is at most this fraction of the line's height. */
+const SHOULDER_HEIGHT = 0.03;
 
 /** Median of a sample (copies and sorts). */
 function median(xs: readonly number[]): number {
@@ -186,7 +203,7 @@ export function checkCellSymmetry(
   if (pattern.points.length < 20) {
     throw new Error(`only ${pattern.points.length} points lie at d ≥ ${dMinRead} Å inside the fit range — widen the range or lower dMin`);
   }
-  const place = (d: number): number => dToX(pattern, d, tof);
+  const place = (d: number): number => dToX(pattern, d, tof) + (pattern.xUnit === "twoTheta" ? zeroShift : 0);
 
   // 1. The cell, from peak positions alone (free intensities).
   const free = cellParameters.map((p) => ({ ...p, fixed: p.expression ? p.fixed : false }));
@@ -199,10 +216,13 @@ export function checkCellSymmetry(
     ...(extraPhases.length ? { extraPhases } : {}),
   });
   const cell = pre.cell;
+  const zeroShift = pre.zero ?? 0;
 
   // 2. What the allowed reflections (and the extra phases') cannot account for.
   const lb = leBailExtract(pattern, cell, structure.spaceGroup, {
     fwhm: pre.fwhm, ...(pre.fwhmU !== undefined ? { fwhmU: pre.fwhmU } : {}), shape, eta: pre.eta ?? eta, background: pre.backgroundCurve,
+    ...(pre.zero !== undefined ? { zero: pre.zero } : {}),
+    ...(pre.axial ? { axial: pre.axial } : {}),
     ...(options.caglioti ? { caglioti: options.caglioti } : {}),
     ...(tof ? { tof } : {}),
     ...(pre.tofProfile ? { tofProfile: pre.tofProfile } : {}),
@@ -320,8 +340,11 @@ export function checkCellSymmetry(
     if (s >= threshold) violated.push({ ...f, significance: s });
   }
 
-  // 4. Leftover peaks near no reflection at all.
-  const everything = [...allowed.map((r) => r.x), ...forbidden.map((r) => r.x), ...others.map((o) => o.x)].sort((a, b) => a - b);
+  // 4. Leftover peaks near no reflection at all. A lab tube's Kα₂ lines count
+  // as positions: a leftover there is a Kα₂ misfit, not an unindexed peak.
+  const line2 = secondLine(pattern);
+  const kAlpha2 = line2 ? allowed.map((r) => secondLineTwoTheta(r.x - zeroShift, line2.lambdaRatio) + zeroShift).filter(inside) : [];
+  const everything = [...allowed.map((r) => r.x), ...kAlpha2, ...forbidden.map((r) => r.x), ...others.map((o) => o.x)].sort((a, b) => a - b);
   const nearAny = (xi: number, tol: number): boolean => {
     let lo = 0;
     let hi = everything.length;
@@ -332,16 +355,37 @@ export function checkCellSymmetry(
     }
     return [everything[lo - 1], everything[lo]].some((r) => r !== undefined && Math.abs(r - xi) <= tol);
   };
+  // A leftover within a few widths of a line many times its height is that
+  // line's unfitted tail: the Le Bail shape (one pseudo-Voigt, FCJ) is simpler
+  // than a real instrument's.
+  const lines = [
+    ...allowed.map((r) => ({ x: r.x, label: hkl(r) })),
+    ...others,
+  ].map((l) => ({ ...l, height: net[nearestIndex(l.x)]! }));
+  const shoulderOf = (xi: number, bump: number): { of: string; offset: number; relativeHeight: number } | null => {
+    const reach = SHOULDER_WIDTHS * width(xi);
+    let best: { of: string; offset: number; relativeHeight: number } | null = null;
+    for (const l of lines) {
+      if (Math.abs(l.x - xi) > reach || !(l.height > 0)) continue;
+      const relativeHeight = bump / l.height;
+      if (relativeHeight <= SHOULDER_HEIGHT && (!best || relativeHeight < best.relativeHeight)) best = { of: l.label, offset: xi - l.x, relativeHeight };
+    }
+    return best;
+  };
   const unindexed: { x: number; significance: number }[] = [];
+  const shoulders: { x: number; significance: number; of: string; offset: number; relativeHeight: number }[] = [];
   for (let i = 1; i < n - 1; i++) {
     if (z[i]! < threshold) continue;
     // An apex over a whole peak width: a noise bump on the flank of a leftover
     // peak (an unfitted extra phase keeps its whole profile) is not a peak.
     if (!isApex(i) || nearAny(x[i]!, tolWidths * width(x[i]!))) continue;
-    if (unindexed.some((p) => Math.abs(p.x - x[i]!) < width(x[i]!))) continue;
-    unindexed.push({ x: x[i]!, significance: z[i]! });
+    if ([...unindexed, ...shoulders].some((p) => Math.abs(p.x - x[i]!) < width(x[i]!))) continue;
+    const shoulder = shoulderOf(x[i]!, residual[i]! - baseline[i]!);
+    if (shoulder) shoulders.push({ x: x[i]!, significance: z[i]!, ...shoulder });
+    else unindexed.push({ x: x[i]!, significance: z[i]! });
   }
   unindexed.sort((a, b) => b.significance - a.significance);
+  shoulders.sort((a, b) => b.significance - a.significance);
   violated.sort((a, b) => b.significance - a.significance);
 
   const everyPeakIndexes = unindexed.length === 0;
@@ -354,6 +398,7 @@ export function checkCellSymmetry(
     cellValues: pre.cellValues,
     leBail: { rWeighted: pre.rWeighted, fwhm: pre.fwhm, background: pre.background },
     unindexedPeaks: unindexed,
+    shoulders,
     absences: { tested, violated, untestable },
     limits: [
       ...LIMITS,

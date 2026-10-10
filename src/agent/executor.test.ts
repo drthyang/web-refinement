@@ -8,6 +8,7 @@ import { newSession, type Session } from "@/app/powderSession";
 import { exampleStructure } from "@/examples/mn3ga";
 import type { RefinementParameter } from "@/core/refinement/types";
 import { executor, fakeHost, pdfPort, sessionPort } from "@/testSupport/agentHeadless";
+import { shoulderReading } from "@/agent/powderTools";
 
 const parse = (text: string): Record<string, unknown> => JSON.parse(text) as Record<string, unknown>;
 
@@ -338,6 +339,9 @@ describe("AgentExecutor on a live powder fit", () => {
     const table = parse((await ex.run("structure_table", {})).text).phases as { cell: Record<string, string>; sites: { label: string; x: string; adp: string }[] }[];
     expect(table[0]!.cell.a).toMatch(/^\d+\.\d+\(\d+\)$/);
     expect(table[0]!.sites.find((s) => s.label === "Mn1")!.adp).toMatch(/^B \d+\.\d+\(\d+\)$/);
+    // The refined value, not the CIF's: the table reads the phase with the parameters applied.
+    const bMn1 = session().powderParams.find((p) => p.kind === "bIso" && p.id.includes("Mn1"))!.value;
+    expect(Number(table[0]!.sites.find((s) => s.label === "Mn1")!.adp.match(/^B ([\d.]+)/)![1])).toBeCloseTo(bMn1, 1);
 
     // One parameter back to its starting value, the others kept.
     const scale = session().powderParams.find((p) => p.id === "scale")!.value;
@@ -347,6 +351,24 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(after.get("scale")!.value).toBe(scale);
     expect(asked.at(-1)!.preview).toBe("Reset B_Mn1 to the starting value");
   }, 60_000);
+
+  it("sets an X-ray tube's polarization and Kα₂ ratio only with the user's approval, and only on X-ray data", async () => {
+    const start = newSession(exampleStructure());
+    const xray: Session = { ...start, pattern: { ...start.pattern, xUnit: "twoTheta", radiation: { kind: "xray", wavelength: 1.5405, polarization: 0.7, kAlpha2: { wavelength: 1.5443, ratio: 0.5 } } } };
+    const { port, session } = sessionPort(xray);
+    // Auto mode, yet it asks: an instrument constant is the user's call.
+    const { ex, asked } = executor(fakeHost(port).host, "auto");
+    const state = parse((await ex.run("get_state", {})).text);
+    expect(state.data).toMatchObject({ radiation: "xray", polarization: 0.7, kAlpha2: { wavelength: 1.5443, ratio: 0.5 } });
+    await ex.run("set_instrument_constants", { polarization: 0.5 });
+    expect(asked.at(-1)!.preview).toBe("Polarization 0.7 → 0.5");
+    expect(session().pattern.radiation).toMatchObject({ kind: "xray", polarization: 0.5, kAlpha2: { ratio: 0.5 } });
+    expect(parse((await ex.run("set_instrument_constants", { polarization: 0.5 })).text)).toMatchObject({ unchanged: true });
+    // Neutron data have neither.
+    const { port: neutron } = sessionPort(newSession(exampleStructure()));
+    const n = executor(fakeHost(neutron).host, true).ex;
+    expect((await n.run("set_instrument_constants", { polarization: 0.5 })).text).toMatch(/constants of constant-wavelength X-ray data/);
+  });
 
   it("refuses asymmetry without the instrument's profile, and any judgement with no structure loaded", async () => {
     const { port } = sessionPort(newSession(exampleStructure()));
@@ -555,5 +577,15 @@ describe("AgentLink", () => {
     expect(link.port()).toBe(pdf);
     link.release("pdf");
     expect(link.port()).toBeNull();
+  });
+});
+
+describe("the cell check's shoulders", () => {
+  it("are read as a profile tail, at one offset an instrumental feature", () => {
+    const r = shoulderReading([{ x: 32.78, of: "3 0 0", offset: -0.268, relativeHeight: 0.011 }, { x: 49.26, of: "2 1 3", offset: -0.262, relativeHeight: 0.015 }], "twoTheta");
+    expect(r).toMatch(/^2 shoulders on the flank of a strong line \(32\.78° beside 3 0 0, 1\.1 %; 49\.26° beside 2 1 3, 1\.5 %\)/);
+    expect(r).toMatch(/both sit at one offset from their lines \(−0\.27°\), an instrumental feature/);
+    expect(r).toMatch(/not a missing phase/);
+    expect(shoulderReading([{ x: 32.78, of: "3 0 0", offset: -0.27, relativeHeight: 0.01 }, { x: 40, of: "2 1 1", offset: 0.3, relativeHeight: 0.02 }], "twoTheta")).not.toMatch(/one offset/);
   });
 });

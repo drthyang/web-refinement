@@ -53,6 +53,12 @@ describe("structureToPcr", () => {
     expect(pcr).toMatch(/O1\s+O\s+0\.50000\s+0\.50000\s+0\.50000\s+0\.60000\s+1\.00000/);
   });
 
+  it("writes a lab tube's Kα₂ as Lambda2 and Ratio, and a neutron beam as one line", () => {
+    const tube = structureToPcr(structure, { instrument: { kind: "constantWavelength", radiationKind: "xray", wavelength: 1.5405, kAlpha2: { wavelength: 1.5443, ratio: 0.5 } } });
+    expect(tube).toMatch(/1\.540500\s+1\.544300\s+0\.50000/);
+    expect(pcr).toMatch(/1\.900000\s+1\.900000\s+0\.00000/);
+  });
+
   it("writes the wavelength and the refined cell", () => {
     expect(pcr).toContain("1.900000 1.900000");
     expect(pcr).toMatch(/4\.445000\s+4\.445000\s+4\.445000\s+90\.000000\s+90\.000000\s+90\.000000/);

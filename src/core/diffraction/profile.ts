@@ -98,6 +98,8 @@ export interface ProfilePeak {
   readonly eta?: number;
   /** Back-to-back-exponential TOF shape; present only for `shape: "tof"`. */
   readonly tof?: TofShape;
+  /** A Kα₂ component: drawn into the pattern, not the reflection's position. */
+  readonly secondLine?: boolean;
 }
 
 /**

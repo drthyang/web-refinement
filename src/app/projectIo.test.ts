@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { exampleStructure } from "@/examples/mn3ga";
 import { buildSyntheticSingleCrystal } from "@/examples/synthetic";
-import { newSession, DEFAULT_INSTRUMENT } from "@/app/powderSession";
+import { newSession, DEFAULT_INSTRUMENT, carryRefinedStructure, type Session } from "@/app/powderSession";
 import {
   defaultProjectTitle,
   modulatedHypothesisFrom,
@@ -255,5 +255,25 @@ describe("titles", () => {
   it("names the file after the primary phase and the technique", () => {
     expect(defaultProjectTitle(structure, "pdf")).toBe(`${structure.name} · PDF (real space)`);
     expect(defaultProjectTitle({ ...structure, name: "" }, "powder")).toBe(`${structure.id} · Rietveld (powder)`);
+  });
+});
+
+describe("a new dataset of the same structure", () => {
+  it("starts the structure where the last fit left it, with the dataset's own scale and profile", () => {
+    const fitted: Session = { ...newSession(structure, DEFAULT_INSTRUMENT), powderSource: "T150K.dat" };
+    const fresh = newSession(structure, DEFAULT_INSTRUMENT).powderParams;
+    const moved = fitted.powderParams.map((p) => (p.kind === "cellLength" || p.kind === "bIso" ? { ...p, value: p.value * 1.01 } : p.kind === "scale" ? { ...p, value: 42 } : p));
+    const { params, carried } = carryRefinedStructure({ ...fitted, powderParams: moved }, fresh);
+    expect(carried).toBe(moved.filter((p) => p.kind === "cellLength" || p.kind === "bIso").length);
+    for (const p of params) {
+      const was = moved.find((m) => m.id === p.id)!;
+      if (p.kind === "cellLength" || p.kind === "bIso") {
+        expect(p.value).toBe(was.value);
+        expect(p.initialValue).toBe(fresh.find((f) => f.id === p.id)!.initialValue); // Reset → the CIF
+      }
+      if (p.kind === "scale") expect(p.value).not.toBe(42);
+    }
+    // The demo's synthetic pattern carries nothing.
+    expect(carryRefinedStructure({ ...fitted, powderSource: "synthetic (self-consistent demo)", powderParams: moved }, fresh).carried).toBe(0);
   });
 });

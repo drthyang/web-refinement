@@ -76,6 +76,7 @@ function parseFullProfIrf(text: string): InstrumentParameters {
       kind: "constantWavelength",
       ...(radiationKind !== undefined ? { radiationKind } : {}),
       wavelength: wave[0]!,
+      ...kAlpha2Of(radiationKind, wave[0]!, wave[1], wave[2]),
       ...(zero !== undefined ? { zero } : {}),
       ...(uvw ? {
         u: uvw[0]! * FP_UVW_DEG2_TO_CENTIDEG2,
@@ -153,6 +154,11 @@ function parseGsasPrm(text: string): InstrumentParameters {
 
   const lam1 = icons[0];
   if (lam1 === undefined || lam1 <= 0) throw new Error("GSAS .prm: CW ICONS record has no wavelength");
+  // A lab tube's Kα₂: λ₂ in field 2 and the Kα₂/Kα₁ ratio in columns 55–65
+  // (where GSAS-II reads it). A blank ratio is the usual 0.5.
+  const lam2 = iconsCol(1);
+  const kRatioField = iconsRaw.slice(55, 65).trim();
+  const kRatio = kRatioField === "" ? 0.5 : Number(kRatioField);
   const zeroCentideg = icons[2];
   // First PRCF coefficient row (e.g. `PRCF11`): GU GV GW (GP) for CW profile
   // functions 1–4 — the first three are the Gaussian Caglioti terms.
@@ -180,7 +186,16 @@ function parseGsasPrm(text: string): InstrumentParameters {
     } : {}),
     ...(lxy.length >= 2 ? { x: lxy[0]!, y: lxy[1]! } : {}),
     ...(radiationKind === "xray" && pola !== undefined && pola > 0 && pola <= 1 ? { polarization: pola } : {}),
+    ...kAlpha2Of(radiationKind, lam1, lam2, kRatio),
   };
+}
+
+/** The Kα₂ field of an X-ray instrument: present when λ₂ is a second line
+ *  (FullProf writes λ₂ = λ₁ for a monochromator) with a positive ratio. */
+function kAlpha2Of(radiationKind: "xray" | "neutron" | undefined, lam1: number, lam2: number | undefined, ratio: number | undefined): { kAlpha2?: { wavelength: number; ratio: number } } {
+  if (radiationKind !== "xray" || lam2 === undefined || !(lam2 > 0) || ratio === undefined || !(ratio > 0)) return {};
+  if (Math.abs(lam2 - lam1) <= 1e-6 * lam1) return {};
+  return { kAlpha2: { wavelength: lam2, ratio } };
 }
 
 function readValues(text: string): Map<string, number> {
@@ -188,9 +203,9 @@ function readValues(text: string): Map<string, number> {
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (line === "" || line.startsWith("#")) continue;
-    // Keys may carry a dot, slash, or hyphen (GSAS-II `Polariz.`, `SH/L`,
-    // `beta-0`, `sig-1`).
-    const m = line.match(/^([A-Za-z0-9_./-]+)\s*[:=\s]\s*(-?\d[\d.eE+-]*)/);
+    // Keys may carry a dot, slash, hyphen or parentheses (GSAS-II `Polariz.`,
+    // `SH/L`, `beta-0`, `sig-1`, `I(L2)/I(L1)`).
+    const m = line.match(/^([A-Za-z0-9_./()-]+)\s*[:=\s]\s*(-?\d[\d.eE+-]*)/);
     if (!m) continue;
     const key = m[1]!.toLowerCase();
     const value = parseFloat(m[2]!);
@@ -257,6 +272,7 @@ function parseInstrumentBase(text: string): InstrumentParameters {
       ...(v.get("x") !== undefined ? { x: v.get("x")! } : {}),
       ...(v.get("y") !== undefined ? { y: v.get("y")! } : {}),
       ...(v.get("polariz.") !== undefined ? { polarization: v.get("polariz.")! } : {}),
+      ...kAlpha2Of(radiationKind, lam, v.get("lam2"), v.get("i(l2)/i(l1)") ?? 0.5),
     };
   }
   throw new Error("Instrument file has neither difC (TOF) nor a wavelength (CW)");

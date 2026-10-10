@@ -15,7 +15,7 @@ import { applyParameters } from "@/core/workflow/apply";
 import { refine as refineProblem } from "@/core/refinement/engine";
 import { boxcarWindows } from "@/core/workflow/pdfBoxcar";
 import { DEFAULT_INSTRUMENT, buildSpecFor, type Session } from "@/app/powderSession";
-import type { InstrumentParameters } from "@/core/diffraction/instrument";
+import { withConstants, type InstrumentParameters } from "@/core/diffraction/instrument";
 import { powderRestraints } from "@/app/powderSpec";
 import { runPowderRefinement } from "@/workers/runPowder";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
@@ -51,7 +51,12 @@ export function sessionPort(start: Session, instrument: InstrumentParameters = D
     return {
       structure: s.structure,
       extraPhases: s.extraPhases,
-      refinedPhases: [s.structure],
+      // Each phase with the parameters applied, its bindings routed by phase (as the page does).
+      refinedPhases: ((): PowderLiveState["refinedPhases"] => {
+        const values: Record<string, number> = Object.fromEntries(s.powderParams.map((p) => [p.id, p.value]));
+        const multi = s.extraPhases.length > 0;
+        return [s.structure, ...s.extraPhases].map((ph) => applyParameters(ph, multi ? s.powderBindings.filter((b) => b.targetId === ph.id) : s.powderBindings, values).model);
+      })(),
       pattern: s.pattern,
       parameters: s.powderParams,
       bindings: s.powderBindings,
@@ -126,6 +131,10 @@ export function sessionPort(start: Session, instrument: InstrumentParameters = D
     setSiteTies: (update) => {
       calls.push(`ties ${JSON.stringify(update)}`);
       s = { ...s, siteTies: { ...s.siteTies, ...update } };
+    },
+    setInstrumentConstants: (update) => {
+      calls.push(`constants ${JSON.stringify(update)}`);
+      if (s.pattern.radiation.kind === "xray") s = { ...s, pattern: { ...s.pattern, radiation: withConstants(s.pattern.radiation, update) } };
     },
     setCorrections: (update) => {
       calls.push(`corrections ${JSON.stringify(update)}`);

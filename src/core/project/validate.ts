@@ -153,7 +153,14 @@ function checkRadiation(v: unknown, path: string): void {
   const r = rec(v, path);
   const kind = oneOf(RADIATION_KINDS)(r.kind, `${path}.kind`);
   if (kind !== "neutron-tof") num(r.wavelength, `${path}.wavelength`);
-  if (kind === "xray") opt(r.polarization, `${path}.polarization`, num);
+  if (kind === "xray") {
+    opt(r.polarization, `${path}.polarization`, num);
+    if (r.kAlpha2 !== undefined && r.kAlpha2 !== null) {
+      const k = rec(r.kAlpha2, `${path}.kAlpha2`);
+      num(k.wavelength, `${path}.kAlpha2.wavelength`);
+      num(k.ratio, `${path}.kAlpha2.ratio`);
+    }
+  }
 }
 
 function checkWindow(v: unknown, path: string): void {

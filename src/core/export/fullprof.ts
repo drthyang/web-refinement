@@ -288,7 +288,10 @@ function cwPcr(structure: StructureModel, opts: PcrExportOptions): string {
   lines.push(flagRow([0, 0, 1, 0, 1, 0, 4, 0, 0, 1, 10, 0, 0, 0, 0, 0, 0]));
   lines.push(`!`);
   lines.push(`! Lambda1  Lambda2    Ratio    Bkpos    Wdt    Cthm     muR   AsyLim   Rpolarz  2nd-muR -> Patt# 1`);
-  lines.push(` ${num(wavelength, 6, 8)} ${num(wavelength, 6, 8)}  0.00000 ${num(thMin, 3, 8)}  8.0000  0.0000  0.0000  180.00    0.0000  0.0000`);
+  // A lab tube's Kα₂ (λ₂ kept in its ratio to λ₁ if λ₁ was overridden); a monochromatic beam writes λ₂ = λ₁, ratio 0.
+  const k2 = !neutron && inst?.kAlpha2 ? inst.kAlpha2 : undefined;
+  const lambda2 = k2 && inst ? wavelength * (k2.wavelength / inst.wavelength) : wavelength;
+  lines.push(` ${num(wavelength, 6, 8)} ${num(lambda2, 6, 8)}  ${num(k2?.ratio ?? 0, 5, 7)} ${num(thMin, 3, 8)}  8.0000  0.0000  0.0000  180.00    0.0000  0.0000`);
   lines.push(`!`);
   lines.push(`!NCY  Eps  R_at  R_an  R_pr  R_gl     Thmin       Step       Thmax    PSD    Sent0`);
   lines.push(`  5  0.10  1.00  1.00  1.00  1.00   ${num(thMin, 4, 9)}   ${num(step, 6, 8)}   ${num(thMax, 4, 8)}   0.000   0.000`);

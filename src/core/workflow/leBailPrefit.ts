@@ -25,7 +25,7 @@
 import type { StructureModel, UnitCell } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { ParameterBinding, RefinementParameter } from "@/core/refinement/types";
-import type { PeakShape } from "@/core/diffraction/profile";
+import type { AxialDivergence, PeakShape } from "@/core/diffraction/profile";
 import type { FitRange } from "@/core/workflow/powder";
 import { applyParameters } from "@/core/workflow/apply";
 import { leBailExtract, tofFwhmAt, tofShapeAt, type Caglioti, type LeBailPhase, type LeBailTofProfile, type TofCalibration } from "@/core/workflow/leBail";
@@ -43,14 +43,62 @@ const widthId = (i: number): string => `__leBail_width_${i}`;
 const SIG2_ID = "__leBail_sig2";
 const ALPHA_ID = "__leBail_alpha";
 const BETA0_ID = "__leBail_beta0";
+const ZERO_ID = "__leBail_zero";
+const ASYM_ID = "__leBail_asym";
+/** Where the asymmetry starts: S/L = H/L = 0.01, a lab or CW-neutron value. */
+const ASYM_START = 0.01;
 /** Chebyshev background terms past the constant (`BKG_ID`). */
 const bkgTermId = (j: number): string => `__leBail_bkg${j}`;
 /** A TOF background follows the incident spectrum: four Chebyshev terms. */
 const TOF_BACKGROUND_TERMS = 4;
 /** A lab or synchrotron 2θ background slopes too (air scatter at low angle,
  *  fluorescence, the holder): a flat one left the whole slope as residual
- *  (Le Bail wR 50% on a sloped Cu Kα pattern). Three Chebyshev terms. */
-const CW_BACKGROUND_TERMS = 3;
+ *  (Le Bail wR 50% on a sloped Cu Kα pattern). Three Chebyshev terms, one
+ *  more per 20° of 2θ past 60°, up to eight: over 15–130° a quadratic fell
+ *  from the air scatter at 15° to near zero at 100°, and the peaks there took
+ *  up the background (fluorapatite, Cu tube). */
+function cwBackgroundTerms(x: readonly number[], twoTheta: boolean): number {
+  if (!twoTheta || x.length === 0) return 3;
+  const span = Math.max(...x) - Math.min(...x);
+  return Math.min(8, Math.max(3, 3 + Math.floor((span - 60) / 20)));
+}
+
+/**
+ * Chebyshev coefficients of a smooth curve under the peaks: a low percentile
+ * of the counts in each of several windows, fitted by least squares. The
+ * background starts there rather than flat, so the free intensities do not
+ * take it up before it can move.
+ */
+function backgroundSeed(y: readonly number[], cheb: readonly (readonly number[])[], terms: number): number[] | null {
+  const n = y.length;
+  const windows = Math.max(4 * terms, 12);
+  const rows: { t: readonly number[]; v: number }[] = [];
+  for (let w = 0; w < windows; w++) {
+    const a = Math.floor((w * n) / windows);
+    const b = Math.floor(((w + 1) * n) / windows);
+    const counted = y.slice(a, b).filter((v) => v > 0).sort((p, q) => p - q);
+    if (counted.length < 5) continue;
+    rows.push({ t: cheb[(a + b) >> 1]!, v: counted[Math.floor(0.2 * (counted.length - 1))]! });
+  }
+  if (rows.length < terms) return null;
+  // Normal equations, solved by Gaussian elimination with partial pivoting.
+  const m = rows[0]!.t.length;
+  const A = Array.from({ length: m }, (_, i) => Array.from({ length: m + 1 }, (_, j) =>
+    rows.reduce((sum, r) => sum + r.t[i]! * (j < m ? r.t[j]! : r.v), 0)));
+  for (let c = 0; c < m; c++) {
+    let piv = c;
+    for (let r = c + 1; r < m; r++) if (Math.abs(A[r]![c]!) > Math.abs(A[piv]![c]!)) piv = r;
+    [A[c], A[piv]] = [A[piv]!, A[c]!];
+    if (Math.abs(A[c]![c]!) < 1e-12) return null;
+    for (let r = 0; r < m; r++) {
+      if (r === c) continue;
+      const f = A[r]![c]! / A[c]![c]!;
+      for (let k = c; k <= m; k++) A[r]![k]! -= f * A[c]![k]!;
+    }
+  }
+  const coef = A.map((row, i) => row[m]! / row[i]!);
+  return coef.every(Number.isFinite) ? coef : null;
+}
 
 export interface LeBailPrefitOptions {
   readonly shape?: PeakShape;
@@ -93,6 +141,10 @@ export interface LeBailPrefitResult {
   readonly extraCells: UnitCell[];
   /** Each extra phase's refined width factor. */
   readonly extraWidthScales: number[];
+  /** 2θ patterns: the refined zero shift (degrees), a nuisance. */
+  readonly zero?: number;
+  /** 2θ patterns: the refined axial divergence (S/L = H/L), a nuisance. */
+  readonly axial?: AxialDivergence;
   /** Refined background level, the constant term (a nuisance — not transferred). */
   readonly background: number;
   /** The refined background at each pattern point (flat at constant wavelength). */
@@ -201,6 +253,8 @@ export function leBailCellPrefit(
   const dMid = useTof ? Math.sqrt(Math.max(dSpan[0]!, 0.1) * dSpan[1]!) : 0;
   const tof0: LeBailTofProfile | undefined = useTof ? (options.tofProfile ?? tofSeed(x, yObs, bkg0, tof, dMid)) : undefined;
 
+  // The FCJ tail is only drawn below 2θ = 90°, and only matters well below it.
+  const lowAngle = pattern.xUnit === "twoTheta" && x.some((xi) => xi < 60);
   const freeCell = cellParameters.filter((p) => !p.fixed && !p.expression);
   if (freeCell.length === 0) {
     // Nothing to refine — return the current cell untouched.
@@ -245,14 +299,13 @@ export function leBailCellPrefit(
       // the partition gave peaks their full intensity those tails dragged the
       // residual baseline negative between lines.
       ...(shape === "pseudoVoigt" ? [nuisance(ETA_ID, "Le Bail η", "peakWidth", eta, 0, 1)] : []),
+      // A lab instrument's zero error and the axial-divergence tail of its
+      // low-angle lines: without them the cell takes up the zero, and every
+      // strong line's tail is left as a leftover peak (fluorapatite, Cu tube).
+      ...(pattern.xUnit === "twoTheta" ? [nuisance(ZERO_ID, "Le Bail zero shift", "zeroShift", 0, -1, 1)] : []),
+      ...(lowAngle ? [nuisance(ASYM_ID, "Le Bail axial divergence S/L = H/L", "asymSL", ASYM_START, 0, 0.1)] : []),
     ];
-  const bkgParam: RefinementParameter = {
-    id: BKG_ID, label: "Le Bail background", kind: "background",
-    value: bkg0, initialValue: bkg0, min: 0, fixed: false,
-  };
-  const bkgTerms: number = useTof ? TOF_BACKGROUND_TERMS : CW_BACKGROUND_TERMS;
-  const bkgShapeParams = Array.from({ length: bkgTerms - 1 }, (_, j) =>
-    ({ id: bkgTermId(j + 1), label: `Le Bail background T${j + 1}`, kind: "background", value: 0, initialValue: 0, fixed: false }) as RefinementParameter);
+  const bkgTerms: number = useTof ? TOF_BACKGROUND_TERMS : cwBackgroundTerms(x, pattern.xUnit === "twoTheta");
   // Chebyshev polynomials over the pattern's own x span.
   const xLo = Math.min(...x);
   const xHi = Math.max(...x);
@@ -260,10 +313,21 @@ export function leBailCellPrefit(
     const u = xHi > xLo ? (2 * (xi - xLo)) / (xHi - xLo) - 1 : 0;
     const t = [1, u];
     for (let j = 2; j < bkgTerms; j++) t.push(2 * u * t[j - 1]! - t[j - 2]!);
-    return t;
+    return t.slice(0, bkgTerms);
+  });
+  // A 2θ background starts from the curve under the peaks (the constant term kept ≥ 0).
+  const seed = pattern.xUnit === "twoTheta" ? backgroundSeed(yObs, cheb, bkgTerms) : null;
+  const c0Start = seed ? Math.max(seed[0]!, 0) : bkg0;
+  const bkgParam: RefinementParameter = {
+    id: BKG_ID, label: "Le Bail background", kind: "background",
+    value: c0Start, initialValue: c0Start, min: 0, fixed: false,
+  };
+  const bkgShapeParams = Array.from({ length: bkgTerms - 1 }, (_, j) => {
+    const v = seed?.[j + 1] ?? 0;
+    return { id: bkgTermId(j + 1), label: `Le Bail background T${j + 1}`, kind: "background", value: v, initialValue: v, fixed: false } as RefinementParameter;
   });
   const backgroundAt = (v: Record<string, number>): number | number[] => {
-    const c0 = Math.max(v[BKG_ID] ?? bkg0, 0);
+    const c0 = Math.max(v[BKG_ID] ?? c0Start, 0);
     if (bkgTerms === 1) return c0;
     const c = [c0, ...Array.from({ length: bkgTerms - 1 }, (_, j) => v[bkgTermId(j + 1)] ?? 0)];
     return cheb.map((t) => c.reduce((sum, cj, j) => sum + cj * t[j]!, 0));
@@ -302,6 +366,8 @@ export function leBailCellPrefit(
       const tofProfile = tofAt(resolved);
       const lb = leBailExtract(pattern, cell, structure.spaceGroup, {
         fwhm, fwhmU, shape, eta: resolved[ETA_ID] ?? eta, cycles, background,
+        ...(resolved[ZERO_ID] !== undefined ? { zero: resolved[ZERO_ID] } : {}),
+        ...(resolved[ASYM_ID] !== undefined ? { axial: { sl: resolved[ASYM_ID], hl: resolved[ASYM_ID] } } : {}),
         ...(options.caglioti ? { caglioti: options.caglioti } : {}),
         ...(options.tof ? { tof: options.tof } : {}),
         ...(tofProfile ? { tofProfile } : {}),
@@ -312,20 +378,32 @@ export function leBailCellPrefit(
   };
 
   const maxIterations = options.maxIterations ?? 12;
-  const result = extras.length === 0 ? refine(problem, { maxIterations }) : (() => {
+  // The zero shift and the asymmetry are freed only once the cell has
+  // converged without them: from a cell a few per cent off, a free zero lines
+  // up some of the misplaced peaks and holds the cell in a false minimum.
+  const staged = new Set([ZERO_ID, ASYM_ID]);
+  const hasStaged = allParams.some((p) => staged.has(p.id));
+  const cost = (v: Readonly<Record<string, number>>): number => {
+    const calc = problem.calculate(v);
+    let sum = 0;
+    for (let i = 0; i < calc.length; i++) sum += weights[i]! * (yObs[i]! - calc[i]!) ** 2;
+    return sum;
+  };
+  const valuesOf = (params: readonly RefinementParameter[]): Record<string, number> => Object.fromEntries(params.map((p) => [p.id, p.value]));
+  const unstaged = hasStaged ? allParams.map((p) => (staged.has(p.id) ? { ...p, value: 0, initialValue: 0, fixed: true } : p)) : allParams;
+  // The background starts from the curve under the peaks, or flat at a low
+  // percentile, whichever fits better as it stands: the curve follows a lab
+  // pattern's air scatter, but where peaks overlap everywhere it rides on them.
+  const flat = unstaged.map((p) => (p.id === BKG_ID ? { ...p, value: bkg0, initialValue: bkg0 } : bkgShapeParams.some((b) => b.id === p.id) ? { ...p, value: 0, initialValue: 0 } : p));
+  const firstParams = seed && cost(valuesOf(flat)) < cost(valuesOf(unstaged)) ? flat : unstaged;
+  const first = extras.length === 0 ? refine({ ...problem, parameters: firstParams }, { maxIterations }) : (() => {
     // An impurity's lines can soak up misfit wherever they land, so its cell
     // has local minima a few line widths apart. Converge the rest with the
     // impurity cells held, scan each expansion in quarter-width steps, then
     // free everything from the best point. (Mn₃Ga 600 K: MnO's minimum is at
     // +0.25 %, its thermal expansion from the room-temperature CIF.)
-    const held = refine({ ...problem, parameters: allParams.map((p) => (strainParams.includes(p) ? { ...p, fixed: true } : p)) }, { maxIterations });
+    const held = refine({ ...problem, parameters: firstParams.map((p) => (strainParams.includes(p) ? { ...p, fixed: true } : p)) }, { maxIterations });
     const values: Record<string, number> = { ...held.parameters };
-    const cost = (v: Readonly<Record<string, number>>): number => {
-      const calc = problem.calculate(v);
-      let sum = 0;
-      for (let i = 0; i < calc.length; i++) sum += weights[i]! * (yObs[i]! - calc[i]!) ** 2;
-      return sum;
-    };
     // The peak width as a relative d shift, at the middle of the pattern.
     const xMid = [...x].sort((a, b) => a - b)[x.length >> 1]!;
     const fwhmNow = values[FWHM_ID] ?? fwhm0;
@@ -342,8 +420,14 @@ export function leBailCellPrefit(
       }
       values[sp.id] = best.eps;
     }
-    return refine({ ...problem, parameters: allParams.map((p) => ({ ...p, value: values[p.id] ?? p.value })) }, { maxIterations });
+    return refine({ ...problem, parameters: firstParams.map((p) => ({ ...p, value: values[p.id] ?? p.value })) }, { maxIterations });
   })();
+  // Then the zero and the asymmetry, from the converged point; kept only if
+  // the fit improves.
+  const second = hasStaged
+    ? refine({ ...problem, parameters: allParams.map((p) => ({ ...p, value: p.id === ASYM_ID ? ASYM_START : staged.has(p.id) ? 0 : first.parameters[p.id] ?? p.value })) }, { maxIterations })
+    : null;
+  const result = second && (second.agreement.rWeighted ?? Infinity) < (first.agreement.rWeighted ?? Infinity) ? second : first;
 
   const merged: Record<string, number> = {};
   for (const p of cellParameters) merged[p.id] = result.parameters[p.id] ?? p.value;
@@ -359,6 +443,8 @@ export function leBailCellPrefit(
     ...(tofProfile ? { tofProfile } : {}),
     ...(shape === "pseudoVoigt" ? { eta: result.parameters[ETA_ID] ?? eta } : {}),
     ...(result.parameters[FWHM_U_ID] !== undefined ? { fwhmU: result.parameters[FWHM_U_ID] } : {}),
+    ...(result.parameters[ZERO_ID] ? { zero: result.parameters[ZERO_ID] } : {}),
+    ...(result.parameters[ASYM_ID] ? { axial: { sl: result.parameters[ASYM_ID], hl: result.parameters[ASYM_ID] } } : {}),
     extraCells: extraAt(result.parameters).map((ph) => ph.cell),
     extraWidthScales: extraAt(result.parameters).map((ph) => ph.widthScale ?? 1),
     background: result.parameters[BKG_ID] ?? bkg0,

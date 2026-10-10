@@ -71,9 +71,30 @@ describe("the fit diagnosis", () => {
     expect(texture!.action).toMatch(/preferredOrientation \[0, 0, 1\]/);
   });
 
+  it("measures peaks broader than calculated, and does not bill their flanks to the background", () => {
+    // The sample's lines √3 × the instrument file's: U, V, W three times larger.
+    const dx = judge({}, { profU: 3 * 1963, profV: 3 * -4217, profW: 3 * 3613 });
+    expect(dx.causes[0]?.id, JSON.stringify(dx.causes)).toBe("peak-width");
+    expect(dx.width?.median).toBeGreaterThan(1.5);
+    expect(dx.width?.median).toBeLessThan(1.9);
+    expect(dx.causes[0]?.action).toMatch(/Caglioti W, then U and V/);
+    expect(dx.causes.some((c) => c.id === "background")).toBe(false);
+  });
+
+  it("names a missing Lorentzian part from the lines' shape", () => {
+    // The sample adds a Lorentzian size width (X = 10: 0.1° at low angle) the model lacks.
+    const dx = judge({}, { profX: 10 });
+    const tails = dx.causes.find((c) => c.id === "peak-tails");
+    expect(tails, JSON.stringify(dx.causes)).toBeDefined();
+    expect(dx.width!.etaObs! - dx.width!.etaCalc!).toBeGreaterThan(0.15);
+    expect(tails!.action).toMatch(/Lorentzian X \(size, 1\/cosθ\) and Y/);
+  });
+
   it("finds nothing to name on a fit that matches its data", () => {
     const dx = judge({}, {});
     expect(dx.causes.filter((c) => c.share > 0.3)).toEqual([]);
+    expect(dx.width?.median).toBeCloseTo(1, 1);
+    expect(Math.abs(dx.width!.etaObs! - dx.width!.etaCalc!)).toBeLessThan(0.1);
     expect(dx.validation.agreement.gof).toBeLessThan(1.3);
   });
 

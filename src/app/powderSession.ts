@@ -107,6 +107,29 @@ export function newSession(structure: StructureModel, instrument: InstrumentPara
   };
 }
 
+/** The parameters of the structure itself, which a new dataset of it starts from. */
+const STRUCTURAL_KINDS = new Set<RefinementParameter["kind"]>(["cellLength", "cellAngle", "positionShift", "atomX", "atomY", "atomZ", "bIso", "uAniso", "occupancy"]);
+
+/**
+ * A new dataset's parameters with the structure where the previous fit left
+ * it: the cell, positions, ADPs and occupancies of the same structure carry
+ * over (a temperature series — the paramagnetic refinement seeds the ordered
+ * data), while their free states and the dataset's own scale, background and
+ * profile start afresh. Reset still returns to the CIF's values.
+ */
+export function carryRefinedStructure(previous: Session, params: readonly RefinementParameter[]): { params: RefinementParameter[]; carried: number } {
+  const fitted = previous.powderSource !== EMPTY_SOURCE && previous.powderSource !== SYNTHETIC_SOURCE;
+  const old = new Map(fitted ? previous.powderParams.filter((p) => STRUCTURAL_KINDS.has(p.kind)).map((p) => [p.id, p]) : []);
+  let carried = 0;
+  const out = params.map((p) => {
+    const o = old.get(p.id);
+    if (!o || o.kind !== p.kind || o.value === p.value) return p;
+    carried++;
+    return { ...p, value: o.value };
+  });
+  return { params: out, carried };
+}
+
 /** The session with its corrections cleared: new data starts without them. */
 export function withoutCorrections(s: Session): Session {
   const { corrections: _cleared, ...rest } = s;

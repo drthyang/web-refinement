@@ -102,6 +102,22 @@ describe("check_cell_symmetry — synthetic failures", () => {
     expect(check_cell_symmetry({ structure: cscl, pattern: mixed, extraPhases: [other] }).everyPeakIndexes).toBe(true);
   });
 
+  it("calls a small bump beside a strong line a shoulder, and the same bump on its own an unindexed peak", () => {
+    // 1.5 % of the strongest line (CsCl 110), 0.25° below it — a profile tail's
+    // size and place — and the same bump at 26°, far from every line.
+    const tt110 = (2 * Math.asin(1.54 / (2 * (4.12 / Math.SQRT2))) * 180) / Math.PI;
+    const bump = (x: number, c: number): number => 300 * Math.exp((-4 * Math.LN2 * (x - c) ** 2) / 0.12 ** 2);
+    const withBumps: PowderPattern = { ...pattern, points: pattern.points.map((p) => ({ ...p, yObs: p.yObs + bump(p.x, tt110 - 0.25) + bump(p.x, 26) })) };
+    const r = check_cell_symmetry({ structure: cscl, pattern: withBumps });
+    expect(r.shoulders).toHaveLength(1);
+    expect(r.shoulders[0]).toMatchObject({ of: "1 1 0" });
+    expect(r.shoulders[0]!.offset).toBeCloseTo(-0.25, 1);
+    expect(r.shoulders[0]!.relativeHeight).toBeLessThan(0.03);
+    expect(r.unindexedPeaks).toHaveLength(1);
+    expect(r.unindexedPeaks[0]!.x).toBeCloseTo(26, 0);
+    expect(r.everyPeakIndexes).toBe(false); // the lone bump, not the shoulder
+  });
+
   it("reads only d ≥ dMin, and says so", () => {
     const r = check_cell_symmetry({ structure: cscl, pattern, dMin: 1.2 });
     expect(r.limits.some((l) => l.includes("d ≥ 1.2 Å"))).toBe(true);

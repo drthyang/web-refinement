@@ -46,7 +46,7 @@ import { buildMpdfSpec, mpdfComponents, unsupportedMpdfModel, MPDF_STAGE_KINDS }
 import { computeAgreementFactors, excludedPointMask, weightsFromSigma } from "@/core/refinement/factors";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
 import { generateReflections } from "@/core/diffraction/reflections";
-import { abscissaFromD } from "@/core/diffraction/instrument";
+import { abscissaFromD, radiationOf } from "@/core/diffraction/instrument";
 import { bondLengths } from "@/core/crystal/geometry";
 import { analyzeSiteSymmetry, type SiteSymmetry } from "@/core/crystal/siteSymmetry";
 import { classifyPointGroup } from "@/core/crystal/pointGroup";
@@ -128,12 +128,13 @@ export function parse_structure(args: { cif: string; id?: string; spaceGroupSett
 }
 
 /** Classify + parse powder data; returns the pattern and how the format was detected. */
-export function parse_powder_data(args: { text: string; filename?: string }): {
+export function parse_powder_data(args: { text: string; filename?: string; instrument?: InstrumentParameters }): {
   detected: { dataType: string; xUnit?: string; source: string; confidence: string; note?: string };
   pattern: PowderPattern;
   summary: { points: number; xUnit: string; xMin: number; xMax: number; radiation: string };
 } {
-  const fmt = detectDataFormat({ text: args.text, filename: args.filename ?? "data" });
+  // The instrument sets the radiation: X-ray or neutron, λ, polarization, a lab tube's Kα₂.
+  const fmt = detectDataFormat({ text: args.text, filename: args.filename ?? "data", ...(args.instrument ? { instrument: args.instrument } : {}) });
   if (fmt.dataType !== "powder") throw new Error(`detected ${fmt.dataType} data, not powder — use the single-crystal path`);
   // A GSAS histogram (BANK records: STD/ESD/ALT/FXYE, CONST or TOF binning)
   // is read as the app reads it; its packed rows are not columns.
@@ -433,7 +434,7 @@ export function simulate_pattern(args: {
     id: "sim",
     name: "simulated",
     xUnit: isTof ? "tof" : "twoTheta",
-    radiation: isTof ? { kind: "neutron-tof" } : { kind: instrument.radiationKind === "neutron" ? "neutron" : "xray", wavelength: instrument.wavelength },
+    radiation: isTof ? { kind: "neutron-tof" } : radiationOf(instrument, "xray"),
     points: grid.map((x) => ({ x, yObs: 0 })),
   };
   const spec = buildPowderSpec(args.structure, pattern, instrument, true, 1, {});

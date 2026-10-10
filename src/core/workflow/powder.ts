@@ -20,7 +20,7 @@ import { powderPeakIntensities, lorentzPolarization, marchDollase } from "@/core
 import { correctionsForPattern } from "@/core/diffraction/corrections";
 import { nuclearStructureFactorPartials } from "@/core/diffraction/structureFactor";
 import { braggTheta } from "@/core/crystal/unitCell";
-import { dFromTof } from "@/core/diffraction/instrument";
+import { dFromTof, secondLine, secondLineTwoTheta } from "@/core/diffraction/instrument";
 import { synthesizePattern, cagliotiFwhm, lorentzianFwhm, tchPseudoVoigt, fcjSubPeaks, type ProfilePeak, type ProfileOptions, type PeakShape } from "@/core/diffraction/profile";
 import { evaluateBackground, type BackgroundType } from "@/core/diffraction/background";
 import { quarticStrainInvariants, stephensStrainFwhmDeg, stephensStrainSigmaTof, isotropicStrainSigmaTof, uniaxialStrainFwhmDeg, type QuarticInvariant } from "@/core/diffraction/anisoStrain";
@@ -283,20 +283,34 @@ export function placePeaks(
   // false basin (GaNb4Se8 benchmark: wR 23% → 53%).
   const useLorentzModel = useTch || useUniaxial || useUniaxialStrain;
   const invariants = useStephens ? strainInvariantsFor(applied) : null;
+  // A lab tube's Kα₂: each reflection again at λ₂, ratio × the intensity.
+  const line2 = secondLine(pattern);
 
-  const peaks: ProfilePeak[] = [];
-  for (const p of intensities) {
-    let center = dToX(pattern, p.d);
-    if (Number.isNaN(center)) continue;
-    // Position corrections (displacement D·cosθ, transparency T·sin2θ) at the
-    // Bragg angle. Accumulated then added once (not folded into a single
-    // expression) to keep the exact float arithmetic of the pre-registry code.
+  // Position corrections (displacement D·cosθ, transparency T·sin2θ) at the
+  // Bragg angle, then the zero shift. Accumulated then added once (not folded
+  // into a single expression) to keep the exact float arithmetic of the
+  // pre-registry code.
+  const shifted = (bragg: number): number => {
+    let x = bragg;
     if (corr.anyPositional) {
       let shift = 0;
-      for (const c of corr.positional) shift += c.positionShift!(applied.corrections, center);
-      center += shift;
+      for (const c of corr.positional) shift += c.positionShift!(applied.corrections, bragg);
+      x += shift;
     }
-    center += applied.zeroShift;
+    return x + applied.zeroShift;
+  };
+  const peaks: ProfilePeak[] = [];
+  const emit = (center: number, intensity: number, fwhm: number, eta: number | undefined, second: boolean): void => {
+    if (useFcj) {
+      for (const sub of fcjSubPeaks(center, applied.axial!)) peaks.push(profilePeak(sub.center, intensity * sub.weight, fwhm, eta, second));
+    } else {
+      peaks.push(profilePeak(center, intensity, fwhm, eta, second));
+    }
+  };
+  for (const p of intensities) {
+    const bragg = dToX(pattern, p.d);
+    if (Number.isNaN(bragg)) continue;
+    const center = shifted(bragg);
     let gaussianFwhm = useCaglioti ? cagliotiFwhm(center, applied.caglioti!) / 100 : constWidth;
     const hasHkl = p.h !== undefined && p.k !== undefined && p.l !== undefined;
     // Stephens anisotropic strain → extra Gaussian width, added in quadrature.
@@ -328,16 +342,21 @@ export function placePeaks(
     // roughness); each returns 1 at identity, so multiplying is a no-op when off.
     let intensity = p.intensity;
     for (const c of corr.intensity) intensity *= c.intensityFactor!(applied.corrections, center);
-    if (useFcj) {
-      for (const sub of fcjSubPeaks(center, applied.axial!)) {
-        const i = intensity * sub.weight;
-        peaks.push(eta !== undefined ? { center: sub.center, intensity: i, fwhm, eta } : { center: sub.center, intensity: i, fwhm });
-      }
-    } else {
-      peaks.push(eta !== undefined ? { center, intensity, fwhm, eta } : { center, intensity, fwhm });
+    emit(center, intensity, fwhm, eta, false);
+    // Kα₂ with Kα₁'s width, shape and corrections, as GSAS-II draws it: over
+    // the ≤ 0.5° that separates the lines, the widths differ by far less than
+    // they are known.
+    if (line2) {
+      const bragg2 = secondLineTwoTheta(bragg, line2.lambdaRatio);
+      if (!Number.isNaN(bragg2)) emit(shifted(bragg2), intensity * line2.ratio, fwhm, eta, true);
     }
   }
   return peaks;
+}
+
+function profilePeak(center: number, intensity: number, fwhm: number, eta: number | undefined, second: boolean): ProfilePeak {
+  if (second) return eta !== undefined ? { center, intensity, fwhm, eta, secondLine: true } : { center, intensity, fwhm, secondLine: true };
+  return eta !== undefined ? { center, intensity, fwhm, eta } : { center, intensity, fwhm };
 }
 
 /**
