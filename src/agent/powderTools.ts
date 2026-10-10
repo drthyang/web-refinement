@@ -20,6 +20,8 @@ import {
 import type { StructureModel } from "@/core/crystal/types";
 import type { BackgroundType } from "@/core/diffraction/background";
 import type { MustrainModel } from "@/app/powderSpec";
+import type { PowderXUnit } from "@/core/diffraction/types";
+import { availableDisplayUnits, convertAxisValue, convertInterval } from "@/visualization/axisUnits";
 import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, parameterSummary, pct, sig, type LiveToolHost } from "@/agent/liveCommon";
 
 
@@ -72,7 +74,19 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
         residual,
         options: { ...(input.sigma !== undefined ? { sigma: input.sigma } : {}), limit: input.limit ?? 12 },
       });
-      return { count: found.count, peaks: found.peaks.map((p) => ({ d: sig(p.d, 5), height: sig(p.height, 3) })) };
+      // Shown to the user too: ▽ marks with guide lines on the plot.
+      port.showPeaks(found.peaks);
+      return {
+        count: found.count,
+        // Each position in d, Q and the data's own axis (TOF or 2θ), from the page's calibration.
+        peaks: found.peaks.map((p) => ({
+          d: sig(p.d, 5),
+          q: sig((2 * Math.PI) / p.d, 5),
+          ...(s.pattern.xUnit !== "dSpacing" && s.pattern.xUnit !== "q" ? { [s.pattern.xUnit]: sig(convertAxisValue(p.d, "dSpacing", s.pattern.xUnit, s.axis), 6) } : {}),
+          height: sig(p.height, 3),
+        })),
+        ...(found.count > 0 ? { markedOnPlot: "The user sees these peaks marked on the plot (▽ with a guide line, listed under it); refer to them by d." } : {}),
+      };
     }
     case "bond_geometry":
       return bondsOf(s.refinedPhases, input, bond_geometry);
@@ -117,10 +131,8 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
         port.setFitRange(null);
         return undefined;
       }
-      const min = input.min ?? s.extent.min;
-      const max = input.max ?? s.extent.max;
-      if (!(max > min)) throw new Error(`the window needs max > min (got ${min}–${max})`);
-      if (max < s.extent.min || min > s.extent.max) throw new Error(`${min}–${max} is outside the pattern (${sig(s.extent.min, 6)}–${sig(s.extent.max, 6)} ${s.pattern.xUnit})`);
+      const { min, max } = requestedWindow(s, input);
+      if (max < s.extent.min || min > s.extent.max) throw new Error(`${sig(min, 6)}–${sig(max, 6)} ${UNIT[s.pattern.xUnit]} is outside the pattern (${sig(s.extent.min, 6)}–${sig(s.extent.max, 6)})`);
       port.setFitRange({ min: Math.max(min, s.extent.min), max: Math.min(max, s.extent.max) });
       return undefined;
     }
@@ -164,8 +176,13 @@ export function describePowderChange(spec: LiveToolSpec, input: Input, s: Powder
       return `Microstrain ${s.settings.mustrain} → ${String(input.model)}`;
     case "set_adp_model":
       return `ADPs ${s.settings.anisotropicAdp ? "anisotropic" : "isotropic"} → ${input.anisotropic ? "anisotropic" : "isotropic"}`;
-    case "set_fit_range":
-      return input.whole ? "Fit the whole pattern" : `Fit window ${String(input.min ?? sig(s.extent.min, 6))} – ${String(input.max ?? sig(s.extent.max, 6))} ${s.pattern.xUnit}`;
+    case "set_fit_range": {
+      if (input.whole) return "Fit the whole pattern";
+      const w = requestedWindow(s, input);
+      const native = `${sig(w.min, 6)} – ${sig(w.max, 6)} ${UNIT[s.pattern.xUnit]}`;
+      const unit = (input.unit as PowderXUnit | undefined) ?? s.pattern.xUnit;
+      return unit === s.pattern.xUnit ? `Fit window ${native}` : `Fit window ${String(input.min ?? "edge")} – ${String(input.max ?? "edge")} ${UNIT[unit]} (${native})`;
+    }
     case "refine": {
       const free = s.parameters.filter((p) => !p.fixed && !p.expression).length;
       return input.mode === "thorough"
@@ -199,11 +216,23 @@ function stateView(s: PowderLiveState, history: ProjectHistory | null, select: r
       axis: s.pattern.xUnit,
       extent: [sig(s.extent.min, 6), sig(s.extent.max, 6)],
       fitWindow: s.fitRange ? [sig(s.fitRange.min, 6), sig(s.fitRange.max, 6)] : "whole pattern",
+      // The same in every unit the page converts to, so no one converts by hand.
+      inOtherUnits: Object.fromEntries(
+        availableDisplayUnits(s.axis)
+          .filter((u) => u !== s.pattern.xUnit)
+          .map((u) => {
+            const e = convertInterval(s.extent, s.pattern.xUnit, u, s.axis);
+            const w = s.fitRange ? convertInterval(s.fitRange, s.pattern.xUnit, u, s.axis) : null;
+            return [u, { unit: UNIT[u], extent: [sig(e.min, 5), sig(e.max, 5)], ...(w ? { fitWindow: [sig(w.min, 5), sig(w.max, 5)] } : {}) }];
+          }),
+      ),
       observations: s.observationCount,
       radiation: s.pattern.radiation.kind,
     },
     instrument: s.instrument
-      ? s.instrument.kind === "constantWavelength" ? { kind: "constant wavelength", wavelength: s.instrument.wavelength } : { kind: "time of flight", difC: s.instrument.difC }
+      ? s.instrument.kind === "constantWavelength"
+        ? { kind: "constant wavelength", wavelength: s.instrument.wavelength }
+        : { kind: "time of flight", difC: s.instrument.difC, difA: s.instrument.difA ?? 0, zero: s.instrument.zero ?? 0, note: "TOF = difC·d + difA·d² + zero; set_fit_range and find_unexplained_peaks convert for you" }
       : "none loaded (default CW, λ = 1.54 Å)",
     settings: { ...s.settings, profileShape: s.profile.shape },
     magneticModel: s.magnetic
@@ -227,6 +256,28 @@ function stateView(s: PowderLiveState, history: ProjectHistory | null, select: r
 }
 
 // ── analysis helpers ────────────────────────────────────────────────────────
+
+const UNIT: Record<PowderXUnit, string> = { tof: "µs (TOF)", twoTheta: "° 2θ", dSpacing: "Å (d)", q: "Å⁻¹ (Q)" };
+
+/**
+ * The window set_fit_range asks for, on the pattern's own axis. min/max may
+ * come in any unit the page can convert to; a bound left out is the pattern's
+ * edge. Conversions can reverse order (Q ↔ d), so the result is sorted.
+ */
+function requestedWindow(s: PowderLiveState, input: Input): { min: number; max: number } {
+  const native = s.pattern.xUnit;
+  const unit = (input.unit as PowderXUnit | undefined) ?? native;
+  const units = availableDisplayUnits(s.axis);
+  if (!units.includes(unit)) throw new Error(`this pattern cannot be read in ${unit}: it converts to ${units.join(", ")} (load the instrument file for its calibration)`);
+  const edges = unit === native ? s.extent : convertInterval(s.extent, native, unit, s.axis);
+  const lo = input.min ?? edges.min;
+  const hi = input.max ?? edges.max;
+  if (!(hi > lo)) throw new Error(`the window needs max > min (got ${lo}–${hi} ${UNIT[unit]})`);
+  if (unit === native) return { min: lo, max: hi };
+  const w = convertInterval({ min: lo, max: hi }, unit, native, s.axis);
+  if (!Number.isFinite(w.min) || !Number.isFinite(w.max)) throw new Error(`${lo}–${hi} ${UNIT[unit]} does not convert to ${UNIT[native]} on this pattern`);
+  return w;
+}
 
 function residualOf(s: PowderLiveState): { d: number[]; yObs: number[]; yCalc: number[] } {
   if (!s.d) throw new Error("this pattern's axis cannot be converted to d-spacing (no wavelength or TOF calibration)");

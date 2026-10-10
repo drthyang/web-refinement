@@ -20,7 +20,9 @@ export interface AgentSettings {
   readonly mode: AgentMode;
   readonly model: string;
   readonly effort: ChatEffort;
-  /** Run changes without an approval card. Off unless the user turns it on. */
+  /** Auto mode: changes run without an approval card, and the agent works
+   *  through the method's stages on its own. Off (ask first) unless the user
+   *  turns it on, for this session. */
   readonly autoApprove: boolean;
   /** Keep the API key in this browser's local storage, not just for the tab. */
   readonly rememberKey: boolean;
@@ -214,9 +216,10 @@ export function useAgent(host: AgentHost, onAttention: () => void): AgentControl
 
 /** What one chat message runs on, from the settings. */
 function chatConfig(s: AgentSettings, apiKey: string): ChatConfig {
-  if (s.mode === "ollama") return { transport: "ollama", serverUrl: s.ollamaUrl, model: s.ollamaModel, effort: s.effort };
-  if (s.mode === "lmstudio") return { transport: "lmstudio", serverUrl: s.lmstudioUrl, model: s.lmstudioModel, effort: s.effort };
-  return { transport: s.mode === "proxy" ? "proxy" : "api-key", apiKey, model: s.model, effort: s.effort, fallback: s.fallback };
+  const autonomy = s.autoApprove ? "auto" : "ask";
+  if (s.mode === "ollama") return { transport: "ollama", serverUrl: s.ollamaUrl, model: s.ollamaModel, effort: s.effort, autonomy };
+  if (s.mode === "lmstudio") return { transport: "lmstudio", serverUrl: s.lmstudioUrl, model: s.lmstudioModel, effort: s.effort, autonomy };
+  return { transport: s.mode === "proxy" ? "proxy" : "api-key", apiKey, model: s.model, effort: s.effort, fallback: s.fallback, autonomy };
 }
 
 // ── storage (guarded: private windows and blocked site data throw) ─────────

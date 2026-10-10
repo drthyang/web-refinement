@@ -10,6 +10,11 @@
  * refinement; the model must fix one of each pair, or refine them in separate
  * stages. Measured on this data, over this fit window, so a pair that the
  * angular range separates (cell and zero over a wide 2θ range) is not stopped.
+ *
+ * Two background coefficients are exempt: they are one curve in a basis whose
+ * terms trade off by construction (0.99 is usual), while the curve itself is
+ * determined and no coefficient is a result anyone reports. A background term
+ * against anything else (the scale soaking up peak intensity) still counts.
  */
 
 import type { ParameterKind, RefinementOptions, RefinementParameter, RefinementResult } from "@/core/refinement/types";
@@ -44,7 +49,8 @@ export interface CorrelationCheck {
 /** Read the check off a probe (or any refinement result) of the given parameter set. */
 export function readCorrelations(result: RefinementResult, parameters: readonly RefinementParameter[]): CorrelationCheck {
   const kind = new Map<string, ParameterKind>(parameters.map((p) => [p.id, p.kind]));
-  const pairs = (result.diagnostics?.highCorrelations ?? []).map((c): CorrelatedPair => {
+  const sameCurve = (a: string, b: string): boolean => kind.get(a) === "background" && kind.get(b) === "background";
+  const pairs = (result.diagnostics?.highCorrelations ?? []).filter((c) => !sameCurve(c.parameterIdA, c.parameterIdB)).map((c): CorrelatedPair => {
     const ka = kind.get(c.parameterIdA);
     const kb = kind.get(c.parameterIdB);
     const reason = ka && kb ? correlationInsight(ka, kb) : undefined;

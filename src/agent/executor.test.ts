@@ -60,6 +60,7 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
       curves,
       d: convertAxisArray(curves.x, s.pattern.xUnit, "dSpacing", axisContext(s.pattern)),
       observationCount: n,
+      axis: axisContext(s.pattern),
       source: "test",
     };
   };
@@ -95,6 +96,7 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
       calls.push(`range ${r ? `${r.min}-${r.max}` : "whole"}`);
       fitRange = r ? { ...r } : null;
     },
+    showPeaks: (peaks) => calls.push(`showPeaks ${peaks.map((p) => p.d.toFixed(3)).join(",")}`),
     refine,
     thorough: refine,
     probe: async (options) => {
@@ -310,7 +312,7 @@ describe("AgentExecutor on a live powder fit", () => {
     await ex.run("set_free", { fix: ["occ_*"], free: ["bkg*"] });
     const refined = parse((await ex.run("refine", {})).text);
     expect(refined.refined).toBe(true);
-    expect(asked.at(-1)!.preview).toMatch(/^Refine .* · strongest correlation \S+ ↔ \S+ -?0\.\d{3}$/);
+    expect(asked.at(-1)!.preview).toMatch(/^Refine .* · (strongest correlation \S+ ↔ \S+ -?0\.\d{3}|no correlation above 0\.5)$/);
   });
 
   it("does not refine when the correlation check itself fails", async () => {
@@ -345,13 +347,46 @@ describe("AgentExecutor on a live powder fit", () => {
   });
 
   it("finds residual peaks and bond lengths on the live model", async () => {
-    const { port } = sessionPort(newSession(exampleStructure()));
+    const { port, calls } = sessionPort(newSession(exampleStructure()));
     const { ex } = executor(fakeHost(port).host);
     const peaks = parse((await ex.run("find_unexplained_peaks", {})).text);
     expect(typeof peaks.count).toBe("number");
+    // What it found is marked on the plot for the user, without an approval card.
+    const shown = calls.find((c) => c.startsWith("showPeaks"));
+    expect(shown).toBeDefined();
+    expect(shown!.split(" ")[1]?.split(",").filter(Boolean).length ?? 0).toBe(peaks.count as number);
+    if ((peaks.count as number) > 0) expect(String(peaks.markedOnPlot)).toMatch(/marked on the plot/);
+    for (const p of peaks.peaks as { d: number; q: number; twoTheta: number }[]) {
+      expect(p.q).toBeCloseTo((2 * Math.PI) / p.d, 3);
+      expect(1.54 / (2 * Math.sin((p.twoTheta / 2) * Math.PI / 180))).toBeCloseTo(p.d, 4);
+    }
     const bonds = parse((await ex.run("bond_geometry", { cutoff: 3 })).text);
     expect(bonds.phase).toBe(port.state().structure.id);
     expect((await ex.run("bond_geometry", { phase: "nope" })).text).toMatch(/no phase "nope"/);
+  });
+
+  it("takes a fit window in d or Q and converts it with the page's own calibration", async () => {
+    const { port, calls } = sessionPort(newSession(exampleStructure()));
+    const { ex, asked } = executor(fakeHost(port).host, true);
+    // The test pattern is 2θ at λ = 1.54 Å; get_state lists the window in d and Q too.
+    const view = parse((await ex.run("get_state", {})).text);
+    const other = (view.data as { inOtherUnits: Record<string, { extent: number[] }> }).inOtherUnits;
+    expect(Object.keys(other).sort()).toEqual(["dSpacing", "q"]);
+    expect(other.q!.extent[0]).toBeCloseTo((4 * Math.PI / 1.54) * Math.sin((12 / 2) * Math.PI / 180), 3);
+
+    // Q 2–5 Å⁻¹ → d 1.2566–3.1416 Å → 2θ = 2 asin(λ/2d).
+    await ex.run("set_fit_range", { min: 2, max: 5, unit: "q" });
+    const twoTheta = (q: number): number => 2 * Math.asin((1.54 * q) / (4 * Math.PI)) * 180 / Math.PI;
+    const [lo, hi] = calls.at(-1)!.replace("range ", "").split("-").map(Number);
+    expect(lo).toBeCloseTo(twoTheta(2), 6);
+    expect(hi).toBeCloseTo(twoTheta(5), 6);
+    expect(asked.at(-1)!.preview).toMatch(/^Fit window 2 – 5 Å⁻¹ \(Q\) \(28\.\d+ – 75\.\d+ ° 2θ\)$/);
+    // d runs the other way; the window is still ordered.
+    await ex.run("set_fit_range", { min: 1.5, max: 3, unit: "dSpacing" });
+    const [a, b] = calls.at(-1)!.replace("range ", "").split("-").map(Number);
+    expect(a).toBeLessThan(b!);
+    // A unit this pattern cannot reach is refused, naming the ones it can.
+    expect((await ex.run("set_fit_range", { min: 1000, max: 2000, unit: "tof" })).text).toMatch(/cannot be read in tof: it converts to twoTheta, dSpacing, q/);
   });
 
   it("validates the fit window against the pattern", async () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
-import { AgentChat, describeChatError } from "@/agent/chat";
+import { AgentChat, announcedTool, describeChatError, repeatingTail, stalledReply } from "@/agent/chat";
 import type { AgentExecutor } from "@/agent/executor";
 import { LIVE_TOOLS } from "@/agent/tools";
 
@@ -42,12 +42,27 @@ function sse(blocks: Block[], stop: string): string {
   return out;
 }
 
-async function fakeApi(turns: (string | { status: number; json: unknown })[]): Promise<{ url: string; server: Server; requests: { headers: Record<string, unknown>; body: Record<string, unknown> }[] }> {
+/** LM Studio's REST answers, for an LM Studio stand-in: the model list, and what a load does. */
+interface LmStudioSide {
+  readonly models: unknown;
+  readonly load?: { status: number; json: unknown };
+  readonly seen: { path: string; body: unknown }[];
+}
+
+async function fakeApi(turns: (string | { status: number; json: unknown })[], lmstudio?: LmStudioSide): Promise<{ url: string; server: Server; requests: { headers: Record<string, unknown>; body: Record<string, unknown> }[] }> {
   const requests: { headers: Record<string, unknown>; body: Record<string, unknown> }[] = [];
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
+      if (lmstudio && req.url?.startsWith("/api/v1/models")) {
+        const text = Buffer.concat(chunks).toString("utf8");
+        lmstudio.seen.push({ path: req.url, body: text ? JSON.parse(text) : null });
+        const out = req.url === "/api/v1/models" ? { status: 200, json: lmstudio.models } : (lmstudio.load ?? { status: 200, json: { status: "loaded" } });
+        res.writeHead(out.status, { "content-type": "application/json" });
+        res.end(JSON.stringify(out.json));
+        return;
+      }
       requests.push({ headers: req.headers, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown> });
       const turn = turns[requests.length - 1];
       if (!turn) {
@@ -125,6 +140,8 @@ describe("AgentChat", () => {
     expect(system[0]!.cache_control).toEqual({ type: "ephemeral" });
     expect(system[0]!.text).toContain("<user_method>");
     expect(system[0]!.text).toContain("My Rietveld workflow");
+    // The mode follows the cached prompt: ask first unless the user chose auto.
+    expect(system[1]).toEqual({ type: "text", text: expect.stringMatching(/^Mode: ask\. Every change waits for the user's approval/) });
     // The second request carries the whole history, unchanged.
     expect((api.requests[1]!.body.messages as unknown[]).length).toBe(3);
   });
@@ -208,6 +225,7 @@ describe("AgentChat on Ollama", () => {
     expect(first.body.stream).toBe(true);
     for (const k of ["thinking", "output_config", "cache_control", "fallbacks"]) expect(first.body[k]).toBeUndefined();
     expect(first.body.system as string).toContain("<user_method>");
+    expect(first.body.system as string).toMatch(/Mode: ask\. [^]*$/);
     const tools = first.body.tools as { name: string; eager_input_streaming?: boolean }[];
     expect(tools.map((t) => t.name)).toEqual(LIVE_TOOLS.map((t) => t.name));
     expect(tools.some((t) => "eager_input_streaming" in t)).toBe(false);
@@ -238,6 +256,14 @@ describe("AgentChat on Ollama", () => {
   });
 });
 
+/** LM Studio's list with these models (key → loaded context, or null when not loaded). */
+function lmModels(models: Record<string, number | null>, max = 131072): LmStudioSide {
+  return {
+    models: { models: Object.entries(models).map(([key, ctx]) => ({ type: "llm", key, max_context_length: max, loaded_instances: ctx === null ? [] : [{ id: key, config: { context_length: ctx } }], capabilities: { trained_for_tool_use: true } })) },
+    seen: [],
+  };
+}
+
 describe("AgentChat on LM Studio", () => {
   let server: Server | null = null;
   afterEach(async () => {
@@ -248,7 +274,7 @@ describe("AgentChat on LM Studio", () => {
   const runner = { run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor;
 
   it("sends plain headers and only the fields a local server reads, to <server>/v1/messages", async () => {
-    const api = await fakeApi([sse([{ type: "tool_use", id: "call_1", name: "get_state", input: {} }], "tool_use"), sse([{ type: "text", text: "Fine." }], "end_turn")]);
+    const api = await fakeApi([sse([{ type: "tool_use", id: "call_1", name: "get_state", input: {} }], "tool_use"), sse([{ type: "text", text: "Fine." }], "end_turn")], lmModels({ "qwen/qwen3-32b": 32768 }));
     server = api.server;
     const chat = new AgentChat(runner);
     await chat.send("How is it?", { transport: "lmstudio", serverUrl: api.url + "/", model: "qwen/qwen3-32b", effort: "high" }, quiet, new AbortController().signal);
@@ -261,7 +287,7 @@ describe("AgentChat on LM Studio", () => {
   });
 
   it("moving from Ollama to LM Studio drops the other server's thinking", async () => {
-    const api = await fakeApi([sse([{ type: "thinking", thinking: "unsigned" }, { type: "text", text: "Hi." }], "end_turn"), sse([{ type: "text", text: "Hello." }], "end_turn")]);
+    const api = await fakeApi([sse([{ type: "thinking", thinking: "unsigned" }, { type: "text", text: "Hi." }], "end_turn"), sse([{ type: "text", text: "Hello." }], "end_turn")], lmModels({ "qwen/qwen3-32b": 40960 }));
     server = api.server;
     const chat = new AgentChat(runner);
     const signal = new AbortController().signal;
@@ -278,7 +304,7 @@ describe("AgentChat on LM Studio", () => {
       [401, { error: { message: "Invalid API token" } }, /asks for an API token/],
       [422, { error: "boom" }, /^LM Studio error 422: boom$/],
     ] as const) {
-      const api = await fakeApi([{ status, json }]);
+      const api = await fakeApi([{ status, json }], lmModels({ "qwen/qwen3-8b": 32768 }));
       server = api.server;
       const chat = new AgentChat(runner);
       const err = await chat.send("hi", { ...config, serverUrl: api.url }, quiet, new AbortController().signal).then(() => null, (e: unknown) => e);
@@ -286,5 +312,136 @@ describe("AgentChat on LM Studio", () => {
       await new Promise<void>((r) => api.server.close(() => r()));
       server = null;
     }
+  });
+
+  it("loads a model that is not loaded with a 32k context before the first message, and says so", async () => {
+    const side = lmModels({ "qwen/qwen3-32b": null });
+    const api = await fakeApi([sse([{ type: "text", text: "Fine." }], "end_turn")], side);
+    server = api.server;
+    const notices: string[] = [];
+    await new AgentChat(runner).send("hi", { transport: "lmstudio", serverUrl: api.url, model: "qwen/qwen3-32b", effort: "high" }, { ...quiet, onNotice: (t) => notices.push(t) }, new AbortController().signal);
+    expect(side.seen.map((x) => x.path)).toEqual(["/api/v1/models", "/api/v1/models/load"]);
+    expect(side.seen[1]!.body).toEqual({ model: "qwen/qwen3-32b", context_length: 32768 });
+    expect(notices).toEqual(["Loaded qwen/qwen3-32b in LM Studio with a 32k context."]);
+    expect(api.requests).toHaveLength(1);
+  });
+
+  it("will not send to a copy loaded with too little context, and says how to reload it", async () => {
+    const side = lmModels({ "qwen/qwen3-32b": 4096 });
+    const api = await fakeApi([sse([{ type: "text", text: "never" }], "end_turn")], side);
+    server = api.server;
+    const config = { transport: "lmstudio" as const, serverUrl: api.url, model: "qwen/qwen3-32b", effort: "high" as const };
+    const err = await new AgentChat(runner).send("hi", config, quiet, new AbortController().signal).then(() => null, (e: unknown) => e);
+    expect(describeChatError(err, config)).toMatch(/loaded with 4k tokens of context.*lms unload qwen\/qwen3-32b && lms load qwen\/qwen3-32b --context-length 32768/);
+    expect(api.requests).toHaveLength(0);
+    expect(side.seen.map((x) => x.path)).toEqual(["/api/v1/models"]);
+  });
+});
+
+describe("a reply that repeats itself", () => {
+  let server: Server | null = null;
+  afterEach(async () => {
+    if (server) await new Promise<void>((r) => server!.close(() => r()));
+    server = null;
+  });
+
+  it("finds the repeating phrase, and leaves ordinary text alone", () => {
+    expect(repeatingTail("Let me refine. " + "(Actually, I'll call refine())\n\n".repeat(7))).toBe("(Actually, I'll call refine())");
+    expect(repeatingTail("(Actually, I'll call refine()) ".repeat(4))).toBeNull();
+    expect(repeatingTail("-".repeat(400))).toBeNull();
+    expect(repeatingTail("The scale converged; the background terms are stable; the cell moved by 0.002 Å, well within its esd. Next, positions.")).toBeNull();
+  });
+
+  it("stops the turn, keeps the history valid, and says why", async () => {
+    const loop = "I will now refine the scale. " + "(Actually, I'll call refine())\n\n".repeat(40);
+    const api = await fakeApi([sse([{ type: "text", text: loop }], "end_turn"), sse([{ type: "text", text: "OK." }], "end_turn")]);
+    server = api.server;
+    const notices: string[] = [];
+    const chat = new AgentChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor);
+    const quiet = { onAssistantStart: () => undefined, onText: () => undefined, onThinking: () => undefined, onNotice: (t: string) => notices.push(t), onUsage: () => undefined };
+    const config = { transport: "ollama" as const, serverUrl: api.url, model: "qwen3:8b", effort: "high" as const };
+    await chat.send("Refine it.", config, quiet, new AbortController().signal);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatch(/^The model started repeating itself \("\(Actually, I'll call refine\(\)\)"\), so this turn was stopped\. Local models/);
+    const history = chat.history();
+    expect(history.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect((history[1]!.content as { text: string }[])[0]!.text).toBe("I will now refine the scale. (Actually, I'll call refine())");
+    // The conversation goes on.
+    await chat.send("Go on.", config, quiet, new AbortController().signal);
+    expect(chat.history().map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+  });
+});
+
+describe("a reply that stalls", () => {
+  let server: Server | null = null;
+  afterEach(async () => {
+    if (server) await new Promise<void>((r) => server!.close(() => r()));
+    server = null;
+  });
+  const names = LIVE_TOOLS.map((t) => t.name);
+
+  it("knows a promise to act from a real stop", () => {
+    const gate = "According to your method, we must first pass the Le Bail gate. I will start by running the check_cell_symmetry tool.\n\nIf this passes, we move to Stage 1.\n\nStarting the Le Bail gate now.";
+    expect(announcedTool(gate, names)).toBe("check_cell_symmetry");
+    expect(announcedTool("(Actually, I'll call refine())", names)).toBe("refine");
+    // Stopping at a gate for the user, or asking, is not a stall.
+    expect(announcedTool("The cell gate passed. Next I would free the positions — shall I go on?", names)).toBeNull();
+    expect(announcedTool("The scale and background are stable (wR 7.6%). I'll stop here so you can look at the residual before we free the atoms.", names)).toBeNull();
+    expect(announcedTool("The fit converged at wR 4.0%, GoF 1.3. assess_refinement finds nothing to fix.", names)).toBeNull();
+  });
+
+  it("knows waiting on a tool that already answered, or an empty reply after a result", () => {
+    const waited = stalledReply("I apologize for the pause. I was waiting for the check_cell_symmetry tool to complete its analysis, as it performs a complex Le Bail fit.", names, ["check_cell_symmetry"]);
+    expect(waited!.nudge).toMatch(/check_cell_symmetry already finished; its result is the tool result above/);
+    expect(stalledReply("I'll wait for your go-ahead before refining the atoms.", names, ["check_cell_symmetry"])).toBeNull();
+    expect(stalledReply("", names, ["refine"])!.notice).toMatch(/said nothing after the refine result/);
+    expect(stalledReply("", names, [])).toBeNull();
+  });
+
+  it("asks a model that went quiet after a tool result to go on", async () => {
+    const api = await fakeApi([
+      sse([{ type: "text", text: "Running the Le Bail gate." }, { type: "tool_use", id: "c1", name: "check_cell_symmetry", input: {} }], "tool_use"),
+      sse([], "end_turn"),
+      sse([{ type: "text", text: "Every peak indexes in I 2₁ 3; the gate passes." }], "end_turn"),
+    ]);
+    server = api.server;
+    const notices: string[] = [];
+    let text = "";
+    const chat = new AgentChat({ run: async () => ({ isError: false, text: "{\"passed\":true}" }) } as unknown as AgentExecutor);
+    await chat.send("Check the cell.", { transport: "api-key", apiKey: "sk-test", baseURL: api.url, model: "claude-opus-5-5", effort: "high" }, {
+      onAssistantStart: () => undefined, onText: (d) => (text += d), onThinking: () => undefined, onNotice: (t) => notices.push(t), onUsage: () => undefined,
+    }, new AbortController().signal);
+    expect(notices).toEqual(["The model said nothing after the check_cell_symmetry result; the app asked it to go on."]);
+    expect(text).toMatch(/the gate passes\.$/);
+    const third = api.requests[2]!.body.messages as { role: string; content: unknown }[];
+    expect(third.at(-1)).toEqual({ role: "user", content: expect.stringMatching(/^\(From the app, not the user\.\) You replied with nothing after the check_cell_symmetry result/) });
+  });
+
+  it("asks for the call a reply promised, once, and never more than twice per message", async () => {
+    const promise = sse([{ type: "text", text: "I will start by running check_cell_symmetry.\n\nStarting the Le Bail gate now." }], "end_turn");
+    const api = await fakeApi([promise, promise, promise, promise]);
+    server = api.server;
+    const notices: string[] = [];
+    const chat = new AgentChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor);
+    await chat.send("Check the cell.", { transport: "api-key", apiKey: "sk-test", baseURL: api.url, model: "claude-opus-5-5", effort: "high" }, {
+      onAssistantStart: () => undefined, onText: () => undefined, onThinking: () => undefined, onNotice: (t) => notices.push(t), onUsage: () => undefined,
+    }, new AbortController().signal);
+    expect(api.requests).toHaveLength(3);
+    expect(notices).toHaveLength(2);
+    expect(notices[0]).toMatch(/said it would run check_cell_symmetry but made no tool call/);
+  });
+});
+
+describe("auto mode", () => {
+  it("tells the model to work through the stages on its own", async () => {
+    const api = await fakeApi([sse([{ type: "text", text: "On it." }], "end_turn")]);
+    const chat = new AgentChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor);
+    await chat.send("Refine it.", { transport: "api-key", apiKey: "sk-test", baseURL: api.url, model: "claude-opus-5-5", effort: "high", autonomy: "auto" }, {
+      onAssistantStart: () => undefined, onText: () => undefined, onThinking: () => undefined, onNotice: () => undefined, onUsage: () => undefined,
+    }, new AbortController().signal);
+    await new Promise<void>((r) => api.server.close(() => r()));
+    const system = api.requests[0]!.body.system as { text: string; cache_control?: unknown }[];
+    expect(system[0]!.cache_control).toEqual({ type: "ephemeral" });
+    expect(system[1]!.text).toMatch(/^Mode: auto\. .*while its gate passes go on to the next\. Stop and report when a gate fails/);
   });
 });

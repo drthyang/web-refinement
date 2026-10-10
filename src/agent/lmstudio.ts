@@ -13,13 +13,15 @@
  *    whether each was trained for tool use, the longest context it takes, and
  *    the context each loaded copy was given. LM Studio can run tools on a model
  *    not trained for them (through its own prompt), so none is ruled out.
- *  - A model loads with the context length set for it in LM Studio, which can
- *    be far below what the Agent needs; the loaded context is what counts.
+ *  - A model LM Studio loads by itself (on the first request) gets its default
+ *    context length, which can be far below what the Agent needs, and a prompt
+ *    that does not fit is cut. `ensureLmStudioContext` loads it with room
+ *    first, through `/api/v1/models/load`, and refuses a copy loaded too small.
  *
  * Kept free of the SDK so the drawer can list models without loading it.
  */
 
-import { HttpError, getJson, serverBase } from "@/agent/localServer";
+import { HttpError, MIN_AGENT_CONTEXT, getJson, serverBase } from "@/agent/localServer";
 
 export const DEFAULT_LMSTUDIO_URL = "http://localhost:1234";
 
@@ -83,4 +85,42 @@ export async function listLmStudioModels(url: string, signal?: AbortSignal): Pro
 /** Why a page cannot reach the server, as a sentence. LM Studio admits another origin only with CORS on. */
 export function lmstudioUnreachableHint(url: string): string {
   return `Could not reach LM Studio at ${lmstudioBase(url)}. Is its server running, with CORS on? In LM Studio's Developer tab, start the server and turn on Enable CORS in its settings (or run lms server start --cors).`;
+}
+
+/**
+ * Before a message: make sure the model runs with room for the Agent's
+ * instructions. Not loaded: load it with 32k (or its own maximum, if smaller)
+ * and say so. Loaded with less than that: refuse, with how to reload it — a
+ * copy another program may be using is never unloaded from here. A model the
+ * server does not list is left to the request to report.
+ */
+export async function ensureLmStudioContext(url: string, model: string, signal?: AbortSignal): Promise<string | null> {
+  const base = lmstudioBase(url);
+  let models: LmStudioModel[];
+  try {
+    models = await listLmStudioModels(url, signal);
+  } catch (e) {
+    if (e instanceof TypeError) throw new Error(lmstudioUnreachableHint(url), { cause: e });
+    throw e;
+  }
+  const m = models.find((x) => x.key === model);
+  if (!m) return null;
+  const needed = Math.min(MIN_AGENT_CONTEXT, m.maxContext ?? MIN_AGENT_CONTEXT);
+  const k = (n: number): string => `${Math.round(n / 1024)}k`;
+  if (m.loadedContext !== null) {
+    if (m.loadedContext >= needed) return null;
+    throw new Error(
+      `LM Studio has ${model} loaded with ${k(m.loadedContext)} tokens of context, and the Agent's instructions alone are about 15k, so the model would lose them. ` +
+        `Reload it with ${k(needed)}: eject it in LM Studio, then pick it again here (the Agent loads it with ${k(needed)}), or run lms unload ${model} && lms load ${model} --context-length ${needed}.`,
+    );
+  }
+  const init: RequestInit = { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model, context_length: needed }) };
+  if (signal) init.signal = signal;
+  const res = await globalThis.fetch(`${base}/api/v1/models/load`, init);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } | string; message?: string };
+    const why = (typeof body.error === "string" ? body.error : body.error?.message) ?? body.message ?? `it answered ${res.status}`;
+    throw new Error(`LM Studio could not load ${model} with a ${k(needed)} context: ${why}`);
+  }
+  return `Loaded ${model} in LM Studio with a ${k(needed)} context.`;
 }

@@ -29,23 +29,30 @@ function probe(pairs: [string, string, number][], singular: string[] = []): Refi
 
 describe("correlation check", () => {
   it("passes a set with nothing at the limit, and names its strongest pair", () => {
-    const check = readCorrelations(probe([["bkg0", "bkg1", 0.81], ["scale", "B_Mn1", 0.62]]), params);
+    const check = readCorrelations(probe([["scale", "B_Mn1", 0.81], ["scale", "bkg0", 0.62]]), params);
     expect(check.correlated).toEqual([]);
-    expect(check.strongest).toMatchObject({ a: "bkg0", b: "bkg1", coefficient: 0.81 });
+    expect(check.strongest).toMatchObject({ a: "scale", b: "B_Mn1", coefficient: 0.81 });
     expect(correlationRefusal(check)).toBeNull();
   });
 
   it("refuses a pair at the limit, with the physical reason and what to do", () => {
-    const check = readCorrelations(probe([["scale", "occ_Mn1", -0.991], ["B_Mn1", "occ_Mn1", CORRELATION_LIMIT], ["bkg0", "bkg1", 0.7]]), params);
+    const check = readCorrelations(probe([["scale", "occ_Mn1", -0.991], ["B_Mn1", "occ_Mn1", CORRELATION_LIMIT], ["scale", "bkg1", 0.7]]), params);
     expect(check.correlated.map((p) => [p.a, p.b])).toEqual([["scale", "occ_Mn1"], ["B_Mn1", "occ_Mn1"]]);
     expect(check.correlated[0]!.reason).toMatch(/near-degenerate/);
-    expect(check.strongest).toMatchObject({ a: "bkg0", b: "bkg1" });
+    expect(check.strongest).toMatchObject({ a: "scale", b: "bkg1" });
     const refusal = correlationRefusal(check)!;
     expect(refusal).toMatch(/^Not refined/);
     expect(refusal).toContain("scale ↔ occ_Mn1 -0.991 (Scale and site occupancy");
     expect(refusal).toContain("B_Mn1 ↔ occ_Mn1 0.950");
     expect(refusal).toMatch(/Fix one of each pair with set_free/);
     expect(refusalLine(check)).toBe("Not run: scale ↔ occ_Mn1 -0.991 and 1 more correlated");
+  });
+
+  it("lets the background coefficients correlate among themselves, but not with the scale", () => {
+    const check = readCorrelations(probe([["bkg0", "bkg1", 0.995], ["scale", "bkg0", 0.97]]), params);
+    expect(check.correlated.map((p) => [p.a, p.b])).toEqual([["scale", "bkg0"]]);
+    expect(check.correlated[0]!.reason).toMatch(/background are trading intensity/);
+    expect(readCorrelations(probe([["bkg0", "bkg1", 0.995]]), params).correlated).toEqual([]);
   });
 
   it("refuses a combination the data cannot determine", () => {

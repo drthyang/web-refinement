@@ -139,10 +139,6 @@ function Settings({ agent }: { agent: AgentController }): JSX.Element {
           <span style={{ fontSize: 12.5 }}>Fall back to another model if this one declines</span>
         </label>
       )}
-      <label style={{ ...field, flexDirection: "row", alignItems: "center", gap: 6 }} title="Changes run without an approval card. Each one is still a step in History you can undo.">
-        <input type="checkbox" checked={settings.autoApprove} onChange={(e) => agent.updateSettings({ autoApprove: e.target.checked })} />
-        <span style={{ fontSize: 12.5 }}>Auto-approve changes (this session)</span>
-      </label>
     </div>
   );
 }
@@ -266,11 +262,11 @@ function LmStudioSettings({ agent }: { agent: AgentController }): JSX.Element {
       )}
       {picked?.loadedContext != null && picked.loadedContext < MIN_AGENT_CONTEXT && (
         <p style={{ ...note, color: color.noteInk }}>
-          LM Studio loaded this model with {kTokens(picked.loadedContext)} tokens of context; the Agent's instructions alone are about 15k. Reload it with at least 32k (<code style={code}>lms load {picked.key} --context-length 32768</code>{picked.maxContext != null && picked.maxContext < MIN_AGENT_CONTEXT ? `; it takes at most ${kTokens(picked.maxContext)}` : ""}).
+          LM Studio loaded this model with {kTokens(picked.loadedContext)} tokens of context; the Agent's instructions alone are about 15k, so it will not send to it. Eject the model in LM Studio and the Agent loads it with 32k on your next message (or <code style={code}>lms load {picked.key} --context-length 32768</code>{picked.maxContext != null && picked.maxContext < MIN_AGENT_CONTEXT ? `; it takes at most ${kTokens(picked.maxContext)}` : ""}).
         </p>
       )}
       {picked && picked.loadedContext == null && (
-        <p style={note}>Not loaded yet: LM Studio loads it on the first message, with the context length set for it in LM Studio. The Agent needs at least 32k; to be sure, load it yourself (<code style={code}>lms load {picked.key} --context-length 32768</code>).</p>
+        <p style={note}>Not loaded yet: the Agent loads it with a 32k context on your first message.</p>
       )}
       <p style={note}>
         The conversation goes only to this server. Needs LM Studio 0.4.1 or later with its server running and <b>Enable CORS</b> on (Developer tab → server settings, or <code style={code}>lms server start --cors</code>). Local models follow the method less reliably than Claude: watch the approval cards.
@@ -400,7 +396,8 @@ function Composer({ agent, disabled }: { agent: AgentController; disabled: boole
         }}
       />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: fz.micro, color: color.faint, fontFamily: mono }}>
+        <AutonomySwitch agent={agent} />
+        <span style={{ fontSize: fz.micro, color: color.faint, fontFamily: mono, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {agent.usage.input + agent.usage.output > 0
             ? `${fmtTokens(agent.usage.input)} in · ${fmtTokens(agent.usage.cacheRead)} cached · ${fmtTokens(agent.usage.output)} out`
             : "Enter to send · Shift+Enter for a new line"}
@@ -409,6 +406,34 @@ function Composer({ agent, disabled }: { agent: AgentController; disabled: boole
           ? <button style={secondaryButton} onClick={agent.stop}>Stop</button>
           : <button style={primaryButton} onClick={submit} disabled={disabled || !text.trim()}>Send</button>}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Ask first: every change waits for approval, and the agent stops at each
+ * gate. Auto: changes run without a card (still undoable History steps), and
+ * the agent works through the stages, stopping at a failed gate or a decision
+ * the method leaves to the user. Off again on reload.
+ */
+function AutonomySwitch({ agent }: { agent: AgentController }): JSX.Element {
+  const auto = agent.settings.autoApprove;
+  const option = (on: boolean, label: string, title: string): JSX.Element => (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={auto === on}
+      title={title}
+      onClick={() => agent.updateSettings({ autoApprove: on })}
+      style={{ border: "none", padding: "3px 9px", fontSize: 12, cursor: "pointer", background: auto === on ? (on ? color.noteBg : color.primaryTintBg) : color.surface, color: auto === on ? (on ? color.noteInk : color.primary) : color.secondary, fontWeight: auto === on ? 600 : 500 }}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div role="radiogroup" aria-label="Approval mode" style={{ display: "flex", border: `1px solid ${color.control}`, borderRadius: radius.button, overflow: "hidden", flexShrink: 0 }}>
+      {option(false, "Ask first", "Every change waits for your approval, and the agent stops at each gate of the method to report.")}
+      {option(true, "Auto", "Changes run without an approval card (each is still a History step you can undo), and the agent works through the method's stages on its own, stopping at a failed gate or a decision that is yours. Back to Ask first on reload.")}
     </div>
   );
 }

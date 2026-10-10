@@ -194,6 +194,10 @@ export function PowderWorkbench({
   // Reflection clicked in the F_obs/F_calc plot, spotlighted in the pattern
   // plot; null = nothing highlighted.
   const [highlight, setHighlight] = useState<{ hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null>(null);
+  // Residual peaks the Agent found (find_unexplained_peaks), marked on the
+  // plot until the user clears them or the next refinement changes the residual.
+  const [agentPeaks, setAgentPeaks] = useState<readonly { d: number; height: number }[] | null>(null);
+  useEffect(() => setAgentPeaks(null), [powderResult]);
   // Which phase the 3D model shows (0 = primary structure, 1.. = extra phases).
   const [viewPhaseIdx, setViewPhaseIdx] = useState(0);
 
@@ -409,6 +413,13 @@ export function PowderWorkbench({
   const toDisplayX = useCallback(
     (xv: number): number => (effectiveUnit === pattern.xUnit ? xv : convertAxisValue(xv, pattern.xUnit, effectiveUnit, axisCtx)),
     [effectiveUnit, pattern.xUnit, axisCtx],
+  );
+  // The Agent's unexplained peaks on the plot's axis (strongest first, as found).
+  const agentPeakMarks = useMemo(
+    () => (agentPeaks ?? [])
+      .map((p) => ({ x: convertAxisValue(p.d, "dSpacing", effectiveUnit, axisCtx), d: p.d }))
+      .filter((p) => Number.isFinite(p.x)),
+    [agentPeaks, effectiveUnit, axisCtx],
   );
   const curvesD = useMemo(
     () => (!displayUnits.includes("dSpacing") ? undefined : pattern.xUnit === "dSpacing" ? curves.x : convertAxisArray(curves.x, pattern.xUnit, "dSpacing", axisCtx)),
@@ -1292,6 +1303,7 @@ export function PowderWorkbench({
             ? (pattern.xUnit === "dSpacing" ? curves.x : convertAxisArray(curves.x, pattern.xUnit, "dSpacing", axisCtx))
             : null,
           observationCount: observations,
+          axis: axisCtx,
           source: session.rawData?.name ?? powderSource,
         };
       },
@@ -1304,6 +1316,10 @@ export function PowderWorkbench({
       setMustrain,
       setAnisotropicAdp,
       setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : null),
+      showPeaks: (peaks) => {
+        setAgentPeaks(peaks.length > 0 ? peaks.map((p) => ({ d: p.d, height: p.height })) : null);
+        if (peaks.length > 0) setPlotMode("curves");
+      },
       refine: runPowder,
       thorough: runThorough,
       probe: (options) => powderFit(options),
@@ -1624,8 +1640,28 @@ export function PowderWorkbench({
                       focusPoint={focusPoint}
                       highlight={highlight}
                       onHighlight={setHighlight}
+                      {...(agentPeakMarks.length > 0 ? { foundPeaks: agentPeakMarks, foundStyle: { label: "unexplained", color: theme.flag, guides: true } } : {})}
                       {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                     />
+                    {agentPeakMarks.length > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, rowGap: 4, marginTop: 6, fontSize: 12, color: theme.secondary, flexWrap: "wrap" }}>
+                        <span style={{ color: theme.flag, fontWeight: 600 }} title="Residual peaks the Agent found (find_unexplained_peaks): intensity the model does not explain. Cleared at the next refinement.">
+                          ▽ {agentPeakMarks.length} unexplained peak{agentPeakMarks.length === 1 ? "" : "s"}
+                        </span>
+                        {agentPeakMarks.map((p) => (
+                          <button
+                            key={p.d}
+                            type="button"
+                            title={`Zoom to d = ${p.d.toFixed(4)} Å`}
+                            onClick={() => setFocusPoint((f) => ({ x: p.x, token: (f?.token ?? 0) + 1 }))}
+                            style={{ border: `1px solid ${theme.border}`, background: theme.surface, borderRadius: 999, padding: "1px 8px", fontSize: 12, fontFamily: themeMono, color: theme.ink, cursor: "pointer" }}
+                          >
+                            d {p.d.toFixed(3)} Å
+                          </button>
+                        ))}
+                        <button type="button" onClick={() => setAgentPeaks(null)} style={{ ...resetRangeBtn }}>Clear</button>
+                      </div>
+                    )}
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
                       {tofViewOnly
                         ? session.powderOverlay

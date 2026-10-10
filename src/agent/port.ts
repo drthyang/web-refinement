@@ -22,6 +22,7 @@ import type { PowderProfile } from "@/core/workflow/powder";
 import type { MagneticModel } from "@/core/magnetic/types";
 import type { BackgroundType } from "@/core/diffraction/background";
 import type { MustrainModel, SiteTies } from "@/app/powderSpec";
+import type { AxisContext } from "@/visualization/axisUnits";
 
 /** The powder page as the Agent reads it — one render's state. */
 export interface PowderLiveState {
@@ -59,6 +60,8 @@ export interface PowderLiveState {
   readonly curves: { readonly x: readonly number[]; readonly yObs: readonly number[]; readonly yCalc: readonly number[] };
   /** `curves.x` as d-spacings (Å); null when the axis cannot convert. */
   readonly d: readonly number[] | null;
+  /** The page's axis calibration (wavelength, TOF constants), for converting positions between units. */
+  readonly axis: AxisContext;
   /** Points the fit uses: not excluded, inside the fit window. */
   readonly observationCount: number;
   /** Where the observed data came from (file name or demo). */
@@ -77,6 +80,9 @@ export interface PowderAgentPort {
   readonly setAnisotropicAdp: (on: boolean) => void;
   /** The fit window on the pattern's own axis; null restores the whole pattern. */
   readonly setFitRange: (range: { readonly min: number; readonly max: number } | null) => void;
+  /** Mark these residual peaks on the plot (▽ with a guide line); cleared by
+   *  the user or the next refinement. A view change only: no history step. */
+  readonly showPeaks: (peaks: readonly { readonly d: number; readonly height: number }[]) => void;
   /** The Refine button: a flat refinement of the freed parameters. Resolves to
    *  why it did not finish ("cancelled", "failed: …"), or null when it did. */
   readonly refine: () => Promise<string | null>;

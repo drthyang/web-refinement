@@ -100,7 +100,7 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "find_unexplained_peaks",
     title: "Find unexplained peaks",
     description:
-      "Powder page only. Peaks in the residual (obs − calc) of the curves on screen that the model does not explain — the impurity / magnetic-order signal. Returns d-spacings ranked by height. A handful suggests satellites or one impurity; dozens mean the fit itself is poor.",
+      "Powder page only. Peaks in the residual (obs − calc) of the curves on screen that the model does not explain — the impurity / magnetic-order signal. Returns d-spacings ranked by height, and marks them on the plot for the user (▽ with a guide line, listed under the plot, cleared at the next refinement) — so call it when the user asks to see or show the unexplained peaks. A handful suggests satellites or one impurity; dozens mean the fit itself is poor.",
     inputSchema: {
       sigma: z.number().positive().optional().describe("Detection threshold in robust σ (default 8)"),
       limit: z.number().int().positive().max(50).optional().describe("Most peaks to return (default 12)"),
@@ -188,10 +188,11 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "set_fit_range",
     title: "Change the fit window",
     description:
-      "Restrict the refinement to a window on the data's own axis (get_state gives the unit and extent; r in Å on the PDF page), or pass whole:true to undo it: the whole pattern on powder, the page's default r window on PDF.",
+      "Restrict the refinement to a window, or pass whole:true to undo it: the whole pattern on powder, the page's default r window on PDF. On powder, min/max may be in any unit the pattern converts to (get_state lists them with the extent in each): pass `unit` and the page converts with its own calibration (wavelength, or difC/difA/zero for TOF) — never convert yourself. On the PDF page the window is r in Å.",
     inputSchema: {
       min: z.number().optional(),
       max: z.number().optional(),
+      unit: z.enum(["tof", "twoTheta", "dSpacing", "q"]).optional().describe("Powder only: the unit of min/max — tof (µs), twoTheta (°), dSpacing (Å) or q (Å⁻¹). Default: the data's own axis"),
       whole: z.boolean().optional().describe("Powder: fit the whole pattern. PDF: the default r window"),
     },
     effect: "change",
