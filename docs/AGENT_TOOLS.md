@@ -251,8 +251,8 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 **The judgment tools.** `assess_refinement`, `suggest_next_steps` and
 `interpret_structure` turn a refinement result into a verdict, ranked next
 actions and a materials reading. They are pure, tested core code in
-[`src/core/diagnostics/`](../src/core/diagnostics), so an in-app chat panel
-could call the same functions.
+[`src/core/diagnostics/`](../src/core/diagnostics), and the in-app Agent
+calls the same functions on the live page ([below](#the-in-app-agent)).
 
 **How the tools are tested.**
 - A contract test calls every tool on canned inputs and pins the shape of its
@@ -280,7 +280,7 @@ keeping those boundaries mechanical is what keeps the surface maintainable.
 |---|---|---|---|
 | **Tools** | one capability | a pure JSON → JSON handler plus schema, registered in [`src/mcp/registry.ts`](../src/mcp/registry.ts) | a handler never calls another handler; no sequencing, no judgment prose |
 | **Skills** | an expert procedure | a `SKILL.md` that names tools | branches only on the *structured* outputs of the judgment tools |
-| **Orchestration** | the conversation, files, when to invoke | the agent runtime (Claude Code, Claude Desktop, any MCP client) | not built here; staying framework-agnostic is the design |
+| **Orchestration** | the conversation, files, when to invoke | the agent runtime (Claude Code, Claude Desktop, any MCP client), or the in-app Agent | outside the core; the Agent is a thin loop over the same tools |
 
 Where a piece of work belongs:
 - It must be correct every time → a core function, exposed as a tool. Example:
@@ -348,6 +348,96 @@ values or bypasses the constrained least squares. Replaying the same tool calls
 reproduces the result, and nothing counts as validated until a test or an
 external comparison records it.
 
+## The in-app Agent
+
+The Agent puts a model — Claude, or a local model on Ollama — beside the
+analysis open in the browser. It reads the
+live page, judges the fit with the tools above, and makes changes through the
+page's own controls. Open it with the **Agent** button in the header.
+
+**Where it works.**
+- The powder page (Rietveld), single- and multi-phase, with or without an
+  applied magnetic model.
+- The PDF page (a real-space fit of G(r)), single- and multi-phase, with or
+  without an applied spin model. Rw is its agreement; the fit weights every
+  point equally, so the answers carry no GoF and say the esds are not
+  statistical.
+- Not yet: single crystal, and the magnetic analysis step. Their state is
+  private to the page; each needs its own port.
+
+**Its tools.** One list ([`src/agent/tools.ts`](../src/agent/tools.ts))
+serves every way in, so a model sees the same names everywhere. Each tool names
+the pages it works on; on another page it answers with an error that says so.
+The page-specific handlers are [`powderTools.ts`](../src/agent/powderTools.ts)
+and [`pdfTools.ts`](../src/agent/pdfTools.ts).
+- Read tools run at once: `get_state`, `assess_refinement`,
+  `suggest_next_steps`, `rank_next_parameters`, `check_cell_symmetry`,
+  `find_unexplained_peaks`, `bond_geometry`, `interpret_structure`, `read_ref`.
+  The analysis tools are the MCP handlers above, fed from what is on screen.
+- Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
+  `set_adp_model`, `set_fit_range`, `refine`, `reset_parameters`, `go_to_step`.
+  Each is the page's own handler — the Agent's `refine` is the Refine button.
+- Powder page only: `rank_next_parameters`, `check_cell_symmetry`,
+  `find_unexplained_peaks`, `set_background`, `set_microstrain`,
+  `set_adp_model`. On the PDF page, `assess_refinement` judges convergence,
+  correlations, bounds and physical values, without the GoF verdict or the
+  Bragg-peak residual scan, and `set_fit_range` with `whole` restores the
+  page's default r window.
+- `cancel_refinement` never asks.
+- There is no tool that sets a parameter value. The guardrails above hold.
+
+**Approval and undo.** A change shows an approval card in the drawer; the
+model learns when the user declines. "Auto-approve" skips the cards for the
+rest of the session. Every change is a step in History tagged `agent`
+(`HistoryStep.actor`), so ⌘Z undoes it like any other step.
+
+**Four ways to reach a model.**
+
+| Mode | Where the model runs | Credentials | Works on |
+|---|---|---|---|
+| Claude Code | your Claude Code session, through the `materia-live` MCP server | your Claude Code login | `npm run dev` |
+| API key | the browser, with the Anthropic SDK | your Anthropic API key, kept in this browser | the dev server and the published site |
+| Local proxy | the browser; the dev server forwards to the API | `ANTHROPIC_API_KEY` where the dev server runs (or `.env.local`) | `npm run dev`, `npm run preview` |
+| Ollama | your Ollama server (a local model) | none | the dev server; the published site once Ollama allows its origin |
+
+- **Claude Code.** `.mcp.json` starts `materia-live` (`npm run mcp:live`) next
+  to `materia`. It listens on `127.0.0.1:5199` (`MATERIA_LIVE_PORT`); the page
+  long-polls it when the Agent is open in this mode. Only pages served from
+  this machine may connect. `materia` keeps the full headless toolset for
+  what-ifs on data the app has not opened.
+- **API key.** Claude Opus 5.5 by default (Sonnet 5.5 and Haiku 5.5 on offer),
+  adaptive thinking, streamed. Every turn stays on the chosen model: the API's
+  refusal fallback to another model is an opt-in setting, and a turn another
+  model answered is announced. The key is kept for the tab unless you tick
+  Remember; it is never written to a project, autosave, or report. The system
+  prompt carries the `my-rietveld-workflow` skill and two `knowledge/` notes,
+  and is cached across turns.
+- **Local proxy.** `<base>api/anthropic/` on the dev and preview servers
+  ([`src/agent/proxy.ts`](../src/agent/proxy.ts)). Only the app's own
+  pages may use it. The static build has no proxy.
+- **Ollama.** Ollama answers the Anthropic Messages API at
+  `<server>/v1/messages`, so the same chat loop, tools and approvals drive a
+  local model ([`src/agent/ollama.ts`](../src/agent/ollama.ts)). The page
+  talks to the server directly (default `http://localhost:11434`) and lists
+  its models from `/api/tags`; models that cannot call tools are shown but
+  not offered. Requests carry only plain headers, which Ollama's CORS rules
+  admit, and only the fields Ollama reads (no caching, effort or fallback).
+  Ollama's defaults allow pages on `localhost`; for the published site, start
+  Ollama with `OLLAMA_ORIGINS` set to its address. The instructions alone are
+  about 15k tokens, so pick a model with at least a 32k context. Checked with
+  `gemma4:26b` on Ollama 0.40: it read the fit, refined after approval,
+  assessed the result and stopped at the method's gate. Local models follow
+  the method less reliably than Claude; the approval cards are the guard.
+
+`node scripts/live-bridge-demo.mjs` drives an open page through the bridge
+the way Claude Code does, as a smoke test without a model.
+
+**How it is tested.** [`src/agent/`](../src/agent) tests run the tools on
+a real powder fit and a real PDF fit (the refinement engine, the assessment), the bridge through
+an MCP client, the chat loop against a stand-in API that streams scripted
+turns (as Claude and as Ollama), the Ollama model listing against a stand-in
+server, and the proxy against a stubbed upstream.
+
 ## Planned
 
 Tool slices, in priority order (names are provisional):
@@ -367,7 +457,7 @@ Other planned work:
 - Richer per-tool JSON schemas.
 - Assessment variants for single-crystal data (in the R1/wR2/GooF convention)
   and for magnetic refinements.
-- An in-browser tool registry, so a chat panel calls the same functions the
-  buttons do. Claude Agent SDK tool definitions are another delivery option.
+- The Agent on the single-crystal page and the magnetic analysis step, each
+  through its own port; PDF symmetry modes and boxcar scans as tools.
 
 The order across the whole project is in [ROADMAP.md §5](./ROADMAP.md).

@@ -10,6 +10,7 @@
  */
 
 import type { HistoryBinding } from "@/app/historyBinding";
+import type { AgentLink } from "@/agent/link";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
 import type { PdfWorkspace } from "@/core/project/types";
@@ -102,7 +103,7 @@ function rwInk(rw: number): string {
   return color.warnInk;
 }
 
-export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructure = false, client, step = 0, onStep, onMagneticPresent, exportsRef, onLoadData, onLoadCif, onAddPhase, onRemovePhase, presetValues, presetFitRange, restore, stepHistory }: {
+export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructure = false, client, step = 0, onStep, onMagneticPresent, exportsRef, onLoadData, onLoadCif, onAddPhase, onRemovePhase, presetValues, presetFitRange, restore, stepHistory, agentLink }: {
   structure: StructureModel;
   pattern: PdfPattern;
   /** Active workflow step (0 = refinement, 1 = magnetic PDF analysis). */
@@ -134,6 +135,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   restore?: PdfWorkspace;
   /** The shell's step history: recorded at this page's refinements and model changes. */
   stepHistory?: HistoryBinding;
+  /** Where this page publishes its Agent port (agent/port.ts). */
+  agentLink?: AgentLink;
 }): JSX.Element {
   const multiPhase = extraPhases.length > 0;
   // The workspace this page was mounted to reopen, read once. It applies only
@@ -551,7 +554,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     return applyMagneticMoments(spinFit.magnetic, spec.bindings, values);
   }, [spinFit, activeParams, spec.bindings]);
 
-  async function runRefine(): Promise<void> {
+  /** The Refine button. Resolves to why it did not finish, or null when it did (the Agent reads it). */
+  async function runRefine(): Promise<string | null> {
     stepHistory?.recordNow("edit");
     setBusy(true);
     const specAtCall = specRef.current;
@@ -567,13 +571,20 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         // The parameterization (or the whole problem) changed mid-run; the
         // result's ids belong to the old spec — drop it rather than mixing.
         console.info("[status] refinement result discarded — the parameter spec changed while it ran");
-        return;
+        return "the parameter set changed while it ran, so its result was dropped";
       }
       setParams((ps) => ps.map((p) => ({ ...p, value: res.parameters[p.id] ?? p.value })));
       setResult(res);
       stepHistory?.requestStep("refine", spinFit ? "Refine nuclear + magnetic G(r)" : "Refine");
+      return null;
     } catch (e) {
-      console.error(`[status] PDF refinement failed: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === CANCELLED) {
+        console.info("[status] PDF refinement cancelled");
+        return "cancelled";
+      }
+      console.error(`[status] PDF refinement failed: ${msg}`);
+      return `failed: ${msg}`;
     } finally {
       setLive(null);
       setBusy(false);
@@ -583,7 +594,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // Multi-start (one engine, two faces, as powder): a cold start gets the wide
   // "Prefit" search; once a fit exists it's a lighter "Escape min" nudge out of
   // the current basin. Keeps the lowest-χ² of baseline + restarts.
-  async function runMultiStart(): Promise<void> {
+  async function runMultiStart(): Promise<string | null> {
     stepHistory?.recordNow("edit");
     setBusy(true);
     const specAtCall = specRef.current;
@@ -603,7 +614,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           );
       if (specRef.current !== specAtCall) {
         console.info("[status] multi-start result discarded — the parameter spec changed while it ran");
-        return;
+        return "the parameter set changed while it ran, so its result was dropped";
       }
       setParams((ps) => ps.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value })));
       setResult(ms.final);
@@ -612,8 +623,15 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         `[status] PDF multi-start (${escape ? "escape" : "prefit"}): best of ${ms.restartsRun + 1} starts` +
         `${ms.bestStartIndex > 0 ? ` (restart ${ms.bestStartIndex} won)` : " (baseline held)"} · Rw ${(100 * (ms.final.agreement.rWeighted ?? 0)).toFixed(2)}%`,
       );
+      return null;
     } catch (e) {
-      console.error(`[status] PDF multi-start failed: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === CANCELLED) {
+        console.info("[status] PDF multi-start cancelled");
+        return "cancelled";
+      }
+      console.error(`[status] PDF multi-start failed: ${msg}`);
+      return `failed: ${msg}`;
     } finally {
       setLive(null);
       setBusy(false);
@@ -1105,6 +1123,54 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
     setLive(null);
     stepHistory?.requestStep("edit", "Reset to starting values");
   }
+
+  /** Stop the running refinement or multi-start; the parameters keep their values. */
+  function cancelRefine(): void {
+    client.cancel();
+  }
+
+  // Publish the Agent port (agent/port.ts): the live state, read lazily, and
+  // this page's own handlers — the Agent's `refine` is the Refine button.
+  // Republished every render, so a call always sees the state on screen.
+  useEffect(() => {
+    if (!agentLink) return;
+    agentLink.publish({
+      technique: "pdf",
+      state: () => {
+        const values: Record<string, number> = {};
+        for (const p of activeParams) values[p.id] = p.value;
+        return {
+          phases: phases.map((ph) => ph.structure),
+          refinedPhases: phases.map((ph) => applyParameters(ph.structure, multiPhase ? pdfPhaseBindingsFor(spec.bindings, ph.id) : spec.bindings, values).model),
+          pattern,
+          parameters: activeParams,
+          bindings: spec.bindings,
+          result,
+          fitRange: { min: fitRange.min, max: fitRange.max },
+          defaultRange: { min: defaultRange.min, max: defaultRange.max },
+          extent: { min: rFirst, max: rLast },
+          busy: busy || boxcarBusy || sampleBusy,
+          rw,
+          curves,
+          observationCount: curves.x.filter((r) => r >= fitRange.min && r <= fitRange.max).length,
+          positionMode,
+          spinModel: spinFit !== null,
+          warnings: [motionConflict, adpWarning].filter((w): w is string => w !== null),
+          source: pattern.name,
+        };
+      },
+      setFixed: (changes) => {
+        const fixed = new Map(changes.map((c) => [c.id, c.fixed]));
+        setParams((ps) => ps.map((p) => (fixed.has(p.id) ? { ...p, fixed: fixed.get(p.id)! } : p)));
+      },
+      setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : defaultRange),
+      refine: runRefine,
+      thorough: runMultiStart,
+      cancel: cancelRefine,
+      reset,
+    });
+  });
+  useEffect(() => () => agentLink?.release("pdf"), [agentLink]);
 
   // Exports published to the app header (engine contract): the output triple —
   // refined curves (CSV), refined structure(s) (CIF with esds + Rw meta), and
@@ -1789,6 +1855,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           thoroughMode={result ? "escape" : "prefit"}
           prefitTitle="Prefit from a cold start: a broad set of perturbed restarts of the free parameters, keeping the best — lands the model in a good basin before you refine. (No Le Bail stage — that extracts Bragg intensities, which real-space G(r) doesn't have.)"
           onReset={reset}
+          onCancel={cancelRefine}
           busy={busy}
           result={result}
           title="PDF parameters"

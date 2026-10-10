@@ -1,10 +1,11 @@
 /// <reference types="vitest/config" />
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { normalize, resolve, sep } from "node:path";
+import { anthropicProxy } from "./src/agent/proxy";
 
 // GitHub Pages serves from a repo subpath; override with VITE_BASE if needed.
 const base = process.env.VITE_BASE ?? "/web-refinement/";
@@ -61,9 +62,29 @@ function serveLocalData(): Plugin {
   };
 }
 
-export default defineConfig({
+/**
+ * The Agent's local proxy (src/agent/proxy.ts): `<base>api/anthropic/…`
+ * forwarded to the Anthropic API with ANTHROPIC_API_KEY from the environment
+ * or .env.local, so the key never reaches the page. Dev and preview servers
+ * only; the static build has no server and so no proxy.
+ */
+function agentProxy(apiKey: string | undefined): Plugin {
+  const handler = anthropicProxy(apiKey);
+  return {
+    name: "agent-anthropic-proxy",
+    configureServer(server) {
+      server.middlewares.use(handler);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(handler);
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
   base,
-  plugins: [react(), serveLocalData()],
+  // Read without a prefix filter, server side only: never exposed to the page.
+  plugins: [react(), serveLocalData(), agentProxy(loadEnv(mode, process.cwd(), "").ANTHROPIC_API_KEY)],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -82,4 +103,4 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.{test,spec}.ts"],
   },
-});
+}));

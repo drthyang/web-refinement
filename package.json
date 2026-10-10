@@ -1,6 +1,6 @@
 {
   "name": "web-refinement",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Browser-native refinement workbench for atomic and magnetic structures",
@@ -18,9 +18,12 @@
     "screenshots": "node scripts/device-screenshots.mjs",
     "build:mcp": "node scripts/build-mcp.mjs",
     "gen:tooldoc": "node scripts/gen-tooldoc.mjs",
-    "mcp": "node scripts/build-mcp.mjs --serve"
+    "mcp": "node scripts/build-mcp.mjs --serve",
+    "build:mcp-live": "node scripts/build-mcp.mjs --live",
+    "mcp:live": "node scripts/build-mcp.mjs --live --serve"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

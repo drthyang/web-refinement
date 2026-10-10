@@ -85,6 +85,7 @@ import { excludedPointMask } from "@/core/refinement/factors";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { type Session, buildSpecFor, DEFAULT_INSTRUMENT, SYNTHETIC_SOURCE, EMPTY_SOURCE } from "@/app/powderSession";
 import type { EngineExportsRef } from "@/app/workbenchEngine";
+import type { AgentLink } from "@/agent/link";
 
 // Lazy so three.js (~550 kB) only loads when the user opens the 3D view.
 const StructureView = lazy(() => import("@/app/ui/StructureView").then((m) => ({ default: m.StructureView })));
@@ -152,6 +153,8 @@ export interface PowderWorkbenchProps {
   useGpu?: boolean;
   /** The shell's step history: recorded at this page's refinements and model changes. */
   stepHistory?: HistoryBinding;
+  /** Where this engine publishes its Agent port (agent/port.ts) while active. */
+  agentLink?: AgentLink;
 }
 
 export function PowderWorkbench({
@@ -160,7 +163,7 @@ export function PowderWorkbench({
   onLoadData, onLoadCif, onAddPhase, onRemovePhase, onClearStructures, detection, onOverrideXUnit,
   onLoadInstrument, onLoadDemo, demos = [],
   onOpenProject, viewRestore, useGpu = true,
-  stepHistory,
+  stepHistory, agentLink,
 }: PowderWorkbenchProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   // Incremented by the toolbar "⊡ Fit range" button; the plot zooms onto the
@@ -706,8 +709,9 @@ export function PowderWorkbench({
     stepHistory?.requestStep("edit", "Reset to starting values");
   }
 
-  /** Flat co-refinement of the currently-freed parameters. */
-  async function runPowder(): Promise<void> {
+  /** Flat co-refinement of the currently-freed parameters. Resolves to why it
+   *  did not finish (cancelled, failed), or null when it did. */
+  async function runPowder(): Promise<string | null> {
     // The starting point (freed parameters, edited values, settings) is a step
     // of its own, so going back lands before this refinement, not after it.
     stepHistory?.recordNow("edit");
@@ -740,7 +744,7 @@ export function PowderWorkbench({
           `wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%.`,
         );
         stepHistory?.requestStep("refine", coRefined ? "Refine nuclear + magnetic" : "Refine (magnetic model held)");
-        return;
+        return null;
       }
       // The WebGPU structure-factor kernel accelerates only the flat single-phase
       // nuclear-powder Jacobian; the client itself gates on that + WebGPU support
@@ -765,9 +769,11 @@ export function PowderWorkbench({
       setPowderResult(result);
       setMessage(`Powder refinement ${result.status}: wR = ${(100 * (result.agreement.rWeighted ?? 0)).toFixed(2)}%${gpuActive ? " · GPU |F|²" : ""}.`);
       stepHistory?.requestStep("refine", "Refine");
+      return null;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setMessage(msg === CANCELLED ? "Refinement cancelled." : `Powder refinement failed: ${msg}`);
+      return msg === CANCELLED ? "cancelled" : `failed: ${msg}`;
     } finally {
       livePreview.current = null;
       setBusy(false);
@@ -839,9 +845,9 @@ export function PowderWorkbench({
    *     lowest-χ² result.
    * With an applied magnetic model the search runs over the moment subspace
    * instead (see the magnetic branch below), so the Le Bail stage is nuclear /
-   * multi-phase only.
+   * multi-phase only. Resolves to why it did not finish, or null when it did.
    */
-  async function runThorough(): Promise<void> {
+  async function runThorough(): Promise<string | null> {
     // One engine, two faces: with no fit yet it's a "Prefit" (broad cold-start
     // search + Le Bail); once a fit exists it's a light "Escape min" nudge.
     const mode: "prefit" | "escape" = powderResult ? "escape" : "prefit";
@@ -882,7 +888,7 @@ export function PowderWorkbench({
           : `baseline held over ${ms.restartsRun + 1} starts`;
         setMessage(`Magnetic ${mode === "prefit" ? "prefit" : "escape"}: ${bestNote} — wR ${wr}%.${degNote}`);
         stepHistory?.requestStep("refine", mode === "prefit" ? "Magnetic prefit" : "Magnetic escape minimum");
-        return;
+        return null;
       }
       // Stage 1 — Le Bail cell pre-fit (prefit only; single-phase, when a cell
       // parameter is free). A TOF pattern also needs the diffractometer
@@ -938,9 +944,11 @@ export function PowderWorkbench({
           : `Already at the best minimum — the baseline beat all ${ms.restartsRun + 1} starts, wR ${wr}%.`);
       }
       stepHistory?.requestStep("refine", mode === "prefit" ? "Prefit" : "Escape minimum");
+      return null;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setMessage(msg === CANCELLED ? "Refinement cancelled." : `${mode === "prefit" ? "Prefit" : "Escape min"} failed: ${msg}`);
+      return msg === CANCELLED ? "cancelled" : `failed: ${msg}`;
     } finally {
       livePreview.current = null;
       setBusy(false);
@@ -1221,6 +1229,73 @@ export function PowderWorkbench({
     };
     return () => { exportsRef.current = null; };
   });
+
+  // Publish the Agent port (agent/port.ts) while this engine is the active
+  // one with data loaded: the live state, read lazily, and this page's own
+  // handlers — the Agent's `refine` is the Refine button. Republished every
+  // render, so a call always sees the state on screen.
+  useEffect(() => {
+    if (!agentLink) return;
+    if (!active || !hasContent) {
+      // Inactive under the PDF page, this page still renders: leave its port alone.
+      agentLink.release("powder");
+      return;
+    }
+    agentLink.publish({
+      technique: "powder",
+      state: () => {
+        const excluded = excludedPointMask(curves.yObs);
+        let observations = 0;
+        curves.x.forEach((x, i) => {
+          if (!excluded[i] && !(fitRangeActive && (x < fitRange!.min || x > fitRange!.max))) observations++;
+        });
+        return {
+          structure,
+          extraPhases: session.extraPhases,
+          refinedPhases,
+          pattern,
+          parameters: powderParams,
+          bindings: pBindings,
+          profile: session.powderProfile,
+          magnetic: session.magnetic ?? null,
+          result: powderResult,
+          instrument: instrumentLoaded ? instrument : null,
+          fitRange: fitRangeActive ? { min: fitRange!.min, max: fitRange!.max } : null,
+          extent: { min: patternExtent.min, max: patternExtent.max },
+          busy,
+          viewOnly: tofViewOnly,
+          wR: weightedR(curves),
+          settings: {
+            backgroundTerms: session.backgroundTerms,
+            backgroundType: session.powderProfile.backgroundType ?? "chebyshev",
+            mustrain: session.mustrain ?? "isotropic",
+            anisotropicAdp: !!session.anisotropicAdp,
+            siteTies: session.siteTies,
+          },
+          curves,
+          d: displayUnits.includes("dSpacing")
+            ? (pattern.xUnit === "dSpacing" ? curves.x : convertAxisArray(curves.x, pattern.xUnit, "dSpacing", axisCtx))
+            : null,
+          observationCount: observations,
+          source: session.rawData?.name ?? powderSource,
+        };
+      },
+      setFixed: (changes) => {
+        const fixed = new Map(changes.map((c) => [c.id, c.fixed]));
+        setSession((s) => ({ ...s, powderParams: s.powderParams.map((p) => (fixed.has(p.id) ? { ...p, fixed: fixed.get(p.id)! } : p)) }));
+      },
+      setBackgroundTerms,
+      setBackgroundType,
+      setMustrain,
+      setAnisotropicAdp,
+      setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : null),
+      refine: runPowder,
+      thorough: runThorough,
+      cancel: cancelPowder,
+      reset: resetPowderParams,
+    });
+  });
+  useEffect(() => () => agentLink?.release("powder"), [agentLink]);
 
   // Summary-card content (Structure / Data / Instrument).
   const cell = structure.cell;

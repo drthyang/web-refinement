@@ -113,6 +113,40 @@ html {
   overflow: hidden;
 }
 
+/*
+ * The frame holds the shell and, when open, the Agent drawer beside it. The
+ * drawer takes its width from the window, so the whole shell — header, bars,
+ * page and footer — narrows as one column and keeps the alignment rule above;
+ * nothing slides under the drawer.
+ */
+.wb-frame {
+  display: flex;
+  align-items: stretch;
+}
+.wb-frame > .wb-shell {
+  flex: 1;
+  min-width: 0;
+}
+.wb-agent {
+  flex: none;
+  width: clamp(340px, 27vw, 460px);
+  height: calc(100vh / var(--ui-zoom));
+  height: calc(100dvh / var(--ui-zoom));
+  position: sticky;
+  top: 0;
+}
+/* A narrow window has no room beside the page: the drawer covers it. */
+@media (max-width: 900px) {
+  .wb-agent {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    height: auto;
+    z-index: 60;
+    border-left: none !important;
+  }
+}
+
 /* The copyright footer clears the home indicator when the page runs full-bleed. */
 .wb-footer {
   padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
