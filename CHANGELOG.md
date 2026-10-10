@@ -9,6 +9,14 @@ release fixes bugs.
 
 ### Added
 
+- **An eval suite for the Agent** (`src/agent/evals/`). Nine scenarios, each
+  written against a failure the researcher rounds or a user found (the
+  refused full refinement, misfits called extra peaks, a lower symmetry
+  proposed first, a bare occupancy, a window given in d, the PDF method), run
+  through the real chat loop and tools on pages built from the repository's
+  data, and graded. CI replays each with a scripted model, once as the Agent
+  should behave and once as it failed, so every check is shown to catch its
+  failure; `npm run eval:agent` runs them against a real model.
 - **The space group is reviewed last** (`review_symmetry`, for the Agent and
   over MCP). Once the structure is refined to the best its space group allows
   — scale, background, cell, positions, profile, ADPs — and the fit is still

@@ -605,6 +605,39 @@ the chat loop against a stand-in API that streams scripted turns (as Claude,
 Ollama and LM Studio), the Ollama and LM Studio model listings against
 stand-in servers, and the proxy against a stubbed upstream.
 
+**The eval suite** ([`src/agent/evals/`](../src/agent/evals)) grades the
+Agent's behaviour, not its code. A scenario is a page built from the
+repository's own data (the Mn₃Ga powder demo with seeded noise, a start with
+only intensity misfits, one with an impurity line; the GaTa₄Se₈ PDF demo),
+what the user says, what they approve, and the checks the run must pass. It
+runs through the real chat loop, executor and tools; only the model varies.
+Each scenario guards against a failure that was found:
+
+| Scenario | Guards against |
+|---|---|
+| `full-refinement` | refusing the full refinement on the cell check (user report) |
+| `misfits-not-extra-peaks` | calling intensity misfit on known reflections extra peaks (user report) |
+| `symmetry-last` | proposing a lower symmetry before the structure is refined (user report) |
+| `impurity-line` | missing, or not reporting, a line no phase explains |
+| `bare-occupancy` | freeing an occupancy bare, or lifting the rule unasked |
+| `free-everything` | retrying a refused refinement with the same free set |
+| `fit-window-in-d` | reading a window given in d as 2θ |
+| `pdf-method` | changing the PDF fit before reading its method; δ1 with δ2 |
+| `pdf-local-structure` | answering local-versus-average without a boxcar scan |
+
+The checks mostly read the tool calls (what the Agent did); a few read the
+replies sentence by sentence (a sentence that names extra peaks or a lower
+symmetry without negating it). In CI every scenario is replayed with a
+scripted model twice: as the Agent should behave, where every check passes,
+and as it behaved when the failure was found, where the checks written
+against it must fail. So each check is shown to catch what it is for.
+
+Against a real model, `MATERIA_AGENT_EVAL=1 ANTHROPIC_API_KEY=… npm run
+eval:agent` runs every scenario and prints a pass count per scenario.
+`MATERIA_AGENT_EVAL_MODEL`, `_EFFORT`, `_TRANSPORT` (`ollama` or `lmstudio`,
+with `_SERVER`), `_ONLY` (scenario ids), `_REPEAT` (runs per scenario) and
+`_OUT` (a JSON report with the transcripts) adjust the run.
+
 ## Planned
 
 Tool slices, in priority order (names are provisional):
