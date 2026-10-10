@@ -210,6 +210,19 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     pages: ["powder", "pdf"],
   },
   {
+    name: "boxcar_scan",
+    title: "Boxcar scan",
+    description:
+      "PDF page only. The r-resolved view of the current model: a box of fixed width slid across the fit window, the FREE parameters refined in each box (seeded from the previous one), as the page's Boxcar view does — the user watches it there. It answers whether the local structure differs from the average: Rw and parameters that drift between low and high r. The parameter rows are left as they are (a diagnostic, not a fit). Returns, per box, its r range, Rw and the free parameters' values, and each parameter's spread. Takes about one refinement per box. Free only what you want tracked first.",
+    inputSchema: {
+      width: z.number().positive().optional().describe("Box width in Å (default 5)"),
+      step: z.number().positive().optional().describe("Advance between boxes in Å (default 1; width/2 gives half-overlapping boxes)"),
+      direction: z.enum(["up", "down", "both"]).optional().describe("Walk low → high r (default), high → low, or both (path dependence shows as a gap)"),
+    },
+    effect: "change",
+    pages: ["pdf"],
+  },
+  {
     name: "reset_parameters",
     title: "Reset to starting values",
     description: "Put every parameter back to its starting value and clear the result (the Reset control). Recorded as a step, so it can be undone.",

@@ -377,6 +377,11 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
   `set_adp_model`, `set_fit_range`, `refine`, `reset_parameters`, `go_to_step`.
   Each is the page's own handler — the Agent's `refine` is the Refine button.
+- PDF page only: `boxcar_scan`, the Boxcar view's scan. The free parameters
+  are refined box by box across the fit window, seeded from the previous box,
+  and the parameter rows are left as they are. It returns each box's r range,
+  Rw and values, and each parameter's spread, to tell the local structure
+  from the average.
 - Powder page only: `rank_next_parameters`, `check_cell_symmetry`,
   `find_unexplained_peaks`, `set_background`, `set_microstrain`,
   `set_adp_model`. On the PDF page, `assess_refinement` judges convergence,

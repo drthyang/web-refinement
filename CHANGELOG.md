@@ -9,6 +9,9 @@ release fixes bugs.
 
 ### Added
 
+- **The Agent runs boxcar scans on the PDF page** (`boxcar_scan`): the free
+  parameters refined box by box across r, shown in the Boxcar view, with each
+  box's Rw and values returned, to tell the local structure from the average.
 - **The cards the Agent is on breathe.** While the Agent is open, the edge of
   each card a running or waiting tool call acts on (Structure, Data,
   Instrument, Pattern, Parameters, Result) breathes, as do the cards a reply
@@ -30,6 +33,9 @@ release fixes bugs.
 - The Agent's refine reported the previous history step when the page took
   long to render; switching Ask first / Auto during a run now reaches the
   model at its next turn.
+- On the PDF page, the assessment's advice for a displacement parameter at 0
+  is about real space (correlated motion, a short window), not Rietveld
+  background or absorption; the Agent's bond list names each bond once.
 - **Residual peaks are judged against each point's uncertainty and the known
   reflections.** Lone noisy points in a low-count TOF region were reported as
   "unexplained peaks", and so were misfits of a phase's own reflections. Now

@@ -27,6 +27,7 @@ export const TOOL_CARDS: Readonly<Record<string, readonly AgentCard[]>> = {
   set_fit_range: ["pattern"],
   refine: ["parameters", "pattern"],
   reset_parameters: ["parameters"],
+  boxcar_scan: ["pattern"],
 };
 
 /** Words that name a card, conservatively: each must point at one place on the page. */

@@ -23,6 +23,7 @@ import type { MagneticModel } from "@/core/magnetic/types";
 import type { BackgroundType } from "@/core/diffraction/background";
 import type { MustrainModel, SiteTies } from "@/app/powderSpec";
 import type { AxisContext } from "@/visualization/axisUnits";
+import type { BoxcarDirectionChoice, BoxcarRun } from "@/core/workflow/pdfBoxcar";
 
 /** The powder page as the Agent reads it — one render's state. */
 export interface PowderLiveState {
@@ -145,6 +146,10 @@ export interface PdfAgentPort {
   readonly thorough: () => Promise<string | null>;
   /** The Refine button's fit with these options, returned and never applied (see PowderAgentPort). */
   readonly probe: (options: Partial<RefinementOptions>) => Promise<RefinementResult>;
+  /** The Boxcar view's scan with this plan (it becomes the panel's plan, and the
+   *  view opens): the free set refined in each box across the fit window. The
+   *  parameter rows are left as they are. Null when it was cancelled or failed. */
+  readonly boxcar: (plan: { readonly width: number; readonly step: number; readonly direction: BoxcarDirectionChoice }) => Promise<BoxcarRun | null>;
   readonly cancel: () => void;
   /** Every parameter back to its starting value. */
   readonly reset: () => void;

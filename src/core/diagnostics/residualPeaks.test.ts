@@ -35,3 +35,18 @@ describe("residual peaks", () => {
     expect(residualPeaks(noSigma).between.length).toBeGreaterThan(1);
   });
 });
+
+describe("an ADP at its bound, by technique", () => {
+  it("gives real-space advice on the PDF page", async () => {
+    const { assessRefinement } = await import("@/core/diagnostics/assessment");
+    const result = {
+      status: "converged" as const, parameters: { U_Ga: 0 }, esd: {}, agreement: { rFactor: 0.12, rWeighted: 0.125 }, history: [],
+      diagnostics: { svdZeroCount: 0, singularParameterIds: [], conditionNumber: 10, highCorrelations: [], maxLambda: 1e-3, atBounds: [{ parameterId: "U_Ga", bound: "min" as const, value: 0 }], maxShiftOverEsd: 0 },
+    };
+    const parameters = [{ id: "U_Ga", label: "Ga U", kind: "uAniso" as const, value: 0, initialValue: 0.01, fixed: false, min: 0 }];
+    const pdf = assessRefinement({ result, parameters, observationCount: 500, mode: "pdf" });
+    expect(pdf.findings[0]!.detail).toMatch(/correlated motion sharpens them/);
+    const powder = assessRefinement({ result, parameters, observationCount: 500 });
+    expect(powder.findings[0]!.detail).toMatch(/over-damping high-angle intensity/);
+  });
+});

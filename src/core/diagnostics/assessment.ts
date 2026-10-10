@@ -100,7 +100,7 @@ export interface AssessmentInput {
      *  reflections at large d may then be k = 0 magnetic order. */
     readonly magneticNeutron?: boolean;
   };
-  readonly mode?: "powder" | "single-crystal";
+  readonly mode?: "powder" | "single-crystal" | "pdf";
 }
 
 /**
@@ -307,7 +307,9 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
       severity: isStructural ? "critical" : "warning",
       summary: `${p?.label ?? b.parameterId} is resting on its ${b.bound} bound (${b.value}).`,
       detail: p && ADP_KINDS.has(p.kind)
-        ? "A displacement parameter pinned at a bound (often B→0) usually means the model is over-damping high-angle intensity — check the background, an absorption/extinction effect, or a correlation, rather than trusting the value."
+        ? input.mode === "pdf"
+          ? "In real space a displacement parameter at 0 usually means the near-neighbour peaks are sharper than the model's: correlated motion sharpens them, and with δ1/δ2 (or sratio) held, U takes up the sharpening. Free one correlated-motion term (δ2 at low temperature, δ1 at high), or fit a window long enough to pin U, rather than trusting the value. In a short low-r window it can also mean the local structure differs from the model."
+          : "A displacement parameter pinned at a bound (often B→0) usually means the model is over-damping high-angle intensity — check the background, an absorption/extinction effect, or a correlation, rather than trusting the value."
         : "A free parameter at a bound has a meaningless esd and signals the fit wanted to go where physics forbids — hold it fixed and find the upstream cause (correlation, wrong background, bad starting value).",
       parameterIds: [b.parameterId],
       evidence: { bound: b.bound, value: b.value },

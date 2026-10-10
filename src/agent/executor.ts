@@ -172,7 +172,7 @@ export class AgentExecutor implements ToolRunner {
       // The user's own unsaved edits become their step first, so the agent's
       // step holds only what the agent changed.
       this.host.recordNow("edit");
-      const note = await this.host.asAgent(async () => {
+      const changed = await this.host.asAgent(async () => {
         const n = port.technique === "pdf" ? await changePdf(spec.name, input, port, this.host) : await changePowder(spec.name, input, port, this.host);
         await this.host.settle();
         const kind = STEP_KIND[spec.name];
@@ -182,8 +182,9 @@ export class AgentExecutor implements ToolRunner {
         }
         return n;
       });
+      const note = typeof changed === "object" ? changed.note : changed;
       const after = this.requirePort().state();
-      const out = changeOutcome(spec.name, before, after, this.currentStep(), note);
+      const out = { ...changeOutcome(spec.name, before, after, this.currentStep(), note), ...(typeof changed === "object" ? changed.data : {}) };
       update({ status: "done", outcome: outcomeLine(spec.name, before, after, note) });
       return this.respond(out);
     } catch (e) {
