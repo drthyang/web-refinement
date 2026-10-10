@@ -300,7 +300,7 @@ shape is pinned, and every registered tool appears on this page.
 
 ## Skills
 
-A skill composes tools into an expert procedure. Two ship in this repository:
+A skill composes tools into an expert procedure. Four ship in this repository:
 
 - [`.claude/skills/my-rietveld-workflow/`](../.claude/skills/my-rietveld-workflow/SKILL.md),
   the maintainer's own powder Rietveld procedure: a sanity check of the cell, a
@@ -313,6 +313,19 @@ A skill composes tools into an expert procedure. Two ship in this repository:
   order, one correlated-motion term, boxcar scans for local versus average
   structure. General practice until the maintainer's own PDF method is written
   down.
+- [`.claude/skills/magnetic-analysis/`](../.claude/skills/magnetic-analysis/SKILL.md),
+  the powder magnetic structure procedure the Rietveld skill hands off to: k from
+  the peaks the nuclear fit leaves, the magnetic space groups top-down, the
+  moments, then nuclear and magnetic together, with the powder's limits. A first
+  draft, to confirm with the maintainer.
+- [`.claude/skills/symmetry-review/`](../.claude/skills/symmetry-review/SKILL.md),
+  the last step of a Rietveld refinement, if at all: when the data ask for a
+  lower space group, the alternatives to rule out, and how a lower group is
+  tested — never before the structure is refined to the best its group allows.
+
+New skills come from interviewing the user; [SKILL_INTERVIEWS.md](./SKILL_INTERVIEWS.md)
+is the guide (magnetic, PDF, single crystal, the symmetry review), and says where
+each answer lands: the skill's text, a firm rule in code, or an eval scenario.
 
 The same files serve both agents. Claude Code loads them as skills in this
 repository; the in-app Agent reads them through
