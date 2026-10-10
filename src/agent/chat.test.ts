@@ -446,6 +446,6 @@ describe("auto mode", () => {
     await new Promise<void>((r) => api.server.close(() => r()));
     const system = api.requests[0]!.body.system as { text: string; cache_control?: unknown }[];
     expect(system[0]!.cache_control).toEqual({ type: "ephemeral" });
-    expect(system[1]!.text).toMatch(/^Mode: auto\. .*while its gate passes go on to the next\. Stop and report when a gate fails/);
+    expect(system[1]!.text).toMatch(/^Mode: auto\. .*while it converges sensibly go on to the next\. Stop and report when a stage fails/);
   });
 });

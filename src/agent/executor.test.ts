@@ -351,10 +351,10 @@ describe("AgentExecutor on a live powder fit", () => {
     // Scale with every site occupancy: an exact degeneracy (all three only scale intensity).
     const { port, calls } = sessionPort({ ...start, powderParams: start.powderParams.map((p) => ({ ...p, fixed: !["scale", "occ_Mn1", "occ_Ga1"].includes(p.id) })) });
     const { host, records } = fakeHost(port);
-    // The method's firm rules come first (see below); here the gate has passed
-    // and the user allowed the bare occupancies, so the correlations decide.
+    // The method's firm rules come first (see below); here the user allowed
+    // the bare occupancies, so the correlations decide.
     const key = keyOfState("powder", port.state());
-    records.set(key, { ...emptyRecord(key), cellGate: { passed: true, at: 0, summary: "" }, exceptions: [{ rule: "bare-occupancy", reason: "test", at: 0 }] });
+    records.set(key, { ...emptyRecord(key), exceptions: [{ rule: "bare-occupancy", reason: "test", at: 0 }] });
     const { ex, asked, seen } = executor(host, true);
     const out = await ex.run("refine", {});
     expect(out.isError).toBe(true);
@@ -372,37 +372,62 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(asked.at(-1)!.preview).toMatch(/^Refine .* · (strongest correlation \S+ ↔ \S+ -?0\.\d{3}|no correlation above 0\.5)$/);
   });
 
-  it("keeps the structure fixed until the cell gate passes, and counts the stages a refinement covers", async () => {
+  it("refines the structure whatever the cell check says, and counts the stages a refinement covers", async () => {
     const start = newSession(exampleStructure());
     const { port, calls } = sessionPort({ ...start, powderParams: start.powderParams.map((p) => ({ ...p, fixed: !["scale", "bkg0", "pos_Mn1_0"].includes(p.id) })) });
     const { host, records } = fakeHost(port);
-    const { ex, asked, seen } = executor(host, true);
-    const refused = await ex.run("refine", {});
-    expect(refused.isError).toBe(true);
-    expect(refused.text).toMatch(/keeps the structure fixed until the cell and space group are trusted, and pos_Mn1_0 is atomic\. The cell gate has not run on this analysis\. Run check_cell_symmetry/);
-    expect(seen.filter((e) => e.tool === "refine").at(-1)!.outcome).toBe("Not run: 1 atomic parameter before the cell gate");
-    expect(calls).toEqual([]); // refused before the correlation probe
-    expect(asked).toEqual([]);
-
-    const gate = parse((await ex.run("check_cell_symmetry", {})).text);
-    expect(gate.passed).toBe(true);
-    const key = keyOfState("powder", port.state());
-    expect(records.get(key)!.cellGate).toMatchObject({ passed: true, summary: "every peak indexes; the absences are consistent" });
-
+    const { ex, asked } = executor(host, true);
+    // No cell check yet: atomic parameters refine anyway (the deployed Agent
+    // refused a full refinement here, citing the check).
     const done = parse((await ex.run("refine", {})).text);
     expect(done.refined).toBe(true);
-    // Positions refined before the scale/background/cell block finished: a note, not a refusal.
+    expect(calls.slice(0, 2)).toEqual(["probe", "refine"]);
+    expect(asked.map((e) => e.tool)).toEqual(["refine"]);
     expect(done.methodNote).toBeUndefined(); // the base block was free alongside
+    const key = keyOfState("powder", port.state());
     expect(records.get(key)!.stagesDone).toEqual(expect.arrayContaining(["base", "positions"]));
-    const method = parse((await ex.run("get_state", {})).text).method as { stages: string[]; next: string; cellGate: string };
-    expect(method.stages.slice(0, 4)).toEqual(["✓ Cell gate", "✓ Scale, background, cell", "✓ Positions", "○ Profile"]);
+
+    // The check is recorded, not enforced.
+    const check = parse((await ex.run("check_cell_symmetry", {})).text);
+    expect(check.passed).toBe(true);
+    expect(check.reading).toBe("Every peak indexes and no forbidden reflection shows intensity: refine the structure.");
+    expect(records.get(key)!.cellCheck).toMatchObject({ passed: true, summary: "every peak indexes; no absence flagged" });
+    const method = parse((await ex.run("get_state", {})).text).method as { stages: string[]; next: string; cellCheck: string };
+    expect(method.stages).toEqual(["✓ Cell check", "✓ Scale, background, cell", "✓ Positions", "○ Profile", "○ ADPs", "○ Occupancy (if needed)", "○ Corrections (if needed)", "○ Symmetry review (last) (if needed)"]);
     expect(method.next).toBe("Profile");
-    expect(method.cellGate).toBe("passed");
+    expect(method.cellCheck).toBe("every peak indexes; no absence flagged");
 
     // ADPs before the profile: refined, with a note.
     await ex.run("set_free", { fix: ["pos_Mn1_0"], free: ["B_Mn1"] });
     const adp = parse((await ex.run("refine", {})).text);
     expect(adp.methodNote).toMatch(/^Out of the method's order \(my-rietveld-workflow\): adps refined before profile\./);
+  });
+
+  it("questions the space group only last: review_symmetry waits for the method's stages", async () => {
+    const start = newSession(exampleStructure());
+    const { port } = sessionPort({ ...start, powderParams: start.powderParams.map((p) => ({ ...p, fixed: !["scale", "bkg0"].includes(p.id) })) });
+    const { host, records } = fakeHost(port);
+    const { ex, seen } = executor(host, true);
+    const early = await ex.run("review_symmetry", {});
+    expect(early.isError).toBe(true);
+    expect(early.text).toMatch(/^Error: Not yet\. The space group is the last thing questioned: a structure is refined to the best its group allows first, and intensity that differs on the group's own reflections is what that refinement fixes/);
+    expect(early.text).toMatch(/Refine these stages of my-rietveld-workflow first, each to convergence: Scale, background, cell, Positions, Profile, ADPs\./);
+    expect(seen.filter((e) => e.tool === "review_symmetry").at(-1)!.outcome).toBe("Not yet: 4 stages to refine first");
+
+    // Every required stage covered, but nothing refined on screen: still not yet.
+    const key = keyOfState("powder", port.state());
+    records.set(key, { ...emptyRecord(key), stagesDone: ["base", "positions", "profile", "adp"] });
+    expect((await ex.run("review_symmetry", {})).text).toMatch(/^Error: Not yet: the review reads the refined residual, and the fit on screen is not refined\./);
+
+    // Refined to convergence: the review reads the residual and is recorded.
+    expect(parse((await ex.run("refine", {})).text).refined).toBe(true);
+    const review = parse((await ex.run("review_symmetry", {})).text);
+    expect(Array.isArray(review.observedForbidden)).toBe(true);
+    expect(String(review.decision)).toMatch(/^The user's\./);
+    expect(records.get(key)!.symmetryReviewed?.summary).toMatch(/forbidden reflection/);
+    const method = parse((await ex.run("get_state", {})).text).method as { stages: string[]; symmetryReview: string };
+    expect(method.stages.at(-1)).toBe("✓ Symmetry review (last) (if needed)");
+    expect(method.symmetryReview).toBe(records.get(key)!.symmetryReviewed!.summary);
   });
 
   it("keeps notes on the analysis, without asking, and lists them in get_state", async () => {
@@ -423,7 +448,6 @@ describe("AgentExecutor on a live powder fit", () => {
     const { port } = sessionPort({ ...start, powderParams: start.powderParams.map((p) => ({ ...p, fixed: !["scale", "occ_Mn1"].includes(p.id) })) });
     const { host, records } = fakeHost(port);
     const key = keyOfState("powder", port.state());
-    records.set(key, { ...emptyRecord(key), cellGate: { passed: true, at: 0, summary: "" } });
     const { ex, asked } = executor(host, "auto");
     const refused = await ex.run("refine", {});
     expect(refused.text).toMatch(/occ_Mn1 is a free occupancy with nothing but the scale to determine it.*Tie it \(set_site_ties/);
@@ -471,20 +495,27 @@ describe("AgentExecutor on a live powder fit", () => {
     const { ex } = executor(fakeHost(port).host);
     const peaks = parse((await ex.run("find_unexplained_peaks", {})).text);
     expect(typeof peaks.count).toBe("number");
-    // What it found is marked on the plot for the user, without an approval card.
+    type Listed = { d: number; q: number; twoTheta: number; near?: string };
+    const unexplained = peaks.unexplained as Listed[];
+    const misfits = peaks.misfits as Listed[];
+    // Only the peaks on no reflection count, and only they are marked on the
+    // plot for the user, without an approval card.
+    expect(unexplained.length).toBe(peaks.count as number);
     const shown = calls.find((c) => c.startsWith("showPeaks"));
     expect(shown).toBeDefined();
     expect(shown!.split(" ")[1]?.split(",").filter(Boolean).length ?? 0).toBe(peaks.count as number);
     if ((peaks.count as number) > 0) expect(String(peaks.markedOnPlot)).toMatch(/marked on the plot/);
-    type Listed = { d: number; q: number; twoTheta: number; near?: string };
-    const listed = [...(peaks.unexplained as Listed[]), ...(peaks.besideKnownReflections as Listed[]), ...(peaks.onKnownReflections as Listed[])];
-    expect(listed.length).toBe(peaks.count as number);
-    for (const p of peaks.onKnownReflections as Listed[]) expect(p.near).toMatch(/^\S+ -?\d+ -?\d+ -?\d+$/);
-    for (const p of peaks.besideKnownReflections as Listed[]) expect(p.near).toMatch(/^beside \S+ -?\d+ -?\d+ -?\d+ \(-?\d+\.\d% in d\)$/);
-    for (const p of listed) {
+    // Residual on a known reflection is its misfit, never an extra peak.
+    for (const p of misfits) expect(p.near).toMatch(/^(on|beside) \S+ -?\d+ -?\d+ -?\d+( \(-?\d+\.\d% in d\))?$/);
+    if (misfits.length > 0) expect(String(peaks.reading)).toMatch(/They are not extra peaks/);
+    for (const p of [...unexplained, ...misfits]) {
       expect(p.q).toBeCloseTo((2 * Math.PI) / p.d, 3);
       expect(1.54 / (2 * Math.sin((p.twoTheta / 2) * Math.PI / 180))).toBeCloseTo(p.d, 4);
     }
+    // showMisfits marks the misfits as well.
+    calls.length = 0;
+    await ex.run("find_unexplained_peaks", { showMisfits: true });
+    expect(calls.find((c) => c.startsWith("showPeaks"))!.split(" ")[1]?.split(",").filter(Boolean).length ?? 0).toBe(unexplained.length + misfits.length);
     const bonds = parse((await ex.run("bond_geometry", { cutoff: 3 })).text);
     expect(bonds.phase).toBe(port.state().structure.id);
     expect((await ex.run("bond_geometry", { phase: "nope" })).text).toMatch(/no phase "nope"/);
@@ -653,8 +684,8 @@ describe("AgentExecutor on a live PDF fit", () => {
       expect(out.isError).toBe(true);
       expect(out.text).toMatch(new RegExp(`${name} works on the powder page only; the PDF page is open`));
     }
-    // The cell gate is a powder rule: there is nothing to lift on the PDF page.
-    expect((await ex.run("allow_exception", { rule: "cell-gate", reason: "an impurity" })).text).toMatch(/the rule "cell-gate" does not apply on this page/);
+    // There is no cell gate to lift, on either page.
+    expect((await ex.run("allow_exception", { rule: "cell-gate", reason: "an impurity" })).text).toMatch(/invalid input for allow_exception/);
   });
 
   it("frees, refines as the agent, and reports Rw; the assessment drops the GoF verdict", async () => {

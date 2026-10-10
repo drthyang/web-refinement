@@ -249,15 +249,19 @@ export interface ProjectView {
 }
 
 /**
- * The in-app Agent's record of one analysis (agent/method.ts): the cell gate's
- * outcome, the method's rules the user lifted and why, the method's stages a
- * refinement has covered, and the Agent's notes. Keyed by the analysis (page,
- * data, phases). Optional, and ignored by builds without the Agent.
+ * The in-app Agent's record of one analysis (agent/method.ts): the cell
+ * check's outcome, the symmetry review's, the method's rules the user lifted
+ * and why, the method's stages a refinement has covered, and the Agent's
+ * notes. Keyed by the analysis (page, data, phases). Optional, and ignored by
+ * builds without the Agent.
  */
 export interface AgentRecordFile {
   readonly key: string;
-  readonly cellGate?: { readonly passed: boolean; readonly at: number; readonly summary: string };
-  readonly exceptions: readonly { readonly rule: "cell-gate" | "bare-occupancy"; readonly reason: string; readonly at: number }[];
+  /** The cell check at the start (check_cell_symmetry): advisory, never a gate. */
+  readonly cellCheck?: { readonly passed: boolean; readonly at: number; readonly summary: string };
+  /** The symmetry review at the end of the method (review_symmetry). */
+  readonly symmetryReviewed?: { readonly at: number; readonly summary: string };
+  readonly exceptions: readonly { readonly rule: "bare-occupancy"; readonly reason: string; readonly at: number }[];
   readonly stagesDone: readonly string[];
   readonly notes: readonly { readonly text: string; readonly at: number }[];
 }

@@ -39,7 +39,7 @@ rmSync(tmp, { force: true });
 // that every tool has a `| \`name\`` row, so keep descriptions out of tables.
 const TOOL_GROUPS = [
   ["Structure, data and instrument", ["parse_structure", "parse_powder_data", "parse_instrument", "reflection_list", "bond_geometry", "analyze_site_symmetry"]],
-  ["Powder refinement", ["check_cell_symmetry", "build_refinement", "refine_powder", "evaluate_pattern", "simulate_pattern", "rank_next_parameters"]],
+  ["Powder refinement", ["check_cell_symmetry", "build_refinement", "refine_powder", "evaluate_pattern", "simulate_pattern", "rank_next_parameters", "review_symmetry"]],
   ["Judging a refinement", ["assess_refinement", "suggest_next_steps", "interpret_structure"]],
   ["Magnetic structures", ["find_unexplained_peaks", "search_propagation_vector", "list_magnetic_subgroups", "allowed_moments", "build_magnetic_model", "refine_magnetic_powder"]],
   ["Single crystal", ["parse_single_crystal_data", "write_single_crystal_data", "merge_magnetic_supercell", "expand_structure_supercell", "build_modulated_moment_model"]],

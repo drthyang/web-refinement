@@ -96,10 +96,11 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 | Tool | What it does |
 |---|---|
 | `build_refinement` | Build refinement parameter set |
-| `check_cell_symmetry` | Check cell & space group (Le Bail gate) |
+| `check_cell_symmetry` | Check cell & space group (Le Bail sanity check) |
 | `refine_powder` | Refine (constrained least squares) |
 | `evaluate_pattern` | Evaluate pattern (no refinement) |
 | `simulate_pattern` | Simulate pattern (structure only) |
+| `review_symmetry` | Review the space group (last step) |
 | `rank_next_parameters` | Rank next parameters (sensitivity) |
 
 **Judging a refinement**
@@ -175,7 +176,7 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 
 **`build_refinement`** — Build the SYMMETRY-ALLOWED parameter set, bindings, and profile for a structure + pattern. Only symmetry-allowed parameters are created, so an agent cannot free a forbidden one. Feed `parameters`/`bindings`/`profile` to refine_powder.
 
-**`check_cell_symmetry`** — The gate BEFORE refining a structure: does the cell index every peak, and does the data respect the space group's systematic absences? A Le Bail fit refines the cell from peak positions alone (free intensities), with back-to-back-exponential peaks that widen with d on time-of-flight data; then every leftover peak must sit on a reflection and every forbidden reflection must carry no intensity (≥ `significance` σ counts). `unindexedPeaks` mean a wrong cell or lattice, or a missing phase — pass known impurities as `extraPhases`. `absences.violated` means the group is too symmetric (a centring or glide the crystal lacks). `absences.untestable` lists forbidden reflections too close to an allowed one to judge. Only d ≥ `dMin` (0.7 Å) is read. It cannot catch a too-LARGE cell (a supercell indexes anything) or a group with too FEW absences — read `limits`. `passed` and `cell` (the Le Bail cell) are the result. When unindexed peaks and a violated absence come together, `reading` warns that the violation may be a line of the same unidentified phase.
+**`check_cell_symmetry`** — A sanity check at the START of a refinement, not a gate: does the cell index every peak, and does the data respect the space group's systematic absences? A Le Bail fit refines the cell from peak positions alone (free intensities), with back-to-back-exponential peaks that widen with d on time-of-flight data; then it reads the leftover (≥ `significance` σ counts). `unindexedPeaks` mean a wrong cell or lattice, or a missing phase — settle these first; pass known impurities as `extraPhases`. `absences.violated` is a FLAG, not a verdict: before the structure is refined, profile misfit or an impurity line reads the same way. Do not change the space group on it — note it, refine the structure to the best, and question the group last with review_symmetry on the refined residual. `absences.untestable` lists forbidden reflections too close to an allowed one to judge. Only d ≥ `dMin` (0.7 Å) is read. It cannot catch a too-LARGE cell (a supercell indexes anything) or a group with too FEW absences — read `limits`. `passed` and `cell` (the Le Bail cell) are the result.
 
 **`refine_powder`** — Run the deterministic Levenberg–Marquardt refinement of the FREED parameters (fix a parameter by setting its `fixed:true`). Returns refined values, esds, agreement (wR/GoF), the SVD/correlation/at-bound diagnostics, the observation count, and the residual — everything assess_refinement needs — plus `parameters`: the input set carrying the refined values, ready for the next block. The agent decides what to free; it never sets values.
 
@@ -195,7 +196,9 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 
 **`analyze_site_symmetry`** — Per-site symmetry: for each atom, its Wyckoff label (e.g. "6h", for the built-in space groups), multiplicity, point-group site symmetry, and the symmetry-allowed refinable degrees of freedom — free positional coordinates (0–3), anisotropic-ADP components (0–6), and magnetic-moment components (0–3). The parameterization guardrail: read this BEFORE freeing coordinates or moments so you never fight a symmetry constraint — an atom on a fixed special position has 0 free coordinates, and a site with `allowedMomentComponents: 0` cannot carry a moment. Also reports the crystal's overall point group.
 
-**`find_unexplained_peaks`** — Find peaks in the residual (obs − calc) that the nuclear model does not explain — the magnetic-order / impurity-phase signal. Robust MAD-based thresholding; returns d-spacings ranked by height. A handful of peaks suggests magnetic satellites; dozens mean the nuclear fit itself is poor.
+**`find_unexplained_peaks`** — Find peaks in the residual (obs − calc) — the magnetic-order / impurity-phase signal. Robust MAD-based thresholding; returns d-spacings ranked by height. Check each against the phases' reflections (reflection_list) before calling it an extra peak: residual ON a known reflection is that reflection's intensity or shape misfit, which refining the structure, profile and corrections fixes — not a new phase and not a reason to lower the symmetry. A handful of peaks away from every reflection suggests magnetic satellites or one impurity; dozens mean the fit itself is poor.
+
+**`review_symmetry`** — The LAST step of a Rietveld refinement, never the first: once scale, background, cell, positions, profile and ADPs are refined to convergence and the fit is still not good, read the refined residual at the reflections the primary phase's space group forbids. Returns the forbidden reflections that still carry intensity (`observedForbidden`), the same-lattice (translationengleiche) subgroups that allow them, smallest index first, with their domain counts (`candidates`), and a `reading`. Intensity that differs on allowed reflections is what refinement fixes, never evidence against the group. A lower group is a new model refined again from the start, kept only if it fits these reflections without the misfit moving elsewhere — the user decides. Lost centrings and larger cells are not enumerated (read `limits`).
 
 **`search_propagation_vector`** — Rank candidate commensurate propagation vectors k (denominators 2/3/4/6) by how many unexplained peak d-spacings their satellites G ± k explain. Feed the d values from find_unexplained_peaks; the winning k goes to list_magnetic_subgroups.
 
@@ -300,8 +303,9 @@ shape is pinned, and every registered tool appears on this page.
 A skill composes tools into an expert procedure. Two ship in this repository:
 
 - [`.claude/skills/my-rietveld-workflow/`](../.claude/skills/my-rietveld-workflow/SKILL.md),
-  the maintainer's own powder Rietveld procedure: a fixed freeing sequence, gates
-  between stages, and acceptance criteria. It covers constant-wavelength and TOF
+  the maintainer's own powder Rietveld procedure: a sanity check of the cell, a
+  fixed freeing sequence, acceptance criteria, and the space group reviewed
+  last, only when everything else is refined. It covers constant-wavelength and TOF
   data, single- and multi-phase, and hands magnetic structures on to the
   magnetic-analysis flow.
 - [`.claude/skills/pdf-workflow/`](../.claude/skills/pdf-workflow/SKILL.md), the
@@ -392,8 +396,8 @@ The page-specific handlers are [`powderTools.ts`](../src/agent/powderTools.ts)
 and [`pdfTools.ts`](../src/agent/pdfTools.ts).
 - Read tools run at once: `get_state`, `assess_refinement`,
   `suggest_next_steps`, `rank_next_parameters`, `check_cell_symmetry`,
-  `find_unexplained_peaks`, `bond_geometry`, `interpret_structure`,
-  `read_skill`, `read_ref`. The analysis tools are the MCP handlers above, fed
+  `find_unexplained_peaks`, `review_symmetry`, `bond_geometry`,
+  `interpret_structure`, `read_skill`, `read_ref`. The analysis tools are the MCP handlers above, fed
   from what is on screen.
 - `read_skill` returns a skill whole, as Markdown (not cut to the ref budget),
   with the names of its references; with `reference` it returns one of them.
@@ -401,21 +405,37 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   method skill in this conversation (`my-rietveld-workflow` on the powder page,
   `pdf-workflow` on the PDF page); a change before that is refused with the
   call to make. Clearing the conversation resets it.
-- **The method's firm rules are code** ([`src/agent/method.ts`](../src/agent/method.ts)),
-  checked before the correlation probe: on the powder page no atomic parameter
-  (position, ADP, occupancy) refines until `check_cell_symmetry` has passed for
-  the analysis on screen (its data and phases); on both pages no occupancy
-  refines bare, with no Σ or composition tie. Only the user lifts a rule:
+- **The method's firm rule is code** ([`src/agent/method.ts`](../src/agent/method.ts)),
+  checked before the correlation probe: on both pages no occupancy refines
+  bare, with no Σ or composition tie. Only the user lifts it:
   `allow_exception` (rule, reason) shows an approval card even in Auto, and the
   exception lasts until the data or the phases change.
-- **The method's stages** (powder: cell gate, scale/background/cell, positions,
-  profile, ADPs, then occupancy and corrections if needed; PDF: scale/cell,
-  ADPs, correlated motion, positions, then occupancy and particle size) are a
-  checklist in the drawer and `get_state`'s `method`. A stage is done once a
-  converged refinement had one of its parameters free, whoever ran it. A
-  refinement out of order runs, with a `methodNote` in its outcome.
-- The record behind them (the gate, the exceptions, the stages done, and the
-  Agent's notes) is kept per analysis by the shell and saved with the project
+- **The cell check is a check, not a gate.** `check_cell_symmetry` at the start
+  settles gross problems (a peak no reflection indexes: a missing phase or a
+  wrong cell); it never holds a refinement. Intensity it finds at a forbidden
+  reflection is a flag to note, not a reason to change the space group: before
+  the structure is refined, profile misfit reads the same way.
+- **The space group is questioned last.** `review_symmetry` reads the refined
+  residual at the forbidden reflections and lists the same-lattice subgroups
+  that allow those still carrying intensity (named, with their index and
+  domain count). It refuses, naming the stages left, until scale, background,
+  cell, positions, profile and ADPs have each been refined to convergence and
+  the fit on screen is converged: a structure is refined to the best its
+  group allows before the group is doubted. Its result is a proposal for the
+  user; a lower group is a new model, refined again from the start.
+- **Misfits are not extra peaks.** `find_unexplained_peaks` counts and marks
+  only residual peaks on no reflection of any phase; residual on or beside a
+  known reflection comes back apart as `misfits` — intensity or shape the
+  refinement has yet to match (`showMisfits` marks them too).
+- **The method's stages** (powder: cell check, scale/background/cell,
+  positions, profile, ADPs, then occupancy and corrections if needed, and the
+  symmetry review last; PDF: scale/cell, ADPs, correlated motion, positions,
+  then occupancy and particle size) are a checklist in the drawer and
+  `get_state`'s `method`. A stage is done once a converged refinement had one
+  of its parameters free, whoever ran it. A refinement out of order runs, with
+  a `methodNote` in its outcome.
+- The record behind them (the cell check, the symmetry review, the
+  exceptions, the stages done, and the Agent's notes) is kept per analysis by the shell and saved with the project
   (`agent.records` in the project file; autosaved too). `write_note` adds a
   note without asking (it changes the record, not the analysis); `get_state`
   lists the notes, so a later conversation or session starts from them.
@@ -436,7 +456,7 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   Rw and values, and each parameter's spread, to tell the local structure
   from the average.
 - Powder page only: `rank_next_parameters`, `check_cell_symmetry`,
-  `find_unexplained_peaks`, `set_background`, `set_microstrain`,
+  `find_unexplained_peaks`, `review_symmetry`, `set_background`, `set_microstrain`,
   `set_adp_model`, `set_site_ties`. On the PDF page, `assess_refinement` judges convergence,
   correlations, bounds and physical values, without the GoF verdict or the
   Bragg-peak residual scan, and `set_fit_range` with `whole` restores the
@@ -493,15 +513,16 @@ Refine button is unchanged.
 peak only if it stands 5σ above that point's own uncertainty, so lone noisy
 points in a low-count region are not peaks. It checks each peak against every
 phase's reflections:
-- **on** one (within 0.5% in d): that reflection is calculated too weak;
+- **on** one (within 0.5% in d): that reflection is calculated too weak — a
+  misfit;
 - **beside** one (within 2%): most often its shoulder or tail (TOF peaks tail
-  to larger d);
+  to larger d) — a misfit;
 - **unexplained** otherwise: an impurity, magnetic order or an unmodelled
-  feature.
+  feature. Only these are counted and called extra peaks.
 
-`assess_refinement` reports the same split. The peaks are marked on the
-Rietveld plot: a filled ▽ when unexplained, hollow when on or beside a
-reflection, each with a dashed guide through the pattern. A row under the plot
+`assess_refinement` reports the same split. The unexplained peaks are marked
+on the Rietveld plot with a filled ▽ (with `showMisfits`, the misfits too,
+hollow), each with a dashed guide through the pattern. A row under the plot
 lists each d and its reflection (click to zoom), with a Clear button. The marks go at the next refinement, when the residual
 changes. Viewing only: no approval card, no history step.
 
@@ -597,7 +618,7 @@ Tool slices, in priority order (names are provisional):
 
 Other planned work:
 - One more worked example: a Rietveld refinement driven by the skill (the cell
-  gate, the freeing blocks, the cross-check bundle).
+  check, the freeing blocks, the symmetry review, the cross-check bundle).
 - Expose `knowledge/*.md` as **MCP resources**, so an agent can read the domain
   knowledge the tools assume.
 - Richer per-tool JSON schemas.

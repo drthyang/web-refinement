@@ -21,6 +21,7 @@ export const TOOL_CARDS: Readonly<Record<string, readonly AgentCard[]>> = {
   rank_next_parameters: ["parameters"],
   check_cell_symmetry: ["structure", "pattern"],
   find_unexplained_peaks: ["pattern"],
+  review_symmetry: ["structure", "pattern"],
   bond_geometry: ["structure"],
   interpret_structure: ["structure"],
   set_free: ["parameters"],
@@ -36,7 +37,7 @@ export const TOOL_CARDS: Readonly<Record<string, readonly AgentCard[]>> = {
 
 /** Words that name a card, conservatively: each must point at one place on the page. */
 const CARD_WORDS: readonly [AgentCard, RegExp][] = [
-  ["structure", /\b(structure|space group|bonds?|bond lengths?|atoms?|unit cell|cell gate)\b/i],
+  ["structure", /\b(structure|space group|bonds?|bond lengths?|atoms?|unit cell|cell check)\b/i],
   ["instrument", /\b(instrument|wavelength|difC|difA|calibration|zero shift)\b/i],
   ["data", /\b(data file|dataset|counting statistics)\b/i],
   // "peak widths" and "peak shape" are the profile, not the plot.

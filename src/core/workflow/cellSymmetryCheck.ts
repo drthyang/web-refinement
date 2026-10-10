@@ -1,13 +1,18 @@
 /**
- * The cell / space-group gate: before any structural refinement, do the cell
- * and the space group account for the pattern? Two questions, each answered
- * from the data rather than from an agreement factor:
+ * The cell / space-group check at the start of a refinement: do the cell and
+ * the space group account for the pattern? A sanity check, not a gate — it
+ * catches gross problems (a wrong cell, a missing phase) before the structure
+ * is refined. Two questions, each answered from the data rather than from an
+ * agreement factor:
  *
  *  1. **Does every observed peak index?** A peak no reflection of the cell can
  *     place means a wrong cell (or lattice) or a missing phase.
  *  2. **Are the systematic absences real?** A reflection the space group forbids
- *     that shows intensity means the group is too symmetric — a centring or a
- *     glide the crystal does not have.
+ *     that shows intensity MAY mean the group is too symmetric — a centring or
+ *     a glide the crystal does not have. Before the structure is refined this
+ *     is a flag to record, not a verdict: profile misfit and an impurity's line
+ *     read the same way, and the space group is reviewed last, on the refined
+ *     residual (diagnostics/symmetryReview.ts), once everything else is refined.
  *
  * A low Le Bail wR alone cannot answer either: free intensities fit a wrong
  * group happily. So the check refines the cell by a Le Bail fit (free
@@ -24,7 +29,7 @@
  *    all is *unindexed*.
  *
  * Limits, stated in the result: a cell that is too LARGE (a supercell) indexes
- * any pattern, so this gate cannot catch one; a group with FEWER absences than
+ * any pattern, so this check cannot catch one; a group with FEWER absences than
  * the crystal's shows no violation (its extra reflections are simply weak).
  *
  * The Le Bail fit uses one pseudo-Voigt width at constant wavelength. On
@@ -93,7 +98,7 @@ export interface HklAt {
 }
 
 export interface CellSymmetryCheck {
-  /** Both gates hold: every peak indexes and no absence is violated. */
+  /** Both hold: every peak indexes and no absence shows intensity. */
   readonly passed: boolean;
   readonly everyPeakIndexes: boolean;
   readonly absencesConsistent: boolean;
@@ -247,13 +252,23 @@ export function checkCellSymmetry(
     }
     return Math.abs(x[lo]! - xi) <= Math.abs(x[hi]! - xi) ? lo : hi;
   };
-  /** The largest leftover (in σ) within ±halfWidth of xi — at least the nearest point. */
+  /** Is point i the highest leftover over a whole peak width either side? */
+  const isApex = (i: number): boolean => {
+    const half = Math.max(2, Math.round(width(x[i]!) / step));
+    for (let j = Math.max(0, i - half); j <= Math.min(n - 1, i + half); j++) if (z[j]! > z[i]!) return false;
+    return true;
+  };
+  /**
+   * The leftover peak (in σ) within ±halfWidth of xi, or 0 when the largest
+   * leftover there is not a peak's apex: a rising flank toward a neighbour's
+   * misfit is that neighbour's intensity, not this reflection's.
+   */
   const peakAt = (xi: number, halfWidth: number): number => {
     const a = nearestIndex(xi - halfWidth);
     const b = nearestIndex(xi + halfWidth);
-    let best = z[nearestIndex(xi)]!;
-    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) if (Math.abs(x[i]! - xi) <= halfWidth && z[i]! > best) best = z[i]!;
-    return best;
+    let at = nearestIndex(xi);
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) if (Math.abs(x[i]! - xi) <= halfWidth && z[i]! > z[at]!) at = i;
+    return isApex(at) ? z[at]! : 0;
   };
 
   // Every reflection position that can index a peak: allowed ones, and the extra
@@ -315,10 +330,7 @@ export function checkCellSymmetry(
     if (z[i]! < threshold) continue;
     // An apex over a whole peak width: a noise bump on the flank of a leftover
     // peak (an unfitted extra phase keeps its whole profile) is not a peak.
-    const half = Math.max(2, Math.round(width(x[i]!) / step));
-    let apex = true;
-    for (let j = Math.max(0, i - half); j <= Math.min(n - 1, i + half) && apex; j++) if (z[j]! > z[i]!) apex = false;
-    if (!apex || nearAny(x[i]!, tolWidths * width(x[i]!))) continue;
+    if (!isApex(i) || nearAny(x[i]!, tolWidths * width(x[i]!))) continue;
     if (unindexed.some((p) => Math.abs(p.x - x[i]!) < width(x[i]!))) continue;
     unindexed.push({ x: x[i]!, significance: z[i]! });
   }

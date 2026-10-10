@@ -458,7 +458,7 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
           by.length ? `${beside.length} beside one: ${by.join(", ")}` : null,
         ].filter(Boolean).join("; ") + ".",
         detail: (k0MagneticHint(input.residual.magneticNeutron, onReflection) ? K0_MAGNETIC + " " : "") +
-          "On a reflection, the reflection is calculated too weak — a misfit of its intensity: the atoms (positions, ADPs, occupancy constraints) or an intensity correction. Beside one, within 2% in d, it is most often the peak's shoulder or tail — the profile (TOF peaks tail to larger d) — and only then a weak peak of another phase. Refine those per the method before reading anything new into them.",
+          "On a reflection, the reflection is calculated too weak — a misfit of its intensity: the atoms (positions, ADPs, occupancy constraints) or an intensity correction. Beside one, within 2% in d, it is most often the peak's shoulder or tail — the profile (TOF peaks tail to larger d) — and only then a weak peak of another phase. Refine those per the method before reading anything new into them: they are misfits, not extra peaks, and no reason to change the space group.",
         evidence: { onReflection: onReflection.length, beside: beside.length, reflections: [...on, ...by].join("; ") },
       });
     }

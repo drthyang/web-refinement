@@ -506,22 +506,27 @@ export function validateProjectFile(raw: unknown): ProjectFile {
   return root as unknown as ProjectFile;
 }
 
-/** The Agent's records: one per analysis, each with its gate, exceptions, stages and notes. */
+/** The Agent's records: one per analysis, each with its checks, exceptions, stages and notes. */
 function checkAgent(v: unknown, path: string): void {
   const agent = rec(v, path);
   arr(agent.records, `${path}.records`).forEach((r, i) => {
     const p = `${path}.records[${i}]`;
     const record = rec(r, p);
     str(record.key, `${p}.key`);
-    if (record.cellGate !== undefined && record.cellGate !== null) {
-      const gate = rec(record.cellGate, `${p}.cellGate`);
-      bool(gate.passed, `${p}.cellGate.passed`);
-      num(gate.at, `${p}.cellGate.at`);
-      str(gate.summary, `${p}.cellGate.summary`);
+    if (record.cellCheck !== undefined && record.cellCheck !== null) {
+      const check = rec(record.cellCheck, `${p}.cellCheck`);
+      bool(check.passed, `${p}.cellCheck.passed`);
+      num(check.at, `${p}.cellCheck.at`);
+      str(check.summary, `${p}.cellCheck.summary`);
+    }
+    if (record.symmetryReviewed !== undefined && record.symmetryReviewed !== null) {
+      const review = rec(record.symmetryReviewed, `${p}.symmetryReviewed`);
+      num(review.at, `${p}.symmetryReviewed.at`);
+      str(review.summary, `${p}.symmetryReviewed.summary`);
     }
     arr(record.exceptions, `${p}.exceptions`).forEach((e, j) => {
       const ex = rec(e, `${p}.exceptions[${j}]`);
-      oneOf(["cell-gate", "bare-occupancy"])(ex.rule, `${p}.exceptions[${j}].rule`);
+      oneOf(["bare-occupancy"])(ex.rule, `${p}.exceptions[${j}].rule`);
       str(ex.reason, `${p}.exceptions[${j}].reason`);
       num(ex.at, `${p}.exceptions[${j}].at`);
     });

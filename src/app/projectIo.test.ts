@@ -43,7 +43,7 @@ describe("the Agent's records in a project", () => {
     const ws = powderWorkspaceFrom(session, someResult, DEFAULT_INSTRUMENT, false, { fitRange: null, displayUnit: null, manualPeakD: [] });
     const record = {
       key: "powder¦mgal2o4.xye¦MgAl2O4|F d -3 m:2",
-      cellGate: { passed: true, at: 1, summary: "every peak indexes; the absences are consistent" },
+      cellCheck: { passed: true, at: 1, summary: "every peak indexes; no absence flagged" },
       exceptions: [{ rule: "bare-occupancy" as const, reason: "isotopic contrast", at: 2 }],
       stagesDone: ["base", "positions"],
       notes: [{ text: "The user holds the composition: inversion is the question.", at: 3 }],

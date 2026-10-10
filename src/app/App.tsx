@@ -259,7 +259,7 @@ export function App(): JSX.Element {
   const agentLink = useRef(new AgentLink()).current;
   const stepActor = useRef<StepActor | undefined>(undefined);
   const [agentOpen, setAgentOpen] = useState(false);
-  // The Agent's record of each analysis (agent/method.ts): the cell gate, the
+  // The Agent's record of each analysis (agent/method.ts): the cell check, the
   // exceptions the user allowed, the method stages done, its notes. The ref
   // lets the executor read its own update before the next render.
   const [agentRecords, setAgentRecords] = useState<Readonly<Record<string, AgentRecord>>>({});

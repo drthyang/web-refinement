@@ -16,7 +16,7 @@ import { changePdf, describePdfChange, pdfNoOp, readPdfTool } from "@/agent/pdfT
 import type { LiveToolHost } from "@/agent/liveCommon";
 import { PROBE_OPTIONS, correlationRefusal, pairText, readCorrelations, refusalLine } from "@/agent/correlationCheck";
 import { PAGE_METHOD, readSkill } from "@/agent/skills";
-import { RULES, keyOfState, methodProgress, outOfOrder, ruleRefusal, stagesCovered, type AgentRecord, type MethodRule } from "@/agent/method";
+import { RULES, keyOfState, methodProgress, outOfOrder, ruleRefusal, stagesCovered, stagesLeft, type AgentRecord, type MethodRule } from "@/agent/method";
 import { REF_KEY, RefStore, buildView } from "@/mcp/refs";
 import type { LinearRestraint, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { StepKind } from "@/core/project/history";
@@ -167,10 +167,20 @@ export class AgentExecutor implements ToolRunner {
 
       if (spec.effect === "read") {
         update({});
+        // The space group is questioned last: only once the method's stages
+        // are refined, on a converged fit.
+        if (spec.name === "review_symmetry") {
+          const notYet = this.symmetryNotYet(port);
+          if (notYet) {
+            update({ status: "failed", outcome: notYet.line });
+            return error(notYet.message);
+          }
+        }
         // Let the drawer paint "running" before a heavy synchronous analysis.
         await new Promise((r) => setTimeout(r, 0));
         let out = port.technique === "pdf" ? readPdfTool(spec.name, input, port, this.host) : readPowderTool(spec.name, input, port, this.host);
-        if (spec.name === "check_cell_symmetry") this.noteCellGate(port, out as { passed?: boolean; unindexedPeaks?: unknown[]; absences?: { violated?: unknown[] } });
+        if (spec.name === "check_cell_symmetry") this.noteCellCheck(port, out as { passed?: boolean; unindexedPeaks?: unknown[]; absences?: { violated?: unknown[] } });
+        if (spec.name === "review_symmetry") this.noteSymmetryReview(port, out as { observedForbidden?: unknown[]; candidates?: { name: string }[] });
         if (spec.name === "get_state") out = { ...(out as object), method: this.methodView(port) };
         update({ status: "done" });
         return this.respond(out);
@@ -278,33 +288,74 @@ export class AgentExecutor implements ToolRunner {
     return st ? { id: st.id, label: st.name ?? st.label } : null;
   }
 
-  /** The cell gate's outcome, kept for the analysis it ran on. */
-  private noteCellGate(port: AgentPort, out: { passed?: boolean; unindexedPeaks?: unknown[]; absences?: { violated?: unknown[] } }): void {
+  /** The cell check's outcome, kept for the analysis it ran on. A record, not a gate. */
+  private noteCellCheck(port: AgentPort, out: { passed?: boolean; unindexedPeaks?: unknown[]; absences?: { violated?: unknown[] } }): void {
     const unindexed = out.unindexedPeaks?.length ?? 0;
-    const violated = out.absences?.violated?.length ?? 0;
-    const summary = out.passed ? "every peak indexes; the absences are consistent" : `${unindexed} unindexed peak${unindexed === 1 ? "" : "s"}, ${violated} violated absence${violated === 1 ? "" : "s"}`;
-    this.host.updateRecord(keyOfState(port.technique, port.state()), (r) => ({ ...r, cellGate: { passed: !!out.passed, at: Date.now(), summary } }));
+    const flagged = out.absences?.violated?.length ?? 0;
+    const parts = [
+      ...(unindexed > 0 ? [`${unindexed} unindexed peak${unindexed === 1 ? "" : "s"}`] : []),
+      ...(flagged > 0 ? [`${flagged} absence${flagged === 1 ? "" : "s"} flagged (revisit at the symmetry review)`] : []),
+    ];
+    const summary = out.passed ? "every peak indexes; no absence flagged" : parts.join(", ");
+    this.host.updateRecord(keyOfState(port.technique, port.state()), (r) => ({ ...r, cellCheck: { passed: !!out.passed, at: Date.now(), summary } }));
   }
 
-  /**
-   * get_state's view of the method: its stages (done or not), the cell gate,
-   * and the exceptions the user allowed. A converged refinement on screen
-   * counts its free blocks as done, whoever ran it.
-   */
-  private methodView(port: AgentPort): Record<string, unknown> {
+  /** The symmetry review's outcome, kept for the analysis. */
+  private noteSymmetryReview(port: AgentPort, out: { observedForbidden?: unknown[]; candidates?: { name: string }[] }): void {
+    const n = out.observedForbidden?.length ?? 0;
+    const top = out.candidates?.slice(0, 3).map((c) => c.name) ?? [];
+    const summary = n === 0 ? "no forbidden reflection carries intensity in the refined fit" : `${n} forbidden reflection${n === 1 ? "" : "s"} with intensity${top.length ? `; subgroups allowing them: ${top.join(", ")}` : ""}`;
+    this.host.updateRecord(keyOfState(port.technique, port.state()), (r) => ({ ...r, symmetryReviewed: { at: Date.now(), summary } }));
+  }
+
+  /** A converged refinement on screen counts its free blocks as done, whoever ran it. */
+  private syncStages(port: AgentPort): AgentRecord {
     const s = port.state();
     const key = keyOfState(port.technique, s);
     if (s.result?.status === "converged") {
       const covered = stagesCovered(port.technique, s.parameters.filter((p) => !p.fixed && !p.expression));
       this.host.updateRecord(key, (r) => (covered.every((c) => r.stagesDone.includes(c)) ? r : { ...r, stagesDone: [...new Set([...r.stagesDone, ...covered])] }));
     }
-    const record = this.host.record(key);
+    return this.host.record(key);
+  }
+
+  /**
+   * Why the space group may not be questioned yet, or null: the method's
+   * required stages must be refined, and the fit on screen converged.
+   */
+  private symmetryNotYet(port: AgentPort): { message: string; line: string } | null {
+    const record = this.syncStages(port);
+    const left = stagesLeft(port.technique, record);
+    const why = "The space group is the last thing questioned: a structure is refined to the best its group allows first, and intensity that differs on the group's own reflections is what that refinement fixes, not evidence against the group.";
+    if (left.length > 0) {
+      return {
+        line: `Not yet: ${left.length} stage${left.length === 1 ? "" : "s"} to refine first`,
+        message: `Not yet. ${why} Refine these stages of ${PAGE_METHOD[port.technique]} first, each to convergence: ${left.join(", ")}. Then, only if the fit is still not good, review the symmetry.`,
+      };
+    }
+    const status = port.state().result?.status;
+    if (status !== "converged") {
+      return {
+        line: "Not yet: no converged refinement on screen",
+        message: `Not yet: the review reads the refined residual, and the fit on screen is ${status ? `"${status}"` : "not refined"}. ${why} Refine to convergence first.`,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * get_state's view of the method: its stages (done or not), the cell check,
+   * the symmetry review, and the exceptions the user allowed.
+   */
+  private methodView(port: AgentPort): Record<string, unknown> {
+    const record = this.syncStages(port);
     const progress = methodProgress(port.technique, record);
     return {
       skill: progress.skill,
       stages: progress.stages.map((st) => `${st.done ? "✓" : "○"} ${st.label}${st.optional ? " (if needed)" : ""}`),
-      next: progress.next ?? "every required stage done: check the acceptance bar",
-      ...(record.cellGate ? { cellGate: record.cellGate.passed ? "passed" : `not passed: ${record.cellGate.summary}` } : {}),
+      next: progress.next ?? `every required stage done: check the acceptance bar${port.technique === "powder" ? "; only if the fit is still not good, review_symmetry" : ""}`,
+      ...(record.cellCheck ? { cellCheck: record.cellCheck.summary } : {}),
+      ...(record.symmetryReviewed ? { symmetryReview: record.symmetryReviewed.summary } : {}),
       ...(record.exceptions.length > 0 ? { exceptions: record.exceptions.map((e) => `${e.rule}: ${e.reason}`) } : {}),
       ...(record.notes.length > 0 ? { notes: record.notes.map((n) => n.text) } : {}),
     };

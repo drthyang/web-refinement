@@ -9,19 +9,28 @@ release fixes bugs.
 
 ### Added
 
-- **The Agent remembers an analysis.** Its notes (`write_note`: a gate's
-  verdict, an impurity found, a decision of the user's), the cell gate, the
-  exceptions the user allowed and the method's stages done are saved with the
-  project and autosave, and read back in the next session.
+- **The space group is reviewed last** (`review_symmetry`, for the Agent and
+  over MCP). Once the structure is refined to the best its space group allows
+  — scale, background, cell, positions, profile, ADPs — and the fit is still
+  not good, it reads the refined residual at the reflections the group
+  forbids and lists the subgroups of the same lattice that allow those still
+  carrying intensity (named, smallest index first, with their domain counts),
+  for the user to decide. The Agent cannot run it earlier: it answers with the
+  stages left to refine. A subgroup of an origin-choice-2 group (F-43m of
+  Fd-3m:2) is now named across its origin shift.
+- **The Agent remembers an analysis.** Its notes (`write_note`: an absence the
+  cell check flagged, an impurity found, a decision of the user's), the cell
+  check, the symmetry review, the exceptions the user allowed and the
+  method's stages done are saved with the project and autosave, and read back
+  in the next session.
 - **Long Agent sessions stay in the window.** With Claude the API clears old
   tool results past 60k tokens (keeping the skills read); a local model gets a
   pruned copy of the history past ~15k tokens.
-- **The method's firm rules are enforced, and its stages shown.** On the
-  powder page the Agent cannot refine atomic parameters until the cell gate
-  has passed for the analysis on screen, and on both pages it cannot refine an
-  occupancy with no tie; only the user can lift a rule (`allow_exception`, an
-  approval card even in Auto). The drawer shows the method's stages as a
-  checklist, done or next, and a refinement out of order says so.
+- **The method's firm rule is enforced, and its stages shown.** On both pages
+  the Agent cannot refine an occupancy with no tie; only the user can lift the
+  rule (`allow_exception`, an approval card even in Auto). The drawer shows
+  the method's stages as a checklist, done or next, ending with the symmetry
+  review, and a refinement out of order says so.
 - **The Agent reads its skills when it needs them.** Its system prompt now
   lists the skills (the user's methods) by name and description instead of
   carrying the Rietveld skill and two knowledge bases on every request (about
@@ -51,6 +60,18 @@ release fixes bugs.
   pointer. With reduced motion the edge is steady.
 
 ### Fixed
+
+- **The Agent no longer refuses a refinement on the cell check, calls
+  intensity misfit extra peaks, or proposes a lower symmetry first.** The cell
+  check (`check_cell_symmetry`) is a sanity check at the start that never
+  blocks a refinement; intensity it finds at a forbidden reflection is noted
+  for the end, not acted on. `find_unexplained_peaks` counts and marks only
+  peaks on no reflection of any phase, and lists residual on known
+  reflections apart as misfits, which refinement fixes. The skill and the
+  system prompt now say the space group is changed last, if at all, when
+  nothing else can be refined. The check also stops reading a strong
+  neighbour's tail as a forbidden reflection's intensity (a violation must be
+  a peak's apex).
 
 - **Occupancy restraints reach the Rietveld fit.** The powder page never sent
   them, so a shared site's occupancies refined with no Σ restraint (the site

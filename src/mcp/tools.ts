@@ -51,6 +51,7 @@ import { bondLengths } from "@/core/crystal/geometry";
 import { analyzeSiteSymmetry, type SiteSymmetry } from "@/core/crystal/siteSymmetry";
 import { classifyPointGroup } from "@/core/crystal/pointGroup";
 import { detectExtraPeaks, type ExtraPeakOptions } from "@/core/magnetic/extraPeaks";
+import { reviewSymmetry, type SymmetryReview } from "@/core/diagnostics/symmetryReview";
 import { searchPropagationVector, type KSearchOptions } from "@/core/magnetic/kSearch";
 import { magneticSubgroupLattice, latticeRepresentatives } from "@/core/magnetic/subgroupLattice";
 import { allowedMomentDirections } from "@/core/magnetic/allowedMoments";
@@ -182,11 +183,12 @@ export function build_refinement(args: {
 }
 
 /**
- * The cell / space-group gate, run before any structural refinement: a Le Bail
- * fit refines the cell from peak positions alone, then every leftover peak
- * must index and every forbidden reflection must be absent. A wrong cell or
- * lattice shows as unindexed peaks; a space group that is too symmetric (a
- * centring or glide the crystal lacks) shows as violated absences.
+ * The cell / space-group check at the start of a refinement — a sanity check,
+ * not a gate: a Le Bail fit refines the cell from peak positions alone, then
+ * reads the leftover. A wrong cell or a missing phase shows as unindexed
+ * peaks. Intensity at a forbidden reflection is a flag to note and revisit at
+ * the end (review_symmetry, on the refined residual), not a reason to change
+ * the space group before the structure is refined.
  */
 export function check_cell_symmetry(args: {
   structure: StructureModel;
@@ -517,6 +519,27 @@ export function find_unexplained_peaks(args: {
 }): { peaks: { d: number; height: number }[]; count: number } {
   const peaks = detectExtraPeaks(args.residual.d, args.residual.yObs, args.residual.yCalc, args.options ?? {});
   return { peaks: [...peaks], count: peaks.length };
+}
+
+/**
+ * The symmetry review, the LAST step of a Rietveld refinement: on the refined
+ * residual, the forbidden reflections of the primary phase that still carry
+ * intensity, and the same-lattice subgroups that allow them
+ * (diagnostics/symmetryReview.ts). Run only once the structure is refined to
+ * the best its group allows.
+ */
+export function review_symmetry(args: {
+  structure: StructureModel;
+  extraPhases?: StructureModel[];
+  residual: { d: number[]; yObs: number[]; yCalc: number[]; sigma?: number[] };
+}): SymmetryReview {
+  const phases = [args.structure, ...(args.extraPhases ?? [])];
+  const finite = args.residual.d.filter((v) => Number.isFinite(v) && v > 0);
+  const dMin = Math.min(...finite) * 0.99;
+  const dMax = Math.max(...finite) * 1.01;
+  const reflections = phases.flatMap((ph) =>
+    generateReflections(ph.cell, ph.spaceGroup, dMin, dMax).map((r) => ({ d: r.d, hkl: `${r.h} ${r.k} ${r.l}`, phaseLabel: ph.name || ph.id })));
+  return reviewSymmetry(phases, { ...args.residual, reflections });
 }
 
 /**

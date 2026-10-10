@@ -90,7 +90,7 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "check_cell_symmetry",
     title: "Check cell and space group",
     description:
-      "Powder page only. The gate before refining a structure: a Le Bail fit refines the cell from peak positions alone, then every leftover peak must index (`unindexedPeaks`: wrong cell or lattice, or a missing phase) and every forbidden reflection must carry no intensity (`absences.violated`: the group is too symmetric). Uses the loaded phases, data, instrument and fit window; the other phases count as known impurities. Cannot catch a too-large cell. Takes several seconds.",
+      "Powder page only. A sanity check at the START of a refinement, not a gate: a Le Bail fit refines the cell from peak positions alone, then reports leftover peaks no reflection can index (`unindexedPeaks`: a wrong cell or a missing phase — worth settling before refining) and forbidden reflections showing intensity (`absences.violated`). An absence flag is NOT a reason to change the space group: before the structure is refined it is as often profile misfit or an impurity line. Note it (write_note) and refine on; the space group is questioned only at the end, with review_symmetry. Never blocks a refinement. Uses the loaded phases, data, instrument and fit window; the other phases count as known impurities. Cannot catch a too-large cell. Takes several seconds.",
     inputSchema: {
       significance: z.number().positive().optional().describe("Leftover height, in σ, that counts as observed intensity (default 5)"),
       dMin: z.number().positive().optional().describe("Smallest d-spacing read, Å (default 0.7)"),
@@ -102,11 +102,21 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "find_unexplained_peaks",
     title: "Find unexplained peaks",
     description:
-      "Powder page only. Peaks in the residual (obs − calc) of the curves on screen that the model does not explain — the impurity / magnetic-order signal. Returns d-spacings ranked by height, and marks them on the plot for the user (▽ with a guide line, listed under the plot, cleared at the next refinement) — so call it when the user asks to see or show the unexplained peaks. A handful suggests satellites or one impurity; dozens mean the fit itself is poor.",
+      "Powder page only. Peaks in the residual (obs − calc) of the curves on screen that sit on NO reflection of any phase — the impurity / magnetic-order signal (`unexplained`, `count`). Residual on or beside a known reflection is listed apart as `misfits`: that is a reflection whose intensity or shape the model does not match yet — what refining the structure, profile and corrections fixes — never an extra peak. Marks the unexplained peaks on the plot for the user (▽ with a guide line, listed under it, cleared at the next refinement; pass showMisfits to mark the misfits too) — so call it when the user asks to see or show the unexplained peaks. A handful suggests satellites or one impurity.",
     inputSchema: {
       sigma: z.number().positive().optional().describe("Detection threshold in robust σ (default 8)"),
       limit: z.number().int().positive().max(50).optional().describe("Most peaks to return (default 12)"),
+      showMisfits: z.boolean().optional().describe("Also mark the misfits (residual on or beside a known reflection) on the plot; default false"),
     },
+    effect: "read",
+    pages: ["powder"],
+  },
+  {
+    name: "review_symmetry",
+    title: "Review the space group (last step)",
+    description:
+      "Powder page only. The LAST step of the method, never the first: once every required stage is refined (scale, background, cell, positions, profile, ADPs) and the fit is still not good, read the REFINED residual at the reflections the space group forbids. Lists the forbidden reflections that still carry intensity and the subgroups of the same lattice that allow them (smallest index first, with their domain counts). Refuses, naming the stages left, until the method's stages are done: intensity differences on known reflections are what refinement fixes, so lowering the symmetry before refining to the best is wrong. The result is a proposal for the user: a lower group is a new model (its CIF), refined again from the start.",
+    inputSchema: {},
     effect: "read",
     pages: ["powder"],
   },
@@ -147,9 +157,9 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "allow_exception",
     title: "Allow an exception to the method",
     description:
-      "Ask the user to lift one of their method's firm rules for this analysis, when refine refused on it and the user wants to go on regardless: \"cell-gate\" (refine atomic parameters although check_cell_symmetry has not passed — e.g. a known impurity the model lacks) or \"bare-occupancy\" (refine an occupancy with no tie, because a second contrast — anomalous X-ray, isotopic neutron — determines it). Always shows the user an approval card, even in Auto; only they can approve it. Give their reason in `reason`. Lasts until the data or the phases change.",
+      "Ask the user to lift one of their method's firm rules for this analysis, when refine refused on it and the user wants to go on regardless: \"bare-occupancy\" (refine an occupancy with no tie, because a second contrast — anomalous X-ray, isotopic neutron — determines it). Always shows the user an approval card, even in Auto; only they can approve it. Give their reason in `reason`. Lasts until the data or the phases change.",
     inputSchema: {
-      rule: z.enum(["cell-gate", "bare-occupancy"]),
+      rule: z.enum(["bare-occupancy"]),
       reason: z.string().min(3).describe("Why the rule does not apply here, in the user's terms"),
     },
     effect: "change",
@@ -160,7 +170,7 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "write_note",
     title: "Note it for this analysis",
     description:
-      "Keep one short note in this analysis's record, which is saved with the project: a finding that should outlast this conversation (the cell gate's verdict and why, a correlation that forced a choice, an impurity identified) or a decision the user made and why (hold the composition; the minor phase is MnO; keep Qdamp from the Ni standard). get_state lists the notes, so they carry into the next conversation and the next session. One fact per note, a sentence or two; not for narrating progress.",
+      "Keep one short note in this analysis's record, which is saved with the project: a finding that should outlast this conversation (an absence the cell check flagged, to revisit at the symmetry review; a correlation that forced a choice, an impurity identified) or a decision the user made and why (hold the composition; the minor phase is MnO; keep Qdamp from the Ni standard). get_state lists the notes, so they carry into the next conversation and the next session. One fact per note, a sentence or two; not for narrating progress.",
     inputSchema: {
       text: z.string().min(3).max(400).describe("The note, in a sentence or two"),
     },

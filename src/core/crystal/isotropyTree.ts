@@ -186,7 +186,9 @@ export interface SubgroupIdentity {
   /** [G : H] index in the parent point group. */
   readonly index: number;
   /** How the name was found (or why not). */
-  readonly method: "direct" | "permuted-setting" | "point-group-only";
+  readonly method: "direct" | "permuted-setting" | "origin-shifted" | "point-group-only";
+  /** The origin shift (fractional) that matched, for "origin-shifted". */
+  readonly originShift?: readonly [number, number, number];
 }
 
 const opKey = (op: SymmetryOperation): string => {
@@ -233,16 +235,22 @@ function tableKeysWithOrder(nOps: number): { e: SpaceGroupData; key: string }[] 
   return list;
 }
 
+/** The ⅛ grid of origin shifts searched (a subgroup of an origin-choice-2 group sits ⅛ off). */
+const ORIGIN_GRID = 8;
+
 /**
  * Name a subgroup operation set: exact op-set match against the generated
  * table of all 564 settings, retried across the 24 proper
- * axis-permutation changes of basis. Falls back to the point group + index —
- * origin-shifted settings are not searched yet (honest degradation, reported
- * via `method`).
+ * axis-permutation changes of basis, then — with `originShifts` — across
+ * origin shifts on a ⅛ grid (in the given axes: a subgroup of an
+ * origin-choice-2 group, Fd-3m:2's F-43m, has its origin ⅛ along the
+ * diagonal; pass the full centred operation set). Falls back to the point
+ * group + index (honest degradation, reported via `method`).
  */
 export function identifySubgroup(
   subOps: readonly SymmetryOperation[],
   parentOps: readonly SymmetryOperation[],
+  options: { readonly originShifts?: boolean } = {},
 ): SubgroupIdentity {
   const pg = classifyPointGroup(subOps);
   const parentPg = classifyPointGroup(parentOps);
@@ -266,6 +274,23 @@ export function identifySubgroup(
     for (const { e, key } of entries) {
       if (key === transformed) {
         return { number: e.number, hermannMauguin: extendedSymbol(e), pointGroup: pg.symbol, index, method: "permuted-setting" };
+      }
+    }
+  }
+  if (!options.originShifts) return { pointGroup: pg.symbol, index, method: "point-group-only" };
+  // Origin shifts: x' = x − p turns (R, t) into (R, t + Rp − p).
+  const byKey = new Map(entries.map(({ e, key }) => [key, e] as const));
+  for (let a = 0; a < ORIGIN_GRID; a++) {
+    for (let b = 0; b < ORIGIN_GRID; b++) {
+      for (let c = 0; c < ORIGIN_GRID; c++) {
+        if (a === 0 && b === 0 && c === 0) continue;
+        const p: [number, number, number] = [a / ORIGIN_GRID, b / ORIGIN_GRID, c / ORIGIN_GRID];
+        const shifted = subOps.map((op) => ({
+          ...op,
+          translation: op.translation.map((t, i) => t + op.rotation[i]!.reduce((s, r, j) => s + r * p[j]!, 0) - p[i]!) as [number, number, number],
+        }));
+        const e = byKey.get(opSetKey(shifted));
+        if (e) return { number: e.number, hermannMauguin: extendedSymbol(e), pointGroup: pg.symbol, index, method: "origin-shifted", originShift: p };
       }
     }
   }

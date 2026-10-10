@@ -4,18 +4,21 @@
  * same in the user's words; this is what the app enforces and shows.
  *
  * - Firm rules (`MethodRule`) refuse a refinement, like the correlation
- *   check: the cell gate on the powder page (no atomic parameter refines
- *   until check_cell_symmetry has passed for this analysis) and the occupancy
- *   guardrail on both pages (no occupancy refines with nothing but the scale
- *   to determine it). Only the user lifts one, through allow_exception, which
- *   always asks them, even in Auto.
+ *   check: the occupancy guardrail on both pages (no occupancy refines with
+ *   nothing but the scale to determine it). Only the user lifts it, through
+ *   allow_exception, which always asks them, even in Auto.
+ * - The cell check at the start is a check, not a gate: it catches gross
+ *   problems (a peak no reflection can index) and never blocks a refinement.
+ *   The space group is reviewed LAST (review_symmetry refuses until every
+ *   required stage is done): a structure is refined to the best before its
+ *   symmetry is questioned, and intensity misfit is what refinement fixes.
  * - Stages are the method's blocks in order. A stage is done once a converged
  *   refinement had one of its parameters free. Freeing a later block before an
  *   earlier one is a note on the outcome, not a refusal (the user's profile
  *   order is not rigid); the drawer shows the stages as a checklist.
  *
- * The record (gate, exceptions, stages done, notes) is per analysis — the
- * data and the phases — and is kept by the shell, saved with the project.
+ * The record (the checks, exceptions, stages done, notes) is per analysis —
+ * the data and the phases — and is kept by the shell, saved with the project.
  */
 
 import type { LinearRestraint, ParameterKind, RefinementParameter } from "@/core/refinement/types";
@@ -24,17 +27,16 @@ import type { AgentPage } from "@/agent/tools";
 import type { LiveState } from "@/agent/port";
 import { PAGE_METHOD } from "@/agent/skills";
 
-export type MethodRule = "cell-gate" | "bare-occupancy";
+export type MethodRule = "bare-occupancy";
 
 export const RULES: Readonly<Record<MethodRule, { readonly title: string; readonly pages: readonly AgentPage[] }>> = {
-  "cell-gate": { title: "Refine the structure before the cell gate has passed", pages: ["powder"] },
   "bare-occupancy": { title: "Refine an occupancy with no tie or second contrast", pages: ["powder", "pdf"] },
 };
 
 /**
  * The record of one analysis (the shape a project file stores): the last cell
- * gate, the firm rules the user lifted and why, the stages a converged
- * refinement has covered (stage ids), and the Agent's notes.
+ * check and symmetry review, the firm rules the user lifted and why, the
+ * stages a converged refinement has covered (stage ids), and the Agent's notes.
  */
 export type AgentRecord = AgentRecordFile;
 
@@ -63,17 +65,16 @@ export interface MethodStage {
   readonly optional?: boolean;
 }
 
-const ATOMIC: readonly ParameterKind[] = ["atomX", "atomY", "atomZ", "positionShift", "bIso", "uAniso", "occupancy"];
-
-/** my-rietveld-workflow: the gate, then atoms before profile, ADPs, occupancy, corrections. */
+/** my-rietveld-workflow: the cell check, atoms before profile, ADPs, occupancy, corrections; symmetry last. */
 const POWDER_STAGES: readonly MethodStage[] = [
-  { id: "gate", label: "Cell gate", kinds: [] },
+  { id: "check", label: "Cell check", kinds: [] },
   { id: "base", label: "Scale, background, cell", kinds: ["scale", "background", "cellLength", "cellAngle", "zeroShift", "tofCalibration"] },
   { id: "positions", label: "Positions", kinds: ["atomX", "atomY", "atomZ", "positionShift"] },
   { id: "profile", label: "Profile", kinds: ["peakWidth", "profileU", "profileV", "profileW", "profileX", "profileY", "asymSL", "asymHL", "tofProfile", "mustrainIso", "stephensStrain", "anisoSizePerp", "anisoSizePar", "mustrainPerp", "mustrainPar"] },
   { id: "adp", label: "ADPs", kinds: ["bIso", "uAniso"] },
   { id: "occupancy", label: "Occupancy", kinds: ["occupancy"], optional: true },
   { id: "corrections", label: "Corrections", kinds: ["sampleDisplacement", "sampleTransparency", "poRatio", "absorption", "surfaceRoughA", "surfaceRoughB", "extinction"], optional: true },
+  { id: "symmetry", label: "Symmetry review (last)", kinds: [], optional: true },
 ];
 
 /** pdf-workflow: scale and cell, ADPs, one correlated-motion term, positions, occupancy, particle size. */
@@ -116,7 +117,7 @@ export function methodProgress(page: AgentPage, record: AgentRecord): MethodProg
   const stages = stagesFor(page).map((s): StageView => ({
     id: s.id,
     label: s.label,
-    done: s.id === "gate" ? record.cellGate?.passed === true || hasException(record, "cell-gate") : done.has(s.id),
+    done: s.id === "check" ? record.cellCheck !== undefined : s.id === "symmetry" ? record.symmetryReviewed !== undefined : done.has(s.id),
     optional: !!s.optional,
   }));
   return { skill: PAGE_METHOD[page], stages, next: stages.find((s) => !s.done && !s.optional)?.label ?? null };
@@ -156,21 +157,20 @@ export interface RuleRefusal {
 }
 
 /**
+ * The required refinement stages not done yet (labels): what must be refined
+ * before the space group is questioned (review_symmetry). The cell check is a
+ * check, not a stage to refine, so it is not among them.
+ */
+export function stagesLeft(page: AgentPage, record: AgentRecord): string[] {
+  const done = new Set(record.stagesDone);
+  return stagesFor(page).filter((s) => !s.optional && s.kinds.length > 0 && !done.has(s.id)).map((s) => s.label);
+}
+
+/**
  * The firm rule a refinement of this free set would break, or null. Checked
- * before the correlation probe: these do not depend on the data's numbers.
+ * before the correlation probe: it does not depend on the data's numbers.
  */
 export function ruleRefusal(page: AgentPage, free: readonly RefinementParameter[], restraints: readonly LinearRestraint[], record: AgentRecord): RuleRefusal | null {
-  if (page === "powder" && !(record.cellGate?.passed) && !hasException(record, "cell-gate")) {
-    const atomic = free.filter((p) => ATOMIC.includes(p.kind));
-    if (atomic.length > 0) {
-      const ran = record.cellGate ? `The cell gate ran and did not pass (${record.cellGate.summary}).` : "The cell gate has not run on this analysis.";
-      return {
-        rule: "cell-gate",
-        line: `Not run: ${atomic.length} atomic parameter${atomic.length === 1 ? "" : "s"} before the cell gate`,
-        message: `Not refined: the user's method keeps the structure fixed until the cell and space group are trusted, and ${atomic.map((p) => p.id).slice(0, 6).join(", ")}${atomic.length > 6 ? ` and ${atomic.length - 6} more` : ""} ${atomic.length === 1 ? "is" : "are"} atomic. ${ran} Run check_cell_symmetry; once it passes, refine again. If it cannot pass (a known impurity the model lacks, an overlap) and the user wants to go on regardless, ask them, then call allow_exception with rule "cell-gate" and their reason — they approve it themselves.`,
-      };
-    }
-  }
   if (!hasException(record, "bare-occupancy")) {
     const tied = new Set(restraints.flatMap((r) => r.terms.map((t) => t.parameterId)));
     const bare = free.filter((p) => p.kind === "occupancy" && !tied.has(p.id));

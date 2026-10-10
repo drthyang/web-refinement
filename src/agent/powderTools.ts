@@ -22,6 +22,7 @@ import type { MustrainModel, SiteTies } from "@/app/powderSpec";
 import type { PowderXUnit } from "@/core/diffraction/types";
 import { availableDisplayUnits, convertAxisValue, convertInterval } from "@/visualization/axisUnits";
 import { K0_MAGNETIC, k0MagneticHint, residualPeaks } from "@/core/diagnostics/assessment";
+import { reviewSymmetry } from "@/core/diagnostics/symmetryReview";
 import { formatWt, fractionsOf } from "@/core/diagnostics/phaseFractions";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { generateReflections } from "@/core/diffraction/reflections";
@@ -62,7 +63,7 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
       };
     }
     case "check_cell_symmetry": {
-      const gate = check_cell_symmetry({
+      const check = check_cell_symmetry({
         structure: s.refinedPhases[0] ?? s.structure,
         pattern: s.pattern,
         ...(s.instrument ? { instrument: s.instrument } : {}),
@@ -72,33 +73,43 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
         ...(input.significance !== undefined ? { significance: input.significance } : {}),
       });
       // Each unindexed peak in d and Q too, and marked on the plot for the user.
-      const unindexed = gate.unindexedPeaks.map((p) => {
+      const unindexed = check.unindexedPeaks.map((p) => {
         const d = convertAxisValue(p.x, s.pattern.xUnit, "dSpacing", s.axis);
         return { ...p, ...(Number.isFinite(d) ? { d: sig(d, 5), q: sig((2 * Math.PI) / d, 5) } : {}) };
       });
       const marks = unindexed.flatMap((p) => ("d" in p && p.d !== undefined ? [{ d: p.d, height: p.significance }] : []));
       if (marks.length > 0) port.showPeaks(marks);
-      // An impurity's line can land on a forbidden position and read as a violation.
-      const reading = unindexed.length > 0 && gate.absences.violated.length > 0
-        ? `With ${unindexed.length} unindexed peak${unindexed.length === 1 ? "" : "s"} present, the violated absence${gate.absences.violated.length === 1 ? "" : "s"} (${gate.absences.violated.map((v) => `${v.h} ${v.k} ${v.l} at d ${v.d.toFixed(3)} Å`).join(", ")}) may be a line of the same unindexed phase. Identify that phase (add it as an extra phase) and run the gate again before concluding the space group is wrong.`
-        : undefined;
-      return { ...gate, unindexedPeaks: unindexed, ...(reading ? { reading } : {}), ...(marks.length > 0 ? { markedOnPlot: "The unindexed peaks are marked on the plot (filled ▽, listed under it)." } : {}) };
+      // A check, not a gate: an absence flag is recorded and revisited at the
+      // end (review_symmetry), never acted on before the structure is refined.
+      const violated = check.absences.violated;
+      const flags = violated.map((v) => `${v.h} ${v.k} ${v.l} at d ${v.d.toFixed(3)} Å`).join(", ");
+      const readings = [
+        ...(unindexed.length > 0 ? [`${unindexed.length} peak${unindexed.length === 1 ? "" : "s"} no reflection of the cell indexes: a missing phase (most often) or a wrong cell. Settle this with the user before refining the structure.`] : []),
+        ...(violated.length > 0
+          ? [`${violated.length} forbidden reflection${violated.length === 1 ? "" : "s"} show${violated.length === 1 ? "s" : ""} leftover intensity (${flags}). This is a flag, not a verdict: before the structure is refined, profile misfit${unindexed.length > 0 ? ", or a line of the unindexed phase," : ""} reads the same way. Do not change the space group now: note it (write_note) and refine the structure to the best; review_symmetry reads the refined residual at the end.`]
+          : []),
+      ];
+      const reading = readings.length > 0 ? readings.join(" ") : "Every peak indexes and no forbidden reflection shows intensity: refine the structure.";
+      return { ...check, unindexedPeaks: unindexed, reading, ...(marks.length > 0 ? { markedOnPlot: "The unindexed peaks are marked on the plot (filled ▽, listed under it)." } : {}) };
     }
     case "find_unexplained_peaks": {
       // Each peak must stand 5σ above its own counting noise, and is checked
-      // against every phase's reflections: on one, it is that reflection's misfit.
+      // against every phase's reflections. Only a peak on no reflection is
+      // unexplained (an extra peak); one on or beside a reflection is that
+      // reflection's misfit, which refining the model fixes.
       const residual = residualOf(s);
       const { between, beside, onReflection } = residualPeaks(residual, { ...(input.sigma !== undefined ? { sigma: input.sigma } : {}), limit: input.limit ?? 12 });
-      const all = [...between, ...beside, ...onReflection].sort((a, b) => b.height - a.height);
+      const misfits = [...onReflection, ...beside].sort((a, b) => b.height - a.height);
       const isBeside = new Set(beside);
-      const near = (p: (typeof all)[number]): string | undefined => {
+      const near = (p: (typeof misfits)[number]): string | undefined => {
         if (!p.nearNuclear) return undefined;
         const ref = `${p.nearNuclear.phaseLabel} ${p.nearNuclear.hkl}`;
-        return isBeside.has(p) ? `beside ${ref} (${((p.d / p.nearNuclear.d - 1) * 100).toFixed(1)}% in d)` : ref;
+        return isBeside.has(p) ? `beside ${ref} (${((p.d / p.nearNuclear.d - 1) * 100).toFixed(1)}% in d)` : `on ${ref}`;
       };
       // Shown to the user too: ▽ marks with guide lines on the plot.
-      port.showPeaks(all.map((p) => ({ d: p.d, height: p.height, ...(near(p) ? { near: near(p)! } : {}) })));
-      const view = (p: (typeof all)[number]): Record<string, unknown> => ({
+      const marked = input.showMisfits ? [...between, ...misfits].sort((a, b) => b.height - a.height) : between;
+      port.showPeaks(marked.map((p) => ({ d: p.d, height: p.height, ...(near(p) ? { near: near(p)! } : {}) })));
+      const view = (p: (typeof misfits)[number]): Record<string, unknown> => ({
         d: sig(p.d, 5),
         q: sig((2 * Math.PI) / p.d, 5),
         // The data's own axis (TOF or 2θ), from the page's calibration.
@@ -107,16 +118,40 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
         ...(p.significance !== undefined ? { sigmas: sig(p.significance, 3) } : {}),
         ...(near(p) ? { near: near(p) } : {}),
       });
+      const misfitReading = misfits.length === 0 ? ""
+        : ` ${misfits.length} residual peak${misfits.length === 1 ? " sits" : "s sit"} on or beside a known reflection (misfits): ${misfits.length === 1 ? "a reflection" : "reflections"} the model has, with intensity or shape not matched yet. They are not extra peaks — don't call them so, and don't add a phase or change the symmetry for them. Refining the structure (positions, ADPs, occupancy), the profile and the corrections (preferred orientation, absorption) is what fixes them.`;
+      const reading = between.length === 0 && misfits.length === 0
+        ? "No residual peak stands 5σ above its own noise."
+        : (between.length === 0
+          ? "No extra peak: no residual peak sits away from the phases' reflections."
+          : `${between.length} peak${between.length === 1 ? "" : "s"} away from every phase's reflections: intensity no phase accounts for (an impurity, magnetic order, or an unmodelled feature).`) +
+          misfitReading +
+          (k0MagneticHint(residual.magneticNeutron, onReflection) ? ` ${K0_MAGNETIC}` : "");
       return {
-        count: all.length,
+        count: between.length,
         unexplained: between.map(view),
-        besideKnownReflections: beside.map(view),
-        onKnownReflections: onReflection.map(view),
-        reading: all.length === 0
-          ? "No residual peak stands 5σ above its own noise."
-          : `${between.length} away from every phase's reflections (intensity no phase accounts for: an impurity, magnetic order, or an unmodelled feature); ${beside.length} within 2% in d of a reflection (most often its shoulder or tail: check the profile first); ${onReflection.length} on a reflection (calculated too weak: the atoms, ADPs or an intensity correction, not a new phase).` +
-            (k0MagneticHint(residual.magneticNeutron, onReflection) ? ` ${K0_MAGNETIC}` : ""),
-        ...(all.length > 0 ? { markedOnPlot: "The user sees these marked on the plot (filled ▽ unexplained, hollow ▽ on or beside a known reflection, listed under it); refer to them by d." } : {}),
+        misfits: misfits.map(view),
+        reading,
+        ...(marked.length > 0
+          ? { markedOnPlot: input.showMisfits ? "The user sees these marked on the plot (filled ▽ unexplained, hollow ▽ misfits on or beside a known reflection, listed under it); refer to them by d." : "The user sees the unexplained peaks marked on the plot (filled ▽, listed under it); refer to them by d." }
+          : {}),
+      };
+    }
+    case "review_symmetry": {
+      // The executor runs this only once the method's stages are refined.
+      const residual = residualOf(s);
+      const review = reviewSymmetry(s.refinedPhases, residual);
+      const marks = review.observedForbidden.map((o) => ({ d: o.d, height: o.height, near: `forbidden ${o.hkl}` }));
+      if (marks.length > 0) port.showPeaks(marks);
+      const magnetic = review.observedForbidden.length > 0 && residual.magneticNeutron
+        ? "Neutron data with magnetic ions: magnetic order with k = 0 puts intensity on nuclear-forbidden reflections. Rule that out (is the sample below its ordering temperature? the magnetic page) before lowering the nuclear symmetry."
+        : undefined;
+      return {
+        ...review,
+        observedForbidden: review.observedForbidden.map((o) => ({ hkl: o.hkl, d: sig(o.d, 5), ...(o.sigmas !== undefined ? { sigmas: sig(o.sigmas, 3) } : {}) })),
+        ...(magnetic ? { magneticCaveat: magnetic } : {}),
+        decision: "The user's. Present the evidence and the candidates; do not change the model. A lower symmetry is a new model (its CIF, loaded by the user), refined again from the start of the method, and kept only if it fits these reflections without the misfit moving elsewhere and with fewer free parameters than it gains in χ² (a Hamilton-type test).",
+        ...(marks.length > 0 ? { markedOnPlot: "The forbidden reflections with intensity are marked on the plot (filled ▽, labelled forbidden h k l)." } : {}),
       };
     }
     case "bond_geometry":

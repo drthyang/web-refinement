@@ -449,9 +449,9 @@ function Composer({ agent, disabled }: { agent: AgentController; disabled: boole
 }
 
 /**
- * Ask first: every change waits for approval, and the agent stops at each
- * gate. Auto: changes run without a card (still undoable History steps), and
- * the agent works through the stages, stopping at a failed gate or a decision
+ * Ask first: every change waits for approval, and the agent stops after each
+ * stage. Auto: changes run without a card (still undoable History steps), and
+ * the agent works through the stages, stopping at a failed stage or a decision
  * the method leaves to the user. Off again on reload.
  */
 function AutonomySwitch({ agent }: { agent: AgentController }): JSX.Element {
@@ -470,8 +470,8 @@ function AutonomySwitch({ agent }: { agent: AgentController }): JSX.Element {
   );
   return (
     <div role="radiogroup" aria-label="Approval mode" style={{ display: "flex", border: `1px solid ${color.control}`, borderRadius: radius.button, overflow: "hidden", flexShrink: 0 }}>
-      {option(false, "Ask first", "Every change waits for your approval, and the agent stops at each gate of the method to report.")}
-      {option(true, "Auto", "Changes run without an approval card (each is still a History step you can undo), and the agent works through the method's stages on its own, stopping at a failed gate or a decision that is yours. Back to Ask first on reload.")}
+      {option(false, "Ask first", "Every change waits for your approval, and the agent stops after each stage of the method to report.")}
+      {option(true, "Auto", "Changes run without an approval card (each is still a History step you can undo), and the agent works through the method's stages on its own, stopping at a failed stage or a decision that is yours. Back to Ask first on reload.")}
     </div>
   );
 }
