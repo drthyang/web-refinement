@@ -24,7 +24,7 @@ import { zipStore } from "@/core/export/zip";
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern, PowderXUnit } from "@/core/diffraction/types";
 import type { DetectedFormat, DetectionSource } from "@/parsers/detectFormat";
-import type { RefinementParameter, RefinementResult, ParameterBinding } from "@/core/refinement/types";
+import type { RefinementOptions, RefinementParameter, RefinementResult, ParameterBinding } from "@/core/refinement/types";
 import { cellVolume } from "@/core/crystal/unitCell";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import { magneticComponentCurve } from "@/core/workflow/magneticPowder";
@@ -44,6 +44,7 @@ import { powderReportInput, reportFileName, type MagneticExploration } from "@/a
 import { isMagneticModelParameterKind, isMomentParameterKind } from "@/core/refinement/types";
 import type { ComputeClient } from "@/workers/computeClient";
 import { CANCELLED } from "@/workers/computeClient";
+import type { PowderProgress } from "@/workers/runPowder";
 import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
 import type { SampleResult } from "@/core/refinement/bayes/sampler";
 import { KSearchPanel, type MagneticFit, type MagneticPatternView, type ResidualPeak } from "@/components/KSearchPanel";
@@ -193,6 +194,10 @@ export function PowderWorkbench({
   // Reflection clicked in the F_obs/F_calc plot, spotlighted in the pattern
   // plot; null = nothing highlighted.
   const [highlight, setHighlight] = useState<{ hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null>(null);
+  // Residual peaks the Agent found (find_unexplained_peaks), marked on the
+  // plot until the user clears them or the next refinement changes the residual.
+  const [agentPeaks, setAgentPeaks] = useState<readonly { d: number; height: number }[] | null>(null);
+  useEffect(() => setAgentPeaks(null), [powderResult]);
   // Which phase the 3D model shows (0 = primary structure, 1.. = extra phases).
   const [viewPhaseIdx, setViewPhaseIdx] = useState(0);
 
@@ -408,6 +413,13 @@ export function PowderWorkbench({
   const toDisplayX = useCallback(
     (xv: number): number => (effectiveUnit === pattern.xUnit ? xv : convertAxisValue(xv, pattern.xUnit, effectiveUnit, axisCtx)),
     [effectiveUnit, pattern.xUnit, axisCtx],
+  );
+  // The Agent's unexplained peaks on the plot's axis (strongest first, as found).
+  const agentPeakMarks = useMemo(
+    () => (agentPeaks ?? [])
+      .map((p) => ({ x: convertAxisValue(p.d, "dSpacing", effectiveUnit, axisCtx), d: p.d }))
+      .filter((p) => Number.isFinite(p.x)),
+    [agentPeaks, effectiveUnit, axisCtx],
   );
   const curvesD = useMemo(
     () => (!displayUnits.includes("dSpacing") ? undefined : pattern.xUnit === "dSpacing" ? curves.x : convertAxisArray(curves.x, pattern.xUnit, "dSpacing", axisCtx)),
@@ -711,6 +723,31 @@ export function PowderWorkbench({
 
   /** Flat co-refinement of the currently-freed parameters. Resolves to why it
    *  did not finish (cancelled, failed), or null when it did. */
+  /**
+   * The Refine button's fit of the current free set: with an applied magnetic
+   * model, nuclear + magnetic on the shared scale; otherwise the nuclear
+   * pattern (multi-phase when there are extra phases). Applies nothing — the
+   * caller does, or (the Agent's correlation probe) only reads it.
+   */
+  function powderFit(options: Partial<RefinementOptions>, gpu = false, onProgress?: PowderProgress): Promise<RefinementResult> {
+    const window = fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {};
+    if (magneticApplied) {
+      return client.refineMagneticPowderParallel({
+        structure, magnetic: session.magnetic!, pattern, parameters: [...powderParams], bindings: [...pBindings],
+        ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
+        ...profileReq(),
+        ...window,
+      }, options);
+    }
+    return client.refinePowderParallel({
+      structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(),
+      ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
+      ...window,
+      options,
+      useGpu: gpu,
+    }, onProgress);
+  }
+
   async function runPowder(): Promise<string | null> {
     // The starting point (freed parameters, edited values, settings) is a step
     // of its own, so going back lands before this refinement, not after it.
@@ -726,12 +763,7 @@ export function PowderWorkbench({
       if (magneticApplied) {
         await new Promise((r) => setTimeout(r, 30)); // let the busy state paint
         const coRefined = momentRowsFree();
-        const result = await client.refineMagneticPowderParallel({
-          structure, magnetic: session.magnetic!, pattern, parameters: [...powderParams], bindings: [...pBindings],
-          ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases.map((s) => ({ structure: s, id: s.id })) } : {}),
-          ...profileReq(),
-          ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
-        }, { maxIterations: 20 });
+        const result = await powderFit({ maxIterations: 20 });
         const refinedMag = applyMagneticMoments(session.magnetic!, pBindings, result.parameters);
         setSession((s) => ({
           ...s,
@@ -755,13 +787,7 @@ export function PowderWorkbench({
         && typeof navigator !== "undefined" && !!(navigator as Navigator & { gpu?: unknown }).gpu;
       // Parallel-Jacobian path for the flat single-phase case; the client
       // falls back to the single-worker path for multi-phase requests.
-      const result = await client.refinePowderParallel({
-        structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(),
-        ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
-        ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
-        options: { maxIterations: 20 },
-        useGpu,
-      }, onPowderProgress);
+      const result = await powderFit({ maxIterations: 20 }, useGpu, onPowderProgress);
       setSession((s) => ({
         ...s,
         powderParams: s.powderParams.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value })),
@@ -1277,6 +1303,7 @@ export function PowderWorkbench({
             ? (pattern.xUnit === "dSpacing" ? curves.x : convertAxisArray(curves.x, pattern.xUnit, "dSpacing", axisCtx))
             : null,
           observationCount: observations,
+          axis: axisCtx,
           source: session.rawData?.name ?? powderSource,
         };
       },
@@ -1289,8 +1316,13 @@ export function PowderWorkbench({
       setMustrain,
       setAnisotropicAdp,
       setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : null),
+      showPeaks: (peaks) => {
+        setAgentPeaks(peaks.length > 0 ? peaks.map((p) => ({ d: p.d, height: p.height })) : null);
+        if (peaks.length > 0) setPlotMode("curves");
+      },
       refine: runPowder,
       thorough: runThorough,
+      probe: (options) => powderFit(options),
       cancel: cancelPowder,
       reset: resetPowderParams,
     });
@@ -1608,8 +1640,28 @@ export function PowderWorkbench({
                       focusPoint={focusPoint}
                       highlight={highlight}
                       onHighlight={setHighlight}
+                      {...(agentPeakMarks.length > 0 ? { foundPeaks: agentPeakMarks, foundStyle: { label: "unexplained", color: theme.flag, guides: true } } : {})}
                       {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                     />
+                    {agentPeakMarks.length > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, rowGap: 4, marginTop: 6, fontSize: 12, color: theme.secondary, flexWrap: "wrap" }}>
+                        <span style={{ color: theme.flag, fontWeight: 600 }} title="Residual peaks the Agent found (find_unexplained_peaks): intensity the model does not explain. Cleared at the next refinement.">
+                          ▽ {agentPeakMarks.length} unexplained peak{agentPeakMarks.length === 1 ? "" : "s"}
+                        </span>
+                        {agentPeakMarks.map((p) => (
+                          <button
+                            key={p.d}
+                            type="button"
+                            title={`Zoom to d = ${p.d.toFixed(4)} Å`}
+                            onClick={() => setFocusPoint((f) => ({ x: p.x, token: (f?.token ?? 0) + 1 }))}
+                            style={{ border: `1px solid ${theme.border}`, background: theme.surface, borderRadius: 999, padding: "1px 8px", fontSize: 12, fontFamily: themeMono, color: theme.ink, cursor: "pointer" }}
+                          >
+                            d {p.d.toFixed(3)} Å
+                          </button>
+                        ))}
+                        <button type="button" onClick={() => setAgentPeaks(null)} style={{ ...resetRangeBtn }}>Clear</button>
+                      </div>
+                    )}
                     <p style={{ marginTop: 8, fontSize: 12, color: theme.secondary }}>
                       {tofViewOnly
                         ? session.powderOverlay

@@ -104,6 +104,19 @@ breaks the tie:
 If none of these is present, keep occupancy fixed and say why. This is a firm rule for
 him, not a suggestion.
 
+## The correlation guardrail (do not skip)
+
+**Never refine strongly correlated parameters together.** Two free parameters that
+correlate at |ρ| ≥ 0.95 carry information the data cannot separate: the fit trades one
+against the other along a valley, their esds inflate, and either can land anywhere on it.
+Check the free set before each refinement — the in-app Agent's `refine` measures it at the
+current values and refuses a correlated set; headless, read the correlations
+`refine_powder` and `assess_refinement` report. When a pair correlates, fix one — usually
+the one this sequence frees later (occupancy against scale, B against scale, the zero
+against the cell) — or refine them in separate stages, and free it again only once the
+other is stable. A combination the data cannot determine at all (a null direction) is the
+same rule at its limit. This is a firm rule for him, like the occupancy guardrail.
+
 ## Corrections are polish, not a crutch
 
 Add sample/intensity corrections **only after the structure has converged**, to clean up

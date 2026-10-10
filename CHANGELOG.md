@@ -9,6 +9,22 @@ release fixes bugs.
 
 ### Added
 
+- **The Agent never refines correlated parameters together.** Before it
+  refines, it measures the free set at the current values with the page's own
+  fit; two parameters correlated at |ρ| ≥ 0.95, or a combination the data
+  cannot determine, stop the refinement until one of each pair is fixed. The
+  approval card shows the strongest pair left; the Refine button is unchanged.
+- **The Agent works in any axis unit.** Its fit window can be given in TOF,
+  2θ, d or Q and is converted with the page's calibration; positions it
+  reports come in d, Q and the data's own axis.
+- **The Agent marks unexplained peaks on the Rietveld plot** when it looks for
+  them, with a list under the plot to zoom to each and a Clear button.
+- **The Agent keeps going when a model stalls.** It notices a reply that
+  promises a tool call it does not make, an empty reply after a tool result,
+  or "waiting for" a tool that already answered, and asks the model to go on.
+  It stops a reply that keeps repeating itself. On LM Studio it loads a model
+  with a 32k context before the first message, and refuses one loaded with
+  less.
 - **The Agent on LM Studio.** A fourth way to reach a model: a local model on
   your LM Studio server (0.4.1 or later, with CORS on), listed from the server
   with each model's loaded context.

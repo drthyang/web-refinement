@@ -383,6 +383,12 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   correlations, bounds and physical values, without the GoF verdict or the
   Bragg-peak residual scan, and `set_fit_range` with `whole` restores the
   page's default r window.
+- Positions come in every unit, so the model never converts by hand.
+  `get_state` lists the extent and fit window in each unit the pattern
+  converts to (2θ, d, Q, TOF), with the full TOF calibration.
+  `find_unexplained_peaks` gives each peak in d, Q and the data's own axis.
+  `set_fit_range` takes min/max in any of them (`unit`), converted by the page
+  with its own calibration.
 - `cancel_refinement` never asks.
 - There is no tool that sets a parameter value. The guardrails above hold.
 
@@ -390,6 +396,44 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
 model learns when the user declines. "Auto-approve" skips the cards for the
 rest of the session. Every change is a step in History tagged `agent`
 (`HistoryStep.actor`), so ⌘Z undoes it like any other step.
+
+**No correlated parameters refined together.** Before the Agent's `refine`
+runs, and before the approval card appears, the page runs its own fit of the
+free set with no iterations (the port's `probe`): the normal matrix at the
+current values, over the same fit window, which gives the covariance the
+refinement would report without moving anything
+([`src/agent/correlationCheck.ts`](../src/agent/correlationCheck.ts)). If
+two free parameters correlate at |ρ| ≥ 0.95 (the line the engine and
+`assess_refinement` already draw), or the data cannot determine a combination
+of them at all (an SVD null direction, such as scale with every site
+occupancy), `refine` refuses and names them, with the physical reason for
+known pairs. The model must fix one of each pair, or refine them in separate
+stages. Background coefficients are exempt among themselves: they describe one
+curve in a basis whose terms trade off by construction, while the curve is
+determined. A background term against the scale still counts. A passing check puts the strongest remaining pair on the approval card.
+The check is measured on this data, so a pair the range separates (cell and
+zero over a wide 2θ range) is not refused. Pairs that tighten during the fit
+are listed in the outcome, and the next `refine` refuses them. The page's own
+Refine button is unchanged.
+
+**Unexplained peaks on the plot.** `find_unexplained_peaks` marks what it
+finds on the Rietveld plot: a ▽ in the highlight colour with a dashed guide
+through the pattern, and a row under the plot listing each d (click to zoom)
+with a Clear button. The marks go at the next refinement, when the residual
+changes. Viewing only: no approval card, no history step.
+
+**When a model stalls.** The chat loop watches for three ways a reply leaves
+the user waiting on nothing:
+- a reply that promises a call it does not make ("Starting the Le Bail gate
+  now.");
+- an empty reply after a tool result;
+- "waiting for" a tool that already answered.
+
+It then tells the model so and lets it go on, at most twice per message, and
+says so in the conversation. A reply that asks the user or stops at a gate is
+left alone. A reply (or its reasoning) that starts repeating one phrase over
+and over is stopped, keeping the text up to the first repeat so the
+conversation stays valid.
 
 **Four ways to reach a model.**
 
@@ -435,10 +479,12 @@ rest of the session. Every change is a step in History tagged `agent`
   other origin until **Enable CORS** is on in its server settings (or
   `lms server start --cors`), and its server has its own port, so this is
   needed even for the dev server. A model loads with the context length set
-  for it in LM Studio; the drawer shows each loaded model's context and asks
-  for at least 32k (`lms load <model> --context-length 32768`). Tested against
-  a stand-in server built from LM Studio's documented responses, not yet
-  against LM Studio itself.
+  for it in LM Studio, often far below what the Agent needs, and a prompt that
+  does not fit is cut. So before each message the Agent loads a model that is
+  not loaded with 32k (`/api/v1/models/load`), and will not send to one loaded
+  with less: it says how to reload it, and never unloads a copy another program
+  may be using. Tested against a stand-in server built from LM Studio's
+  documented responses, not yet against LM Studio itself.
 
 **How it is tested.** [`src/agent/`](../src/agent) tests run the tools on
 a real powder fit and a real PDF fit (the refinement engine, the assessment),

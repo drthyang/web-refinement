@@ -110,7 +110,7 @@ const ADP_KINDS: ReadonlySet<ParameterKind> = new Set(["bIso", "uAniso"]);
  * Keyed by the unordered pair of kinds. This is where refiner folklore becomes
  * machine-readable: the agent gets *why* a correlation is expected and what to do.
  */
-function correlationInsight(a: ParameterKind, b: ParameterKind): string | undefined {
+export function correlationInsight(a: ParameterKind, b: ParameterKind): string | undefined {
   const pair = new Set<ParameterKind>([a, b]);
   const has = (x: ParameterKind, y: ParameterKind): boolean => pair.has(x) && pair.has(y);
   if (has("scale", "background")) return "The overall scale and the background are trading intensity — a flexible background can soak up peak intensity. Reduce background terms, or refine scale with the background fixed first.";
@@ -119,6 +119,10 @@ function correlationInsight(a: ParameterKind, b: ParameterKind): string | undefi
   if (has("cellLength", "zeroShift")) return "Cell length and zero shift both move peak positions; they separate only across a wide 2θ/TOF range. Refine the zero from a well-characterized standard, or fix it.";
   if (has("profileU", "profileV") || has("profileV", "profileW") || has("profileU", "profileW")) return "The Caglioti U/V/W are mutually correlated (they parameterize one FWHM(θ) curve). Free them together only with good angular coverage; otherwise refine W first.";
   if (has("mustrainPerp", "mustrainPar") || has("anisoSizePerp", "anisoSizePar")) return "Anisotropic microstructure components correlate along directions the data barely resolves. Free them only after the isotropic profile has converged.";
+  // Real space (PDF): the peak-sharpening and envelope terms.
+  if (has("delta1", "delta2")) return "δ1 and δ2 both sharpen the near-neighbour peaks (the 1/r and 1/r² correlated-motion terms). Refine one: δ2 at low temperature, δ1 at high temperature.";
+  if (has("sratio", "delta1") || has("sratio", "delta2") || has("rcut", "delta1") || has("rcut", "delta2")) return "sratio/rcut is the other correlated-motion model; it describes the same peak sharpening as δ1/δ2. Use one model, never both.";
+  if (has("pdfScale", "spdiameter")) return "The particle-size envelope and the scale both set the amplitude of G(r) over a short r window. Refine spdiameter only for nanoparticles, over an r range that reaches the particle size.";
   // Correction-owned correlations (displacement/transparency/roughness vs. cell,
   // zero, scale, background) live on their registry descriptors.
   const fromCorrection = correctionCorrelation(a, b);

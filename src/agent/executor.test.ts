@@ -60,6 +60,7 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
       curves,
       d: convertAxisArray(curves.x, s.pattern.xUnit, "dSpacing", axisContext(s.pattern)),
       observationCount: n,
+      axis: axisContext(s.pattern),
       source: "test",
     };
   };
@@ -95,8 +96,22 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
       calls.push(`range ${r ? `${r.min}-${r.max}` : "whole"}`);
       fitRange = r ? { ...r } : null;
     },
+    showPeaks: (peaks) => calls.push(`showPeaks ${peaks.map((p) => p.d.toFixed(3)).join(",")}`),
     refine,
     thorough: refine,
+    probe: async (options) => {
+      calls.push("probe");
+      return runPowderRefinement({
+        type: "refinePowder",
+        requestId: 0,
+        structure: s.structure,
+        pattern: s.pattern,
+        parameters: s.powderParams,
+        bindings: s.powderBindings,
+        shape: s.powderProfile.shape,
+        options,
+      });
+    },
     cancel: () => calls.push("cancel"),
     reset: () => calls.push("reset"),
   };
@@ -279,6 +294,36 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(String(out.note)).toMatch(/did not finish \(cancelled\)/);
   });
 
+  it("never refines correlated parameters together: the free set is checked before anyone is asked", async () => {
+    const start = newSession(exampleStructure());
+    // Scale with every site occupancy: an exact degeneracy (all three only scale intensity).
+    const { port, calls } = sessionPort({ ...start, powderParams: start.powderParams.map((p) => ({ ...p, fixed: !["scale", "occ_Mn1", "occ_Ga1"].includes(p.id) })) });
+    const { ex, asked, seen } = executor(fakeHost(port).host, true);
+    const out = await ex.run("refine", {});
+    expect(out.isError).toBe(true);
+    expect(out.text).toMatch(/Not refined: .*Not determined by the data at all, together: .*occ_Mn1.*Fix one of each pair with set_free/);
+    expect(asked).toEqual([]);
+    expect(calls).toEqual(["probe"]);
+    const card = seen.filter((e) => e.tool === "refine").at(-1)!;
+    expect(card.status).toBe("failed");
+    expect(card.outcome).toMatch(/^Not run: .* not determined$/);
+
+    // With the occupancies fixed again, the approval card names the strongest pair left.
+    await ex.run("set_free", { fix: ["occ_*"], free: ["bkg*"] });
+    const refined = parse((await ex.run("refine", {})).text);
+    expect(refined.refined).toBe(true);
+    expect(asked.at(-1)!.preview).toMatch(/^Refine .* · (strongest correlation \S+ ↔ \S+ -?0\.\d{3}|no correlation above 0\.5)$/);
+  });
+
+  it("does not refine when the correlation check itself fails", async () => {
+    const { port, calls } = sessionPort(newSession(exampleStructure()));
+    const broken: PowderAgentPort = { ...port, probe: async () => { throw new Error("cancelled"); } };
+    const { ex, asked } = executor(fakeHost(broken).host, true);
+    expect((await ex.run("refine", {})).text).toMatch(/could not check the free parameters' correlations before refining \(cancelled\); nothing was refined/);
+    expect(asked).toEqual([]);
+    expect(calls).not.toContain("refine");
+  });
+
   it("refuses a change while a refinement runs, but lets a cancel through", async () => {
     const { port, calls } = sessionPort(newSession(exampleStructure()));
     const busy: PowderAgentPort = { ...port, state: () => ({ ...port.state(), busy: true }) };
@@ -302,13 +347,46 @@ describe("AgentExecutor on a live powder fit", () => {
   });
 
   it("finds residual peaks and bond lengths on the live model", async () => {
-    const { port } = sessionPort(newSession(exampleStructure()));
+    const { port, calls } = sessionPort(newSession(exampleStructure()));
     const { ex } = executor(fakeHost(port).host);
     const peaks = parse((await ex.run("find_unexplained_peaks", {})).text);
     expect(typeof peaks.count).toBe("number");
+    // What it found is marked on the plot for the user, without an approval card.
+    const shown = calls.find((c) => c.startsWith("showPeaks"));
+    expect(shown).toBeDefined();
+    expect(shown!.split(" ")[1]?.split(",").filter(Boolean).length ?? 0).toBe(peaks.count as number);
+    if ((peaks.count as number) > 0) expect(String(peaks.markedOnPlot)).toMatch(/marked on the plot/);
+    for (const p of peaks.peaks as { d: number; q: number; twoTheta: number }[]) {
+      expect(p.q).toBeCloseTo((2 * Math.PI) / p.d, 3);
+      expect(1.54 / (2 * Math.sin((p.twoTheta / 2) * Math.PI / 180))).toBeCloseTo(p.d, 4);
+    }
     const bonds = parse((await ex.run("bond_geometry", { cutoff: 3 })).text);
     expect(bonds.phase).toBe(port.state().structure.id);
     expect((await ex.run("bond_geometry", { phase: "nope" })).text).toMatch(/no phase "nope"/);
+  });
+
+  it("takes a fit window in d or Q and converts it with the page's own calibration", async () => {
+    const { port, calls } = sessionPort(newSession(exampleStructure()));
+    const { ex, asked } = executor(fakeHost(port).host, true);
+    // The test pattern is 2θ at λ = 1.54 Å; get_state lists the window in d and Q too.
+    const view = parse((await ex.run("get_state", {})).text);
+    const other = (view.data as { inOtherUnits: Record<string, { extent: number[] }> }).inOtherUnits;
+    expect(Object.keys(other).sort()).toEqual(["dSpacing", "q"]);
+    expect(other.q!.extent[0]).toBeCloseTo((4 * Math.PI / 1.54) * Math.sin((12 / 2) * Math.PI / 180), 3);
+
+    // Q 2–5 Å⁻¹ → d 1.2566–3.1416 Å → 2θ = 2 asin(λ/2d).
+    await ex.run("set_fit_range", { min: 2, max: 5, unit: "q" });
+    const twoTheta = (q: number): number => 2 * Math.asin((1.54 * q) / (4 * Math.PI)) * 180 / Math.PI;
+    const [lo, hi] = calls.at(-1)!.replace("range ", "").split("-").map(Number);
+    expect(lo).toBeCloseTo(twoTheta(2), 6);
+    expect(hi).toBeCloseTo(twoTheta(5), 6);
+    expect(asked.at(-1)!.preview).toMatch(/^Fit window 2 – 5 Å⁻¹ \(Q\) \(28\.\d+ – 75\.\d+ ° 2θ\)$/);
+    // d runs the other way; the window is still ordered.
+    await ex.run("set_fit_range", { min: 1.5, max: 3, unit: "dSpacing" });
+    const [a, b] = calls.at(-1)!.replace("range ", "").split("-").map(Number);
+    expect(a).toBeLessThan(b!);
+    // A unit this pattern cannot reach is refused, naming the ones it can.
+    expect((await ex.run("set_fit_range", { min: 1000, max: 2000, unit: "tof" })).text).toMatch(/cannot be read in tof: it converts to twoTheta, dSpacing, q/);
   });
 
   it("validates the fit window against the pattern", async () => {
@@ -394,6 +472,7 @@ function pdfPort(): { port: PdfAgentPort; calls: string[] } {
       calls.push("thorough");
       return "cancelled";
     },
+    probe: async (options) => refineProblem(buildPdfProblem(demo.structure, demo.pattern, params, spec.bindings, spec.restraints, fitRange), { ...options, analyticDerivatives: true }),
     cancel: () => calls.push("cancel"),
     reset: () => calls.push("reset"),
   };
@@ -432,7 +511,7 @@ describe("AgentExecutor on a live PDF fit", () => {
     await ex.run("set_free", { free: ["delta2"] });
     expect(calls).toContain("setFixed delta2=false");
     const out = parse((await ex.run("refine", {})).text);
-    expect(asked.at(-1)!.preview).toMatch(/^Refine G\(r\), \d+ free parameters$/);
+    expect(asked.at(-1)!.preview).toMatch(/^Refine G\(r\), \d+ free parameters · (strongest correlation \S+ ↔ \S+ -?\d\.\d{3}|no correlation above 0\.5)$/);
     expect(out.refined).toBe(true);
     expect(typeof out.Rw).toBe("number");
     expect(typeof out.RwBefore).toBe("number");
@@ -445,6 +524,18 @@ describe("AgentExecutor on a live PDF fit", () => {
     expect(String(verdict.convention)).toMatch(/no GoF/);
     const next = parse((await ex.run("suggest_next_steps", {})).text);
     expect(next.steps).toBeDefined();
+  });
+
+  it("refuses δ1 and δ2 together, which correlate on this G(r), and says why", async () => {
+    const { port, calls } = pdfPort();
+    const { ex, asked } = executor(fakeHost(port).host, true);
+    await ex.run("set_free", { free: ["delta1", "delta2"] });
+    const out = await ex.run("refine", {});
+    expect(out.isError).toBe(true);
+    expect(out.text).toMatch(/delta1 ↔ delta2 -0\.9\d\d \(δ1 and δ2 both sharpen the near-neighbour peaks/);
+    expect(calls).not.toContain("refine");
+    // Only the set_free was asked about.
+    expect(asked.map((e) => e.tool)).toEqual(["set_free"]);
   });
 
   it("restores the default r window and passes on why a run did not finish", async () => {

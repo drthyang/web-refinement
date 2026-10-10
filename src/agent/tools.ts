@@ -100,7 +100,7 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "find_unexplained_peaks",
     title: "Find unexplained peaks",
     description:
-      "Powder page only. Peaks in the residual (obs − calc) of the curves on screen that the model does not explain — the impurity / magnetic-order signal. Returns d-spacings ranked by height. A handful suggests satellites or one impurity; dozens mean the fit itself is poor.",
+      "Powder page only. Peaks in the residual (obs − calc) of the curves on screen that the model does not explain — the impurity / magnetic-order signal. Returns d-spacings ranked by height, and marks them on the plot for the user (▽ with a guide line, listed under the plot, cleared at the next refinement) — so call it when the user asks to see or show the unexplained peaks. A handful suggests satellites or one impurity; dozens mean the fit itself is poor.",
     inputSchema: {
       sigma: z.number().positive().optional().describe("Detection threshold in robust σ (default 8)"),
       limit: z.number().int().positive().max(50).optional().describe("Most peaks to return (default 12)"),
@@ -188,10 +188,11 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "set_fit_range",
     title: "Change the fit window",
     description:
-      "Restrict the refinement to a window on the data's own axis (get_state gives the unit and extent; r in Å on the PDF page), or pass whole:true to undo it: the whole pattern on powder, the page's default r window on PDF.",
+      "Restrict the refinement to a window, or pass whole:true to undo it: the whole pattern on powder, the page's default r window on PDF. On powder, min/max may be in any unit the pattern converts to (get_state lists them with the extent in each): pass `unit` and the page converts with its own calibration (wavelength, or difC/difA/zero for TOF) — never convert yourself. On the PDF page the window is r in Å.",
     inputSchema: {
       min: z.number().optional(),
       max: z.number().optional(),
+      unit: z.enum(["tof", "twoTheta", "dSpacing", "q"]).optional().describe("Powder only: the unit of min/max — tof (µs), twoTheta (°), dSpacing (Å) or q (Å⁻¹). Default: the data's own axis"),
       whole: z.boolean().optional().describe("Powder: fit the whole pattern. PDF: the default r window"),
     },
     effect: "change",
@@ -201,7 +202,7 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "refine",
     title: "Refine",
     description:
-      "Run the refinement of the free parameters, as the Refine button does, and wait for it. mode \"thorough\" is the Prefit / Escape-minimum button instead: with no fit yet, a multi-start search (on powder, after a Le Bail cell pre-fit); after a fit, a light multi-start nudge out of a local minimum. Returns the outcome (status; wR and GoF on powder, Rw on PDF; iterations, free count) and the step it recorded. Follow it with assess_refinement.",
+      "Run the refinement of the free parameters, as the Refine button does, and wait for it. mode \"thorough\" is the Prefit / Escape-minimum button instead: with no fit yet, a multi-start search (on powder, after a Le Bail cell pre-fit); after a fit, a light multi-start nudge out of a local minimum. Correlated parameters are never refined together: before it runs (and before the user is asked), it measures the free set at the current values, and refuses when two free parameters correlate at |ρ| ≥ 0.95 or the data cannot determine a combination of them, naming them with the physical reason; fix one of each pair with set_free, or refine them in separate stages. Returns the outcome (status; wR and GoF on powder, Rw on PDF; iterations, free count; any pair that correlates at the refined values) and the step it recorded. Follow it with assess_refinement.",
     inputSchema: {
       mode: z.enum(["refine", "thorough"]).optional().describe("Default \"refine\""),
     },

@@ -58,6 +58,7 @@ export async function changePdf(name: string, input: Input, port: PdfAgentPort, 
     case "set_free":
       return applyFree(s.parameters, input, port.setFixed);
     case "set_fit_range": {
+      if (input.unit !== undefined) throw new Error("the PDF page fits a window in r (Å); leave out `unit`");
       if (input.whole) {
         port.setFitRange(null);
         return undefined;

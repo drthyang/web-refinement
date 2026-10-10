@@ -1166,6 +1166,13 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : defaultRange),
       refine: runRefine,
       thorough: runMultiStart,
+      // The Refine button's request with the Agent's options; the result is only read.
+      probe: (options) => {
+        const req = { ...refineRequest(params, 0), options };
+        return spinFit
+          ? client.refineMpdfParallel({ ...req, magnetic: spinFit.magnetic })
+          : client.refinePdfParallel({ ...req, ...(multiPhase ? { extraPhases: [...extraPhases] } : {}) });
+      },
       cancel: cancelRefine,
       reset,
     });

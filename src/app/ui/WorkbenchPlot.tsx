@@ -43,6 +43,12 @@ interface Props {
    * below, so found peaks don't read as another indexed phase.
    */
   readonly foundPeaks?: readonly FoundPeak[];
+  /**
+   * How to draw `foundPeaks` (default: obs-coloured ▽, legend "found"). With
+   * `guides`, each marker also drops a dashed line through the intensity
+   * region, so the peak stands out on a dense pattern.
+   */
+  readonly foundStyle?: { readonly label: string; readonly color: string; readonly guides: boolean };
   readonly showBackground?: boolean;
   /** Increment to zoom the view onto the active fit range (no-op without one). */
   readonly focusFitToken?: number;
@@ -193,6 +199,7 @@ export function WorkbenchPlot({
   onFitRangeChange,
   phases,
   foundPeaks,
+  foundStyle,
   showBackground = true,
   focusFitToken = 0,
   focusPeakToken = 0,
@@ -566,7 +573,7 @@ export function WorkbenchPlot({
       { color: color.diff, label: "diff", shape: "line" },
       { color: color.bkg, label: "bkg", shape: "dashline" },
       // The ▽ "found" key leads the dynamic entries when found peaks exist.
-      ...(foundPeaks && foundPeaks.length > 0 ? [{ color: color.obs, label: "found", shape: "triangle" as const }] : []),
+      ...(foundPeaks && foundPeaks.length > 0 ? [{ color: foundStyle?.color ?? color.obs, label: foundStyle?.label ?? "found", shape: "triangle" as const }] : []),
       ...(overlays ?? []).map((o, i) => ({ color: OVERLAY_COLORS[i % OVERLAY_COLORS.length]!, label: o.label, shape: "dash" as const })),
       // Overlays replace the generic "hkl" key only; explicit Bragg rows (the
       // magnetic page draws its candidate over the pattern AND needs its tick
@@ -675,22 +682,26 @@ export function WorkbenchPlot({
         {/* Found-peak markers: downward ▽ triangles above the pattern at each
             detected (unexplained-residual) peak — a distinct mark from the
             Bragg tick rows below, so they don't read as another indexed phase.
-            Magnetic-analysis only (absent elsewhere). */}
+            The Agent's unexplained peaks use `foundStyle` (colour + guides). */}
         {foundPeaks && foundPeaks.length > 0 && (
           <g>
             {foundPeaks.map((p, i) => {
               if (p.x < vlo || p.x > vhi) return null;
               const px = sx(p.x);
+              const ink = foundStyle?.color ?? color.obs;
               return (
                 <g key={i}>
+                  {foundStyle?.guides && (
+                    <line x1={px} y1={foundTop + FOUND_H} x2={px} y2={BASE} stroke={ink} strokeWidth={1.2} strokeDasharray="4 3" opacity={0.75} pointerEvents="none" />
+                  )}
                   <path
                     d={`M ${(px - FOUND_W).toFixed(1)} ${foundTop} L ${(px + FOUND_W).toFixed(1)} ${foundTop} L ${px.toFixed(1)} ${foundTop + FOUND_H} Z`}
-                    fill={color.obs}
+                    fill={ink}
                     stroke={color.raised}
                     strokeWidth={0.8}
                   />
                   <rect x={px - 6} y={foundTop - 2} width={12} height={FOUND_H + 6} fill="transparent">
-                    <title>{`found peak · d ${p.d.toFixed(3)} Å`}</title>
+                    <title>{`${foundStyle?.label ?? "found"} peak · d ${p.d.toFixed(3)} Å`}</title>
                   </rect>
                 </g>
               );
