@@ -45,6 +45,7 @@ import { isMagneticModelParameterKind, isMomentParameterKind } from "@/core/refi
 import type { ComputeClient } from "@/workers/computeClient";
 import { CANCELLED } from "@/workers/computeClient";
 import type { PowderProgress } from "@/workers/runPowder";
+import { formatWt, fractionsOf } from "@/core/diagnostics/phaseFractions";
 import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
 import type { SampleResult } from "@/core/refinement/bayes/sampler";
 import { KSearchPanel, type MagneticFit, type MagneticPatternView, type ResidualPeak } from "@/components/KSearchPanel";
@@ -1391,6 +1392,11 @@ export function PowderWorkbench({
   // always shows the key calibration actually loaded — the wavelength for CW
   // (e.g. 11-BM's λ 0.413909 Å), difC/Zero for TOF.
   const instMeta = instParamMeta;
+  // Weight fractions of the phases from the refined scales (multi-phase, after a refinement).
+  const phaseFractions = useMemo(
+    () => (powderResult && session.extraPhases.length > 0 ? fractionsOf(refinedPhases, powderParams, powderResult) : null),
+    [powderResult, session.extraPhases.length, refinedPhases, powderParams],
+  );
   const summaryCards: SummaryCardData[] = [
     {
       label: "Structure",
@@ -1408,7 +1414,11 @@ export function PowderWorkbench({
       meta: !hasContent
         ? "Load a CIF to begin, or pick a demo"
         : session.extraPhases.length > 0
-        ? [structure, ...session.extraPhases].map((p) => `${p.name} ${p.spaceGroup.hermannMauguin ?? ""}`.trim()).join(" · ")
+        ? [structure, ...session.extraPhases].map((p, i) => {
+          // After a refinement, each phase's weight fraction (Hill & Howard).
+          const w = phaseFractions?.[i];
+          return `${p.name} ${p.spaceGroup.hermannMauguin ?? ""}`.trim() + (w ? ` ${formatWt(w)}` : "");
+        }).join(" · ")
         : `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
       ...(session.extraPhases.length > 0
         ? {
@@ -2106,3 +2116,4 @@ function DemoCard({ kicker, title, blurb, onClick }: { kicker: string; title: st
     </button>
   );
 }
+

@@ -128,6 +128,7 @@ export function correlationInsight(a: ParameterKind, b: ParameterKind): string |
   if (has("scale", "occupancy")) return "Scale and site occupancy are near-degenerate on a single site (both multiply intensity). Constrain occupancy (e.g. full, or a Σ=1 tie) unless a second contrast breaks the tie.";
   if (has("cellLength", "zeroShift")) return "Cell length and zero shift both move peak positions; they separate only across a wide 2θ/TOF range. Refine the zero from a well-characterized standard, or fix it.";
   if (has("profileU", "profileV") || has("profileV", "profileW") || has("profileU", "profileW")) return "The Caglioti U/V/W are mutually correlated (they parameterize one FWHM(θ) curve). Free them together only with good angular coverage; otherwise refine W first.";
+  if (has("profileX", "profileY")) return "The Lorentzian X (size, 1/cosθ) and Y (strain, tanθ) widths differ only in how they grow with angle, so over a short or low-angle range they describe the same broadening. Refine Y (or X) alone, and free the other only with data to high angle.";
   if (has("mustrainPerp", "mustrainPar") || has("anisoSizePerp", "anisoSizePar")) return "Anisotropic microstructure components correlate along directions the data barely resolves. Free them only after the isotropic profile has converged.";
   // Time of flight: the back-to-back-exponential rise (α) moves each peak apex
   // along TOF, as a uniform cell change or the calibration does.

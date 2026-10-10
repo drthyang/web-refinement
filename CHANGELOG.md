@@ -9,6 +9,10 @@ release fixes bugs.
 
 ### Added
 
+- **Phase fractions.** After a multi-phase powder refinement, each phase's
+  weight fraction (Hill–Howard, from its refined scale, cell-contents mass and
+  volume, with an esd from the scale esds) shows on the Structure card and in
+  the Agent's `get_state` (Mn₃Ga with 3.7 wt% MnO read back 3.65(8) wt%).
 - **The Agent runs boxcar scans on the PDF page** (`boxcar_scan`): the free
   parameters refined box by box across r, shown in the Boxcar view, with each
   box's Rw and values returned, to tell the local structure from the average.
@@ -20,6 +24,14 @@ release fixes bugs.
 
 ### Fixed
 
+- **The cell gate on a sloped 2θ background.** Its Le Bail fit had a flat
+  background at constant wavelength, so a lab pattern's slope stayed in the
+  residual (wR 50%) and read as unindexed intensity; it now has three
+  Chebyshev terms. When unindexed peaks and a violated absence come together,
+  the Agent is told the violation may be a line of the same unidentified
+  phase, rather than a wrong space group.
+- Correlated Lorentzian X and Y widths are explained (they differ only in how
+  they grow with angle), like the Caglioti U/V/W.
 - **The cell gate on a wide 2θ scan.** Its Le Bail fit used one peak width at
   constant wavelength, so high-angle flanks read as unindexed peaks and a
   correct cell failed (Mn₃Ga 30 K, 5–130°). The width now grows with angle

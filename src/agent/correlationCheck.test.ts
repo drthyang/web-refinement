@@ -55,6 +55,11 @@ describe("correlation check", () => {
     expect(readCorrelations(probe([["bkg0", "bkg1", 0.995]]), params).correlated).toEqual([]);
   });
 
+  it("explains the Lorentzian X ↔ Y pair", () => {
+    const check = readCorrelations(probe([["profX", "profY", -0.97]]), [param("profX", "profileX"), param("profY", "profileY")]);
+    expect(check.correlated[0]!.reason).toMatch(/Refine Y \(or X\) alone/);
+  });
+
   it("refuses a combination the data cannot determine", () => {
     const check = readCorrelations(probe([], ["scale", "occ_Mn1"]), params);
     expect(correlationRefusal(check)).toContain("Not determined by the data at all, together: scale, occ_Mn1.");

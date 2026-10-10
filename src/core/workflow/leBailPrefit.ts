@@ -47,6 +47,10 @@ const BETA0_ID = "__leBail_beta0";
 const bkgTermId = (j: number): string => `__leBail_bkg${j}`;
 /** A TOF background follows the incident spectrum: four Chebyshev terms. */
 const TOF_BACKGROUND_TERMS = 4;
+/** A lab or synchrotron 2θ background slopes too (air scatter at low angle,
+ *  fluorescence, the holder): a flat one left the whole slope as residual
+ *  (Le Bail wR 50% on a sloped Cu Kα pattern). Three Chebyshev terms. */
+const CW_BACKGROUND_TERMS = 3;
 
 export interface LeBailPrefitOptions {
   readonly shape?: PeakShape;
@@ -240,7 +244,7 @@ export function leBailCellPrefit(
     id: BKG_ID, label: "Le Bail background", kind: "background",
     value: bkg0, initialValue: bkg0, min: 0, fixed: false,
   };
-  const bkgTerms = useTof ? TOF_BACKGROUND_TERMS : 1;
+  const bkgTerms: number = useTof ? TOF_BACKGROUND_TERMS : CW_BACKGROUND_TERMS;
   const bkgShapeParams = Array.from({ length: bkgTerms - 1 }, (_, j) =>
     ({ id: bkgTermId(j + 1), label: `Le Bail background T${j + 1}`, kind: "background", value: 0, initialValue: 0, fixed: false }) as RefinementParameter);
   // Chebyshev polynomials over the pattern's own x span.

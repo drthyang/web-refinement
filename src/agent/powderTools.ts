@@ -22,6 +22,7 @@ import type { MustrainModel } from "@/app/powderSpec";
 import type { PowderXUnit } from "@/core/diffraction/types";
 import { availableDisplayUnits, convertAxisValue, convertInterval } from "@/visualization/axisUnits";
 import { K0_MAGNETIC, k0MagneticHint, residualPeaks } from "@/core/diagnostics/assessment";
+import { formatWt, fractionsOf } from "@/core/diagnostics/phaseFractions";
 import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, parameterSummary, pct, sig, type LiveToolHost } from "@/agent/liveCommon";
@@ -77,7 +78,11 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
       });
       const marks = unindexed.flatMap((p) => ("d" in p && p.d !== undefined ? [{ d: p.d, height: p.significance }] : []));
       if (marks.length > 0) port.showPeaks(marks);
-      return { ...gate, unindexedPeaks: unindexed, ...(marks.length > 0 ? { markedOnPlot: "The unindexed peaks are marked on the plot (filled ▽, listed under it)." } : {}) };
+      // An impurity's line can land on a forbidden position and read as a violation.
+      const reading = unindexed.length > 0 && gate.absences.violated.length > 0
+        ? `With ${unindexed.length} unindexed peak${unindexed.length === 1 ? "" : "s"} present, the violated absence${gate.absences.violated.length === 1 ? "" : "s"} (${gate.absences.violated.map((v) => `${v.h} ${v.k} ${v.l} at d ${v.d.toFixed(3)} Å`).join(", ")}) may be a line of the same unindexed phase. Identify that phase (add it as an extra phase) and run the gate again before concluding the space group is wrong.`
+        : undefined;
+      return { ...gate, unindexedPeaks: unindexed, ...(reading ? { reading } : {}), ...(marks.length > 0 ? { markedOnPlot: "The unindexed peaks are marked on the plot (filled ▽, listed under it)." } : {}) };
     }
     case "find_unexplained_peaks": {
       // Each peak must stand 5σ above its own counting noise, and is checked
@@ -265,6 +270,7 @@ function stateView(s: PowderLiveState, history: ProjectHistory | null, select: r
       ? { propagation: s.magnetic.propagation, moments: s.magnetic.moments.length, refined: s.parameters.some((p) => p.kind === "momentMode") }
       : null,
     wR: pct(s.wR),
+    ...phaseFractionView(s),
     lastRefinement: s.result
       ? {
           status: s.result.status,
@@ -282,6 +288,19 @@ function stateView(s: PowderLiveState, history: ProjectHistory | null, select: r
 }
 
 // ── analysis helpers ────────────────────────────────────────────────────────
+
+/** Multi-phase, after a refinement: each phase's weight fraction from its scale. */
+function phaseFractionView(s: PowderLiveState): Record<string, unknown> {
+  if (!s.result || s.extraPhases.length === 0) return {};
+  const fractions = fractionsOf(s.refinedPhases, s.parameters, s.result);
+  if (!fractions) return {};
+  return {
+    phaseFractions: {
+      weight: fractions.map((f) => ({ phase: f.name, wtPercent: sig(f.weightPercent, 4), ...(f.esd !== undefined ? { esd: sig(f.esd, 2) } : {}), shown: formatWt(f) })),
+      basis: "Hill & Howard, from the refined scales, cell masses and volumes: of the crystalline phases in the model only; no microabsorption (Brindley) correction, esds from the scale esds alone.",
+    },
+  };
+}
 
 const UNIT: Record<PowderXUnit, string> = { tof: "µs (TOF)", twoTheta: "° 2θ", dSpacing: "Å (d)", q: "Å⁻¹ (Q)" };
 
