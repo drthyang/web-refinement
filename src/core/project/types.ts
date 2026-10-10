@@ -248,6 +248,20 @@ export interface ProjectView {
   readonly step?: number;
 }
 
+/**
+ * The in-app Agent's record of one analysis (agent/method.ts): the cell gate's
+ * outcome, the method's rules the user lifted and why, the method's stages a
+ * refinement has covered, and the Agent's notes. Keyed by the analysis (page,
+ * data, phases). Optional, and ignored by builds without the Agent.
+ */
+export interface AgentRecordFile {
+  readonly key: string;
+  readonly cellGate?: { readonly passed: boolean; readonly at: number; readonly summary: string };
+  readonly exceptions: readonly { readonly rule: "cell-gate" | "bare-occupancy"; readonly reason: string; readonly at: number }[];
+  readonly stagesDone: readonly string[];
+  readonly notes: readonly { readonly text: string; readonly at: number }[];
+}
+
 /** The complete state of a session. */
 export interface ProjectFile {
   readonly schemaVersion: number;
@@ -261,6 +275,8 @@ export interface ProjectFile {
    * session. Optional — older files have none, and older builds ignore it.
    */
   readonly history?: ProjectHistory;
+  /** The in-app Agent's records, one per analysis it worked on. */
+  readonly agent?: { readonly records: readonly AgentRecordFile[] };
 }
 
 // Re-exported for call sites that narrow on the dataset types.

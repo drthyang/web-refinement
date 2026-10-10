@@ -9,6 +9,13 @@ release fixes bugs.
 
 ### Added
 
+- **The Agent remembers an analysis.** Its notes (`write_note`: a gate's
+  verdict, an impurity found, a decision of the user's), the cell gate, the
+  exceptions the user allowed and the method's stages done are saved with the
+  project and autosave, and read back in the next session.
+- **Long Agent sessions stay in the window.** With Claude the API clears old
+  tool results past 60k tokens (keeping the skills read); a local model gets a
+  pruned copy of the history past ~15k tokens.
 - **The method's firm rules are enforced, and its stages shown.** On the
   powder page the Agent cannot refine atomic parameters until the cell gate
   has passed for the analysis on screen, and on both pages it cannot refine an

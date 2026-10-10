@@ -405,6 +405,19 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(adp.methodNote).toMatch(/^Out of the method's order \(my-rietveld-workflow\): adps refined before profile\./);
   });
 
+  it("keeps notes on the analysis, without asking, and lists them in get_state", async () => {
+    const { port, calls } = sessionPort(newSession(exampleStructure()));
+    const { host, records, steps } = fakeHost(port);
+    const { ex, asked } = executor(host, true);
+    const out = parse((await ex.run("write_note", { text: "The minor phase is MnO (user)." })).text);
+    expect(out).toMatchObject({ noted: true, notes: 1 });
+    expect(asked).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(steps).toEqual([]);
+    expect(records.get(keyOfState("powder", port.state()))!.notes.map((n) => n.text)).toEqual(["The minor phase is MnO (user)."]);
+    expect((parse((await ex.run("get_state", {})).text).method as { notes: string[] }).notes).toEqual(["The minor phase is MnO (user)."]);
+  });
+
   it("never frees an occupancy bare; only the user lifts the rule, asked even in Auto", async () => {
     const start = newSession(exampleStructure());
     const { port } = sessionPort({ ...start, powderParams: start.powderParams.map((p) => ({ ...p, fixed: !["scale", "occ_Mn1"].includes(p.id) })) });

@@ -703,6 +703,7 @@ export function App(): JSX.Element {
       ...(projectMeta ? { createdAt: projectMeta.createdAt } : {}),
       ...(projectMeta?.notes !== undefined ? { notes: projectMeta.notes } : {}),
       ...(h ? { history: h } : {}),
+      agentRecords: Object.values(agentRecordsRef.current),
     });
   }
 
@@ -750,6 +751,9 @@ export function App(): JSX.Element {
     setDetection(null);
     // The file's own history, or a new one that starts at this open.
     setHistory(file.history ?? null);
+    // The Agent's records travel with the project (gate, exceptions, stages, notes).
+    agentRecordsRef.current = Object.fromEntries((file.agent?.records ?? []).map((r) => [r.key, r]));
+    setAgentRecords(agentRecordsRef.current);
     if (!file.history) requestStep("open", `Opened ${sourceName}`, true);
     setMessage(`Opened project “${file.metadata.title}” — ${TECHNIQUE_LABEL[ws.technique]}, saved by v${file.metadata.appVersion}${file.history ? `, ${file.history.steps.length} steps` : ""}.`);
   }

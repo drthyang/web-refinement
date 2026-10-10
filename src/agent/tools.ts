@@ -157,6 +157,17 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     alwaysAsk: true,
   },
   {
+    name: "write_note",
+    title: "Note it for this analysis",
+    description:
+      "Keep one short note in this analysis's record, which is saved with the project: a finding that should outlast this conversation (the cell gate's verdict and why, a correlation that forced a choice, an impurity identified) or a decision the user made and why (hold the composition; the minor phase is MnO; keep Qdamp from the Ni standard). get_state lists the notes, so they carry into the next conversation and the next session. One fact per note, a sentence or two; not for narrating progress.",
+    inputSchema: {
+      text: z.string().min(3).max(400).describe("The note, in a sentence or two"),
+    },
+    effect: "read",
+    pages: ["powder", "pdf"],
+  },
+  {
     name: "read_ref",
     title: "Read a stored value",
     description:

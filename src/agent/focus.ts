@@ -13,6 +13,7 @@ export const TOOL_CARDS: Readonly<Record<string, readonly AgentCard[]>> = {
   read_ref: [],
   read_skill: [],
   allow_exception: [],
+  write_note: [],
   go_to_step: [],
   cancel_refinement: [],
   assess_refinement: ["result", "pattern"],

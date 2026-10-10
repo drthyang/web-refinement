@@ -414,8 +414,18 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   checklist in the drawer and `get_state`'s `method`. A stage is done once a
   converged refinement had one of its parameters free, whoever ran it. A
   refinement out of order runs, with a `methodNote` in its outcome.
-- The record behind them (the gate, the exceptions, the stages done) is kept
-  per analysis by the shell.
+- The record behind them (the gate, the exceptions, the stages done, and the
+  Agent's notes) is kept per analysis by the shell and saved with the project
+  (`agent.records` in the project file; autosaved too). `write_note` adds a
+  note without asking (it changes the record, not the analysis); `get_state`
+  lists the notes, so a later conversation or session starts from them.
+- **Long sessions** ([`src/agent/contextWindow.ts`](../src/agent/contextWindow.ts)).
+  With Claude, the API clears old tool results once the prompt passes 60k
+  tokens (context editing), keeping the last six and every `read_skill`
+  result; server-side clearing is not an edit of the history the model's
+  thinking is bound to. A local model gets a pruned copy past ~15k tokens: old
+  results replaced by a line naming the tool to call again, the stored history
+  untouched.
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
   `set_adp_model`, `set_site_ties`, `set_fit_range`, `refine`,
   `reset_parameters`, `go_to_step`.

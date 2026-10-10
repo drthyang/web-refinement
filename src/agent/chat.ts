@@ -33,6 +33,7 @@ import type {
 import { LIVE_TOOLS, inputJsonSchema } from "@/agent/tools";
 import type { ToolRunner } from "@/agent/executor";
 import { agentSystemPrompt, autonomyNote, type AgentAutonomy } from "@/agent/systemPrompt";
+import { CONTEXT_EDITING, CONTEXT_EDITING_BETA, pruneForLocal } from "@/agent/contextWindow";
 import { hasRefusalFallback } from "@/agent/chat-models";
 import { ollamaBase, unreachableHint } from "@/agent/ollama";
 import { ensureLmStudioContext, lmstudioBase, lmstudioUnreachableHint } from "@/agent/lmstudio";
@@ -207,7 +208,8 @@ export class AgentChat {
     if (isLocal(config.transport)) {
       // A thinking-capable model thinks by default, and both servers reuse the
       // cached prompt prefix by themselves.
-      return { model: config.model, max_tokens: 64000, system: `${this.system}\n\n${autonomyNote(config.autonomy ?? "ask")}`, tools: this.tools, messages: this.messages };
+      // A local window is small: old tool results go from the copy it gets.
+      return { model: config.model, max_tokens: 64000, system: `${this.system}\n\n${autonomyNote(config.autonomy ?? "ask")}`, tools: this.tools, messages: pruneForLocal(this.messages) };
     }
     return {
       model: config.model,
@@ -221,7 +223,10 @@ export class AgentChat {
       output_config: { effort: config.effort },
       // Caches the conversation so far on every turn, after the system prompt.
       cache_control: { type: "ephemeral" },
-      ...(config.fallback && hasRefusalFallback(config.model) ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
+      // Old tool results leave the window once it fills (contextWindow.ts).
+      context_management: CONTEXT_EDITING,
+      betas: [CONTEXT_EDITING_BETA, ...(config.fallback && hasRefusalFallback(config.model) ? ["server-side-fallback-2026-07-01"] : [])],
+      ...(config.fallback && hasRefusalFallback(config.model) ? { fallbacks: "default" as const } : {}),
     };
   }
 

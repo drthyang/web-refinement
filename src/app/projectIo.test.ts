@@ -37,6 +37,27 @@ function roundTrip<T>(file: T): T {
   return parseProject(serializeProject(file as never)) as unknown as T;
 }
 
+describe("the Agent's records in a project", () => {
+  it("travel with the file, and a malformed one is refused by name", () => {
+    const session = newSession(structure, DEFAULT_INSTRUMENT);
+    const ws = powderWorkspaceFrom(session, someResult, DEFAULT_INSTRUMENT, false, { fitRange: null, displayUnit: null, manualPeakD: [] });
+    const record = {
+      key: "powder¦mgal2o4.xye¦MgAl2O4|F d -3 m:2",
+      cellGate: { passed: true, at: 1, summary: "every peak indexes; the absences are consistent" },
+      exceptions: [{ rule: "bare-occupancy" as const, reason: "isotopic contrast", at: 2 }],
+      stagesDone: ["base", "positions"],
+      notes: [{ text: "The user holds the composition: inversion is the question.", at: 3 }],
+    };
+    const file = roundTrip(projectFileFor({ structures: [session.structure], workspace: ws, title: "t", agentRecords: [record] }));
+    expect(file.agent).toEqual({ records: [record] });
+    // No records, no block.
+    expect(projectFileFor({ structures: [session.structure], workspace: ws, title: "t", agentRecords: [] }).agent).toBeUndefined();
+    const bad = JSON.parse(serializeProject(file as never));
+    bad.agent.records[0].exceptions[0].rule = "anything-goes";
+    expect(() => parseProject(JSON.stringify(bad))).toThrow(/agent\.records\[0\]\.exceptions\[0\]\.rule/);
+  });
+});
+
 describe("powder capture / restore", () => {
   it("rebuilds an identical session from a saved workspace (real spec, real bindings)", () => {
     const session = { ...newSession(structure, DEFAULT_INSTRUMENT), anisotropicAdp: false, mustrain: "uniaxial" as const };

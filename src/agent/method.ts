@@ -19,6 +19,7 @@
  */
 
 import type { LinearRestraint, ParameterKind, RefinementParameter } from "@/core/refinement/types";
+import type { AgentRecordFile } from "@/core/project/types";
 import type { AgentPage } from "@/agent/tools";
 import type { LiveState } from "@/agent/port";
 import { PAGE_METHOD } from "@/agent/skills";
@@ -30,18 +31,12 @@ export const RULES: Readonly<Record<MethodRule, { readonly title: string; readon
   "bare-occupancy": { title: "Refine an occupancy with no tie or second contrast", pages: ["powder", "pdf"] },
 };
 
-export interface AgentRecord {
-  /** The analysis this record belongs to (analysisKey). */
-  readonly key: string;
-  /** The last cell gate (check_cell_symmetry) on this analysis. */
-  readonly cellGate?: { readonly passed: boolean; readonly at: number; readonly summary: string };
-  /** Firm rules the user lifted for this analysis, and why. */
-  readonly exceptions: readonly { readonly rule: MethodRule; readonly reason: string; readonly at: number }[];
-  /** Stages a converged refinement has covered (stage ids). */
-  readonly stagesDone: readonly string[];
-  /** The Agent's notes on this analysis: findings and the user's decisions. */
-  readonly notes: readonly { readonly text: string; readonly at: number }[];
-}
+/**
+ * The record of one analysis (the shape a project file stores): the last cell
+ * gate, the firm rules the user lifted and why, the stages a converged
+ * refinement has covered (stage ids), and the Agent's notes.
+ */
+export type AgentRecord = AgentRecordFile;
 
 export function emptyRecord(key: string): AgentRecord {
   return { key, exceptions: [], stagesDone: [], notes: [] };

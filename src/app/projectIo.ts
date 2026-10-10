@@ -27,6 +27,7 @@ import type { PdfPattern, PowderXUnit, SingleCrystalDataset } from "@/core/diffr
 import type { MagneticModel } from "@/core/magnetic/types";
 import {
   PROJECT_SCHEMA_VERSION,
+  type AgentRecordFile,
   TECHNIQUE_LABEL,
   type FitWindow,
   type ModulatedHypothesis,
@@ -92,6 +93,8 @@ export interface ProjectEnvelope {
   readonly step?: number;
   /** The step history, when the session has one. */
   readonly history?: ProjectHistory;
+  /** The in-app Agent's records (agent/method.ts). */
+  readonly agentRecords?: readonly AgentRecordFile[];
 }
 
 /** Wrap a workspace into a complete, timestamped project file. */
@@ -110,6 +113,7 @@ export function projectFileFor(env: ProjectEnvelope): ProjectFile {
     workspace: env.workspace,
     ...(env.step !== undefined ? { view: { step: env.step } } : {}),
     ...(env.history ? { history: env.history } : {}),
+    ...(env.agentRecords && env.agentRecords.length > 0 ? { agent: { records: env.agentRecords } } : {}),
   };
 }
 

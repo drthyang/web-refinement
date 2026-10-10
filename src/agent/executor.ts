@@ -90,6 +90,9 @@ const STEP_KIND: Readonly<Record<string, StepKind>> = {
 
 let nextCallId = 1;
 
+/** Notes kept per analysis; the oldest go first. */
+const MAX_NOTES = 40;
+
 export class AgentExecutor implements ToolRunner {
   private readonly refs = new RefStore(128);
   /** The skills read in this conversation (a page's method gates its changes). */
@@ -150,6 +153,16 @@ export class AgentExecutor implements ToolRunner {
         port.cancel();
         update({ status: "done", outcome: "Cancel requested" });
         return this.respond({ cancelled: port.state().busy ? "requested" : "nothing was running" });
+      }
+
+      if (spec.name === "write_note") {
+        // The record's notes, not the page: no approval, no history step.
+        const text = (input as { text: string }).text.trim();
+        update({ preview: text });
+        const key = keyOfState(port.technique, port.state());
+        this.host.updateRecord(key, (r) => ({ ...r, notes: [...r.notes, { text, at: Date.now() }].slice(-MAX_NOTES) }));
+        update({ status: "done" });
+        return this.respond({ noted: true, notes: this.host.record(key).notes.length });
       }
 
       if (spec.effect === "read") {
@@ -293,6 +306,7 @@ export class AgentExecutor implements ToolRunner {
       next: progress.next ?? "every required stage done: check the acceptance bar",
       ...(record.cellGate ? { cellGate: record.cellGate.passed ? "passed" : `not passed: ${record.cellGate.summary}` } : {}),
       ...(record.exceptions.length > 0 ? { exceptions: record.exceptions.map((e) => `${e.rule}: ${e.reason}`) } : {}),
+      ...(record.notes.length > 0 ? { notes: record.notes.map((n) => n.text) } : {}),
     };
   }
 

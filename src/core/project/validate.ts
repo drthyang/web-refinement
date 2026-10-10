@@ -502,7 +502,36 @@ export function validateProjectFile(raw: unknown): ProjectFile {
     opt(view.step, "view.step", int);
   }
   if (root.history !== undefined && root.history !== null) checkHistory(root.history, "history");
+  if (root.agent !== undefined && root.agent !== null) checkAgent(root.agent, "agent");
   return root as unknown as ProjectFile;
+}
+
+/** The Agent's records: one per analysis, each with its gate, exceptions, stages and notes. */
+function checkAgent(v: unknown, path: string): void {
+  const agent = rec(v, path);
+  arr(agent.records, `${path}.records`).forEach((r, i) => {
+    const p = `${path}.records[${i}]`;
+    const record = rec(r, p);
+    str(record.key, `${p}.key`);
+    if (record.cellGate !== undefined && record.cellGate !== null) {
+      const gate = rec(record.cellGate, `${p}.cellGate`);
+      bool(gate.passed, `${p}.cellGate.passed`);
+      num(gate.at, `${p}.cellGate.at`);
+      str(gate.summary, `${p}.cellGate.summary`);
+    }
+    arr(record.exceptions, `${p}.exceptions`).forEach((e, j) => {
+      const ex = rec(e, `${p}.exceptions[${j}]`);
+      oneOf(["cell-gate", "bare-occupancy"])(ex.rule, `${p}.exceptions[${j}].rule`);
+      str(ex.reason, `${p}.exceptions[${j}].reason`);
+      num(ex.at, `${p}.exceptions[${j}].at`);
+    });
+    arr(record.stagesDone, `${p}.stagesDone`).forEach((st, j) => str(st, `${p}.stagesDone[${j}]`));
+    arr(record.notes, `${p}.notes`).forEach((n, j) => {
+      const note = rec(n, `${p}.notes[${j}]`);
+      str(note.text, `${p}.notes[${j}].text`);
+      num(note.at, `${p}.notes[${j}].at`);
+    });
+  });
 }
 
 /** The phases and the workspace that uses them — a project's model, or a history step's. */

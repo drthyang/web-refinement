@@ -126,7 +126,9 @@ describe("AgentChat", () => {
     // no fallback, which is opt-in.
     const first = api.requests[0]!;
     expect(first.headers["x-api-key"]).toBe("sk-test");
-    expect(first.headers["anthropic-beta"]).toBeUndefined();
+    // Only context editing is on: old tool results leave the window server-side, never a skill.
+    expect(first.headers["anthropic-beta"]).toBe("context-management-2025-06-27");
+    expect(first.body.context_management).toMatchObject({ edits: [{ type: "clear_tool_uses_20250919", exclude_tools: ["read_skill"] }] });
     expect(first.body.model).toBe("claude-opus-5-5");
     expect(first.body.fallbacks).toBeUndefined();
     expect(first.body.stream).toBe(true);
@@ -177,7 +179,7 @@ describe("AgentChat", () => {
       new AbortController().signal,
     );
     expect(api.requests[0]!.body.fallbacks).toBeUndefined();
-    expect(api.requests[0]!.headers["anthropic-beta"]).toBeUndefined();
+    expect(api.requests[0]!.headers["anthropic-beta"]).toBe("context-management-2025-06-27");
   });
 
   it("answers the calls of a stopped turn so the conversation stays valid", async () => {
