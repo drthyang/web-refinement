@@ -1,7 +1,6 @@
 /**
- * Runs Agent tool calls against the live page, whoever sent them (the
- * in-app chat or Claude Code through the bridge): validate the input, ask the
- * user before a change, make the change as the agent so the history tags its
+ * Runs the in-app chat's Agent tool calls against the live page: validate the
+ * input, ask the user before a change, make the change as the agent so the history tags its
  * step, wait for it to render, and answer with a compact JSON view.
  *
  * Results travel like the MATERIA MCP server's: a bulky part becomes a ref
@@ -32,15 +31,11 @@ export interface AgentHost extends LiveToolHost {
   readonly recordNow: (kind: StepKind, label?: string) => void;
 }
 
-/** Who sent a call. */
-export type AgentSource = "chat" | "claude-code";
-
 export type ActivityStatus = "waiting" | "running" | "done" | "declined" | "failed";
 
 /** One tool call as the Agent drawer lists it. */
 export interface ActivityEntry {
   readonly id: string;
-  readonly source: AgentSource;
   readonly tool: string;
   readonly title: string;
   readonly effect: ToolEffect;
@@ -58,9 +53,9 @@ export interface ToolOutcome {
   readonly text: string;
 }
 
-/** What the chat and the bridge call: the executor, or a lazy stand-in for it. */
+/** What the chat calls: the executor, or a lazy stand-in for it. */
 export interface ToolRunner {
-  readonly run: (name: string, input: unknown, source: AgentSource) => Promise<ToolOutcome>;
+  readonly run: (name: string, input: unknown) => Promise<ToolOutcome>;
 }
 
 export interface ExecutorOptions {
@@ -91,17 +86,17 @@ export class AgentExecutor implements ToolRunner {
   constructor(private readonly host: AgentHost, private readonly opts: ExecutorOptions) {}
 
   /** Run one call. Never throws: failures come back as an error outcome the model can read. */
-  run(name: string, input: unknown, source: AgentSource): Promise<ToolOutcome> {
+  run(name: string, input: unknown): Promise<ToolOutcome> {
     const spec = liveTool(name);
     if (!spec) return Promise.resolve(error(`no tool named ${name}`));
-    if (spec.effect !== "change") return this.execute(spec, input, source);
-    const run = this.changes.then(() => this.execute(spec, input, source));
+    if (spec.effect !== "change") return this.execute(spec, input);
+    const run = this.changes.then(() => this.execute(spec, input));
     this.changes = run.catch(() => undefined);
     return run;
   }
 
-  private async execute(spec: LiveToolSpec, raw: unknown, source: AgentSource): Promise<ToolOutcome> {
-    let entry: ActivityEntry = { id: `c${nextCallId++}`, source, tool: spec.name, title: spec.title, effect: spec.effect, at: Date.now(), status: "running" };
+  private async execute(spec: LiveToolSpec, raw: unknown): Promise<ToolOutcome> {
+    let entry: ActivityEntry = { id: `c${nextCallId++}`, tool: spec.name, title: spec.title, effect: spec.effect, at: Date.now(), status: "running" };
     const update = (patch: Partial<ActivityEntry>): void => {
       entry = { ...entry, ...patch };
       this.opts.onActivity(entry);

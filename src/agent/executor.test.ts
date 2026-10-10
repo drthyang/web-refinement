@@ -189,7 +189,7 @@ describe("AgentExecutor on a live powder fit", () => {
     const { port } = sessionPort(newSession(exampleStructure()));
     const { host } = fakeHost(port);
     const { ex, asked } = executor(host);
-    const out = await ex.run("get_state", {}, "chat");
+    const out = await ex.run("get_state", {});
     expect(out.isError).toBe(false);
     expect(out.text.length).toBeLessThan(8000);
     const view = parse(out.text);
@@ -202,10 +202,10 @@ describe("AgentExecutor on a live powder fit", () => {
 
   it("rejects unknown fields and tools, and says when nothing is open", async () => {
     const { ex } = executor(fakeHost(sessionPort(newSession(exampleStructure())).port).host);
-    expect((await ex.run("set_free", { free: ["scale"], value: 3 }, "chat")).text).toMatch(/invalid input for set_free/);
-    expect((await ex.run("set_value", {}, "chat")).text).toBe("Error: no tool named set_value");
+    expect((await ex.run("set_free", { free: ["scale"], value: 3 })).text).toMatch(/invalid input for set_free/);
+    expect((await ex.run("set_value", {})).text).toBe("Error: no tool named set_value");
     const empty = executor(fakeHost(null).host).ex;
-    expect((await empty.run("get_state", {}, "chat")).text).toMatch(/no analysis is open/);
+    expect((await empty.run("get_state", {})).text).toMatch(/no analysis is open/);
   });
 
   /** The demo session with every parameter fixed, so freeing one is a change. */
@@ -217,7 +217,7 @@ describe("AgentExecutor on a live powder fit", () => {
   it("does not ask about a change that changes nothing", async () => {
     const { port, calls } = sessionPort(allFixed());
     const { ex, asked } = executor(fakeHost(port).host, true);
-    const out = parse((await ex.run("set_free", { fix: ["scale"] }, "chat")).text);
+    const out = parse((await ex.run("set_free", { fix: ["scale"] })).text);
     expect(out.unchanged).toBe(true);
     expect(asked).toEqual([]);
     expect(calls).toEqual([]);
@@ -227,7 +227,7 @@ describe("AgentExecutor on a live powder fit", () => {
     const { port, calls } = sessionPort(allFixed());
     const { host, steps } = fakeHost(port);
     const { ex, asked } = executor(host, false);
-    const out = await ex.run("set_free", { free: ["scale"] }, "claude-code");
+    const out = await ex.run("set_free", { free: ["scale"] });
     expect(parse(out.text).declined).toBe(true);
     expect(asked).toHaveLength(1);
     expect(asked[0]!.preview).toMatch(/^Free scale/);
@@ -239,7 +239,7 @@ describe("AgentExecutor on a live powder fit", () => {
     const { port, calls } = sessionPort(allFixed());
     const { host, steps } = fakeHost(port);
     const { ex, seen } = executor(host, true);
-    const out = parse((await ex.run("set_free", { free: ["scale", "bkg*"] }, "chat")).text);
+    const out = parse((await ex.run("set_free", { free: ["scale", "bkg*"] })).text);
     expect(calls[0]).toMatch(/^setFixed /);
     expect(out.free).toEqual(expect.arrayContaining(["scale"]));
     // The user's own edits are flushed first (as the user), then the agent's step.
@@ -256,17 +256,17 @@ describe("AgentExecutor on a live powder fit", () => {
     });
     const { host } = fakeHost(port);
     const { ex } = executor(host, "auto");
-    expect((await ex.run("refine", {}, "chat")).text).toMatch(/no parameter is free/);
-    await ex.run("set_free", { free: ["scale"] }, "chat");
-    const refined = parse((await ex.run("refine", {}, "chat")).text);
+    expect((await ex.run("refine", {})).text).toMatch(/no parameter is free/);
+    await ex.run("set_free", { free: ["scale"] });
+    const refined = parse((await ex.run("refine", {})).text);
     expect(refined.refined).toBe(true);
     expect(refined.wR as number).toBeLessThan(refined.wRBefore as number);
     expect(session().powderParams.find((p) => p.kind === "scale")!.fixed).toBe(false);
 
-    const assessment = parse((await ex.run("assess_refinement", {}, "chat")).text);
+    const assessment = parse((await ex.run("assess_refinement", {})).text);
     expect(typeof assessment.summary).toBe("string");
     expect(assessment.verdict).toBeDefined();
-    const next = parse((await ex.run("suggest_next_steps", {}, "chat")).text);
+    const next = parse((await ex.run("suggest_next_steps", {})).text);
     expect(next.steps).toBeDefined();
   });
 
@@ -274,7 +274,7 @@ describe("AgentExecutor on a live powder fit", () => {
     const { port } = sessionPort(newSession(exampleStructure()));
     const stuck: PowderAgentPort = { ...port, refine: async () => "cancelled" };
     const { ex } = executor(fakeHost(stuck).host, "auto");
-    const out = parse((await ex.run("refine", {}, "chat")).text);
+    const out = parse((await ex.run("refine", {})).text);
     expect(out.refined).toBe(false);
     expect(String(out.note)).toMatch(/did not finish \(cancelled\)/);
   });
@@ -283,9 +283,9 @@ describe("AgentExecutor on a live powder fit", () => {
     const { port, calls } = sessionPort(newSession(exampleStructure()));
     const busy: PowderAgentPort = { ...port, state: () => ({ ...port.state(), busy: true }) };
     const { ex, asked } = executor(fakeHost(busy).host, true);
-    expect((await ex.run("set_free", { free: ["scale"] }, "chat")).text).toMatch(/a refinement is running/);
+    expect((await ex.run("set_free", { free: ["scale"] })).text).toMatch(/a refinement is running/);
     expect(asked).toEqual([]);
-    const cancelled = parse((await ex.run("cancel_refinement", {}, "chat")).text);
+    const cancelled = parse((await ex.run("cancel_refinement", {})).text);
     expect(cancelled.cancelled).toBe("requested");
     expect(calls).toContain("cancel");
   });
@@ -293,32 +293,32 @@ describe("AgentExecutor on a live powder fit", () => {
   it("keeps big answers small and opens them with read_ref", async () => {
     const { port } = sessionPort(newSession(exampleStructure()));
     const { ex } = executor(fakeHost(port).host);
-    const all = parse((await ex.run("get_state", { parameters: ["*"] }, "chat")).text);
+    const all = parse((await ex.run("get_state", { parameters: ["*"] })).text);
     expect(JSON.stringify(all).length).toBeLessThan(8000);
     const rows = all.parameterRows as unknown[] | { ref: string };
     const ref = Array.isArray(rows) ? `${String(all.ref)}/parameterRows` : rows.ref;
-    const window = parse((await ex.run("read_ref", { ref, start: 0, end: 2 }, "chat")).text);
+    const window = parse((await ex.run("read_ref", { ref, start: 0, end: 2 })).text);
     expect((window.items as unknown[]).length).toBe(2);
   });
 
   it("finds residual peaks and bond lengths on the live model", async () => {
     const { port } = sessionPort(newSession(exampleStructure()));
     const { ex } = executor(fakeHost(port).host);
-    const peaks = parse((await ex.run("find_unexplained_peaks", {}, "chat")).text);
+    const peaks = parse((await ex.run("find_unexplained_peaks", {})).text);
     expect(typeof peaks.count).toBe("number");
-    const bonds = parse((await ex.run("bond_geometry", { cutoff: 3 }, "chat")).text);
+    const bonds = parse((await ex.run("bond_geometry", { cutoff: 3 })).text);
     expect(bonds.phase).toBe(port.state().structure.id);
-    expect((await ex.run("bond_geometry", { phase: "nope" }, "chat")).text).toMatch(/no phase "nope"/);
+    expect((await ex.run("bond_geometry", { phase: "nope" })).text).toMatch(/no phase "nope"/);
   });
 
   it("validates the fit window against the pattern", async () => {
     const { port, calls } = sessionPort(newSession(exampleStructure()));
     const { ex } = executor(fakeHost(port).host, "auto");
     const { extent } = port.state();
-    expect((await ex.run("set_fit_range", { min: 50, max: 40 }, "chat")).text).toMatch(/needs max > min/);
-    await ex.run("set_fit_range", { min: extent.min + 5, max: extent.max - 5 }, "chat");
+    expect((await ex.run("set_fit_range", { min: 50, max: 40 })).text).toMatch(/needs max > min/);
+    await ex.run("set_fit_range", { min: extent.min + 5, max: extent.max - 5 });
     expect(calls.at(-1)).toBe(`range ${extent.min + 5}-${extent.max - 5}`);
-    await ex.run("set_fit_range", { whole: true }, "chat");
+    await ex.run("set_fit_range", { whole: true });
     expect(calls.at(-1)).toBe("range whole");
   });
 });
@@ -404,7 +404,7 @@ describe("AgentExecutor on a live PDF fit", () => {
   it("reads the PDF page in its own terms: r window, Rw, no GoF", async () => {
     const { port } = pdfPort();
     const { ex, asked } = executor(fakeHost(port).host);
-    const view = parse((await ex.run("get_state", {}, "chat")).text);
+    const view = parse((await ex.run("get_state", {})).text);
     expect(view.technique).toBe("pdf");
     expect((view.data as { axis: string; fitWindow: number[] }).axis).toBe("r (Å)");
     expect((view.data as { fitWindow: number[] }).fitWindow).toEqual([1.5, 6]);
@@ -417,7 +417,7 @@ describe("AgentExecutor on a live PDF fit", () => {
   it("refuses a powder-only tool, naming the page", async () => {
     const { ex } = executor(fakeHost(pdfPort().port).host, "auto");
     for (const name of ["check_cell_symmetry", "set_background", "rank_next_parameters"]) {
-      const out = await ex.run(name, name === "set_background" ? { terms: 3 } : {}, "chat");
+      const out = await ex.run(name, name === "set_background" ? { terms: 3 } : {});
       expect(out.isError).toBe(true);
       expect(out.text).toMatch(new RegExp(`${name} works on the powder page only; the PDF page is open`));
     }
@@ -427,11 +427,11 @@ describe("AgentExecutor on a live PDF fit", () => {
     const { port, calls } = pdfPort();
     const { host, steps } = fakeHost(port);
     const { ex, asked, seen } = executor(host);
-    expect((await ex.run("assess_refinement", {}, "chat")).text).toMatch(/refine first/);
+    expect((await ex.run("assess_refinement", {})).text).toMatch(/refine first/);
 
-    await ex.run("set_free", { free: ["delta2"] }, "chat");
+    await ex.run("set_free", { free: ["delta2"] });
     expect(calls).toContain("setFixed delta2=false");
-    const out = parse((await ex.run("refine", {}, "chat")).text);
+    const out = parse((await ex.run("refine", {})).text);
     expect(asked.at(-1)!.preview).toMatch(/^Refine G\(r\), \d+ free parameters$/);
     expect(out.refined).toBe(true);
     expect(typeof out.Rw).toBe("number");
@@ -440,22 +440,22 @@ describe("AgentExecutor on a live PDF fit", () => {
     expect(seen.filter((e) => e.tool === "refine").at(-1)!.outcome).toMatch(/· Rw \d+\.\d\d%$/);
     expect(steps.some((st) => st.agent)).toBe(true);
 
-    const verdict = parse((await ex.run("assess_refinement", {}, "chat")).text);
+    const verdict = parse((await ex.run("assess_refinement", {})).text);
     expect(JSON.stringify(verdict.verdict)).not.toMatch(/"gof"/);
     expect(String(verdict.convention)).toMatch(/no GoF/);
-    const next = parse((await ex.run("suggest_next_steps", {}, "chat")).text);
+    const next = parse((await ex.run("suggest_next_steps", {})).text);
     expect(next.steps).toBeDefined();
   });
 
   it("restores the default r window and passes on why a run did not finish", async () => {
     const { port, calls } = pdfPort();
     const { ex, asked } = executor(fakeHost(port).host);
-    await ex.run("set_fit_range", { min: 2, max: 5 }, "chat");
+    await ex.run("set_fit_range", { min: 2, max: 5 });
     expect(calls.at(-1)).toBe("range 2-5");
-    await ex.run("set_fit_range", { whole: true }, "chat");
+    await ex.run("set_fit_range", { whole: true });
     expect(asked.at(-1)!.preview).toBe("Fit the default window, r 1.5 – 6 Å");
     expect(calls.at(-1)).toBe("range default");
-    const out = parse((await ex.run("refine", { mode: "thorough" }, "chat")).text);
+    const out = parse((await ex.run("refine", { mode: "thorough" })).text);
     expect(out.refined).toBe(false);
     expect(String(out.note)).toMatch(/did not finish \(cancelled\)/);
   });

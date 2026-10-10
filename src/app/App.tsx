@@ -388,12 +388,7 @@ export function App(): JSX.Element {
     history: () => agentLatest.current.history,
     goToStep: (id) => agentLatest.current.goToStep(id),
   }), [agentLink]);
-  // Nothing connects until the Agent is first opened.
-  const [agentUsed, setAgentUsed] = useState(false);
-  useEffect(() => {
-    if (agentOpen) setAgentUsed(true);
-  }, [agentOpen]);
-  const agent = useAgent(agentHost, agentUsed, () => setAgentOpen(true));
+  const agent = useAgent(agentHost, () => setAgentOpen(true));
 
   // ⌘Z / Ctrl+Z steps back, with Shift steps forward — except inside a text
   // field, which keeps its own undo.

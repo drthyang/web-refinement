@@ -84,8 +84,8 @@ describe("AgentChat", () => {
     server = api.server;
     const ran: string[] = [];
     const executor = {
-      run: async (name: string, _input: unknown, source: string) => {
-        ran.push(`${name}/${source}`);
+      run: async (name: string) => {
+        ran.push(name);
         return name === "assess_refinement" ? { isError: true, text: "Error: refine first" } : { isError: false, text: "{\"technique\":\"powder\"}" };
       },
     } as unknown as AgentExecutor;
@@ -99,7 +99,7 @@ describe("AgentChat", () => {
       new AbortController().signal,
     );
 
-    expect(ran).toEqual(["get_state/chat", "assess_refinement/chat"]);
+    expect(ran).toEqual(["get_state", "assess_refinement"]);
     expect(text).toBe("Let me look.The fit is good.");
     expect(starts).toBe(2);
     const history = chat.history();
@@ -199,7 +199,7 @@ describe("AgentChat on Ollama", () => {
     server = api.server;
     let thought = "";
     const chat = new AgentChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor);
-    await chat.send("How is it?", { transport: "ollama", ollamaUrl: api.url + "/", model: "qwen3:32b", effort: "high" }, { ...quiet, onThinking: (d) => (thought += d) }, new AbortController().signal);
+    await chat.send("How is it?", { transport: "ollama", serverUrl: api.url + "/", model: "qwen3:32b", effort: "high" }, { ...quiet, onThinking: (d) => (thought += d) }, new AbortController().signal);
 
     expect(thought).toBe("Look first.");
     const first = api.requests[0]!;
@@ -220,7 +220,7 @@ describe("AgentChat on Ollama", () => {
     server = api.server;
     const chat = new AgentChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor);
     const signal = new AbortController().signal;
-    await chat.send("hi", { transport: "ollama", ollamaUrl: api.url, model: "qwen3:32b", effort: "high" }, quiet, signal);
+    await chat.send("hi", { transport: "ollama", serverUrl: api.url, model: "qwen3:32b", effort: "high" }, quiet, signal);
     expect((chat.history()[1]!.content as { type: string }[]).map((b) => b.type)).toEqual(["thinking", "text"]);
 
     await chat.send("again", { transport: "api-key", apiKey: "sk-test", baseURL: api.url, model: "claude-opus-5-5", effort: "high" }, quiet, signal);
@@ -232,8 +232,59 @@ describe("AgentChat on Ollama", () => {
     const api = await fakeApi([{ status: 404, json: { type: "error", error: { type: "not_found_error", message: "model 'nope:1b' not found" } } }]);
     server = api.server;
     const chat = new AgentChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor);
-    const config = { transport: "ollama" as const, ollamaUrl: api.url, model: "nope:1b", effort: "high" as const };
+    const config = { transport: "ollama" as const, serverUrl: api.url, model: "nope:1b", effort: "high" as const };
     const err = await chat.send("hi", config, quiet, new AbortController().signal).then(() => null, (e: unknown) => e);
     expect(describeChatError(err, config)).toBe('Ollama has no model "nope:1b". Pull it (ollama pull nope:1b) or pick another in the Agent settings.');
+  });
+});
+
+describe("AgentChat on LM Studio", () => {
+  let server: Server | null = null;
+  afterEach(async () => {
+    if (server) await new Promise<void>((r) => server!.close(() => r()));
+    server = null;
+  });
+  const quiet = { onAssistantStart: () => undefined, onText: () => undefined, onThinking: () => undefined, onNotice: () => undefined, onUsage: () => undefined };
+  const runner = { run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor;
+
+  it("sends plain headers and only the fields a local server reads, to <server>/v1/messages", async () => {
+    const api = await fakeApi([sse([{ type: "tool_use", id: "call_1", name: "get_state", input: {} }], "tool_use"), sse([{ type: "text", text: "Fine." }], "end_turn")]);
+    server = api.server;
+    const chat = new AgentChat(runner);
+    await chat.send("How is it?", { transport: "lmstudio", serverUrl: api.url + "/", model: "qwen/qwen3-32b", effort: "high" }, quiet, new AbortController().signal);
+
+    const first = api.requests[0]!;
+    for (const h of ["x-api-key", "authorization", "anthropic-version", "anthropic-beta", "anthropic-dangerous-direct-browser-access", "x-stainless-lang"]) expect(first.headers[h]).toBeUndefined();
+    expect(first.body.model).toBe("qwen/qwen3-32b");
+    for (const k of ["thinking", "output_config", "cache_control", "fallbacks"]) expect(first.body[k]).toBeUndefined();
+    expect(chat.history().map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+  });
+
+  it("moving from Ollama to LM Studio drops the other server's thinking", async () => {
+    const api = await fakeApi([sse([{ type: "thinking", thinking: "unsigned" }, { type: "text", text: "Hi." }], "end_turn"), sse([{ type: "text", text: "Hello." }], "end_turn")]);
+    server = api.server;
+    const chat = new AgentChat(runner);
+    const signal = new AbortController().signal;
+    await chat.send("hi", { transport: "ollama", serverUrl: api.url, model: "qwen3:32b", effort: "high" }, quiet, signal);
+    await chat.send("again", { transport: "lmstudio", serverUrl: api.url, model: "qwen/qwen3-32b", effort: "high" }, quiet, signal);
+    const sent = api.requests[1]!.body.messages as { role: string; content: string | { type: string }[] }[];
+    expect((sent[1]!.content as { type: string }[]).map((b) => b.type)).toEqual(["text"]);
+  });
+
+  it("explains a context overflow and a server that wants a token", async () => {
+    const config = { transport: "lmstudio" as const, model: "qwen/qwen3-8b", effort: "high" as const };
+    for (const [status, json, expected] of [
+      [400, { type: "error", error: { type: "invalid_request_error", message: "The number of tokens to keep from the initial prompt is greater than the context length." } }, /no longer fits the context LM Studio loaded "qwen\/qwen3-8b" with.*lms load qwen\/qwen3-8b --context-length 32768/],
+      [401, { error: { message: "Invalid API token" } }, /asks for an API token/],
+      [422, { error: "boom" }, /^LM Studio error 422: boom$/],
+    ] as const) {
+      const api = await fakeApi([{ status, json }]);
+      server = api.server;
+      const chat = new AgentChat(runner);
+      const err = await chat.send("hi", { ...config, serverUrl: api.url }, quiet, new AbortController().signal).then(() => null, (e: unknown) => e);
+      expect(describeChatError(err, config)).toMatch(expected);
+      await new Promise<void>((r) => api.server.close(() => r()));
+      server = null;
+    }
   });
 });

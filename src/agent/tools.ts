@@ -1,12 +1,10 @@
 /**
  * The Agent's tools: what a model may read and do in the LIVE analysis.
  *
- * One list serves every way a model reaches the app — the in-app chat (API key
- * or local proxy) and Claude Code through the `materia-live` MCP bridge — so
- * the names, descriptions and schemas a model sees are the same everywhere.
- * This file is declarations only (no browser code), so the Node bridge can
- * serve the same list; the handlers live in powderTools.ts and pdfTools.ts and
- * run in the page. Every tool names the pages it works on; on another page it
+ * One list serves every way a model reaches the app (API key, local proxy,
+ * Ollama, LM Studio), so the names, descriptions and schemas a model sees are
+ * the same everywhere. This file is declarations only (no browser code); the
+ * handlers live in powderTools.ts and pdfTools.ts and run in the page. Every tool names the pages it works on; on another page it
  * answers with an error that says so.
  *
  * Unlike the MATERIA MCP tools (src/mcp/registry.ts), which are pure functions

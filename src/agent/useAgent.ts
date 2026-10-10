@@ -1,19 +1,20 @@
 /**
  * The Agent's state for the drawer: settings, the conversation, the tool
- * activity, approvals waiting on the user, and the Claude Code bridge. Lives in
- * the app shell (always mounted), so the bridge stays connected and a call can
- * ask for approval while the drawer is closed — `onAttention` opens it.
+ * activity, and approvals waiting on the user. Lives in the app shell (always
+ * mounted), so a call can ask for approval while the drawer is closed —
+ * `onAttention` opens it.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { ActivityEntry, AgentExecutor, AgentHost, ToolRunner } from "@/agent/executor";
-import { BridgeClient, DEFAULT_BRIDGE_URL, type BridgeStatus } from "@/agent/bridgeClient";
 import type { ChatConfig, ChatEffort, AgentChat } from "@/agent/chat";
 import { API_KEY_KEY, SETTINGS_KEY, migrateLegacyKeys } from "@/agent/storage";
 import { DEFAULT_OLLAMA_URL } from "@/agent/ollama";
+import { DEFAULT_LMSTUDIO_URL } from "@/agent/lmstudio";
 
-/** How the Agent reaches a model: Claude three ways, or a local model on Ollama. */
-export type AgentMode = "claude-code" | "api-key" | "proxy" | "ollama";
+/** How the Agent reaches a model: Claude two ways, or a local model on Ollama or LM Studio. */
+export type AgentMode = "api-key" | "proxy" | "ollama" | "lmstudio";
+export const AGENT_MODES: readonly AgentMode[] = ["api-key", "proxy", "ollama", "lmstudio"];
 
 export interface AgentSettings {
   readonly mode: AgentMode;
@@ -25,10 +26,12 @@ export interface AgentSettings {
   readonly rememberKey: boolean;
   /** Let the API answer a declined turn with another model (off: every turn stays on `model`). */
   readonly fallback: boolean;
-  readonly bridgeUrl: string;
   /** The Ollama server, and the model on it (kept apart from `model`, the Claude choice). */
   readonly ollamaUrl: string;
   readonly ollamaModel: string;
+  /** The LM Studio server, and the model on it (its key). */
+  readonly lmstudioUrl: string;
+  readonly lmstudioModel: string;
 }
 
 export type TranscriptItem =
@@ -47,7 +50,6 @@ export interface AgentController {
   /** Changes waiting for the user's decision. */
   readonly pending: readonly ActivityEntry[];
   readonly decide: (entryId: string, approve: boolean) => void;
-  readonly bridge: BridgeStatus;
   /** A chat turn is running. */
   readonly thinking: boolean;
   readonly send: (text: string) => void;
@@ -58,30 +60,26 @@ export interface AgentController {
 
 const KEY_KEY = API_KEY_KEY;
 const DEFAULTS: AgentSettings = {
-  mode: "claude-code",
+  mode: "api-key",
   model: "claude-opus-5-5",
   effort: "high",
   autoApprove: false,
   rememberKey: false,
   fallback: false,
-  bridgeUrl: DEFAULT_BRIDGE_URL,
   ollamaUrl: DEFAULT_OLLAMA_URL,
   ollamaModel: "",
+  lmstudioUrl: DEFAULT_LMSTUDIO_URL,
+  lmstudioModel: "",
 };
 
 let nextItem = 1;
 const itemId = (): string => `t${nextItem++}`;
 
-/**
- * `enabled`: the user has opened the Agent in this page. Until then nothing
- * connects anywhere — the bridge does not poll a server nobody asked for.
- */
-export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => void): AgentController {
+export function useAgent(host: AgentHost, onAttention: () => void): AgentController {
   const [settings, setSettings] = useState<AgentSettings>(readSettings);
   const [apiKey, setApiKeyState] = useState<string>(readKey);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [activity, setActivity] = useState<Record<string, ActivityEntry>>({});
-  const [bridge, setBridge] = useState<BridgeStatus>({ state: "off" });
   const [thinking, setThinking] = useState(false);
   const [usage, setUsage] = useState({ input: 0, output: 0, cacheRead: 0 });
   const approvals = useRef(new Map<string, (ok: boolean) => void>());
@@ -114,16 +112,8 @@ export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => v
             },
           }),
       ));
-    return { run: async (name, input, source) => (await load()).run(name, input, source) };
+    return { run: async (name, input) => (await load()).run(name, input) };
   }, [host]);
-
-  // The Claude Code bridge runs while that mode is chosen (once the Agent is in use).
-  useEffect(() => {
-    if (!enabled || settings.mode !== "claude-code") return;
-    const client = new BridgeClient(settings.bridgeUrl, executor, setBridge);
-    client.start();
-    return () => client.stop();
-  }, [enabled, settings.mode, settings.bridgeUrl, executor]);
 
   const updateSettings = useCallback((patch: Partial<AgentSettings>) => {
     setSettings((s) => {
@@ -152,9 +142,7 @@ export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => v
   const send = useCallback((text: string) => {
     const message = text.trim();
     if (!message || turn.current) return;
-    const s = settingsRef.current;
-    if (s.mode === "claude-code") return;
-    const config = chatConfig(s, apiKeyRef.current);
+    const config = chatConfig(settingsRef.current, apiKeyRef.current);
     const ctrl = new AbortController();
     turn.current = ctrl;
     setThinking(true);
@@ -205,13 +193,9 @@ export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => v
   const stop = useCallback(() => {
     turn.current?.abort();
     // A stopped turn declines what it was waiting on.
-    for (const [id, resolve] of approvals.current) {
-      if (activity[id]?.source === "chat") {
-        approvals.current.delete(id);
-        resolve(false);
-      }
-    }
-  }, [activity]);
+    for (const resolve of approvals.current.values()) resolve(false);
+    approvals.current.clear();
+  }, []);
 
   const clear = useCallback(() => {
     if (turn.current) return;
@@ -225,12 +209,13 @@ export function useAgent(host: AgentHost, enabled: boolean, onAttention: () => v
 
   const pending = Object.values(activity).filter((e) => e.status === "waiting");
 
-  return { settings, updateSettings, apiKey, setApiKey, transcript, activity, pending, decide, bridge, thinking, send, stop, clear, usage };
+  return { settings, updateSettings, apiKey, setApiKey, transcript, activity, pending, decide, thinking, send, stop, clear, usage };
 }
 
 /** What one chat message runs on, from the settings. */
 function chatConfig(s: AgentSettings, apiKey: string): ChatConfig {
-  if (s.mode === "ollama") return { transport: "ollama", ollamaUrl: s.ollamaUrl, model: s.ollamaModel, effort: s.effort };
+  if (s.mode === "ollama") return { transport: "ollama", serverUrl: s.ollamaUrl, model: s.ollamaModel, effort: s.effort };
+  if (s.mode === "lmstudio") return { transport: "lmstudio", serverUrl: s.lmstudioUrl, model: s.lmstudioModel, effort: s.effort };
   return { transport: s.mode === "proxy" ? "proxy" : "api-key", apiKey, model: s.model, effort: s.effort, fallback: s.fallback };
 }
 
@@ -239,18 +224,35 @@ function chatConfig(s: AgentSettings, apiKey: string): ChatConfig {
 function readSettings(): AgentSettings {
   try {
     migrateLegacyKeys(localStorage, sessionStorage);
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return DEFAULTS;
-    const parsed = JSON.parse(raw) as Partial<AgentSettings>;
-    return {
-      ...DEFAULTS,
-      ...parsed,
-      // Auto-approve is a per-session choice: it never comes back on by itself.
-      autoApprove: false,
-    };
+    return settingsFrom(localStorage.getItem(SETTINGS_KEY));
   } catch {
     return DEFAULTS;
   }
+}
+
+/**
+ * The stored settings over the defaults. Only known keys come back, and a mode
+ * this version no longer has (the Claude Code bridge, removed) falls back to
+ * the default.
+ */
+export function settingsFrom(raw: string | null): AgentSettings {
+  if (!raw) return DEFAULTS;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return DEFAULTS;
+  }
+  if (typeof parsed !== "object" || parsed === null) return DEFAULTS;
+  const stored = parsed as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...DEFAULTS };
+  for (const k of Object.keys(DEFAULTS) as (keyof AgentSettings)[]) {
+    if (typeof stored[k] === typeof DEFAULTS[k]) out[k] = stored[k];
+  }
+  if (!AGENT_MODES.includes(out.mode as AgentMode)) out.mode = DEFAULTS.mode;
+  // Auto-approve is a per-session choice: it never comes back on by itself.
+  out.autoApprove = false;
+  return out as unknown as AgentSettings;
 }
 
 function writeSettings(s: AgentSettings): void {
