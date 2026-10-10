@@ -96,6 +96,9 @@ export interface AssessmentInput {
     /** Every phase's reflections (refined cells): a residual peak on one is a
      *  misfit of that reflection, not intensity no phase accounts for. */
     readonly reflections?: readonly { readonly d: number; readonly hkl: string; readonly phaseLabel: string }[];
+    /** A neutron pattern of a phase with magnetic ions: excess on nuclear
+     *  reflections at large d may then be k = 0 magnetic order. */
+    readonly magneticNeutron?: boolean;
   };
   readonly mode?: "powder" | "single-crystal";
 }
@@ -138,6 +141,16 @@ export function correlationInsight(a: ParameterKind, b: ParameterKind): string |
   const fromCorrection = correctionCorrelation(a, b);
   if (fromCorrection) return fromCorrection;
   return undefined;
+}
+
+/** Why excess intensity on nuclear reflections may be magnetic, for a neutron pattern of a phase with magnetic ions. */
+export const K0_MAGNETIC =
+  "This is a neutron pattern of a phase with magnetic ions, and the excess sits on nuclear reflections at large d: if the sample can be magnetically ordered at this temperature, that is the k = 0 magnetic signature (magnetic intensity on the nuclear positions, fading with the form factor at small d). Check it with the Magnetic analysis step before refining atoms or ADPs into it.";
+
+/** On-reflection excess that may be k = 0 magnetic: neutrons, magnetic ions, and most of it at d > 2.5 Å. */
+export function k0MagneticHint(magneticNeutron: boolean | undefined, onReflection: readonly { readonly d: number }[]): boolean {
+  if (!magneticNeutron || onReflection.length === 0) return false;
+  return onReflection.filter((p) => p.d > 2.5).length * 2 >= onReflection.length;
 }
 
 /** Within this of a reflection (relative d), a residual peak is that reflection's misfit. */
@@ -389,7 +402,8 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
           on.length ? `${onReflection.length} residual peak${onReflection.length === 1 ? " sits" : "s sit"} on known reflections: ${on.join(", ")}` : null,
           by.length ? `${beside.length} beside one: ${by.join(", ")}` : null,
         ].filter(Boolean).join("; ") + ".",
-        detail: "On a reflection, the reflection is calculated too weak — a misfit of its intensity: the atoms (positions, ADPs, occupancy constraints) or an intensity correction. Beside one, within 2% in d, it is most often the peak's shoulder or tail — the profile (TOF peaks tail to larger d) — and only then a weak peak of another phase. Refine those per the method before reading anything new into them.",
+        detail: (k0MagneticHint(input.residual.magneticNeutron, onReflection) ? K0_MAGNETIC + " " : "") +
+          "On a reflection, the reflection is calculated too weak — a misfit of its intensity: the atoms (positions, ADPs, occupancy constraints) or an intensity correction. Beside one, within 2% in d, it is most often the peak's shoulder or tail — the profile (TOF peaks tail to larger d) — and only then a weak peak of another phase. Refine those per the method before reading anything new into them.",
         evidence: { onReflection: onReflection.length, beside: beside.length, reflections: [...on, ...by].join("; ") },
       });
     }

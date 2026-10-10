@@ -21,7 +21,8 @@ import type { BackgroundType } from "@/core/diffraction/background";
 import type { MustrainModel } from "@/app/powderSpec";
 import type { PowderXUnit } from "@/core/diffraction/types";
 import { availableDisplayUnits, convertAxisValue, convertInterval } from "@/visualization/axisUnits";
-import { residualPeaks } from "@/core/diagnostics/assessment";
+import { K0_MAGNETIC, k0MagneticHint, residualPeaks } from "@/core/diagnostics/assessment";
+import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
 import { generateReflections } from "@/core/diffraction/reflections";
 import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, parameterSummary, pct, sig, type LiveToolHost } from "@/agent/liveCommon";
 
@@ -59,8 +60,8 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
         })),
       };
     }
-    case "check_cell_symmetry":
-      return check_cell_symmetry({
+    case "check_cell_symmetry": {
+      const gate = check_cell_symmetry({
         structure: s.refinedPhases[0] ?? s.structure,
         pattern: s.pattern,
         ...(s.instrument ? { instrument: s.instrument } : {}),
@@ -69,10 +70,20 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
         ...(input.dMin !== undefined ? { dMin: input.dMin } : {}),
         ...(input.significance !== undefined ? { significance: input.significance } : {}),
       });
+      // Each unindexed peak in d and Q too, and marked on the plot for the user.
+      const unindexed = gate.unindexedPeaks.map((p) => {
+        const d = convertAxisValue(p.x, s.pattern.xUnit, "dSpacing", s.axis);
+        return { ...p, ...(Number.isFinite(d) ? { d: sig(d, 5), q: sig((2 * Math.PI) / d, 5) } : {}) };
+      });
+      const marks = unindexed.flatMap((p) => ("d" in p && p.d !== undefined ? [{ d: p.d, height: p.significance }] : []));
+      if (marks.length > 0) port.showPeaks(marks);
+      return { ...gate, unindexedPeaks: unindexed, ...(marks.length > 0 ? { markedOnPlot: "The unindexed peaks are marked on the plot (filled ▽, listed under it)." } : {}) };
+    }
     case "find_unexplained_peaks": {
       // Each peak must stand 5σ above its own counting noise, and is checked
       // against every phase's reflections: on one, it is that reflection's misfit.
-      const { between, beside, onReflection } = residualPeaks(residualOf(s), { ...(input.sigma !== undefined ? { sigma: input.sigma } : {}), limit: input.limit ?? 12 });
+      const residual = residualOf(s);
+      const { between, beside, onReflection } = residualPeaks(residual, { ...(input.sigma !== undefined ? { sigma: input.sigma } : {}), limit: input.limit ?? 12 });
       const all = [...between, ...beside, ...onReflection].sort((a, b) => b.height - a.height);
       const isBeside = new Set(beside);
       const near = (p: (typeof all)[number]): string | undefined => {
@@ -98,7 +109,8 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
         onKnownReflections: onReflection.map(view),
         reading: all.length === 0
           ? "No residual peak stands 5σ above its own noise."
-          : `${between.length} away from every phase's reflections (intensity no phase accounts for: an impurity, magnetic order, or an unmodelled feature); ${beside.length} within 2% in d of a reflection (most often its shoulder or tail: check the profile first); ${onReflection.length} on a reflection (calculated too weak: the atoms, ADPs or an intensity correction, not a new phase).`,
+          : `${between.length} away from every phase's reflections (intensity no phase accounts for: an impurity, magnetic order, or an unmodelled feature); ${beside.length} within 2% in d of a reflection (most often its shoulder or tail: check the profile first); ${onReflection.length} on a reflection (calculated too weak: the atoms, ADPs or an intensity correction, not a new phase).` +
+            (k0MagneticHint(residual.magneticNeutron, onReflection) ? ` ${K0_MAGNETIC}` : ""),
         ...(all.length > 0 ? { markedOnPlot: "The user sees these marked on the plot (filled ▽ unexplained, hollow ▽ on or beside a known reflection, listed under it); refer to them by d." } : {}),
       };
     }
@@ -293,7 +305,7 @@ function requestedWindow(s: PowderLiveState, input: Input): { min: number; max: 
   return w;
 }
 
-function residualOf(s: PowderLiveState): { d: number[]; yObs: number[]; yCalc: number[]; sigma: number[]; reflections: { d: number; hkl: string; phaseLabel: string }[] } {
+function residualOf(s: PowderLiveState): { d: number[]; yObs: number[]; yCalc: number[]; sigma: number[]; reflections: { d: number; hkl: string; phaseLabel: string }[]; magneticNeutron: boolean } {
   if (!s.d) throw new Error("this pattern's axis cannot be converted to d-spacing (no wavelength or TOF calibration)");
   // Inside the fit window only: outside it the model is not being fitted.
   const keep = s.curves.x.map((x) => !s.fitRange || (x >= s.fitRange.min && x <= s.fitRange.max));
@@ -311,7 +323,9 @@ function residualOf(s: PowderLiveState): { d: number[]; yObs: number[]; yCalc: n
   const reflections = s.refinedPhases.flatMap((ph) =>
     generateReflections(ph.cell, ph.spaceGroup, dMin, dMax, { absences: true }).map((r) => ({ d: r.d, hkl: `${r.h} ${r.k} ${r.l}`, phaseLabel: ph.name || ph.id })),
   );
-  return { d, yObs: pick(s.curves.yObs), yCalc: pick(s.curves.yCalc), sigma: pick(sigma), reflections };
+  // Neutrons see magnetic order; a phase with magnetic ions may carry it.
+  const magneticNeutron = s.pattern.radiation.kind.startsWith("neutron") && s.magnetic === null && [s.structure, ...s.extraPhases].some((ph) => magneticIonCandidates(ph).length > 0);
+  return { d, yObs: pick(s.curves.yObs), yCalc: pick(s.curves.yCalc), sigma: pick(sigma), reflections, magneticNeutron };
 }
 
 function assessment(s: PowderLiveState): ReturnType<typeof assess_refinement> {

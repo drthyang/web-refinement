@@ -215,12 +215,31 @@ interface ParsedCif {
  * refined-XRD blocks must not take its cell from one block and its atoms from
  * another.
  */
+/** Where a block's `data_` name is kept among its items (no CIF tag starts with a space). */
+const BLOCK_NAME = " data_block";
+
+/**
+ * A phase's name: _pd_phase_name, else the common or mineral name, else the
+ * formula ("Mn3 Ga" → "Mn3Ga"), else the data block's own name when it is not
+ * a placeholder ("global", a number), else "structure".
+ */
+function phaseName(items: ReadonlyMap<string, string>): string {
+  const value = (key: string): string | undefined => {
+    const v = items.get(key)?.replace(/^["']|["']$/g, "").trim();
+    return v && v !== "?" && v !== "." ? v : undefined;
+  };
+  const formula = value("_chemical_formula_sum")?.replace(/\s+/g, "");
+  const block = items.get(BLOCK_NAME)?.trim();
+  const usableBlock = block && !/^(global|data|structure|phase|\d+|[a-z])$/i.test(block) ? block.replace(/_/g, " ") : undefined;
+  return value("_pd_phase_name") ?? value("_chemical_name_common") ?? value("_chemical_name_mineral") ?? formula ?? usableBlock ?? "structure";
+}
+
 function parseCifBlocks(text: string): ParsedCif {
   const blocks: ParsedCif[] = [];
   let items = new Map<string, string>();
   let loops: Loop[] = [];
   const flush = (): void => {
-    if (items.size > 0 || loops.length > 0) blocks.push({ items, loops });
+    if (items.size > (items.has(BLOCK_NAME) ? 1 : 0) || loops.length > 0) blocks.push({ items, loops });
   };
 
   const tokens = tokenizeCif(text);
@@ -230,9 +249,10 @@ function parseCifBlocks(text: string): ParsedCif {
     const t = tokens[i]!;
     const word = reservedWord(t);
     if (word === "data_") {
-      // New data block — start fresh so blocks never merge.
+      // New data block — start fresh so blocks never merge. Its name is kept
+      // (under a key no CIF tag can have) as the last fallback for the phase name.
       flush();
-      items = new Map<string, string>();
+      items = new Map<string, string>([[BLOCK_NAME, t.text.slice(5)]]);
       loops = [];
       i++;
       continue;
@@ -464,7 +484,7 @@ function parseSites(items: Map<string, string>, loops: Loop[]): AtomSite[] {
  */
 export function parseCif(text: string, id = "structure", options: CifParseOptions = {}): StructureModel {
   const { items, loops } = parseCifBlocks(text);
-  const name = items.get("_pd_phase_name")?.replace(/^["']|["']$/g, "") ?? "structure";
+  const name = phaseName(items);
   const cell = parseCell(items);
   return {
     id,
@@ -572,7 +592,7 @@ export interface MagneticCifResult {
  */
 export function parseMagneticCif(text: string, id = "structure", options: CifParseOptions = {}): MagneticCifResult {
   const { items, loops } = parseCifBlocks(text);
-  const name = items.get("_pd_phase_name")?.replace(/^["']|["']$/g, "") ?? "structure";
+  const name = phaseName(items);
   const magSg = parseMagneticSpaceGroup(items, loops);
   const cell = parseCell(items);
   const structure: StructureModel = {

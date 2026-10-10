@@ -7,8 +7,29 @@ release fixes bugs.
 
 ## [Unreleased]
 
+### Added
+
+- **The cards the Agent is on breathe.** While the Agent is open, the edge of
+  each card a running or waiting tool call acts on (Structure, Data,
+  Instrument, Pattern, Parameters, Result) breathes, as do the cards a reply
+  points to in its last paragraph (for a few seconds) and a reply under the
+  pointer. With reduced motion the edge is steady.
+
 ### Fixed
 
+- **The cell gate on a wide 2θ scan.** Its Le Bail fit used one peak width at
+  constant wavelength, so high-angle flanks read as unindexed peaks and a
+  correct cell failed (Mn₃Ga 30 K, 5–130°). The width now grows with angle
+  (Caglioti U). The gate's unindexed peaks come with d and Q and are marked on
+  the plot.
+- Excess intensity on nuclear reflections in a neutron pattern of a phase with
+  magnetic ions is flagged as possible k = 0 magnetic order, before atoms or
+  ADPs are refined into it.
+- A CIF without a phase name is named from its common name, formula or data
+  block, not "structure".
+- The Agent's refine reported the previous history step when the page took
+  long to render; switching Ask first / Auto during a run now reaches the
+  model at its next turn.
 - **Residual peaks are judged against each point's uncertainty and the known
   reflections.** Lone noisy points in a low-count TOF region were reported as
   "unexplained peaks", and so were misfits of a phase's own reflections. Now

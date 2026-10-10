@@ -1493,7 +1493,7 @@ export function PowderWorkbench({
           <>
             <SummaryCards cards={summaryCards} />
             <div className="wb-work2">
-              <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", height: "100%" }}>
+              <div data-agent-card="pattern" style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", height: "100%" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
                   <span style={themeLabel}>
                     {plotMode === "structure" ? "Crystal structure — unit cell" : plotMode === "validation" ? "Validation" : plotMode === "posterior" ? "Bayesian posterior — free parameters" : "Powder pattern"}

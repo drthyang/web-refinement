@@ -180,7 +180,7 @@ export function ParameterPanel({ params, esd, onChange, onRefine, onThorough, th
   };
 
   return (
-    <div style={{ ...card, display: "flex", flexDirection: "column", overflow: "hidden", height: "100%" }}>
+    <div data-agent-card="parameters" style={{ ...card, display: "flex", flexDirection: "column", overflow: "hidden", height: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: `10px ${space.inset}` }}>
         <span style={uppercaseLabel}>{title ?? "Powder parameters"}</span>
         <span style={{ marginLeft: "auto", fontFamily: mono, fontSize: 11, color: color.faint }}>{freeCount} of {params.length} free</span>
@@ -337,7 +337,7 @@ function ResultSection({ result, open, onToggle }: { result: RefinementResult; o
   const converged = result.status === "converged";
   const cycles = result.history.length;
   return (
-    <div style={footer}>
+    <div data-agent-card="result" style={footer}>
       <div style={resultHeader} onClick={onToggle} role="button" aria-expanded={open}>
         <span style={{ color: color.primary, fontSize: 10 }}>{open ? "▾" : "▸"}</span>
         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>Result</span>

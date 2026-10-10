@@ -332,7 +332,11 @@ function Item({ item, agent }: { item: TranscriptItem; agent: AgentController })
               <div style={{ whiteSpace: "pre-wrap", marginTop: 4 }}>{item.thinking}</div>
             </details>
           )}
-          {item.text && <div style={assistantText}><Markdown text={item.text} /></div>}
+          {item.text && (
+            <div style={assistantText} onMouseEnter={() => agent.hoverReply(item.text)} onMouseLeave={() => agent.hoverReply(null)}>
+              <Markdown text={item.text} />
+            </div>
+          )}
         </div>
       );
     case "tool": {

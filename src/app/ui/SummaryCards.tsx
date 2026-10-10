@@ -50,7 +50,7 @@ function SummaryCard({ data }: { data: SummaryCardData }): JSX.Element {
   const showChipRow = showChip || badges.length > 0;
   const chipStyle = data.chipTone === "warn" ? warnChip : okChip;
   return (
-    <div style={{ ...card, padding: space.inset, display: "flex", flexDirection: "column", gap: 7 }}>
+    <div data-agent-card={data.label.toLowerCase()} style={{ ...card, padding: space.inset, display: "flex", flexDirection: "column", gap: 7 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={uppercaseLabel}>{data.label}</span>
         {data.help && <InfoBadge text={data.help} />}

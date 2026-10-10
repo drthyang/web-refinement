@@ -47,7 +47,7 @@ import type { ParameterBinding, RefinementParameter } from "@/core/refinement/ty
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { FitRange } from "@/core/workflow/powder";
 import { generateReflections } from "@/core/diffraction/reflections";
-import { dRange, dToX, leBailExtract, tofFwhmAt, type LeBailTofProfile, type TofCalibration } from "@/core/workflow/leBail";
+import { cwWidth, dRange, dToX, leBailExtract, tofFwhmAt, type LeBailTofProfile, type TofCalibration } from "@/core/workflow/leBail";
 import { leBailCellPrefit } from "@/core/workflow/leBailPrefit";
 
 export interface CellSymmetryCheckOptions {
@@ -194,7 +194,7 @@ export function checkCellSymmetry(
 
   // 2. What the allowed reflections (and the extra phases') cannot account for.
   const lb = leBailExtract(pattern, cell, structure.spaceGroup, {
-    fwhm: pre.fwhm, shape, eta: pre.eta ?? eta, background: pre.backgroundCurve,
+    fwhm: pre.fwhm, ...(pre.fwhmU !== undefined ? { fwhmU: pre.fwhmU } : {}), shape, eta: pre.eta ?? eta, background: pre.backgroundCurve,
     ...(tof ? { tof } : {}),
     ...(pre.tofProfile ? { tofProfile: pre.tofProfile } : {}),
     ...(extraPhases.length ? { extraPhases: extraPhases.map((ph, i) => ({ cell: pre.extraCells[i] ?? ph.cell, spaceGroup: ph.spaceGroup, widthScale: pre.extraWidthScales[i] ?? 1 })) } : {}),
@@ -209,9 +209,10 @@ export function checkCellSymmetry(
   // Le Bail width (grown with TOF when the fit had no TOF peak shape).
   const xMid = median(x);
   const tofProfile = pre.tofProfile;
+  const cw = cwWidth(pattern, pre.fwhm, pre.fwhmU ?? 0);
   const width = (xi: number): number =>
     tofProfile && tof ? tofFwhmAt((xi - tof.zero) / tof.difC, tofProfile)
-      : pattern.xUnit === "tof" && xMid > 0 ? pre.fwhm * (xi / xMid) : pre.fwhm;
+      : pattern.xUnit === "tof" && xMid > 0 ? pre.fwhm * (xi / xMid) : cw(xi);
 
   // A shape error is a fraction of the peak it belongs to, spread across that
   // peak — not of the calculated value at the same point, which on a steep

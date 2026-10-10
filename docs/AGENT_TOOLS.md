@@ -432,6 +432,14 @@ reflection, each with a dashed guide through the pattern. A row under the plot
 lists each d and its reflection (click to zoom), with a Clear button. The marks go at the next refinement, when the residual
 changes. Viewing only: no approval card, no history step.
 
+**Where the agent is.** While the drawer is open, the shell writes the cards
+the agent is on to the root element (`data-agent-focus`), and their edges
+breathe ([`src/agent/focus.ts`](../src/agent/focus.ts)). A card is "on" when:
+- a running or waiting tool call acts on it (`refine` the parameters and the
+  pattern, `check_cell_symmetry` the structure and the pattern, …);
+- the latest reply names it in its last paragraph (for 8 s after the reply);
+- the pointer is over a reply that names it.
+
 **When a model stalls.** The chat loop watches for three ways a reply leaves
 the user waiting on nothing:
 - a reply that promises a call it does not make ("Starting the Le Bail gate
