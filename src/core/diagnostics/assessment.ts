@@ -19,11 +19,12 @@
  */
 
 import type {
+  LinearRestraint,
   RefinementParameter,
   RefinementResult,
   ParameterKind,
 } from "@/core/refinement/types";
-import { detectExtraPeaks } from "@/core/magnetic/extraPeaks";
+import { annotateExtraPeaks, detectExtraPeaks, type AnnotatedExtraPeak } from "@/core/magnetic/extraPeaks";
 import { correctionCorrelation } from "@/core/diffraction/corrections";
 
 export type Severity = "info" | "note" | "warning" | "critical";
@@ -39,7 +40,8 @@ export type FindingCategory =
   | "parameterization"
   | "convergence"
   | "physical"
-  | "residual";
+  | "residual"
+  | "misfit";
 
 export interface AssessmentFinding {
   readonly category: FindingCategory;
@@ -89,8 +91,23 @@ export interface AssessmentInput {
     readonly d: readonly number[];
     readonly yObs: readonly number[];
     readonly yCalc: readonly number[];
+    /** Each point's standard uncertainty: a residual peak must stand above its
+     *  own counting noise, so a noisy low-count region does not read as peaks. */
+    readonly sigma?: readonly number[];
+    /** Every phase's reflections (refined cells): a residual peak on one is a
+     *  misfit of that reflection, not intensity no phase accounts for. */
+    readonly reflections?: readonly { readonly d: number; readonly hkl: string; readonly phaseLabel: string }[];
+    /** A neutron pattern of a phase with magnetic ions: excess on nuclear
+     *  reflections at large d may then be k = 0 magnetic order. */
+    readonly magneticNeutron?: boolean;
   };
-  readonly mode?: "powder" | "single-crystal";
+  readonly mode?: "powder" | "single-crystal" | "pdf";
+  /** The restraints the fit ran with: two parameters in one move together by
+   *  construction, so their correlation is noted once, not warned about. */
+  readonly restraints?: readonly LinearRestraint[];
+  /** Displacement parameters of sites several atoms share (a mixed site): at a
+   *  bound, the mixing is the first suspect. */
+  readonly sharedSiteAdps?: readonly string[];
 }
 
 /**
@@ -117,8 +134,12 @@ export function correlationInsight(a: ParameterKind, b: ParameterKind): string |
   if (has("scale", "bIso")) return "Scale and isotropic B correlate through the overall fall-off of intensity with angle. Fix one (usually B) until the scale and cell are stable.";
   if (has("scale", "occupancy")) return "Scale and site occupancy are near-degenerate on a single site (both multiply intensity). Constrain occupancy (e.g. full, or a Σ=1 tie) unless a second contrast breaks the tie.";
   if (has("cellLength", "zeroShift")) return "Cell length and zero shift both move peak positions; they separate only across a wide 2θ/TOF range. Refine the zero from a well-characterized standard, or fix it.";
-  if (has("profileU", "profileV") || has("profileV", "profileW") || has("profileU", "profileW")) return "The Caglioti U/V/W are mutually correlated (they parameterize one FWHM(θ) curve). Free them together only with good angular coverage; otherwise refine W first.";
+  if (has("profileU", "profileV") || has("profileV", "profileW") || has("profileU", "profileW")) return "The Caglioti U/V/W parameterize one FWHM²(θ) curve, so they trade off by construction; the curve is what the data determine. Refine W first, then U and V once the peaks are fitted across the range.";
+  if (has("profileX", "profileY")) return "The Lorentzian X (size, 1/cosθ) and Y (strain, tanθ) widths differ only in how they grow with angle, so over a short or low-angle range they describe the same broadening. Refine Y (or X) alone, and free the other only with data to high angle.";
   if (has("mustrainPerp", "mustrainPar") || has("anisoSizePerp", "anisoSizePar")) return "Anisotropic microstructure components correlate along directions the data barely resolves. Free them only after the isotropic profile has converged.";
+  // Time of flight: the back-to-back-exponential rise (α) moves each peak apex
+  // along TOF, as a uniform cell change or the calibration does.
+  if (has("tofProfile", "cellLength") || has("tofProfile", "tofCalibration") || has("tofProfile", "zeroShift")) return "A TOF profile term (the rise-time α above all) moves each peak apex along TOF, as a uniform cell change or the difC/zero calibration does, so the data cannot separate them. Take α from the instrument calibration and keep it fixed; refine the widths (σ) and the decay (β) instead.";
   // Real space (PDF): the peak-sharpening and envelope terms.
   if (has("delta1", "delta2")) return "δ1 and δ2 both sharpen the near-neighbour peaks (the 1/r and 1/r² correlated-motion terms). Refine one: δ2 at low temperature, δ1 at high temperature.";
   if (has("sratio", "delta1") || has("sratio", "delta2") || has("rcut", "delta1") || has("rcut", "delta2")) return "sratio/rcut is the other correlated-motion model; it describes the same peak sharpening as δ1/δ2. Use one model, never both.";
@@ -128,6 +149,73 @@ export function correlationInsight(a: ParameterKind, b: ParameterKind): string |
   const fromCorrection = correctionCorrelation(a, b);
   if (fromCorrection) return fromCorrection;
   return undefined;
+}
+
+const CAGLIOTI: ReadonlySet<ParameterKind> = new Set<ParameterKind>(["profileU", "profileV", "profileW"]);
+
+/**
+ * Two parameters of one curve in a correlated basis: the background
+ * coefficients, or the Caglioti U, V, W of one FWHM²(θ). The terms trade off by
+ * construction while the curve itself is determined, and no coefficient is a
+ * result anyone reports, so their mutual correlation is expected (the data's
+ * null directions are caught apart, by the SVD).
+ */
+export function oneCurve(a: ParameterKind | undefined, b: ParameterKind | undefined): "background" | "caglioti" | null {
+  if (a === "background" && b === "background") return "background";
+  if (a && b && CAGLIOTI.has(a) && CAGLIOTI.has(b)) return "caglioti";
+  return null;
+}
+
+const ONE_CURVE_NOTE = {
+  background: {
+    summary: (top: string) => `The background coefficients correlate among themselves (up to ${top}).`,
+    detail: "Expected for a polynomial background: its terms trade off, while the background curve itself is determined. Their individual esds mean little; nothing to fix unless a background term also correlates with the scale or a structural parameter.",
+  },
+  caglioti: {
+    summary: (top: string) => `The Caglioti U, V, W correlate among themselves (up to ${top}).`,
+    detail: "Expected: they parameterize one FWHM²(θ) = U tan²θ + V tanθ + W, which the data determine across the angular range while the coefficients trade off. Their individual esds mean little; nothing to fix unless one also correlates with a structural parameter.",
+  },
+} as const;
+
+/** Why excess intensity on nuclear reflections may be magnetic, for a neutron pattern of a phase with magnetic ions. */
+export const K0_MAGNETIC =
+  "This is a neutron pattern of a phase with magnetic ions, and the excess sits on nuclear reflections at large d: if the sample can be magnetically ordered at this temperature, that is the k = 0 magnetic signature (magnetic intensity on the nuclear positions, fading with the form factor at small d). Check it with the Magnetic analysis step before refining atoms or ADPs into it.";
+
+/** On-reflection excess that may be k = 0 magnetic: neutrons, magnetic ions, and most of it at d > 2.5 Å. */
+export function k0MagneticHint(magneticNeutron: boolean | undefined, onReflection: readonly { readonly d: number }[]): boolean {
+  if (!magneticNeutron || onReflection.length === 0) return false;
+  return onReflection.filter((p) => p.d > 2.5).length * 2 >= onReflection.length;
+}
+
+/** Within this of a reflection (relative d), a residual peak is that reflection's misfit. */
+const ON_REFLECTION = 0.005;
+/** Within this, it is beside one: a shoulder or a profile tail (a TOF peak's tail runs to larger d). */
+const BESIDE_REFLECTION = 0.02;
+
+/**
+ * Residual peaks, split by where they sit: on a known reflection (a misfit of
+ * its intensity), beside one (a shoulder or tail: the profile first, or a
+ * nearby impurity peak), or between reflections (unexplained). With per-point
+ * σ, a peak must also stand 5σ above its own counting noise.
+ */
+export function residualPeaks(residual: NonNullable<AssessmentInput["residual"]>, options: { readonly sigma?: number; readonly limit?: number } = {}): {
+  between: AnnotatedExtraPeak[];
+  beside: AnnotatedExtraPeak[];
+  onReflection: AnnotatedExtraPeak[];
+} {
+  const { d, yObs, yCalc, sigma, reflections } = residual;
+  const peaks = detectExtraPeaks(d, yObs, yCalc, {
+    ...(sigma ? { pointSigma: sigma } : {}),
+    ...(options.sigma !== undefined ? { sigma: options.sigma } : {}),
+    ...(options.limit !== undefined ? { limit: options.limit } : {}),
+  });
+  const annotated: AnnotatedExtraPeak[] = reflections ? annotateExtraPeaks(peaks, reflections, BESIDE_REFLECTION) : [...peaks];
+  const rel = (p: AnnotatedExtraPeak): number => p.nearNuclear?.relDelta ?? Infinity;
+  return {
+    between: annotated.filter((p) => rel(p) > BESIDE_REFLECTION),
+    beside: annotated.filter((p) => rel(p) > ON_REFLECTION && rel(p) <= BESIDE_REFLECTION),
+    onReflection: annotated.filter((p) => rel(p) <= ON_REFLECTION),
+  };
 }
 
 /** Toby 2006: the ratio wR/R_exp (the GoF) is what's meaningful, not absolute wR. */
@@ -231,7 +319,7 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
         : `${name} had not fully settled: the last step shifted it by ${shift.toFixed(2)} esd (settled is < ${SHIFT_SETTLED}).`,
       detail: moving
         ? "A parameter moved by more than its own esd on the final step, so its value ± esd does not yet describe the minimum. χ² flattened first, which is typical of a shallow or correlated direction, where steps zig-zag across a narrow valley. Refine more cycles from these values; if it keeps moving, find the correlation behind it or fix the parameter."
-        : "By the crystallographic convention a refinement has converged when every shift is below a tenth of its esd. Refine a few more cycles before quoting final values.",
+        : "By the crystallographic convention a refinement has converged when every shift is below a tenth of its esd. Refine a few more cycles before quoting final values. If another cycle moves it by about as much again, it lies along a flat direction the data barely determine (often a minor phase's ADP or a weak profile term): fix it rather than cycling.",
       ...(id ? { parameterIds: [id] } : {}),
       evidence: { maxShiftOverEsd: shift, ...(id ? { parameterId: id } : {}) },
     });
@@ -253,7 +341,11 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
       severity: isStructural ? "critical" : "warning",
       summary: `${p?.label ?? b.parameterId} is resting on its ${b.bound} bound (${b.value}).`,
       detail: p && ADP_KINDS.has(p.kind)
-        ? "A displacement parameter pinned at a bound (often B→0) usually means the model is over-damping high-angle intensity — check the background, an absorption/extinction effect, or a correlation, rather than trusting the value."
+        ? input.sharedSiteAdps?.includes(b.parameterId)
+          ? `This displacement parameter belongs to a site several atoms share, so the site's scattering power is the first suspect: ${b.bound === "min" ? "B → 0 makes up for a site that scatters more than the model puts on it" : "a large B makes up for a site that scatters less than the model puts on it"}, i.e. the mixing is off (anti-site disorder, spinel inversion). Refine the site's occupancies with its Σ held (and the composition, when the formula is known) before trusting the ADP.`
+          : input.mode === "pdf"
+          ? "In real space a displacement parameter at 0 usually means the near-neighbour peaks are sharper than the model's: correlated motion sharpens them, and with δ1/δ2 (or sratio) held, U takes up the sharpening. Free one correlated-motion term (δ2 at low temperature, δ1 at high), or fit a window long enough to pin U, rather than trusting the value. In a short low-r window it can also mean the local structure differs from the model."
+          : "A displacement parameter pinned at a bound (often B→0) usually means the model is over-damping high-angle intensity — check the background, an absorption/extinction effect, or a correlation, rather than trusting the value."
         : "A free parameter at a bound has a meaningless esd and signals the fit wanted to go where physics forbids — hold it fixed and find the upstream cause (correlation, wrong background, bad starting value).",
       parameterIds: [b.parameterId],
       evidence: { bound: b.bound, value: b.value },
@@ -264,7 +356,41 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
   findings.push(...physicalFindings(parameters));
 
   // --- correlations ------------------------------------------------------
+  // The terms of one curve (the background, the Caglioti width) trade off by
+  // construction and say nothing about the curve: one note per curve, not a
+  // warning per pair.
+  const curveOf = (c: { parameterIdA: string; parameterIdB: string }) => oneCurve(byId.get(c.parameterIdA)?.kind, byId.get(c.parameterIdB)?.kind);
+  // Two parameters in one restraint move together by construction.
+  const restraints = input.restraints ?? [];
+  const tiedBy = (c: { parameterIdA: string; parameterIdB: string }) =>
+    restraints.find((r) => r.terms.some((t) => t.parameterId === c.parameterIdA) && r.terms.some((t) => t.parameterId === c.parameterIdB));
+  const tiedPairs = (diag?.highCorrelations ?? []).filter((c) => !curveOf(c) && tiedBy(c));
+  if (tiedPairs.length > 0) {
+    const top = Math.max(...tiedPairs.map((c) => Math.abs(c.coefficient)));
+    findings.push({
+      category: "correlation",
+      severity: "info",
+      summary: `Parameters tied by a restraint correlate (up to ${top.toFixed(3)}): ${[...new Set(tiedPairs.map((c) => tiedBy(c)!.label))].join("; ")}.`,
+      detail: "Expected: the restraint moves them together, and the data decide only what it leaves free (for a mixed site with its Σ and the composition held, the exchange fraction). Read that quantity's esd, not each occupancy's.",
+      parameterIds: [...new Set(tiedPairs.flatMap((c) => [c.parameterIdA, c.parameterIdB]))],
+      evidence: { pairs: tiedPairs.length, maxCoefficient: top },
+    });
+  }
+  for (const curve of ["background", "caglioti"] as const) {
+    const pairs = (diag?.highCorrelations ?? []).filter((c) => curveOf(c) === curve);
+    if (pairs.length === 0) continue;
+    const top = Math.max(...pairs.map((c) => Math.abs(c.coefficient)));
+    findings.push({
+      category: "correlation",
+      severity: "info",
+      summary: ONE_CURVE_NOTE[curve].summary(top.toFixed(3)),
+      detail: ONE_CURVE_NOTE[curve].detail,
+      parameterIds: [...new Set(pairs.flatMap((c) => [c.parameterIdA, c.parameterIdB]))],
+      evidence: { pairs: pairs.length, maxCoefficient: top },
+    });
+  }
   for (const c of diag?.highCorrelations ?? []) {
+    if (curveOf(c) || tiedBy(c)) continue;
     const a = byId.get(c.parameterIdA);
     const b = byId.get(c.parameterIdB);
     const insight = a && b ? correlationInsight(a.kind, b.kind) : undefined;
@@ -272,7 +398,8 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
     findings.push({
       category: "correlation",
       severity: abs > 0.95 ? "warning" : "note",
-      summary: `${a?.label ?? c.parameterIdA} ↔ ${b?.label ?? c.parameterIdB} correlate at ${c.coefficient.toFixed(2)}.`,
+      // Three places near ±1, where two would round 0.995 up to a perfect 1.00.
+      summary: `${a?.label ?? c.parameterIdA} ↔ ${b?.label ?? c.parameterIdB} correlate at ${c.coefficient.toFixed(abs >= 0.99 ? 3 : 2)}.`,
       ...(insight ? { detail: insight } : { detail: "Strongly correlated parameters share information the data cannot separate; their individual esds are inflated. Consider refining them in separate stages or fixing one." }),
       parameterIds: [c.parameterIdA, c.parameterIdB],
       evidence: { coefficient: c.coefficient },
@@ -308,16 +435,31 @@ export function assessRefinement(input: AssessmentInput): RefinementAssessment {
 
   // --- unexplained residual: the discovery signal ------------------------
   if (input.residual) {
-    const { d, yObs, yCalc } = input.residual;
-    const peaks = detectExtraPeaks(d, yObs, yCalc);
-    if (peaks.length > 0) {
-      const ds = peaks.slice(0, 8).map((p) => p.d.toFixed(3));
+    const { between, beside, onReflection } = residualPeaks(input.residual);
+    if (between.length > 0) {
+      const ds = between.slice(0, 8).map((p) => p.d.toFixed(3));
       findings.push({
         category: "residual",
-        severity: peaks.length >= 3 ? "warning" : "note",
-        summary: `${peaks.length} unexplained peak${peaks.length === 1 ? "" : "s"} in the positive residual (obs > calc) at d ≈ ${ds.join(", ")} Å.`,
+        severity: between.length >= 3 ? "warning" : "note",
+        summary: `${between.length} unexplained peak${between.length === 1 ? "" : "s"} in the positive residual (obs > calc)${input.residual.reflections ? ", away from every phase's reflections," : ""} at d ≈ ${ds.join(", ")} Å.`,
         detail: "Intensity the model does not account for. In order of likelihood: an impurity or secondary crystallographic phase, magnetic Bragg peaks (if magnetic ions are present — try a k-search), or unmodelled peak-shape/asymmetry. This is where new materials physics hides.",
-        evidence: { peakCount: peaks.length, dSpacings: ds.join(", ") },
+        evidence: { peakCount: between.length, dSpacings: ds.join(", ") },
+      });
+    }
+    if (onReflection.length + beside.length > 0) {
+      const name = (p: (typeof onReflection)[number]): string => `${p.nearNuclear!.phaseLabel} ${p.nearNuclear!.hkl}`;
+      const on = onReflection.slice(0, 6).map((p) => `${name(p)} (d ${p.d.toFixed(3)})`);
+      const by = beside.slice(0, 6).map((p) => `d ${p.d.toFixed(3)} beside ${name(p)} (${((p.d / p.nearNuclear!.d - 1) * 100).toFixed(1)}% in d)`);
+      findings.push({
+        category: "misfit",
+        severity: "note",
+        summary: [
+          on.length ? `${onReflection.length} residual peak${onReflection.length === 1 ? " sits" : "s sit"} on known reflections: ${on.join(", ")}` : null,
+          by.length ? `${beside.length} beside one: ${by.join(", ")}` : null,
+        ].filter(Boolean).join("; ") + ".",
+        detail: (k0MagneticHint(input.residual.magneticNeutron, onReflection) ? K0_MAGNETIC + " " : "") +
+          "On a reflection, the reflection is calculated too weak — a misfit of its intensity: the atoms (positions, ADPs, occupancy constraints) or an intensity correction. Beside one, within 2% in d, it is most often the peak's shoulder or tail — the profile (TOF peaks tail to larger d) — and only then a weak peak of another phase. Refine those per the method before reading anything new into them.",
+        evidence: { onReflection: onReflection.length, beside: beside.length, reflections: [...on, ...by].join("; ") },
       });
     }
   }
@@ -389,6 +531,16 @@ export function suggestNextSteps(assessment: RefinementAssessment): NextStep[] {
       rationale: corr.summary,
       priority: 3,
       addresses: ["correlation", "conditioning"],
+    });
+  }
+
+  const misfit = has("misfit");
+  if (misfit && !has("residual")) {
+    steps.push({
+      action: "Fit the misfit reflections before looking for anything new: refine what sets their intensities (positions, ADPs) or their shape (the profile), in the method's order.",
+      rationale: misfit.summary,
+      priority: 5,
+      addresses: ["misfit"],
     });
   }
 

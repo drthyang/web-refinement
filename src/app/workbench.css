@@ -773,3 +773,39 @@ html {
     --ui-zoom: 2.5;
   }
 }
+
+/* The cards the Agent is on (data-agent-focus on the root, set by the shell
+ * while the Agent is open): the card's edge breathes. The result footer sits
+ * inside the parameter card, whose overflow is clipped, so it breathes inward. */
+@keyframes wb-agent-breathe {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(31, 79, 216, 0.22), 0 0 0 0 rgba(31, 79, 216, 0); }
+  50% { box-shadow: 0 0 0 2px rgba(31, 79, 216, 0.85), 0 0 18px 3px rgba(31, 79, 216, 0.26); }
+}
+@keyframes wb-agent-breathe-in {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(31, 79, 216, 0.22); }
+  50% { box-shadow: inset 0 0 0 2px rgba(31, 79, 216, 0.85), inset 0 0 14px rgba(31, 79, 216, 0.16); }
+}
+:root[data-agent-focus~="structure"] [data-agent-card="structure"],
+:root[data-agent-focus~="data"] [data-agent-card="data"],
+:root[data-agent-focus~="instrument"] [data-agent-card="instrument"],
+:root[data-agent-focus~="pattern"] [data-agent-card="pattern"],
+:root[data-agent-focus~="parameters"] [data-agent-card="parameters"] {
+  animation: wb-agent-breathe 2.4s ease-in-out infinite;
+}
+:root[data-agent-focus~="result"] [data-agent-card="result"] {
+  animation: wb-agent-breathe-in 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-agent-focus~="structure"] [data-agent-card="structure"],
+  :root[data-agent-focus~="data"] [data-agent-card="data"],
+  :root[data-agent-focus~="instrument"] [data-agent-card="instrument"],
+  :root[data-agent-focus~="pattern"] [data-agent-card="pattern"],
+  :root[data-agent-focus~="parameters"] [data-agent-card="parameters"] {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(31, 79, 216, 0.7);
+  }
+  :root[data-agent-focus~="result"] [data-agent-card="result"] {
+    animation: none;
+    box-shadow: inset 0 0 0 2px rgba(31, 79, 216, 0.7);
+  }
+}

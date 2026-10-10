@@ -175,7 +175,7 @@ full descriptions at the end are the text an agent reads when it picks a tool.
 
 **`build_refinement`** — Build the SYMMETRY-ALLOWED parameter set, bindings, and profile for a structure + pattern. Only symmetry-allowed parameters are created, so an agent cannot free a forbidden one. Feed `parameters`/`bindings`/`profile` to refine_powder.
 
-**`check_cell_symmetry`** — The gate BEFORE refining a structure: does the cell index every peak, and does the data respect the space group's systematic absences? A Le Bail fit refines the cell from peak positions alone (free intensities), with back-to-back-exponential peaks that widen with d on time-of-flight data; then every leftover peak must sit on a reflection and every forbidden reflection must carry no intensity (≥ `significance` σ counts). `unindexedPeaks` mean a wrong cell or lattice, or a missing phase — pass known impurities as `extraPhases`. `absences.violated` means the group is too symmetric (a centring or glide the crystal lacks). `absences.untestable` lists forbidden reflections too close to an allowed one to judge. Only d ≥ `dMin` (0.7 Å) is read. It cannot catch a too-LARGE cell (a supercell indexes anything) or a group with too FEW absences — read `limits`. `passed` and `cell` (the Le Bail cell) are the result.
+**`check_cell_symmetry`** — The gate BEFORE refining a structure: does the cell index every peak, and does the data respect the space group's systematic absences? A Le Bail fit refines the cell from peak positions alone (free intensities), with back-to-back-exponential peaks that widen with d on time-of-flight data; then every leftover peak must sit on a reflection and every forbidden reflection must carry no intensity (≥ `significance` σ counts). `unindexedPeaks` mean a wrong cell or lattice, or a missing phase — pass known impurities as `extraPhases`. `absences.violated` means the group is too symmetric (a centring or glide the crystal lacks). `absences.untestable` lists forbidden reflections too close to an allowed one to judge. Only d ≥ `dMin` (0.7 Å) is read. It cannot catch a too-LARGE cell (a supercell indexes anything) or a group with too FEW absences — read `limits`. `passed` and `cell` (the Le Bail cell) are the result. When unindexed peaks and a violated absence come together, `reading` warns that the violation may be a line of the same unidentified phase.
 
 **`refine_powder`** — Run the deterministic Levenberg–Marquardt refinement of the FREED parameters (fix a parameter by setting its `fixed:true`). Returns refined values, esds, agreement (wR/GoF), the SVD/correlation/at-bound diagnostics, the observation count, and the residual — everything assess_refinement needs — plus `parameters`: the input set carrying the refined values, ready for the next block. The agent decides what to free; it never sets values.
 
@@ -375,11 +375,17 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   `find_unexplained_peaks`, `bond_geometry`, `interpret_structure`, `read_ref`.
   The analysis tools are the MCP handlers above, fed from what is on screen.
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
-  `set_adp_model`, `set_fit_range`, `refine`, `reset_parameters`, `go_to_step`.
+  `set_adp_model`, `set_site_ties`, `set_fit_range`, `refine`,
+  `reset_parameters`, `go_to_step`.
   Each is the page's own handler — the Agent's `refine` is the Refine button.
+- PDF page only: `boxcar_scan`, the Boxcar view's scan. The free parameters
+  are refined box by box across the fit window, seeded from the previous box,
+  and the parameter rows are left as they are. It returns each box's r range,
+  Rw and values, and each parameter's spread, to tell the local structure
+  from the average.
 - Powder page only: `rank_next_parameters`, `check_cell_symmetry`,
   `find_unexplained_peaks`, `set_background`, `set_microstrain`,
-  `set_adp_model`. On the PDF page, `assess_refinement` judges convergence,
+  `set_adp_model`, `set_site_ties`. On the PDF page, `assess_refinement` judges convergence,
   correlations, bounds and physical values, without the GoF verdict or the
   Bragg-peak residual scan, and `set_fit_range` with `whole` restores the
   page's default r window.
@@ -389,6 +395,16 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   `find_unexplained_peaks` gives each peak in d, Q and the data's own axis.
   `set_fit_range` takes min/max in any of them (`unit`), converted by the page
   with its own calibration.
+- `set_site_ties` is the Shared site row: tie position, tie ADP, Σ occ = 1,
+  and hold composition (each element on two or more sites keeps its total in
+  the cell). With a mixed site's Σ and the composition held, freeing its
+  occupancies refines one exchange fraction (an anti-site or inversion
+  parameter). `get_state` lists the restraints the next refinement fits with;
+  they act only while one of their occupancies is free, and not with a
+  magnetic model applied.
+- Multi-phase: after a refinement, `get_state` gives `phaseFractions`, each
+  phase's weight fraction (Hill–Howard) with its esd and the basis it rests
+  on (crystalline phases in the model only, no microabsorption correction).
 - `cancel_refinement` never asks.
 - There is no tool that sets a parameter value. The guardrails above hold.
 
@@ -408,19 +424,42 @@ two free parameters correlate at |ρ| ≥ 0.95 (the line the engine and
 of them at all (an SVD null direction, such as scale with every site
 occupancy), `refine` refuses and names them, with the physical reason for
 known pairs. The model must fix one of each pair, or refine them in separate
-stages. Background coefficients are exempt among themselves: they describe one
-curve in a basis whose terms trade off by construction, while the curve is
-determined. A background term against the scale still counts. A passing check puts the strongest remaining pair on the approval card.
+stages. The terms of one curve are exempt among themselves: the background
+coefficients, and the Caglioti U, V, W of one FWHM²(θ). Their basis trades off
+by construction while the curve is determined, and none is a reported result;
+a combination the data cannot determine still stops the refinement (the null
+directions). A background or width term against the scale or a structural
+parameter still counts, and so does the Lorentzian X ↔ Y (size against
+strain). Two occupancies tied by one restraint the user set (a shared site's
+Σ, the composition) are not counted against each other either. A passing check puts the strongest remaining pair on the approval card.
 The check is measured on this data, so a pair the range separates (cell and
 zero over a wide 2θ range) is not refused. Pairs that tighten during the fit
 are listed in the outcome, and the next `refine` refuses them. The page's own
 Refine button is unchanged.
 
-**Unexplained peaks on the plot.** `find_unexplained_peaks` marks what it
-finds on the Rietveld plot: a ▽ in the highlight colour with a dashed guide
-through the pattern, and a row under the plot listing each d (click to zoom)
-with a Clear button. The marks go at the next refinement, when the residual
+**Unexplained peaks on the plot.** `find_unexplained_peaks` keeps a residual
+peak only if it stands 5σ above that point's own uncertainty, so lone noisy
+points in a low-count region are not peaks. It checks each peak against every
+phase's reflections:
+- **on** one (within 0.5% in d): that reflection is calculated too weak;
+- **beside** one (within 2%): most often its shoulder or tail (TOF peaks tail
+  to larger d);
+- **unexplained** otherwise: an impurity, magnetic order or an unmodelled
+  feature.
+
+`assess_refinement` reports the same split. The peaks are marked on the
+Rietveld plot: a filled ▽ when unexplained, hollow when on or beside a
+reflection, each with a dashed guide through the pattern. A row under the plot
+lists each d and its reflection (click to zoom), with a Clear button. The marks go at the next refinement, when the residual
 changes. Viewing only: no approval card, no history step.
+
+**Where the agent is.** While the drawer is open, the shell writes the cards
+the agent is on to the root element (`data-agent-focus`), and their edges
+breathe ([`src/agent/focus.ts`](../src/agent/focus.ts)). A card is "on" when:
+- a running or waiting tool call acts on it (`refine` the parameters and the
+  pattern, `check_cell_symmetry` the structure and the pattern, …);
+- the latest reply names it in its last paragraph (for 8 s after the reply);
+- the pointer is over a reply that names it.
 
 **When a model stalls.** The chat loop watches for three ways a reply leaves
 the user waiting on nothing:

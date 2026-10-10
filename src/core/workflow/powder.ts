@@ -503,7 +503,7 @@ export function buildPowderProblem(
         }
       : undefined;
 
-  return { parameters, observations, weights, calculate, ...(analyticColumns ? { analyticColumns } : {}) };
+  return { parameters, observations, weights, dataLength: xValues.length, calculate, ...(analyticColumns ? { analyticColumns } : {}) };
 }
 
 export interface PowderCurves {

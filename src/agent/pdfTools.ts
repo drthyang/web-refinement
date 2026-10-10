@@ -15,7 +15,9 @@ import type { PdfAgentPort, PdfLiveState } from "@/agent/port";
 import type { LiveToolSpec } from "@/agent/tools";
 import type { ProjectHistory } from "@/core/project/history";
 import { assess_refinement, bond_geometry, interpret_structure, suggest_next_steps } from "@/mcp/tools";
-import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, parameterSummary, pct, sig, type LiveToolHost } from "@/agent/liveCommon";
+import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, parameterSummary, pct, sig, type ChangeResult, type LiveToolHost } from "@/agent/liveCommon";
+import { boxcarStepIndex, boxcarWindows, type BoxcarRun } from "@/core/workflow/pdfBoxcar";
+import type { RefinementParameter } from "@/core/refinement/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- inputs are validated against the spec's zod schema before a handler runs */
 type Input = any;
@@ -52,7 +54,7 @@ export function readPdfTool(name: string, input: Input, port: PdfAgentPort, host
  * Make a change on the page. Returns a note for the model when the change
  * needed adjusting (tied parameters skipped) or did not finish.
  */
-export async function changePdf(name: string, input: Input, port: PdfAgentPort, host: LiveToolHost): Promise<string | undefined> {
+export async function changePdf(name: string, input: Input, port: PdfAgentPort, host: LiveToolHost): Promise<ChangeResult> {
   const s = port.state();
   switch (name) {
     case "set_free":
@@ -75,6 +77,12 @@ export async function changePdf(name: string, input: Input, port: PdfAgentPort, 
       const why = await (input.mode === "thorough" ? port.thorough() : port.refine());
       return why ? `The refinement did not finish (${why}); the parameters keep their values from before it.` : undefined;
     }
+    case "boxcar_scan": {
+      if (!s.parameters.some((p) => !p.fixed && !p.expression)) throw new Error("no parameter is free — free the ones to track with set_free first");
+      const run = await port.boxcar({ width: input.width ?? 5, step: input.step ?? 1, direction: input.direction ?? "up" });
+      if (!run) return "The scan did not finish (cancelled, failed, or the model changed while it ran).";
+      return { note: boxcarLine(run), data: boxcarView(run, s.parameters) };
+    }
     case "reset_parameters":
       port.reset();
       return undefined;
@@ -94,6 +102,13 @@ export function pdfNoOp(spec: LiveToolSpec, input: Input, s: PdfLiveState): stri
 /** One line for the approval card: what this change will do, in the page's terms. */
 export function describePdfChange(spec: LiveToolSpec, input: Input, s: PdfLiveState): string {
   switch (spec.name) {
+    case "boxcar_scan": {
+      const width = input.width ?? 5;
+      const step = input.step ?? 1;
+      const boxes = boxcarWindows({ range: s.fitRange, width, step }).length;
+      const free = s.parameters.filter((p) => !p.fixed && !p.expression).length;
+      return `Boxcar scan: ${boxes} boxes of ${width} Å every ${step} Å across r ${sig(s.fitRange.min, 4)} – ${sig(s.fitRange.max, 4)} Å, ${free} free parameters${input.direction === "both" ? ", both directions" : input.direction === "down" ? ", high → low r" : ""}`;
+    }
     case "set_free":
       return describeFree(s.parameters, input);
     case "set_fit_range":
@@ -171,6 +186,47 @@ function assessment(s: PdfLiveState): ReturnType<typeof assess_refinement> & { c
     result: { ...s.result, agreement },
     parameters: [...s.parameters],
     observationCount: s.observationCount,
+    mode: "pdf",
+    restraints: s.restraints,
   });
   return { ...out, convention: `${PDF_CONVENTION} The verdict reads convergence only; wRPercent is Rw. No residual-peak scan in real space.` };
+}
+
+/** One box of a scan, in the run's ascending window order. */
+function boxAt(run: BoxcarRun, series: BoxcarRun["series"][number], i: number): BoxcarRun["series"][number]["result"]["steps"][number] | undefined {
+  return series.result.steps[boxcarStepIndex(series.direction, i, run.windows.length, series.result.steps.length)];
+}
+
+/** The scan as the model reads it: per box its window, Rw and the free values; per parameter its spread. */
+function boxcarView(run: BoxcarRun, parameters: readonly RefinementParameter[]): Record<string, unknown> {
+  const label = new Map(parameters.map((p) => [p.id, p.label]));
+  const passes = run.series.map((series) => {
+    const boxes = run.windows.map((w, i) => {
+      const step = boxAt(run, series, i);
+      if (!step) return null;
+      return {
+        r: [sig(w.min, 4), sig(w.max, 4)],
+        Rw: pct(step.result.agreement.rWeighted ?? NaN),
+        ...(step.carried ? {} : { diverged: true }),
+        values: Object.fromEntries(run.freeIds.map((id) => [id, sig(step.result.parameters[id] ?? NaN, 5)])),
+      };
+    }).filter((b) => b !== null);
+    const spread = Object.fromEntries(run.freeIds.map((id) => {
+      const v = boxes.map((b) => b.values[id] as number).filter(Number.isFinite);
+      const lo = Math.min(...v);
+      const hi = Math.max(...v);
+      return [id, { label: label.get(id) ?? id, first: v[0], last: v.at(-1), min: lo, max: hi }];
+    }));
+    return { direction: series.direction, boxes, spread };
+  });
+  return { boxcar: { width: run.width, boxes: run.windows.length, passes }, reading: "Rw and a parameter that drift together across r mean the model fits some length scales and not others: compare the low-r boxes (the local structure) with the high-r ones (the average)." };
+}
+
+/** The card's outcome line: the scan's Rw at low and high r. */
+function boxcarLine(run: BoxcarRun): string {
+  const series = run.series[0];
+  const first = series && boxAt(run, series, 0);
+  const last = series && boxAt(run, series, run.windows.length - 1);
+  const rw = (step: typeof first): string => (step ? `${pct(step.result.agreement.rWeighted ?? NaN).toFixed(1)}%` : "?");
+  return `${run.windows.length} boxes · Rw ${rw(first)} at low r → ${rw(last)} at high r`;
 }

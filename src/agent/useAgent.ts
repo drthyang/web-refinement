@@ -5,12 +5,13 @@
  * `onAttention` opens it.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityEntry, AgentExecutor, AgentHost, ToolRunner } from "@/agent/executor";
 import type { ChatConfig, ChatEffort, AgentChat } from "@/agent/chat";
 import { API_KEY_KEY, SETTINGS_KEY, migrateLegacyKeys } from "@/agent/storage";
 import { DEFAULT_OLLAMA_URL } from "@/agent/ollama";
 import { DEFAULT_LMSTUDIO_URL } from "@/agent/lmstudio";
+import { TOOL_CARDS, cardsInReply, cardsInText, type AgentCard } from "@/agent/focus";
 
 /** How the Agent reaches a model: Claude two ways, or a local model on Ollama or LM Studio. */
 export type AgentMode = "api-key" | "proxy" | "ollama" | "lmstudio";
@@ -58,7 +59,14 @@ export interface AgentController {
   readonly stop: () => void;
   readonly clear: () => void;
   readonly usage: { readonly input: number; readonly output: number; readonly cacheRead: number };
+  /** The page cards the agent is on: a running tool's, the latest reply's, a hovered reply's. */
+  readonly focus: readonly AgentCard[];
+  /** A reply under the pointer (null when it leaves): its cards join the focus. */
+  readonly hoverReply: (text: string | null) => void;
 }
+
+/** How long the cards a finished reply names keep breathing. */
+const MENTION_MS = 8000;
 
 const KEY_KEY = API_KEY_KEY;
 const DEFAULTS: AgentSettings = {
@@ -144,7 +152,12 @@ export function useAgent(host: AgentHost, onAttention: () => void): AgentControl
   const send = useCallback((text: string) => {
     const message = text.trim();
     if (!message || turn.current) return;
-    const config = chatConfig(settingsRef.current, apiKeyRef.current);
+    // The mode is read at every model turn, so switching Ask first / Auto
+    // mid-run reaches the model as it reaches the approval cards.
+    const config: ChatConfig = Object.defineProperty({ ...chatConfig(settingsRef.current, apiKeyRef.current) }, "autonomy", {
+      get: (): "auto" | "ask" => (settingsRef.current.autoApprove ? "auto" : "ask"),
+      enumerable: true,
+    });
     const ctrl = new AbortController();
     turn.current = ctrl;
     setThinking(true);
@@ -211,7 +224,37 @@ export function useAgent(host: AgentHost, onAttention: () => void): AgentControl
 
   const pending = Object.values(activity).filter((e) => e.status === "waiting");
 
-  return { settings, updateSettings, apiKey, setApiKey, transcript, activity, pending, decide, thinking, send, stop, clear, usage };
+  // ── where the agent is on the page ─────────────────────────────────────
+  const [hover, setHover] = useState<readonly AgentCard[]>([]);
+  const [mentionLive, setMentionLive] = useState(false);
+  const lastReply = useMemo(() => {
+    for (let i = transcript.length - 1; i >= 0; i--) {
+      const item = transcript[i]!;
+      if (item.kind === "assistant" && item.text) return item.text;
+    }
+    return "";
+  }, [transcript]);
+  // A reply's cards breathe while it streams and for a while after.
+  useEffect(() => {
+    if (thinking) {
+      setMentionLive(true);
+      return;
+    }
+    const timer = setTimeout(() => setMentionLive(false), MENTION_MS);
+    return () => clearTimeout(timer);
+  }, [thinking, lastReply]);
+  const focus = useMemo(() => {
+    const cards = new Set<AgentCard>();
+    for (const e of Object.values(activity)) {
+      if (e.status === "running" || e.status === "waiting") for (const c of TOOL_CARDS[e.tool] ?? []) cards.add(c);
+    }
+    if (mentionLive) for (const c of cardsInReply(lastReply)) cards.add(c);
+    for (const c of hover) cards.add(c);
+    return [...cards].sort();
+  }, [activity, mentionLive, lastReply, hover]);
+  const hoverReply = useCallback((text: string | null) => setHover(text ? cardsInText(text) : []), []);
+
+  return { settings, updateSettings, apiKey, setApiKey, transcript, activity, pending, decide, thinking, send, stop, clear, usage, focus, hoverReply };
 }
 
 /** What one chat message runs on, from the settings. */

@@ -65,7 +65,15 @@ export interface LeBailPhase {
 }
 
 export interface LeBailOptions {
+  /** The FWHM; on a 2θ pattern with `fwhmU`, the FWHM at the pattern's middle angle. */
   readonly fwhm: number;
+  /**
+   * Constant wavelength, 2θ axis: how the width grows with angle, Caglioti's U
+   * term (deg²): FWHM² = fwhm² + U·(tan²θ − tan²θ_mid). One width cannot span a
+   * wide 2θ range — high-angle peaks are several times broader, and their
+   * flanks then read as unindexed peaks. Default 0 (one width).
+   */
+  readonly fwhmU?: number;
   readonly shape?: PeakShape;
   readonly eta?: number;
   readonly cycles?: number;
@@ -83,6 +91,20 @@ export interface LeBailOptions {
 }
 
 const FWHM_PER_SIGMA = 2 * Math.sqrt(2 * Math.LN2);
+
+/**
+ * The constant-wavelength FWHM at position x: `fwhm` at the middle angle,
+ * grown (or shrunk) by `u` as FWHM² = fwhm² + u·(tan²θ − tan²θ_mid), never
+ * below a fifth of `fwhm`. One width everywhere off a 2θ axis, or when u is 0.
+ */
+export function cwWidth(pattern: PowderPattern, fwhm: number, u: number): (x: number) => number {
+  if (u === 0 || pattern.xUnit !== "twoTheta" || pattern.points.length === 0) return () => fwhm;
+  const xs = pattern.points.map((p) => p.x).sort((a, b) => a - b);
+  const tan2 = (x: number): number => Math.tan((x * Math.PI) / 360) ** 2;
+  const mid = tan2(xs[xs.length >> 1]!);
+  const floor = (0.2 * fwhm) ** 2;
+  return (x) => Math.sqrt(Math.max(fwhm * fwhm + u * (tan2(x) - mid), floor));
+}
 
 /** The back-to-back-exponential coefficients at d. */
 export function tofShapeAt(d: number, p: LeBailTofProfile): TofShape {
@@ -200,6 +222,7 @@ export function leBailExtract(
   const shape = options.shape ?? "gaussian";
   const eta = options.eta ?? 0.5;
   const fwhm = Math.max(options.fwhm, 1e-4);
+  const widthAt = cwWidth(pattern, fwhm, options.fwhmU ?? 0);
   const bkgOpt = options.background ?? 0;
   const bkgAt = (i: number): number => (typeof bkgOpt === "number" ? bkgOpt : bkgOpt[i] ?? 0);
   const cycles = options.cycles ?? 8;
@@ -224,7 +247,7 @@ export function leBailExtract(
       const support = 8 * (FWHM_PER_SIGMA * s.sigma + 1 / s.alpha + 1 / s.beta);
       return { support, at: (xi) => tofBackToBack(xi - center, s) * supportTaper(Math.abs(xi - center), support) };
     }
-    const w = fwhm * scale;
+    const w = widthAt(center) * scale;
     const support = 12 * w;
     return {
       support,

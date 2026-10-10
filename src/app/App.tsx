@@ -290,10 +290,15 @@ export function App(): JSX.Element {
   }
 
   /** Record a step once the state change that caused it has rendered. */
+  // Steps asked for and steps recorded, so the Agent can wait for the one its
+  // action requested (agentHost.settle) however long the page takes to render.
+  const stepsRequested = useRef(0);
+  const stepsRecorded = useRef(0);
   const requestStep = useCallback((kind: StepKind, label?: string, fresh = false): void => {
     // The actor is read now, while the action that asked for the step runs.
     const actor = stepActor.current;
-    setStepRequest((r) => ({ n: (r?.n ?? 0) + 1, kind, ...(label ? { label } : {}), ...(fresh ? { fresh } : {}), ...(actor ? { actor } : {}) }));
+    const n = ++stepsRequested.current;
+    setStepRequest({ n, kind, ...(label ? { label } : {}), ...(fresh ? { fresh } : {}), ...(actor ? { actor } : {}) });
   }, []);
 
   // Recorded a tick after the request renders: an engine may settle its state
@@ -305,8 +310,9 @@ export function App(): JSX.Element {
   });
   useEffect(() => {
     if (!stepRequest) return;
-    const { kind, label, fresh, actor } = stepRequest;
+    const { n, kind, label, fresh, actor } = stepRequest;
     setTimeout(() => {
+      stepsRecorded.current = Math.max(stepsRecorded.current, n);
       const snap = liveSnapshotRef.current();
       if (!snap) {
         if (fresh) setHistory(null);
@@ -373,7 +379,16 @@ export function App(): JSX.Element {
   const agentHost = useMemo<AgentHost>(() => ({
     port: () => agentLink.port(),
     technique: () => agentLatest.current.technique,
-    settle: () => agentLink.settle(),
+    settle: async () => {
+      await agentLink.settle();
+      // A slow render (a long pattern after a refinement) can outlast settle's
+      // wait; the step the action asked for is recorded only after it. Wait
+      // for it, and for the render that commits it (3 s at most).
+      if (stepsRecorded.current >= stepsRequested.current) return;
+      const until = Date.now() + 3000;
+      while (stepsRecorded.current < stepsRequested.current && Date.now() < until) await agentLink.nextRender(100);
+      await agentLink.nextRender(100);
+    },
     asAgent: async (fn) => {
       stepActor.current = "agent";
       try {
@@ -389,6 +404,13 @@ export function App(): JSX.Element {
     goToStep: (id) => agentLatest.current.goToStep(id),
   }), [agentLink]);
   const agent = useAgent(agentHost, () => setAgentOpen(true));
+  // The cards the agent is on breathe (workbench.css), while the Agent is open.
+  const agentFocus = agentOpen ? agent.focus.join(" ") : "";
+  useEffect(() => {
+    const root = document.documentElement;
+    if (agentFocus) root.dataset.agentFocus = agentFocus;
+    else delete root.dataset.agentFocus;
+  }, [agentFocus]);
 
   // ⌘Z / Ctrl+Z steps back, with Shift steps forward — except inside a text
   // field, which keeps its own undo.
@@ -1012,6 +1034,10 @@ export function App(): JSX.Element {
         // otherwise loading structure-then-instrument would leave the old
         // (default) profile in place, making load order matter.
         setSession((s) => {
+          // Nothing loaded yet: there is no model to rebuild (the placeholder
+          // has no pattern to seed from). The next CIF or data load uses the
+          // instrument.
+          if (s.powderSource === EMPTY_SOURCE) return { ...s, rawInstrument: { name: file.name, text } };
           // For a constant-wavelength instrument on a non-TOF pattern, adopt its
           // radiation (X-ray vs neutron) and wavelength so the physics is correct
           // regardless of whether the data or the instrument was loaded first.

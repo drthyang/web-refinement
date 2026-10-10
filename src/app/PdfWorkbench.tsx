@@ -64,7 +64,7 @@ import { ParameterPanel } from "@/app/ui/ParameterPanel";
 import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
 import { ReciprocalPanel } from "@/app/ui/ReciprocalPanel";
 import { BoxcarPanel, stepIndexFor, type BoxcarPlan, type BoxcarRun, type BoxcarSeries } from "@/app/ui/BoxcarPanel";
-import { boxcarPlanIssue, boxcarScannedMax, boxcarWindows, type BoxcarDirection } from "@/core/workflow/pdfBoxcar";
+import { boxcarPlanIssue, boxcarScannedMax, boxcarWindows, type BoxcarDirection, type BoxcarDirectionChoice } from "@/core/workflow/pdfBoxcar";
 
 /** One finished (or interrupted) pass, accumulated while a run is in flight. */
 type BoxcarSeriesState = BoxcarSeries;
@@ -657,7 +657,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   const [boxcarPlanState, setBoxcarPlanState] = useState<BoxcarPlan>(
     restoring?.boxcar?.plan ?? { width: 5, step: 1, direction: "up", randomStart: false, restarts: 4 },
   );
-  const { width: boxWidth, step: boxStep, direction: boxDirection, randomStart: boxRandomStart, restarts: boxRestarts } =
+  const { width: boxWidthSetting, step: boxStep, direction: boxDirectionSetting, randomStart: boxRandomStart, restarts: boxRestarts } =
     boxcarPlanState;
   const [boxcarRun, setBoxcarRun] = useState<BoxcarRun | null>(restoring?.boxcar?.lastRun ?? null);
   const [boxcarBusy, setBoxcarBusy] = useState(false);
@@ -674,8 +674,8 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
   // walks the same boxes reversed. Keeping one canonical list is what lets the
   // panel align two passes box-for-box.
   const boxcarPlan = useMemo(
-    () => ({ range: { min: fitRange.min, max: fitRange.max }, width: boxWidth, step: boxStep }),
-    [fitRange, boxWidth, boxStep],
+    () => ({ range: { min: fitRange.min, max: fitRange.max }, width: boxWidthSetting, step: boxStep }),
+    [fitRange, boxWidthSetting, boxStep],
   );
   const boxcarWindowList = useMemo(() => boxcarWindows(boxcarPlan), [boxcarPlan]);
   const boxcarIssue = useMemo(() => boxcarPlanIssue(boxcarPlan), [boxcarPlan]);
@@ -702,11 +702,22 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
    * the last box is not a better answer than the first. "Adopt" moves one box's
    * values into the panel deliberately.
    */
-  async function runBoxcar(): Promise<void> {
-    const windows = boxcarWindowList;
-    if (windows.length === 0) return;
+  async function runBoxcar(override?: { readonly width: number; readonly step: number; readonly direction: BoxcarDirectionChoice }): Promise<BoxcarRun | null> {
+    // The Agent passes its own plan: it becomes the panel's plan, and the
+    // Boxcar view opens so the user watches the scan fill in.
+    const boxWidth = override?.width ?? boxWidthSetting;
+    const boxDirection = override?.direction ?? boxDirectionSetting;
+    const windows = override ? boxcarWindows({ range: { min: fitRange.min, max: fitRange.max }, width: override.width, step: override.step }) : boxcarWindowList;
+    if (override) {
+      const issue = boxcarPlanIssue({ range: { min: fitRange.min, max: fitRange.max }, width: override.width, step: override.step });
+      if (issue) throw new Error(issue);
+      setBoxcarPlanState((p) => ({ ...p, width: override.width, step: override.step, direction: override.direction }));
+      setViewTab("boxcar");
+    }
+    if (windows.length === 0) return null;
     const specAtCall = specRef.current;
     const restarts = boxRandomStart ? boxRestarts : 0;
+    let final: BoxcarRun | null = null;
     // Frozen with the run, not held as separate state: the panel's free flags
     // may change before the scan ends, and the tracks belong to the parameter
     // set that produced them.
@@ -740,7 +751,9 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         : [];
       const series = [...done, ...streaming];
       if (series.length === 0) return;
-      setBoxcarRun({ ...plan, series, ...(partial ? { partial: true } : {}) });
+      const run: BoxcarRun = { ...plan, series, ...(partial ? { partial: true } : {}) };
+      if (!partial) final = run;
+      setBoxcarRun(run);
     };
 
     setBoxcarBusy(true);
@@ -781,7 +794,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
         );
         if (specRef.current !== specAtCall) {
           console.info("[status] boxcar result discarded — the parameter spec changed while it ran");
-          return;
+          return null;
         }
         done.push({ direction, result: res });
         // Replace the streamed prefix with the pass's own result before the
@@ -814,6 +827,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       setBoxcarProgress(null);
       setBoxcarBusy(false);
     }
+    return final;
   }
 
   function cancelBoxcar(): void {
@@ -1157,6 +1171,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
           spinModel: spinFit !== null,
           warnings: [motionConflict, adpWarning].filter((w): w is string => w !== null),
           source: pattern.name,
+          restraints: spec.restraints,
         };
       },
       setFixed: (changes) => {
@@ -1166,6 +1181,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : defaultRange),
       refine: runRefine,
       thorough: runMultiStart,
+      boxcar: (plan) => runBoxcar(plan),
       // The Refine button's request with the Agent's options; the result is only read.
       probe: (options) => {
         const req = { ...refineRequest(params, 0), options };
@@ -1433,7 +1449,7 @@ export function PdfWorkbench({ structure, pattern, extraPhases = [], ownStructur
       <div style={{ display: step === 1 ? "none" : "grid", gap: space.gap, gridTemplateRows: "auto 1fr", gridTemplateColumns: "minmax(0, 1fr)", flex: 1, minHeight: 0 }}>
       <SummaryCards cards={summaryCards} />
       <div className="wb-work2">
-        <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", height: "100%" }}>
+        <div data-agent-card="pattern" style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", height: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
             <span style={uppercaseLabel}>
               {viewTab === "fit"

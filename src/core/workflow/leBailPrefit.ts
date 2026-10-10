@@ -36,6 +36,7 @@ import { refine, type RefinementProblem } from "@/core/refinement/engine";
 const FWHM_ID = "__leBail_fwhm";
 const BKG_ID = "__leBail_bkg";
 const ETA_ID = "__leBail_eta";
+const FWHM_U_ID = "__leBail_fwhmU";
 const SIG1_ID = "__leBail_sig1";
 const strainId = (i: number): string => `__leBail_strain_${i}`;
 const widthId = (i: number): string => `__leBail_width_${i}`;
@@ -46,6 +47,10 @@ const BETA0_ID = "__leBail_beta0";
 const bkgTermId = (j: number): string => `__leBail_bkg${j}`;
 /** A TOF background follows the incident spectrum: four Chebyshev terms. */
 const TOF_BACKGROUND_TERMS = 4;
+/** A lab or synchrotron 2θ background slopes too (air scatter at low angle,
+ *  fluorescence, the holder): a flat one left the whole slope as residual
+ *  (Le Bail wR 50% on a sloped Cu Kα pattern). Three Chebyshev terms. */
+const CW_BACKGROUND_TERMS = 3;
 
 export interface LeBailPrefitOptions {
   readonly shape?: PeakShape;
@@ -78,6 +83,8 @@ export interface LeBailPrefitResult {
   readonly fwhm: number;
   /** The refined pseudo-Voigt Lorentzian fraction, for `shape: "pseudoVoigt"`. */
   readonly eta?: number;
+  /** 2θ patterns: the width's growth with angle (see leBail.ts `fwhmU`); `fwhm` is then the width at the middle angle. */
+  readonly fwhmU?: number;
   /** The refined TOF peak coefficients, when the fit used them. */
   readonly tofProfile?: LeBailTofProfile;
   /** Each extra phase's cell, expanded by its refined factor. */
@@ -225,6 +232,9 @@ export function leBailCellPrefit(
     ]
     : [
       nuisance(FWHM_ID, "Le Bail FWHM", "peakWidth", fwhm0, fwhm0 * 0.05, fwhm0 * 20),
+      // On a 2θ pattern the width grows with angle (Caglioti's U): one width
+      // left high-angle flanks as false unindexed peaks (Mn₃Ga 30 K, 5–130°).
+      ...(pattern.xUnit === "twoTheta" ? [nuisance(FWHM_U_ID, "Le Bail FWHM growth U", "peakWidth", 0, -100 * fwhm0 * fwhm0, 400 * fwhm0 * fwhm0)] : []),
       // A fixed η = 0.5 overshot every tail of Gaussian-like peaks, and once
       // the partition gave peaks their full intensity those tails dragged the
       // residual baseline negative between lines.
@@ -234,7 +244,7 @@ export function leBailCellPrefit(
     id: BKG_ID, label: "Le Bail background", kind: "background",
     value: bkg0, initialValue: bkg0, min: 0, fixed: false,
   };
-  const bkgTerms = useTof ? TOF_BACKGROUND_TERMS : 1;
+  const bkgTerms: number = useTof ? TOF_BACKGROUND_TERMS : CW_BACKGROUND_TERMS;
   const bkgShapeParams = Array.from({ length: bkgTerms - 1 }, (_, j) =>
     ({ id: bkgTermId(j + 1), label: `Le Bail background T${j + 1}`, kind: "background", value: 0, initialValue: 0, fixed: false }) as RefinementParameter);
   // Chebyshev polynomials over the pattern's own x span.
@@ -281,10 +291,11 @@ export function leBailCellPrefit(
       const resolved = resolveTies(allParams, values);
       const cell = applyParameters(structure, cellBindings, resolved).model.cell;
       const fwhm = Math.max(resolved[FWHM_ID] ?? fwhm0, 1e-4);
+      const fwhmU = resolved[FWHM_U_ID] ?? 0;
       const background = backgroundAt(resolved);
       const tofProfile = tofAt(resolved);
       const lb = leBailExtract(pattern, cell, structure.spaceGroup, {
-        fwhm, shape, eta: resolved[ETA_ID] ?? eta, cycles, background,
+        fwhm, fwhmU, shape, eta: resolved[ETA_ID] ?? eta, cycles, background,
         ...(options.tof ? { tof: options.tof } : {}),
         ...(tofProfile ? { tofProfile } : {}),
         ...(extras.length ? { extraPhases: extraAt(resolved) } : {}),
@@ -340,6 +351,7 @@ export function leBailCellPrefit(
     fwhm: tofProfile ? tofFwhmAt(dMid, tofProfile) : result.parameters[FWHM_ID] ?? fwhm0,
     ...(tofProfile ? { tofProfile } : {}),
     ...(shape === "pseudoVoigt" ? { eta: result.parameters[ETA_ID] ?? eta } : {}),
+    ...(result.parameters[FWHM_U_ID] !== undefined ? { fwhmU: result.parameters[FWHM_U_ID] } : {}),
     extraCells: extraAt(result.parameters).map((ph) => ph.cell),
     extraWidthScales: extraAt(result.parameters).map((ph) => ph.widthScale ?? 1),
     background: result.parameters[BKG_ID] ?? bkg0,

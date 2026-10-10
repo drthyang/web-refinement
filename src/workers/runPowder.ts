@@ -39,7 +39,7 @@ export function buildProblemForSpec(spec: EvaluatorSpec): RefinementProblem {
     return buildMultiPhasePowderProblem([...spec.phases], spec.pattern, spec.parameters, spec.bindings, {
       shape: spec.shape,
       ...(spec.eta !== undefined ? { eta: spec.eta } : {}),
-    }, spec.fitRange);
+    }, spec.fitRange, spec.restraints ?? []);
   }
   if (spec.kind === "singleCrystal") {
     return buildSingleCrystalRefinementProblem(spec.structure, spec.dataset, spec.parameters, spec.bindings);
@@ -89,7 +89,7 @@ export function runPowderRefinement(req: RefinePowderRequest, onProgress?: Powde
     : null;
   const build = (params: readonly RefinePowderRequest["parameters"][number][]) =>
     phases
-      ? buildMultiPhasePowderProblem(phases, req.pattern, params, req.bindings, profile, req.fitRange)
+      ? buildMultiPhasePowderProblem(phases, req.pattern, params, req.bindings, profile, req.fitRange, req.restraints ?? [])
       : buildPowderProblem(req.structure, req.pattern, params, req.bindings, profile, req.restraints ?? [], req.fitRange);
 
   const patternLen = req.pattern.points.length;

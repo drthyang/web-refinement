@@ -104,6 +104,7 @@ import type { PeakShape } from "@/core/diffraction/profile";
 import {
   assessRefinement,
   suggestNextSteps,
+  type AssessmentInput,
   type RefinementAssessment,
 } from "@/core/diagnostics/assessment";
 import { interpretStructure } from "@/core/diagnostics/interpret";
@@ -325,8 +326,12 @@ export function assess_refinement(args: {
   result: RefinementResult;
   parameters: RefinementParameter[];
   observationCount: number;
-  residual?: { d: number[]; yObs: number[]; yCalc: number[] };
-  mode?: "powder" | "single-crystal";
+  /** The residual, with each point's σ and every phase's reflections when known (see AssessmentInput). */
+  residual?: NonNullable<AssessmentInput["residual"]>;
+  mode?: AssessmentInput["mode"];
+  /** The restraints and mixed-site ADPs of the fit (see AssessmentInput). */
+  restraints?: AssessmentInput["restraints"];
+  sharedSiteAdps?: AssessmentInput["sharedSiteAdps"];
 }): RefinementAssessment {
   return assessRefinement({
     result: args.result,
@@ -334,6 +339,8 @@ export function assess_refinement(args: {
     observationCount: args.observationCount,
     ...(args.residual ? { residual: args.residual } : {}),
     ...(args.mode ? { mode: args.mode } : {}),
+    ...(args.restraints?.length ? { restraints: args.restraints } : {}),
+    ...(args.sharedSiteAdps?.length ? { sharedSiteAdps: args.sharedSiteAdps } : {}),
   });
 }
 

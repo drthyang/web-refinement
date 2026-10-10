@@ -635,3 +635,30 @@ ${rows}
     expect(model.sites[0]!.element).toBe("Sr");
   });
 });
+
+describe("the phase name", () => {
+  const body = (head: string): string => `${head}
+_cell_length_a 4.0
+_cell_length_b 4.0
+_cell_length_c 4.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_symmetry_space_group_name_H-M 'P m -3 m'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+Ni1 Ni 0 0 0
+`;
+  it("falls back from the phase name to the common name, the formula, then the data block", () => {
+    expect(parseCif(body("data_x\n_pd_phase_name 'Nickel'\n_chemical_formula_sum 'Ni'")).name).toBe("Nickel");
+    expect(parseCif(body("data_x\n_chemical_name_common nickel")).name).toBe("nickel");
+    expect(parseCif(body("data_x\n_chemical_formula_sum 'Mn3 Ga'")).name).toBe("Mn3Ga");
+    expect(parseCif(body("data_Mn3Ga_30K_nuclear")).name).toBe("Mn3Ga 30K nuclear");
+    // A placeholder block name or "?" gives the generic name.
+    expect(parseCif(body("data_global\n_chemical_formula_sum ?")).name).toBe("structure");
+  });
+});

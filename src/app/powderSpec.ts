@@ -12,10 +12,10 @@
 import type { StructureModel } from "@/core/crystal/types";
 import type { PowderPattern } from "@/core/diffraction/types";
 import type { InstrumentParameters } from "@/core/diffraction/instrument";
-import type { ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
+import type { LinearRestraint, ParameterBinding, ParameterKind, RefinementParameter } from "@/core/refinement/types";
 import { estimateBackground, evaluateBackground } from "@/core/diffraction/background";
 import { estimateZeroShift } from "@/core/workflow/startingValues";
-import { buildStructureRefinement } from "@/core/workflow/structureRefinement";
+import { buildStructureRefinement, siteTieRestraints } from "@/core/workflow/structureRefinement";
 import { powderCurves, type PowderProfile } from "@/core/workflow/powder";
 import { CORRECTION_KINDS } from "@/core/diffraction/corrections";
 import { optimalScale } from "@/app/loadData";
@@ -66,6 +66,24 @@ export interface PowderSpec {
 // that always imported them from the spec builder.
 import type { SiteTies, MustrainModel } from "@/core/workflow/powderModelOptions";
 export type { SiteTies, MustrainModel };
+
+/**
+ * The occupancy restraints a session's site ties ask for (the shared-site Σ,
+ * the composition) over every phase, multi-phase ids prefixed `p{i}_` as the
+ * multi-phase spec does. Kept only where one of their occupancies is free: over
+ * fixed occupancies a restraint changes nothing, and any restraint turns off
+ * the analytic Jacobian.
+ */
+export function powderRestraints(phases: readonly StructureModel[], ties: SiteTies, params: readonly RefinementParameter[]): LinearRestraint[] {
+  const free = new Set(params.filter((p) => !p.fixed).map((p) => p.id));
+  const prefixed = (r: LinearRestraint, i: number): LinearRestraint =>
+    phases.length > 1
+      ? { ...r, id: `p${i}_${r.id}`, label: `${phases[i]!.name}: ${r.label}`, terms: r.terms.map((t) => ({ ...t, parameterId: `p${i}_${t.parameterId}` })) }
+      : r;
+  return phases
+    .flatMap((structure, i) => siteTieRestraints(structure, ties).map((r) => prefixed(r, i)))
+    .filter((r) => r.terms.some((t) => free.has(t.parameterId)));
+}
 
 
 /**
@@ -146,6 +164,7 @@ export function buildPowderSpec(
     tieSharedPositions: ties.positions ?? true,
     tieSharedAdp: ties.adp ?? true,
     constrainOccupancyToUnity: ties.occupancyToUnity ?? false,
+    holdComposition: ties.composition ?? false,
   };
   // Time-of-flight: back-to-back-exponential profile driven by the diffractometer
   // constants (difC/difA/difB) plus α/β/σ shape coefficients. The .instprm here

@@ -172,6 +172,7 @@ export type EvaluatorSpec =
       readonly pattern: PowderPattern;
       readonly parameters: RefinementParameter[];
       readonly bindings: ParameterBinding[];
+      readonly restraints?: readonly LinearRestraint[];
       readonly shape: PeakShape;
       readonly eta?: number;
       readonly fitRange?: { readonly min?: number; readonly max?: number };

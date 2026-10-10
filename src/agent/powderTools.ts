@@ -12,16 +12,19 @@ import {
   assess_refinement,
   bond_geometry,
   check_cell_symmetry,
-  find_unexplained_peaks,
   interpret_structure,
   rank_next_parameters,
   suggest_next_steps,
 } from "@/mcp/tools";
 import type { StructureModel } from "@/core/crystal/types";
 import type { BackgroundType } from "@/core/diffraction/background";
-import type { MustrainModel } from "@/app/powderSpec";
+import type { MustrainModel, SiteTies } from "@/app/powderSpec";
 import type { PowderXUnit } from "@/core/diffraction/types";
 import { availableDisplayUnits, convertAxisValue, convertInterval } from "@/visualization/axisUnits";
+import { K0_MAGNETIC, k0MagneticHint, residualPeaks } from "@/core/diagnostics/assessment";
+import { formatWt, fractionsOf } from "@/core/diagnostics/phaseFractions";
+import { magneticIonCandidates } from "@/core/magnetic/magneticIons";
+import { generateReflections } from "@/core/diffraction/reflections";
 import { applyFree, bondsOf, cellOf, describeFree, freeNoOp, goToStep, historyView, parameterSummary, pct, sig, type LiveToolHost } from "@/agent/liveCommon";
 
 
@@ -58,8 +61,8 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
         })),
       };
     }
-    case "check_cell_symmetry":
-      return check_cell_symmetry({
+    case "check_cell_symmetry": {
+      const gate = check_cell_symmetry({
         structure: s.refinedPhases[0] ?? s.structure,
         pattern: s.pattern,
         ...(s.instrument ? { instrument: s.instrument } : {}),
@@ -68,24 +71,52 @@ export function readPowderTool(name: string, input: Input, port: PowderAgentPort
         ...(input.dMin !== undefined ? { dMin: input.dMin } : {}),
         ...(input.significance !== undefined ? { significance: input.significance } : {}),
       });
-    case "find_unexplained_peaks": {
-      const residual = residualOf(s);
-      const found = find_unexplained_peaks({
-        residual,
-        options: { ...(input.sigma !== undefined ? { sigma: input.sigma } : {}), limit: input.limit ?? 12 },
+      // Each unindexed peak in d and Q too, and marked on the plot for the user.
+      const unindexed = gate.unindexedPeaks.map((p) => {
+        const d = convertAxisValue(p.x, s.pattern.xUnit, "dSpacing", s.axis);
+        return { ...p, ...(Number.isFinite(d) ? { d: sig(d, 5), q: sig((2 * Math.PI) / d, 5) } : {}) };
       });
+      const marks = unindexed.flatMap((p) => ("d" in p && p.d !== undefined ? [{ d: p.d, height: p.significance }] : []));
+      if (marks.length > 0) port.showPeaks(marks);
+      // An impurity's line can land on a forbidden position and read as a violation.
+      const reading = unindexed.length > 0 && gate.absences.violated.length > 0
+        ? `With ${unindexed.length} unindexed peak${unindexed.length === 1 ? "" : "s"} present, the violated absence${gate.absences.violated.length === 1 ? "" : "s"} (${gate.absences.violated.map((v) => `${v.h} ${v.k} ${v.l} at d ${v.d.toFixed(3)} Å`).join(", ")}) may be a line of the same unindexed phase. Identify that phase (add it as an extra phase) and run the gate again before concluding the space group is wrong.`
+        : undefined;
+      return { ...gate, unindexedPeaks: unindexed, ...(reading ? { reading } : {}), ...(marks.length > 0 ? { markedOnPlot: "The unindexed peaks are marked on the plot (filled ▽, listed under it)." } : {}) };
+    }
+    case "find_unexplained_peaks": {
+      // Each peak must stand 5σ above its own counting noise, and is checked
+      // against every phase's reflections: on one, it is that reflection's misfit.
+      const residual = residualOf(s);
+      const { between, beside, onReflection } = residualPeaks(residual, { ...(input.sigma !== undefined ? { sigma: input.sigma } : {}), limit: input.limit ?? 12 });
+      const all = [...between, ...beside, ...onReflection].sort((a, b) => b.height - a.height);
+      const isBeside = new Set(beside);
+      const near = (p: (typeof all)[number]): string | undefined => {
+        if (!p.nearNuclear) return undefined;
+        const ref = `${p.nearNuclear.phaseLabel} ${p.nearNuclear.hkl}`;
+        return isBeside.has(p) ? `beside ${ref} (${((p.d / p.nearNuclear.d - 1) * 100).toFixed(1)}% in d)` : ref;
+      };
       // Shown to the user too: ▽ marks with guide lines on the plot.
-      port.showPeaks(found.peaks);
+      port.showPeaks(all.map((p) => ({ d: p.d, height: p.height, ...(near(p) ? { near: near(p)! } : {}) })));
+      const view = (p: (typeof all)[number]): Record<string, unknown> => ({
+        d: sig(p.d, 5),
+        q: sig((2 * Math.PI) / p.d, 5),
+        // The data's own axis (TOF or 2θ), from the page's calibration.
+        ...(s.pattern.xUnit !== "dSpacing" && s.pattern.xUnit !== "q" ? { [s.pattern.xUnit]: sig(convertAxisValue(p.d, "dSpacing", s.pattern.xUnit, s.axis), 6) } : {}),
+        height: sig(p.height, 3),
+        ...(p.significance !== undefined ? { sigmas: sig(p.significance, 3) } : {}),
+        ...(near(p) ? { near: near(p) } : {}),
+      });
       return {
-        count: found.count,
-        // Each position in d, Q and the data's own axis (TOF or 2θ), from the page's calibration.
-        peaks: found.peaks.map((p) => ({
-          d: sig(p.d, 5),
-          q: sig((2 * Math.PI) / p.d, 5),
-          ...(s.pattern.xUnit !== "dSpacing" && s.pattern.xUnit !== "q" ? { [s.pattern.xUnit]: sig(convertAxisValue(p.d, "dSpacing", s.pattern.xUnit, s.axis), 6) } : {}),
-          height: sig(p.height, 3),
-        })),
-        ...(found.count > 0 ? { markedOnPlot: "The user sees these peaks marked on the plot (▽ with a guide line, listed under it); refer to them by d." } : {}),
+        count: all.length,
+        unexplained: between.map(view),
+        besideKnownReflections: beside.map(view),
+        onKnownReflections: onReflection.map(view),
+        reading: all.length === 0
+          ? "No residual peak stands 5σ above its own noise."
+          : `${between.length} away from every phase's reflections (intensity no phase accounts for: an impurity, magnetic order, or an unmodelled feature); ${beside.length} within 2% in d of a reflection (most often its shoulder or tail: check the profile first); ${onReflection.length} on a reflection (calculated too weak: the atoms, ADPs or an intensity correction, not a new phase).` +
+            (k0MagneticHint(residual.magneticNeutron, onReflection) ? ` ${K0_MAGNETIC}` : ""),
+        ...(all.length > 0 ? { markedOnPlot: "The user sees these marked on the plot (filled ▽ unexplained, hollow ▽ on or beside a known reflection, listed under it); refer to them by d." } : {}),
       };
     }
     case "bond_geometry":
@@ -116,7 +147,6 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
     case "set_free":
       return applyFree(s.parameters, input, port.setFixed);
     case "set_background":
-      if (input.terms === undefined && input.type === undefined) throw new Error("pass `terms`, `type`, or both");
       if (input.terms !== undefined) port.setBackgroundTerms(input.terms);
       if (input.type !== undefined) port.setBackgroundType(input.type as BackgroundType);
       return undefined;
@@ -125,6 +155,9 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
       return undefined;
     case "set_adp_model":
       port.setAnisotropicAdp(!!input.anisotropic);
+      return undefined;
+    case "set_site_ties":
+      port.setSiteTies(siteTieUpdate(input));
       return undefined;
     case "set_fit_range": {
       if (input.whole) {
@@ -159,7 +192,26 @@ export async function changePowder(name: string, input: Input, port: PowderAgent
  * no-op never asks the user for approval.
  */
 export function powderNoOp(spec: LiveToolSpec, input: Input, s: PowderLiveState): string | null {
+  // An empty change is an error before anyone is asked.
+  if (spec.name === "set_background" && input.terms === undefined && input.type === undefined) throw new Error("pass `terms`, `type`, or both");
+  if (spec.name === "set_site_ties") {
+    const update = siteTieUpdate(input);
+    const keys = Object.keys(update) as (keyof SiteTies)[];
+    if (keys.length === 0) throw new Error("pass at least one of `positions`, `adp`, `occupancyToUnity`, `composition`");
+    return keys.every((k) => tieOn(s.settings.siteTies, k) === update[k]) ? "the site ties are already set so" : null;
+  }
   return spec.name === "set_free" ? freeNoOp(s.parameters, input) : null;
+}
+
+const SITE_TIE_KEYS = ["positions", "adp", "occupancyToUnity", "composition"] as const;
+const SITE_TIE_NAMES: Record<keyof SiteTies, string> = { positions: "tie position", adp: "tie ADP", occupancyToUnity: "Σ occ = 1", composition: "hold composition" };
+/** A tie's effective value: positions and ADPs are tied unless switched off. */
+const tieOn = (ties: SiteTies, k: keyof SiteTies): boolean => ties[k] ?? (k === "positions" || k === "adp");
+
+function siteTieUpdate(input: Input): Partial<Record<keyof SiteTies, boolean>> {
+  const update: Partial<Record<keyof SiteTies, boolean>> = {};
+  for (const k of SITE_TIE_KEYS) if (typeof input[k] === "boolean") update[k] = input[k] as boolean;
+  return update;
 }
 
 /** One line for the approval card: what this change will do, in the page's terms. */
@@ -176,6 +228,8 @@ export function describePowderChange(spec: LiveToolSpec, input: Input, s: Powder
       return `Microstrain ${s.settings.mustrain} → ${String(input.model)}`;
     case "set_adp_model":
       return `ADPs ${s.settings.anisotropicAdp ? "anisotropic" : "isotropic"} → ${input.anisotropic ? "anisotropic" : "isotropic"}`;
+    case "set_site_ties":
+      return Object.entries(siteTieUpdate(input)).map(([k, v]) => `${SITE_TIE_NAMES[k as keyof SiteTies]} ${v ? "on" : "off"}`).join(" · ");
     case "set_fit_range": {
       if (input.whole) return "Fit the whole pattern";
       const w = requestedWindow(s, input);
@@ -234,11 +288,16 @@ function stateView(s: PowderLiveState, history: ProjectHistory | null, select: r
         ? { kind: "constant wavelength", wavelength: s.instrument.wavelength }
         : { kind: "time of flight", difC: s.instrument.difC, difA: s.instrument.difA ?? 0, zero: s.instrument.zero ?? 0, note: "TOF = difC·d + difA·d² + zero; set_fit_range and find_unexplained_peaks convert for you" }
       : "none loaded (default CW, λ = 1.54 Å)",
-    settings: { ...s.settings, profileShape: s.profile.shape },
+    settings: {
+      ...s.settings,
+      profileShape: s.profile.shape,
+      ...(s.restraints.length > 0 ? { occupancyRestraints: s.restraints.map((r) => `${r.label} (${r.terms.map((t) => t.parameterId).join(", ")})`) } : {}),
+    },
     magneticModel: s.magnetic
       ? { propagation: s.magnetic.propagation, moments: s.magnetic.moments.length, refined: s.parameters.some((p) => p.kind === "momentMode") }
       : null,
     wR: pct(s.wR),
+    ...phaseFractionView(s),
     lastRefinement: s.result
       ? {
           status: s.result.status,
@@ -256,6 +315,19 @@ function stateView(s: PowderLiveState, history: ProjectHistory | null, select: r
 }
 
 // ── analysis helpers ────────────────────────────────────────────────────────
+
+/** Multi-phase, after a refinement: each phase's weight fraction from its scale. */
+function phaseFractionView(s: PowderLiveState): Record<string, unknown> {
+  if (!s.result || s.extraPhases.length === 0) return {};
+  const fractions = fractionsOf(s.refinedPhases, s.parameters, s.result);
+  if (!fractions) return {};
+  return {
+    phaseFractions: {
+      weight: fractions.map((f) => ({ phase: f.name, wtPercent: sig(f.weightPercent, 4), ...(f.esd !== undefined ? { esd: sig(f.esd, 2) } : {}), shown: formatWt(f) })),
+      basis: "Hill & Howard, from the refined scales, cell masses and volumes: of the crystalline phases in the model only; no microabsorption (Brindley) correction, esds from the scale esds alone.",
+    },
+  };
+}
 
 const UNIT: Record<PowderXUnit, string> = { tof: "µs (TOF)", twoTheta: "° 2θ", dSpacing: "Å (d)", q: "Å⁻¹ (Q)" };
 
@@ -279,12 +351,27 @@ function requestedWindow(s: PowderLiveState, input: Input): { min: number; max: 
   return w;
 }
 
-function residualOf(s: PowderLiveState): { d: number[]; yObs: number[]; yCalc: number[] } {
+function residualOf(s: PowderLiveState): { d: number[]; yObs: number[]; yCalc: number[]; sigma: number[]; reflections: { d: number; hkl: string; phaseLabel: string }[]; magneticNeutron: boolean } {
   if (!s.d) throw new Error("this pattern's axis cannot be converted to d-spacing (no wavelength or TOF calibration)");
   // Inside the fit window only: outside it the model is not being fitted.
   const keep = s.curves.x.map((x) => !s.fitRange || (x >= s.fitRange.min && x <= s.fitRange.max));
   const pick = (a: readonly number[]): number[] => a.filter((_, i) => keep[i]);
-  return { d: pick(s.d), yObs: pick(s.curves.yObs), yCalc: pick(s.curves.yCalc) };
+  // Each point's own σ (counting statistics when the file gives none).
+  const points = s.pattern.points.length === s.curves.x.length ? s.pattern.points : null;
+  const sigma = s.curves.yObs.map((y, i) => {
+    const given = points?.[i]?.sigma;
+    return given !== undefined && given > 0 ? given : Math.sqrt(Math.max(y, 1));
+  });
+  const d = pick(s.d);
+  const finite = d.filter((v) => Number.isFinite(v) && v > 0);
+  const dMin = Math.min(...finite) * 0.99;
+  const dMax = Math.max(...finite) * 1.01;
+  const reflections = s.refinedPhases.flatMap((ph) =>
+    generateReflections(ph.cell, ph.spaceGroup, dMin, dMax, { absences: true }).map((r) => ({ d: r.d, hkl: `${r.h} ${r.k} ${r.l}`, phaseLabel: ph.name || ph.id })),
+  );
+  // Neutrons see magnetic order; a phase with magnetic ions may carry it.
+  const magneticNeutron = s.pattern.radiation.kind.startsWith("neutron") && s.magnetic === null && [s.structure, ...s.extraPhases].some((ph) => magneticIonCandidates(ph).length > 0);
+  return { d, yObs: pick(s.curves.yObs), yCalc: pick(s.curves.yCalc), sigma: pick(sigma), reflections, magneticNeutron };
 }
 
 function assessment(s: PowderLiveState): ReturnType<typeof assess_refinement> {
@@ -295,5 +382,16 @@ function assessment(s: PowderLiveState): ReturnType<typeof assess_refinement> {
     observationCount: s.observationCount,
     ...(s.d ? { residual: residualOf(s) } : {}),
     mode: "powder",
+    restraints: s.restraints,
+    sharedSiteAdps: sharedSiteAdps(s),
   });
+}
+
+/** ADP parameters bound to two or more sites: a shared (mixed) site's tied ADP. */
+function sharedSiteAdps(s: PowderLiveState): string[] {
+  const sites = new Map<string, Set<string>>();
+  for (const b of s.bindings) {
+    if ((b.kind === "bIso" || b.kind === "uAniso") && b.targetKey) sites.set(b.parameterId, (sites.get(b.parameterId) ?? new Set()).add(`${b.targetId}/${b.targetKey}`));
+  }
+  return [...sites].filter(([, set]) => set.size > 1).map(([id]) => id);
 }

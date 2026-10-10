@@ -7,8 +7,10 @@ import { buildPdfProblem, buildPdfSpec, pdfCurves } from "@/core/workflow/pdf";
 import { applyParameters } from "@/core/workflow/apply";
 import { refine as refineProblem } from "@/core/refinement/engine";
 import { freePlan } from "@/agent/liveCommon";
+import { boxcarWindows } from "@/core/workflow/pdfBoxcar";
 import { LIVE_TOOLS, inputJsonSchema } from "@/agent/tools";
 import { newSession, type Session } from "@/app/powderSession";
+import { powderRestraints } from "@/app/powderSpec";
 import { exampleStructure } from "@/examples/mn3ga";
 import { powderCurves } from "@/core/workflow/powder";
 import { runPowderRefinement } from "@/workers/runPowder";
@@ -62,6 +64,7 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
       observationCount: n,
       axis: axisContext(s.pattern),
       source: "test",
+      restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
     };
   };
   const refine = async (): Promise<string | null> => {
@@ -74,6 +77,7 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
       parameters: s.powderParams,
       bindings: s.powderBindings,
       shape: s.powderProfile.shape,
+      restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
       options: { maxIterations: 20 },
     });
     s = { ...s, powderParams: s.powderParams.map((p) => ({ ...p, value: r.parameters[p.id] ?? p.value })) };
@@ -92,6 +96,10 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
     setBackgroundType: (t) => calls.push(`type ${t}`),
     setMustrain: (m) => calls.push(`mustrain ${m}`),
     setAnisotropicAdp: (on) => calls.push(`adp ${on}`),
+    setSiteTies: (update) => {
+      calls.push(`ties ${JSON.stringify(update)}`);
+      s = { ...s, siteTies: { ...s.siteTies, ...update } };
+    },
     setFitRange: (r) => {
       calls.push(`range ${r ? `${r.min}-${r.max}` : "whole"}`);
       fitRange = r ? { ...r } : null;
@@ -109,6 +117,7 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
         parameters: s.powderParams,
         bindings: s.powderBindings,
         shape: s.powderProfile.shape,
+        restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
         options,
       });
     },
@@ -356,7 +365,12 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(shown).toBeDefined();
     expect(shown!.split(" ")[1]?.split(",").filter(Boolean).length ?? 0).toBe(peaks.count as number);
     if ((peaks.count as number) > 0) expect(String(peaks.markedOnPlot)).toMatch(/marked on the plot/);
-    for (const p of peaks.peaks as { d: number; q: number; twoTheta: number }[]) {
+    type Listed = { d: number; q: number; twoTheta: number; near?: string };
+    const listed = [...(peaks.unexplained as Listed[]), ...(peaks.besideKnownReflections as Listed[]), ...(peaks.onKnownReflections as Listed[])];
+    expect(listed.length).toBe(peaks.count as number);
+    for (const p of peaks.onKnownReflections as Listed[]) expect(p.near).toMatch(/^\S+ -?\d+ -?\d+ -?\d+$/);
+    for (const p of peaks.besideKnownReflections as Listed[]) expect(p.near).toMatch(/^beside \S+ -?\d+ -?\d+ -?\d+ \(-?\d+\.\d% in d\)$/);
+    for (const p of listed) {
       expect(p.q).toBeCloseTo((2 * Math.PI) / p.d, 3);
       expect(1.54 / (2 * Math.sin((p.twoTheta / 2) * Math.PI / 180))).toBeCloseTo(p.d, 4);
     }
@@ -398,6 +412,20 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(calls.at(-1)).toBe(`range ${extent.min + 5}-${extent.max - 5}`);
     await ex.run("set_fit_range", { whole: true });
     expect(calls.at(-1)).toBe("range whole");
+  });
+
+  it("sets the site ties as a settings step; a tie already set asks nothing", async () => {
+    const { port, calls } = sessionPort(newSession(exampleStructure()));
+    const { host, steps } = fakeHost(port);
+    const { ex, asked } = executor(host, true);
+    expect(parse((await ex.run("set_site_ties", { positions: true })).text).unchanged).toBe(true);
+    expect((await ex.run("set_site_ties", {})).text).toMatch(/at least one of/);
+    expect(asked).toEqual([]);
+    await ex.run("set_site_ties", { composition: true, occupancyToUnity: true });
+    expect(asked[0]!.preview).toBe("Σ occ = 1 on · hold composition on");
+    expect(calls).toEqual(['ties {"occupancyToUnity":true,"composition":true}']);
+    expect(port.state().settings.siteTies).toMatchObject({ composition: true, occupancyToUnity: true });
+    expect(steps.at(-1)).toEqual({ kind: "settings", agent: true });
   });
 });
 
@@ -446,6 +474,7 @@ function pdfPort(): { port: PdfAgentPort; calls: string[] } {
       spinModel: false,
       warnings: [],
       source: "test",
+      restraints: spec.restraints,
     };
   };
   const refine = async (): Promise<string | null> => {
@@ -473,6 +502,19 @@ function pdfPort(): { port: PdfAgentPort; calls: string[] } {
       return "cancelled";
     },
     probe: async (options) => refineProblem(buildPdfProblem(demo.structure, demo.pattern, params, spec.bindings, spec.restraints, fitRange), { ...options, analyticDerivatives: true }),
+    // The Boxcar view's scan, one short refinement per box, the rows untouched.
+    boxcar: async (plan) => {
+      calls.push(`boxcar ${plan.width}/${plan.step}`);
+      const windows = boxcarWindows({ range: fitRange, width: plan.width, step: plan.step });
+      let seed = params;
+      const steps = windows.map((w) => {
+        const result = refineProblem(buildPdfProblem(demo.structure, demo.pattern, seed, spec.bindings, spec.restraints, { min: w.min, max: w.max }), { maxIterations: 2, analyticDerivatives: true });
+        seed = seed.map((p) => ({ ...p, value: result.parameters[p.id] ?? p.value }));
+        return { datasetId: String(w.center), result, parameters: seed, carried: true };
+      });
+      const freeIds = params.filter((p) => !p.fixed && !p.expression).map((p) => p.id);
+      return { windows, width: plan.width, restarts: 0, freeIds, series: [{ direction: "up" as const, result: { steps, evolution: [] } }] };
+    },
     cancel: () => calls.push("cancel"),
     reset: () => calls.push("reset"),
   };
@@ -536,6 +578,20 @@ describe("AgentExecutor on a live PDF fit", () => {
     expect(calls).not.toContain("refine");
     // Only the set_free was asked about.
     expect(asked.map((e) => e.tool)).toEqual(["set_free"]);
+  });
+
+  it("scans boxes across r and reports Rw and the free values per box, leaving the rows as they were", async () => {
+    const { port, calls } = pdfPort();
+    const { ex, asked } = executor(fakeHost(port).host, true);
+    const before = port.state().parameters.map((p) => p.value);
+    const out = parse((await ex.run("boxcar_scan", { width: 2, step: 1 })).text);
+    expect(asked.at(-1)!.preview).toMatch(/^Boxcar scan: 3 boxes of 2 Å every 1 Å across r 1\.5 – 6 Å, \d+ free parameters$/);
+    expect(calls).toContain("boxcar 2/1");
+    const pass = (out.boxcar as { passes: { boxes: { r: number[]; Rw: number; values: Record<string, number> }[]; spread: Record<string, unknown> }[] }).passes[0]!;
+    expect(pass.boxes.map((b) => b.r)).toEqual([[1.5, 3.5], [2.5, 4.5], [3.5, 5.5]]);
+    expect(pass.boxes.every((b) => Number.isFinite(b.Rw) && Object.keys(b.values).length > 0)).toBe(true);
+    expect(String(out.note)).toMatch(/^3 boxes · Rw \d+\.\d% at low r → \d+\.\d% at high r$/);
+    expect(port.state().parameters.map((p) => p.value)).toEqual(before);
   });
 
   it("restores the default r window and passes on why a run did not finish", async () => {

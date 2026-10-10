@@ -33,7 +33,7 @@ import { resolveTies } from "@/core/refinement/constraints";
 import type { PeakShape } from "@/core/diffraction/profile";
 import type { BackgroundType } from "@/core/diffraction/background";
 import { extractSizeStrain } from "@/core/diffraction/microstructure";
-import type { SiteTies, MustrainModel } from "@/app/powderSpec";
+import { powderRestraints, type SiteTies, type MustrainModel } from "@/app/powderSpec";
 import { multiPhaseCurves } from "@/core/workflow/multiPhase";
 import { siteGroups } from "@/core/workflow/structureRefinement";
 import { powderPatternCsv } from "@/core/export/exporters";
@@ -45,6 +45,7 @@ import { isMagneticModelParameterKind, isMomentParameterKind } from "@/core/refi
 import type { ComputeClient } from "@/workers/computeClient";
 import { CANCELLED } from "@/workers/computeClient";
 import type { PowderProgress } from "@/workers/runPowder";
+import { formatWt, fractionsOf } from "@/core/diagnostics/phaseFractions";
 import { PosteriorPanel } from "@/app/ui/PosteriorPanel";
 import type { SampleResult } from "@/core/refinement/bayes/sampler";
 import { KSearchPanel, type MagneticFit, type MagneticPatternView, type ResidualPeak } from "@/components/KSearchPanel";
@@ -196,7 +197,7 @@ export function PowderWorkbench({
   const [highlight, setHighlight] = useState<{ hkl: string; kind: "nuclear" | "magnetic"; phaseId?: string } | null>(null);
   // Residual peaks the Agent found (find_unexplained_peaks), marked on the
   // plot until the user clears them or the next refinement changes the residual.
-  const [agentPeaks, setAgentPeaks] = useState<readonly { d: number; height: number }[] | null>(null);
+  const [agentPeaks, setAgentPeaks] = useState<readonly { d: number; height: number; near?: string }[] | null>(null);
   useEffect(() => setAgentPeaks(null), [powderResult]);
   // Which phase the 3D model shows (0 = primary structure, 1.. = extra phases).
   const [viewPhaseIdx, setViewPhaseIdx] = useState(0);
@@ -245,6 +246,12 @@ export function PowderWorkbench({
   // pattern keeps the shape at "gaussian" and stays view-only.
   const tofViewOnly = powderIsTof && session.powderProfile.shape !== "tof";
   const pBindings = session.powderBindings;
+  // The occupancy restraints the site ties ask for, with every nuclear refinement
+  // (the magnetic path takes none).
+  const restraintReq = useMemo(() => {
+    const restraints = powderRestraints([structure, ...session.extraPhases], session.siteTies, powderParams);
+    return restraints.length > 0 ? { restraints } : {};
+  }, [structure, session.extraPhases, session.siteTies, powderParams]);
   // A magnetic model on the session is part of the CALCULATED pattern, whether or
   // not its moments are refinable — the plot below draws nuclear + magnetic, so
   // every fit path has to score against that same model or the wR it reports
@@ -417,7 +424,7 @@ export function PowderWorkbench({
   // The Agent's unexplained peaks on the plot's axis (strongest first, as found).
   const agentPeakMarks = useMemo(
     () => (agentPeaks ?? [])
-      .map((p) => ({ x: convertAxisValue(p.d, "dSpacing", effectiveUnit, axisCtx), d: p.d }))
+      .map((p) => ({ x: convertAxisValue(p.d, "dSpacing", effectiveUnit, axisCtx), d: p.d, ...(p.near ? { near: p.near } : {}) }))
       .filter((p) => Number.isFinite(p.x)),
     [agentPeaks, effectiveUnit, axisCtx],
   );
@@ -740,7 +747,7 @@ export function PowderWorkbench({
       }, options);
     }
     return client.refinePowderParallel({
-      structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(),
+      structure, pattern, parameters: powderParams, bindings: pBindings, ...profileReq(), ...restraintReq,
       ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
       ...window,
       options,
@@ -842,7 +849,7 @@ export function PowderWorkbench({
         rerun = (init) => client.sampleMagneticPowderPosterior(spec, { ...baseOptions, ...(init ? { init } : {}) });
       } else {
         const req = {
-          structure, pattern, parameters: [...powderParams], bindings: pBindings, ...profileReq(),
+          structure, pattern, parameters: [...powderParams], bindings: pBindings, ...profileReq(), ...restraintReq,
           ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
           ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         };
@@ -949,7 +956,7 @@ export function PowderWorkbench({
       // light nudge around an already-refined fit (few restarts, tight ~1.5σ kick).
       const msOptions = mode === "prefit" ? { restarts: 8 } : { restarts: 3, escapeSigma: 1.5 };
       const ms = await client.refinePowderMultiStart({
-        structure, pattern, parameters: workingParams, bindings: pBindings, ...profileReq(),
+        structure, pattern, parameters: workingParams, bindings: pBindings, ...profileReq(), ...restraintReq,
         ...(session.extraPhases.length > 0 ? { extraPhases: session.extraPhases } : {}),
         ...(fitRangeActive ? { fitRange: { min: fitRange!.min, max: fitRange!.max } } : {}),
         options: { maxIterations: 20 },
@@ -1305,6 +1312,7 @@ export function PowderWorkbench({
           observationCount: observations,
           axis: axisCtx,
           source: session.rawData?.name ?? powderSource,
+          restraints: restraintReq.restraints ?? [],
         };
       },
       setFixed: (changes) => {
@@ -1315,9 +1323,10 @@ export function PowderWorkbench({
       setBackgroundType,
       setMustrain,
       setAnisotropicAdp,
+      setSiteTies,
       setFitRange: (range) => setFitRange(range ? { min: range.min, max: range.max } : null),
       showPeaks: (peaks) => {
-        setAgentPeaks(peaks.length > 0 ? peaks.map((p) => ({ d: p.d, height: p.height })) : null);
+        setAgentPeaks(peaks.length > 0 ? peaks.map((p) => ({ d: p.d, height: p.height, ...(p.near ? { near: p.near } : {}) })) : null);
         if (peaks.length > 0) setPlotMode("curves");
       },
       refine: runPowder,
@@ -1391,6 +1400,11 @@ export function PowderWorkbench({
   // always shows the key calibration actually loaded — the wavelength for CW
   // (e.g. 11-BM's λ 0.413909 Å), difC/Zero for TOF.
   const instMeta = instParamMeta;
+  // Weight fractions of the phases from the refined scales (multi-phase, after a refinement).
+  const phaseFractions = useMemo(
+    () => (powderResult && session.extraPhases.length > 0 ? fractionsOf(refinedPhases, powderParams, powderResult) : null),
+    [powderResult, session.extraPhases.length, refinedPhases, powderParams],
+  );
   const summaryCards: SummaryCardData[] = [
     {
       label: "Structure",
@@ -1408,7 +1422,11 @@ export function PowderWorkbench({
       meta: !hasContent
         ? "Load a CIF to begin, or pick a demo"
         : session.extraPhases.length > 0
-        ? [structure, ...session.extraPhases].map((p) => `${p.name} ${p.spaceGroup.hermannMauguin ?? ""}`.trim()).join(" · ")
+        ? [structure, ...session.extraPhases].map((p, i) => {
+          // After a refinement, each phase's weight fraction (Hill & Howard).
+          const w = phaseFractions?.[i];
+          return `${p.name} ${p.spaceGroup.hermannMauguin ?? ""}`.trim() + (w ? ` ${formatWt(w)}` : "");
+        }).join(" · ")
         : `${cellStr} · V ${cellVolume(structure.cell).toFixed(2)} Å³ · ${structure.sites.length} sites`,
       ...(session.extraPhases.length > 0
         ? {
@@ -1493,7 +1511,7 @@ export function PowderWorkbench({
           <>
             <SummaryCards cards={summaryCards} />
             <div className="wb-work2">
-              <div style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", height: "100%" }}>
+              <div data-agent-card="pattern" style={{ ...themeCard, padding: space.inset, display: "flex", flexDirection: "column", height: "100%" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, rowGap: 6, marginBottom: 8, flexWrap: "wrap" }}>
                   <span style={themeLabel}>
                     {plotMode === "structure" ? "Crystal structure — unit cell" : plotMode === "validation" ? "Validation" : plotMode === "posterior" ? "Bayesian posterior — free parameters" : "Powder pattern"}
@@ -1640,23 +1658,28 @@ export function PowderWorkbench({
                       focusPoint={focusPoint}
                       highlight={highlight}
                       onHighlight={setHighlight}
-                      {...(agentPeakMarks.length > 0 ? { foundPeaks: agentPeakMarks, foundStyle: { label: "unexplained", color: theme.flag, guides: true } } : {})}
+                      {...(agentPeakMarks.length > 0 ? { foundPeaks: agentPeakMarks, foundStyle: { label: agentPeakMarks.some((p) => !p.near) ? "unexplained" : "residual peak", color: theme.flag, guides: true } } : {})}
                       {...(tofViewOnly ? {} : { onFitRangeChange: setFitRangeFromDisplay })}
                     />
                     {agentPeakMarks.length > 0 && (
                       <div style={{ display: "flex", alignItems: "center", gap: 6, rowGap: 4, marginTop: 6, fontSize: 12, color: theme.secondary, flexWrap: "wrap" }}>
-                        <span style={{ color: theme.flag, fontWeight: 600 }} title="Residual peaks the Agent found (find_unexplained_peaks): intensity the model does not explain. Cleared at the next refinement.">
-                          ▽ {agentPeakMarks.length} unexplained peak{agentPeakMarks.length === 1 ? "" : "s"}
+                        <span style={{ color: theme.flag, fontWeight: 600 }} title="Residual peaks the Agent found (find_unexplained_peaks). Filled ▽: between every phase's reflections — intensity no phase explains. Hollow ▽: on a known reflection — a misfit of that reflection. Cleared at the next refinement.">
+                          {(() => {
+                            const beside = agentPeakMarks.filter((p) => p.near?.startsWith("beside")).length;
+                            const on = agentPeakMarks.filter((p) => p.near && !p.near.startsWith("beside")).length;
+                            const free = agentPeakMarks.length - on - beside;
+                            return [free > 0 ? `▼ ${free} unexplained` : null, on > 0 ? `▽ ${on} on a known reflection` : null, beside > 0 ? `▽ ${beside} beside one` : null].filter(Boolean).join(" · ");
+                          })()}
                         </span>
                         {agentPeakMarks.map((p) => (
                           <button
                             key={p.d}
                             type="button"
-                            title={`Zoom to d = ${p.d.toFixed(4)} Å`}
+                            title={`Zoom to d = ${p.d.toFixed(4)} Å${p.near ? ` — on ${p.near}, a misfit of that reflection` : " — between the reflections"}`}
                             onClick={() => setFocusPoint((f) => ({ x: p.x, token: (f?.token ?? 0) + 1 }))}
-                            style={{ border: `1px solid ${theme.border}`, background: theme.surface, borderRadius: 999, padding: "1px 8px", fontSize: 12, fontFamily: themeMono, color: theme.ink, cursor: "pointer" }}
+                            style={{ border: `1px solid ${p.near ? theme.border : theme.flag}`, background: theme.surface, borderRadius: 999, padding: "1px 8px", fontSize: 12, fontFamily: themeMono, color: p.near ? theme.secondary : theme.ink, cursor: "pointer" }}
                           >
-                            d {p.d.toFixed(3)} Å
+                            d {p.d.toFixed(3)} Å{p.near ? ` · ${p.near}` : ""}
                           </button>
                         ))}
                         <button type="button" onClick={() => setAgentPeaks(null)} style={{ ...resetRangeBtn }}>Clear</button>
@@ -1693,6 +1716,10 @@ export function PowderWorkbench({
                         <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Constrain the total occupancy of the shared site to 1 (fully occupied)">
                           <input type="checkbox" checked={session.siteTies.occupancyToUnity ?? false} onChange={(e) => setSiteTies({ occupancyToUnity: e.target.checked })} />
                           Σ occ = 1
+                        </label>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="Each element on two or more sites keeps its total in the cell, so atoms exchange between sites (anti-site disorder, spinel inversion) while the formula stays">
+                          <input type="checkbox" checked={session.siteTies.composition ?? false} onChange={(e) => setSiteTies({ composition: e.target.checked })} />
+                          hold composition
                         </label>
                       </div>
                     )}
@@ -2101,3 +2128,4 @@ function DemoCard({ kicker, title, blurb, onClick }: { kicker: string; title: st
     </button>
   );
 }
+

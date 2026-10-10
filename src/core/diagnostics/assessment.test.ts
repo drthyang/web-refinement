@@ -138,6 +138,41 @@ describe("assessRefinement — findings", () => {
     expect(f?.severity).toBe("critical");
   });
 
+  it("suspects the mixing for an ADP at a bound on a shared site", () => {
+    const diagnostics = {
+      svdZeroCount: 0, singularParameterIds: [], conditionNumber: 100, maxLambda: 1,
+      highCorrelations: [], maxShiftOverEsd: 0,
+      atBounds: [{ parameterId: "B_Al2", bound: "min" as const, value: 0 }],
+    };
+    const shared = assessRefinement({ result: result({ diagnostics }), parameters: [param("B_Al2", "bIso", 0)], observationCount: 4000, sharedSiteAdps: ["B_Al2"] });
+    expect(shared.findings.find((x) => x.category === "at-bound")?.detail).toMatch(/scatters more than the model puts on it.*mixing is off/);
+    const lone = assessRefinement({ result: result({ diagnostics }), parameters: [param("B_Al2", "bIso", 0)], observationCount: 4000 });
+    expect(lone.findings.find((x) => x.category === "at-bound")?.detail).toMatch(/over-damping/);
+  });
+
+  it("notes occupancies tied by a restraint once, and still warns about the scale", () => {
+    const a = assessRefinement({
+      result: result({
+        diagnostics: {
+          svdZeroCount: 0, singularParameterIds: [], conditionNumber: 100, maxLambda: 1, atBounds: [], maxShiftOverEsd: 0,
+          highCorrelations: [
+            { parameterIdA: "occ_Mg1", parameterIdB: "occ_Al1", coefficient: -0.97 },
+            { parameterIdA: "scale", parameterIdB: "occ_Al1", coefficient: 0.96 },
+          ],
+        },
+      }),
+      parameters: [param("scale", "scale", 1), param("occ_Mg1", "occupancy", 0.75), param("occ_Al1", "occupancy", 0.25)],
+      observationCount: 4000,
+      restraints: [{ id: "occ_sum_Mg1", label: "Σ occ @ Mg1 site", target: 1, sigma: 0.01, terms: [{ parameterId: "occ_Mg1", coefficient: 1 }, { parameterId: "occ_Al1", coefficient: 1 }] }],
+    });
+    const corr = a.findings.filter((x) => x.category === "correlation");
+    expect(corr.map((f) => [f.severity, f.summary])).toEqual(expect.arrayContaining([
+      ["info", "Parameters tied by a restraint correlate (up to 0.970): Σ occ @ Mg1 site."],
+      ["warning", "scale ↔ occ_Al1 correlate at 0.96."],
+    ]));
+    expect(corr).toHaveLength(2);
+  });
+
   it("warns when data barely supports the free parameters", () => {
     const params = Array.from({ length: 30 }, (_, i) => param(`p${i}`, "atomX", 0.1));
     const a = assessRefinement({ result: result(), parameters: params, observationCount: 80 });

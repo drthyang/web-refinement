@@ -28,6 +28,8 @@ export interface FoundPeak {
   readonly x: number;
   /** d-spacing in Å (for the tooltip). */
   readonly d: number;
+  /** Sits on a known reflection (named here): drawn hollow, a misfit rather than new intensity. */
+  readonly near?: string;
 }
 
 interface Props {
@@ -692,16 +694,16 @@ export function WorkbenchPlot({
               return (
                 <g key={i}>
                   {foundStyle?.guides && (
-                    <line x1={px} y1={foundTop + FOUND_H} x2={px} y2={BASE} stroke={ink} strokeWidth={1.2} strokeDasharray="4 3" opacity={0.75} pointerEvents="none" />
+                    <line x1={px} y1={foundTop + FOUND_H} x2={px} y2={BASE} stroke={ink} strokeWidth={1.2} strokeDasharray={p.near ? "1 4" : "4 3"} opacity={p.near ? 0.5 : 0.75} pointerEvents="none" />
                   )}
                   <path
                     d={`M ${(px - FOUND_W).toFixed(1)} ${foundTop} L ${(px + FOUND_W).toFixed(1)} ${foundTop} L ${px.toFixed(1)} ${foundTop + FOUND_H} Z`}
-                    fill={ink}
-                    stroke={color.raised}
-                    strokeWidth={0.8}
+                    fill={p.near ? color.raised : ink}
+                    stroke={p.near ? ink : color.raised}
+                    strokeWidth={p.near ? 1.3 : 0.8}
                   />
                   <rect x={px - 6} y={foundTop - 2} width={12} height={FOUND_H + 6} fill="transparent">
-                    <title>{`${foundStyle?.label ?? "found"} peak · d ${p.d.toFixed(3)} Å`}</title>
+                    <title>{p.near ? `residual peak on ${p.near} (a misfit of that reflection) · d ${p.d.toFixed(3)} Å` : `${foundStyle?.label ?? "found"} peak · d ${p.d.toFixed(3)} Å`}</title>
                   </rect>
                 </g>
               );

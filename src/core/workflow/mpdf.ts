@@ -342,7 +342,7 @@ export function buildMpdfProblem(
     return out;
   };
 
-  return { parameters, observations, weights, calculate };
+  return { parameters, observations, weights, dataLength: rValues.length, calculate };
 }
 
 /** Obs / nuclear / magnetic / total / difference G(r) curves for the current

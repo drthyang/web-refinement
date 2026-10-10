@@ -116,6 +116,11 @@ export interface StructureRefinementOptions {
    * the starting model's weighted sum.
    */
   readonly occupancyRestraints?: readonly OccupancyRestraint[];
+  /**
+   * Hold the composition: each element on two or more sites keeps its total in
+   * the cell (see {@link compositionRestraints}). Default false.
+   */
+  readonly holdComposition?: boolean;
   /** Max fractional shift of a positional mode from its start. Default 0.2. */
   readonly positionBound?: number;
   /**
@@ -277,6 +282,7 @@ export function buildStructureRefinement(
     restrainSharedOccupancy = true,
     constrainOccupancyToUnity = false,
     occupancyRestraints = [],
+    holdComposition = false,
     positionBound = 0.2,
     preferredOrientation,
     corrections = [],
@@ -469,6 +475,7 @@ export function buildStructureRefinement(
     }
     restraints.push(...buildOccupancyRestraints(structure, occupancyRestraints));
     if (restrainSharedOccupancy) restraints.push(...sharedOccupancyRestraints(structure.sites, constrainOccupancyToUnity));
+    if (holdComposition) restraints.push(...compositionRestraints(structure));
   }
 
   // Preferred orientation (March–Dollase) stays on its own path (it is baked into
@@ -613,7 +620,7 @@ function groupLabel(g: SiteGroup): string {
  * `toUnity` sets the target to exactly **1** (a fully-occupied mixed site — the
  * common physical case) instead of the starting-model sum.
  */
-function sharedOccupancyRestraints(sites: readonly AtomSite[], toUnity = false): LinearRestraint[] {
+export function sharedOccupancyRestraints(sites: readonly AtomSite[], toUnity = false): LinearRestraint[] {
   const out: LinearRestraint[] = [];
   for (const g of siteGroups(sites, true)) {
     if (g.members.length < 2) continue;
@@ -627,6 +634,48 @@ function sharedOccupancyRestraints(sites: readonly AtomSite[], toUnity = false):
     });
   }
   return out;
+}
+
+/**
+ * Hold the composition: each element on two or more sites keeps its total in
+ * the cell, Σ multiplicity × occupancy over its sites, at the starting model's
+ * value. Atoms can then exchange between sites (anti-site disorder, spinel
+ * inversion) while the formula stays; with the shared-site Σ restraints, a
+ * pair of mixed sites is left one exchange fraction. Each restraint's σ is 0.01
+ * occupancy on its largest site, as stiff as the shared-site Σ.
+ */
+export function compositionRestraints(structure: StructureModel): LinearRestraint[] {
+  const bySpecies = new Map<string, { site: AtomSite; multiplicity: number }[]>();
+  for (const site of structure.sites) {
+    const species = site.isotope !== undefined ? `${site.isotope}${site.element}` : site.element;
+    const multiplicity = site.multiplicity ?? siteMultiplicity(structure.spaceGroup.operations, site.position);
+    bySpecies.set(species, [...(bySpecies.get(species) ?? []), { site, multiplicity }]);
+  }
+  const out: LinearRestraint[] = [];
+  for (const [species, members] of bySpecies) {
+    if (members.length < 2) continue;
+    const total = members.reduce((acc, m) => acc + m.multiplicity * m.site.occupancy, 0);
+    out.push({
+      id: `comp_${species}`,
+      label: `Σ ${species} in cell = ${total.toFixed(2)}`,
+      target: total,
+      sigma: 0.01 * Math.max(...members.map((m) => m.multiplicity)),
+      terms: members.map((m) => ({ parameterId: `occ_${m.site.label}`, coefficient: m.multiplicity })),
+    });
+  }
+  return out;
+}
+
+/**
+ * The occupancy restraints a structure's site ties ask for: the shared-site Σ
+ * (to 1 with `occupancyToUnity`) and, with `composition`, the composition.
+ * The same set `buildStructureRefinement` adds when occupancies refine.
+ */
+export function siteTieRestraints(structure: StructureModel, ties: { readonly occupancyToUnity?: boolean; readonly composition?: boolean }): LinearRestraint[] {
+  return [
+    ...sharedOccupancyRestraints(structure.sites, ties.occupancyToUnity ?? false),
+    ...(ties.composition ? compositionRestraints(structure) : []),
+  ];
 }
 
 /**

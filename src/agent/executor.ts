@@ -16,7 +16,7 @@ import { changePdf, describePdfChange, pdfNoOp, readPdfTool } from "@/agent/pdfT
 import type { LiveToolHost } from "@/agent/liveCommon";
 import { PROBE_OPTIONS, correlationRefusal, pairText, readCorrelations, refusalLine } from "@/agent/correlationCheck";
 import { REF_KEY, RefStore, buildView } from "@/mcp/refs";
-import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
+import type { LinearRestraint, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { StepKind } from "@/core/project/history";
 
 /** What the executor needs from the app shell. */
@@ -75,6 +75,7 @@ const STEP_KIND: Readonly<Record<string, StepKind>> = {
   set_background: "settings",
   set_microstrain: "settings",
   set_adp_model: "settings",
+  set_site_ties: "settings",
   set_fit_range: "settings",
 };
 
@@ -155,7 +156,7 @@ export class AgentExecutor implements ToolRunner {
         } catch (e) {
           throw new Error(`could not check the free parameters' correlations before refining (${e instanceof Error ? e.message : String(e)}); nothing was refined`, { cause: e });
         }
-        const check = readCorrelations(probe, before.parameters);
+        const check = readCorrelations(probe, before.parameters, restraintsOf(before));
         const refusal = correlationRefusal(check);
         if (refusal) {
           update({ status: "failed", preview, outcome: refusalLine(check) });
@@ -172,7 +173,7 @@ export class AgentExecutor implements ToolRunner {
       // The user's own unsaved edits become their step first, so the agent's
       // step holds only what the agent changed.
       this.host.recordNow("edit");
-      const note = await this.host.asAgent(async () => {
+      const changed = await this.host.asAgent(async () => {
         const n = port.technique === "pdf" ? await changePdf(spec.name, input, port, this.host) : await changePowder(spec.name, input, port, this.host);
         await this.host.settle();
         const kind = STEP_KIND[spec.name];
@@ -182,8 +183,9 @@ export class AgentExecutor implements ToolRunner {
         }
         return n;
       });
+      const note = typeof changed === "object" ? changed.note : changed;
       const after = this.requirePort().state();
-      const out = changeOutcome(spec.name, before, after, this.currentStep(), note);
+      const out = { ...changeOutcome(spec.name, before, after, this.currentStep(), note), ...(typeof changed === "object" ? changed.data : {}) };
       update({ status: "done", outcome: outcomeLine(spec.name, before, after, note) });
       return this.respond(out);
     } catch (e) {
@@ -273,7 +275,7 @@ function changeOutcome(
       ...(key === "wR" ? { gof: r.agreement.goodnessOfFit !== undefined ? Number(r.agreement.goodnessOfFit.toPrecision(4)) : null } : {}),
       iterations: r.history.length,
       ...(r.diagnostics ? { atBounds: r.diagnostics.atBounds.map((b) => b.parameterId), maxShiftOverEsd: Number(r.diagnostics.maxShiftOverEsd.toPrecision(3)) } : {}),
-      ...developedCorrelations(r, after.parameters),
+      ...developedCorrelations(r, after.parameters, restraintsOf(after)),
       ...(r.message ? { message: r.message } : {}),
     };
   }
@@ -286,8 +288,8 @@ function changeOutcome(
  * read the starting values, and a pair can tighten on the way. The next
  * refinement refuses the set until one of each pair is fixed.
  */
-function developedCorrelations(r: RefinementResult, parameters: readonly RefinementParameter[]): Record<string, unknown> {
-  const check = readCorrelations(r, parameters);
+function developedCorrelations(r: RefinementResult, parameters: readonly RefinementParameter[], restraints: readonly LinearRestraint[]): Record<string, unknown> {
+  const check = readCorrelations(r, parameters, restraints);
   if (check.correlated.length === 0 && check.undetermined.length === 0) return {};
   return {
     correlated: check.correlated.map(pairText),
@@ -295,6 +297,9 @@ function developedCorrelations(r: RefinementResult, parameters: readonly Refinem
     correlationNote: "These parameters correlate at the refined values. Fix one of each pair before the next refinement; refine will not run with them all free.",
   };
 }
+
+/** The restraints the page fits with (site ties, a shared site's Σ). */
+const restraintsOf = (s: LiveState): readonly LinearRestraint[] => s.restraints;
 
 function outcomeLine(name: string, before: LiveState, after: LiveState, note: string | undefined): string {
   if (name === "refine") {

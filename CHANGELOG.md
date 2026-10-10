@@ -9,6 +9,76 @@ release fixes bugs.
 
 ### Added
 
+- **Hold the composition** (Shared site row, and the Agent's new
+  `set_site_ties`): each element on two or more sites keeps its total in the
+  cell, so atoms exchange between sites while the formula stays (anti-site
+  disorder, spinel inversion). A normal-spinel start on neutron data of
+  MgAl₂O₄ with 22% inversion refined to 0.25(4).
+- **Phase fractions.** After a multi-phase powder refinement, each phase's
+  weight fraction (Hill–Howard, from its refined scale, cell-contents mass and
+  volume, with an esd from the scale esds) shows on the Structure card and in
+  the Agent's `get_state` (Mn₃Ga with 3.7 wt% MnO read back 3.65(8) wt%).
+- **The Agent runs boxcar scans on the PDF page** (`boxcar_scan`): the free
+  parameters refined box by box across r, shown in the Boxcar view, with each
+  box's Rw and values returned, to tell the local structure from the average.
+- **The cards the Agent is on breathe.** While the Agent is open, the edge of
+  each card a running or waiting tool call acts on (Structure, Data,
+  Instrument, Pattern, Parameters, Result) breathes, as do the cards a reply
+  points to in its last paragraph (for a few seconds) and a reply under the
+  pointer. With reduced motion the edge is steady.
+
+### Fixed
+
+- **Occupancy restraints reach the Rietveld fit.** The powder page never sent
+  them, so a shared site's occupancies refined with no Σ restraint (the site
+  could empty or over-fill) and "Σ occ = 1" did nothing. They now go with
+  every nuclear refinement whose occupancies are free, single- or multi-phase.
+- **R, wR and GoF describe the data alone.** Restraint pseudo-observations were
+  counted in them, which understated wR (by about 3% of its value on a
+  restrained spinel fit, and on PDF fits with a shared site).
+- **Loading an instrument file first** (before any structure or data) no
+  longer blanks the page.
+- The Agent's correlation check no longer refuses the Caglioti U, V, W
+  together, nor two occupancies one restraint ties: like the background
+  coefficients, they move together by construction. The assessment notes them
+  once instead of warning per pair, and for a displacement parameter at a
+  bound on a shared site it points to the site's mixing first.
+- **The cell gate on a sloped 2θ background.** Its Le Bail fit had a flat
+  background at constant wavelength, so a lab pattern's slope stayed in the
+  residual (wR 50%) and read as unindexed intensity; it now has three
+  Chebyshev terms. When unindexed peaks and a violated absence come together,
+  the Agent is told the violation may be a line of the same unidentified
+  phase, rather than a wrong space group.
+- Correlated Lorentzian X and Y widths are explained (they differ only in how
+  they grow with angle), like the Caglioti U/V/W.
+- **The cell gate on a wide 2θ scan.** Its Le Bail fit used one peak width at
+  constant wavelength, so high-angle flanks read as unindexed peaks and a
+  correct cell failed (Mn₃Ga 30 K, 5–130°). The width now grows with angle
+  (Caglioti U). The gate's unindexed peaks come with d and Q and are marked on
+  the plot.
+- Excess intensity on nuclear reflections in a neutron pattern of a phase with
+  magnetic ions is flagged as possible k = 0 magnetic order, before atoms or
+  ADPs are refined into it.
+- A CIF without a phase name is named from its common name, formula or data
+  block, not "structure".
+- The Agent's refine reported the previous history step when the page took
+  long to render; switching Ask first / Auto during a run now reaches the
+  model at its next turn.
+- On the PDF page, the assessment's advice for a displacement parameter at 0
+  is about real space (correlated motion, a short window), not Rietveld
+  background or absorption; the Agent's bond list names each bond once.
+- **Residual peaks are judged against each point's uncertainty and the known
+  reflections.** Lone noisy points in a low-count TOF region were reported as
+  "unexplained peaks", and so were misfits of a phase's own reflections. Now
+  a peak must stand 5σ above its own noise, and each is reported as on a
+  reflection, beside one (a shoulder or tail), or unexplained, in the
+  assessment, the Agent and the plot marks.
+- The assessment reports background-coefficient correlations as one note
+  (they are expected), not a warning per pair, and no longer rounds 0.995 to
+  1.00.
+
+### Added
+
 - **The Agent never refines correlated parameters together.** Before it
   refines, it measures the free set at the current values with the page's own
   fit; two parameters correlated at |ρ| ≥ 0.95, or a combination the data

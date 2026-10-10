@@ -10,6 +10,9 @@ import type { ProjectHistory } from "@/core/project/history";
 import { lineage } from "@/core/project/history";
 import type { StructureModel } from "@/core/crystal/types";
 
+/** What a change handler returns: a note for the model, or a note and data to merge into its answer. */
+export type ChangeResult = string | { readonly note?: string; readonly data: Record<string, unknown> } | undefined;
+
 /** What every page's tools need from the shell besides the page itself. */
 export interface LiveToolHost {
   readonly history: () => ProjectHistory | null;
@@ -76,7 +79,16 @@ export function bondsOf(refinedPhases: readonly StructureModel[], input: Input, 
   const phase = input.phase ? refinedPhases.find((p) => p.id === input.phase) : refinedPhases[0];
   if (!phase) throw new Error(`no phase "${String(input.phase)}" — phases: ${refinedPhases.map((p) => p.id).join(", ")}`);
   const geo = bondGeometry({ structure: phase, ...(input.cutoff !== undefined ? { cutoff: input.cutoff } : {}) });
-  return { phase: phase.id, shortest: geo.shortest, bonds: geo.bonds.slice(0, 40).map((b) => ({ ...b, distance: sig(b.distance, 5) })) };
+  // Each bond once: A–B and B–A at the same length are one bond.
+  const seen = new Set<string>();
+  const bonds = geo.bonds.filter((b) => {
+    const bond = b as { from?: string; to?: string; distance: number };
+    const key = `${[bond.from, bond.to].sort().join("–")}@${bond.distance.toFixed(4)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return { phase: phase.id, shortest: geo.shortest, bonds: bonds.slice(0, 40).map((b) => ({ ...b, distance: sig(b.distance, 5) })) };
 }
 
 export function historyView(history: ProjectHistory | null): unknown {
