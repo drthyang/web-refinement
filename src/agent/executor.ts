@@ -15,6 +15,7 @@ import { changePowder, describePowderChange, powderNoOp, readPowderTool } from "
 import { changePdf, describePdfChange, pdfNoOp, readPdfTool } from "@/agent/pdfTools";
 import type { LiveToolHost } from "@/agent/liveCommon";
 import { PROBE_OPTIONS, correlationRefusal, pairText, readCorrelations, refusalLine } from "@/agent/correlationCheck";
+import { PAGE_METHOD, readSkill } from "@/agent/skills";
 import { REF_KEY, RefStore, buildView } from "@/mcp/refs";
 import type { LinearRestraint, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { StepKind } from "@/core/project/history";
@@ -58,6 +59,8 @@ export interface ToolOutcome {
 /** What the chat calls: the executor, or a lazy stand-in for it. */
 export interface ToolRunner {
   readonly run: (name: string, input: unknown) => Promise<ToolOutcome>;
+  /** A new conversation: the skills read in the last one must be read again. */
+  readonly newConversation?: () => void;
 }
 
 export interface ExecutorOptions {
@@ -83,10 +86,16 @@ let nextCallId = 1;
 
 export class AgentExecutor implements ToolRunner {
   private readonly refs = new RefStore(128);
+  /** The skills read in this conversation (a page's method gates its changes). */
+  private readonly skillsRead = new Set<string>();
   /** Changes run one at a time: the page has one compute client and one history. */
   private changes: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly host: AgentHost, private readonly opts: ExecutorOptions) {}
+
+  newConversation(): void {
+    this.skillsRead.clear();
+  }
 
   /** Run one call. Never throws: failures come back as an error outcome the model can read. */
   run(name: string, input: unknown): Promise<ToolOutcome> {
@@ -115,6 +124,15 @@ export class AgentExecutor implements ToolRunner {
         update({ status: "done" });
         return { isError: false, text: JSON.stringify(out) };
       }
+      if (spec.name === "read_skill") {
+        // Whole, as Markdown: a skill is read as written, not paged as a ref.
+        const { name, reference } = input as { name: string; reference?: string };
+        update({ preview: reference ? `${name} · ${reference}` : name });
+        const text = readSkill(name, reference);
+        if (reference === undefined) this.skillsRead.add(name);
+        update({ status: "done" });
+        return { isError: false, text };
+      }
 
       const port = this.requirePort();
       if (!spec.pages.includes(port.technique)) {
@@ -137,7 +155,12 @@ export class AgentExecutor implements ToolRunner {
         return this.respond(out);
       }
 
-      // A change: refuse while a fit runs, then ask, then act as the agent.
+      // A change: only once the page's method has been read, never while a fit
+      // runs; then ask, then act as the agent.
+      const method = PAGE_METHOD[port.technique];
+      if (!this.skillsRead.has(method)) {
+        throw new Error(`read the method first: call read_skill with name "${method}" — it is how the user works on this page, and changes wait until it has been read in this conversation`);
+      }
       const before = port.state();
       if (before.busy) throw new Error("a refinement is running — wait for it to finish, or call cancel_refinement");
       const noOp = port.technique === "pdf" ? pdfNoOp(spec, input, before as PdfLiveState) : powderNoOp(spec, input, before as PowderLiveState);

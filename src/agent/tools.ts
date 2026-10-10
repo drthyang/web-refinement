@@ -130,6 +130,18 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     pages: ["powder", "pdf"],
   },
   {
+    name: "read_skill",
+    title: "Read a skill",
+    description:
+      "Read one of the user's skills (the system prompt lists them): the method you follow, in the user's own words, and the references behind it. Read the open page's method skill before your first change on that page — changes are refused until you have, in this conversation. Pass `reference` with one of the names the skill lists to read that reference (a longer knowledge base: read one only when the task needs it).",
+    inputSchema: {
+      name: z.string().min(1).describe("The skill's name, e.g. \"my-rietveld-workflow\""),
+      reference: z.string().min(1).optional().describe("One of the skill's references, by the name it lists"),
+    },
+    effect: "read",
+    pages: ["powder", "pdf"],
+  },
+  {
     name: "read_ref",
     title: "Read a stored value",
     description:

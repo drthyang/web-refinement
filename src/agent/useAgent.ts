@@ -122,7 +122,10 @@ export function useAgent(host: AgentHost, onAttention: () => void): AgentControl
             },
           }),
       ));
-    return { run: async (name, input) => (await load()).run(name, input) };
+    return {
+      run: async (name, input) => (await load()).run(name, input),
+      newConversation: () => void loaded?.then((e) => e.newConversation()),
+    };
   }, [host]);
 
   const updateSettings = useCallback((patch: Partial<AgentSettings>) => {
@@ -215,12 +218,13 @@ export function useAgent(host: AgentHost, onAttention: () => void): AgentControl
   const clear = useCallback(() => {
     if (turn.current) return;
     chat.current = null;
+    executor.newConversation?.();
     // A change still waiting for approval keeps its card, or its call would hang unseen.
     const waiting = Object.values(activity).filter((e) => e.status === "waiting");
     setTranscript(waiting.map((e) => ({ kind: "tool", id: itemId(), entryId: e.id })));
     setActivity(Object.fromEntries(waiting.map((e) => [e.id, e])));
     setUsage({ input: 0, output: 0, cacheRead: 0 });
-  }, [activity]);
+  }, [activity, executor]);
 
   const pending = Object.values(activity).filter((e) => e.status === "waiting");
 

@@ -138,8 +138,10 @@ describe("AgentChat", () => {
     expect(tools.every((t) => t.eager_input_streaming)).toBe(true);
     const system = first.body.system as { text: string; cache_control?: unknown }[];
     expect(system[0]!.cache_control).toEqual({ type: "ephemeral" });
-    expect(system[0]!.text).toContain("<user_method>");
-    expect(system[0]!.text).toContain("My Rietveld workflow");
+    // The skills by name and description; their bodies are read on demand.
+    expect(system[0]!.text).toContain("<skills>");
+    expect(system[0]!.text).toContain("- my-rietveld-workflow (the Powder page's method): The user's personal powder Rietveld");
+    expect(system[0]!.text).not.toContain("## The occupancy guardrail");
     // The mode follows the cached prompt: ask first unless the user chose auto.
     expect(system[1]).toEqual({ type: "text", text: expect.stringMatching(/^Mode: ask\. Every change waits for the user's approval/) });
     // The second request carries the whole history, unchanged.
@@ -224,7 +226,7 @@ describe("AgentChat on Ollama", () => {
     expect(first.body.model).toBe("qwen3:32b");
     expect(first.body.stream).toBe(true);
     for (const k of ["thinking", "output_config", "cache_control", "fallbacks"]) expect(first.body[k]).toBeUndefined();
-    expect(first.body.system as string).toContain("<user_method>");
+    expect(first.body.system as string).toContain("<skills>");
     expect(first.body.system as string).toMatch(/Mode: ask\. [^]*$/);
     const tools = first.body.tools as { name: string; eager_input_streaming?: boolean }[];
     expect(tools.map((t) => t.name)).toEqual(LIVE_TOOLS.map((t) => t.name));

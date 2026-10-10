@@ -11,6 +11,7 @@ export type AgentCard = "structure" | "data" | "instrument" | "pattern" | "param
 export const TOOL_CARDS: Readonly<Record<string, readonly AgentCard[]>> = {
   get_state: [],
   read_ref: [],
+  read_skill: [],
   go_to_step: [],
   cancel_refinement: [],
   assess_refinement: ["result", "pattern"],

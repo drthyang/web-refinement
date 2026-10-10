@@ -104,6 +104,13 @@ breaks the tie:
 If none of these is present, keep occupancy fixed and say why. This is a firm rule for
 him, not a suggestion.
 
+In the app the first two are the Shared site ties (`set_site_ties`): **Σ occ = 1** holds a
+mixed site full, and **hold composition** keeps each element's total in the cell, so atoms
+exchange between sites while the formula stays — anti-site disorder or spinel inversion
+then refines as one exchange fraction. The ties act only while an occupancy they cover is
+free, and `get_state` lists them. Report the exchange fraction (e.g. the inversion as the
+minority cation's occupancy on the other site) with its esd, not every occupancy.
+
 ## The correlation guardrail (do not skip)
 
 **Never refine strongly correlated parameters together.** Two free parameters that
@@ -116,6 +123,14 @@ the one this sequence frees later (occupancy against scale, B against scale, the
 against the cell) — or refine them in separate stages, and free it again only once the
 other is stable. A combination the data cannot determine at all (a null direction) is the
 same rule at its limit. This is a firm rule for him, like the occupancy guardrail.
+
+What does **not** count: the terms of one curve among themselves — the background
+coefficients, and the Caglioti `U, V, W` of one FWHM²(θ). They trade off by construction
+while the curve itself is determined, and nobody reports them as results, so free `U, V, W`
+together on a wide range. Two occupancies tied by one restraint (a mixed site's Σ, the
+composition) move together by construction too. Each of these against anything else (the
+scale, a structural parameter) still counts, and so does the Lorentzian `X` ↔ `Y` (size
+against strain, which people do report).
 
 ## Corrections are polish, not a crutch
 
@@ -176,7 +191,9 @@ Report the outcome as: GoF + the key refined values with ESDs + which correction
   shared instrument keeps them coupled anyway. **Fall back to phase-by-phase only if the
   all-at-once step is unstable** (a phase's scale collapsing, divergence, or runaway
   cross-phase correlations that `assess_refinement` flags). Try the simple way first; split
-  when it fights back.
+  when it fights back. Report each phase's **weight fraction** (Hill–Howard, from the
+  refined scales: `get_state` gives `phaseFractions` with esds) and say what it rests on —
+  the crystalline phases in the model only, no microabsorption correction.
 - **Magnetic**: once the nuclear structure is converged, hand off to the magnetic-analysis
   flow (`build_magnetic_model`, `list_magnetic_subgroups`, `search_propagation_vector`,
   `refine_magnetic_powder`) — that's a separate methodology, not this one.
@@ -194,3 +211,12 @@ Report the outcome as: GoF + the key refined values with ESDs + which correction
 | Geometry / bonds sanity | `bond_geometry`, `interpret_structure` |
 | Cross-check export | `export_bundle` (`fullprof` + `gsas2`, into `outDir`) |
 | Magnetic handoff | `build_magnetic_model`, `list_magnetic_subgroups`, `refine_magnetic_powder` |
+
+## References
+
+Longer knowledge bases behind this method. Read one only when a question needs it.
+
+- [`powder_structural_refinement`](../../../knowledge/powder_structural_refinement_knowledge.md) — the Rietveld model and its policy: profile functions, ADPs, occupancies, constraints, and what makes a refinement physically defensible.
+- [`refinement_fitting_algorithms`](../../../knowledge/refinement_fitting_algorithms_knowledge.md) — the least-squares engine: Levenberg–Marquardt, convergence and shift/esd, correlations and the SVD, restraints, esds and the GoF.
+- [`powder_background_texture`](../../../knowledge/powder_background_texture_knowledge.md) — background models and preferred orientation: which basis to use, how many terms, and how texture shows in the residual.
+- [`magnetic_structure_symmetry`](../../../knowledge/magnetic_structure_symmetry_knowledge.md) — magnetic symmetry and refinement, for the hand-off: when excess intensity may be magnetic order and what the magnetic step needs.

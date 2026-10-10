@@ -9,6 +9,16 @@ release fixes bugs.
 
 ### Added
 
+- **The Agent reads its skills when it needs them.** Its system prompt now
+  lists the skills (the user's methods) by name and description instead of
+  carrying the Rietveld skill and two knowledge bases on every request (about
+  6 KB instead of 63 KB, which a local model's context needs). The Agent reads
+  a skill with `read_skill`, and the knowledge bases a skill cites only when a
+  question needs them; it must read the open page's method before its first
+  change there. The skills are the same `.claude/skills` files Claude Code uses,
+  so adding a skill needs no code. A PDF skill (`pdf-workflow`) joins the
+  Rietveld one, and the Rietveld skill now matches what the app enforces (the
+  correlation exemptions, the site ties, phase fractions).
 - **Hold the composition** (Shared site row, and the Agent's new
   `set_site_ties`): each element on two or more sites keeps its total in the
   cell, so atoms exchange between sites while the formula stays (anti-site

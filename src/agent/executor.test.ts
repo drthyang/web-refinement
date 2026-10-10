@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { AgentExecutor, type ActivityEntry, type AgentHost } from "@/agent/executor";
+import { PAGE_METHOD } from "@/agent/skills";
 import type { AgentPort, PdfAgentPort, PdfLiveState, PowderAgentPort, PowderLiveState } from "@/agent/port";
 import { AgentLink } from "@/agent/link";
 import { gata4se8PdfExample } from "@/examples/gata4se8Pdf";
@@ -149,16 +150,28 @@ function fakeHost(port: AgentPort | null): { host: AgentHost; steps: { kind: Ste
   return { host, steps };
 }
 
-function executor(host: AgentHost, decision: boolean | "auto" = true): { ex: AgentExecutor; asked: ActivityEntry[]; seen: ActivityEntry[] } {
+/**
+ * An executor as a conversation has it once the pages' methods are read
+ * (`readMethods: false` for one that has read nothing yet). The reads run
+ * before the activity is recorded, so tests see only their own calls.
+ */
+function executor(host: AgentHost, decision: boolean | "auto" = true, { readMethods = true } = {}): { ex: AgentExecutor; asked: ActivityEntry[]; seen: ActivityEntry[] } {
   const asked: ActivityEntry[] = [];
   const seen: ActivityEntry[] = [];
+  let recording = false;
   const ex = new AgentExecutor(host, {
     approve: async (entry) => {
       asked.push(entry);
       return decision === "auto" ? true : decision;
     },
-    onActivity: (e) => seen.push(e),
+    onActivity: (e) => {
+      if (recording) seen.push(e);
+    },
   });
+  // A read_skill call runs synchronously up to its result, so the methods
+  // count as read before this returns.
+  if (readMethods) for (const name of Object.values(PAGE_METHOD)) void ex.run("read_skill", { name });
+  recording = true;
   return { ex, asked, seen };
 }
 
@@ -245,6 +258,32 @@ describe("AgentExecutor on a live powder fit", () => {
     expect(out.unchanged).toBe(true);
     expect(asked).toEqual([]);
     expect(calls).toEqual([]);
+  });
+
+  it("reads a skill whole, and refuses a change until the page's method has been read", async () => {
+    const { port, calls } = sessionPort(allFixed());
+    const { ex, asked } = executor(fakeHost(port).host, true, { readMethods: false });
+    const refused = await ex.run("set_free", { free: ["scale"] });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/read_skill with name "my-rietveld-workflow"/);
+    expect(asked).toEqual([]);
+    expect(calls).toEqual([]);
+    // Reading another skill does not open the gate.
+    await ex.run("read_skill", { name: "pdf-workflow" });
+    expect((await ex.run("set_free", { free: ["scale"] })).isError).toBe(true);
+    const skill = await ex.run("read_skill", { name: "my-rietveld-workflow" });
+    expect(skill.isError).toBe(false);
+    expect(skill.text).toMatch(/^Skill my-rietveld-workflow\n/);
+    expect(skill.text).toContain("## The occupancy guardrail");
+    expect(skill.text).toContain("- powder_structural_refinement:");
+    expect(skill.text.length).toBeGreaterThan(8000); // whole, not cut to the ref budget
+    expect((await ex.run("set_free", { free: ["scale"] })).isError).toBe(false);
+    // A reference by name; an unknown one names the ones there are.
+    expect((await ex.run("read_skill", { name: "my-rietveld-workflow", reference: "refinement_fitting_algorithms" })).text).toMatch(/^Reference "refinement_fitting_algorithms"/);
+    expect((await ex.run("read_skill", { name: "my-rietveld-workflow", reference: "nope" })).text).toMatch(/has no reference "nope" — it has powder_structural_refinement/);
+    // A new conversation reads the method again.
+    ex.newConversation();
+    expect((await ex.run("set_free", { fix: ["scale"] })).isError).toBe(true);
   });
 
   it("asks before a change; a decline leaves the page untouched", async () => {

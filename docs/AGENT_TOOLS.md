@@ -297,12 +297,32 @@ shape is pinned, and every registered tool appears on this page.
 
 ## Skills
 
-A skill composes tools into an expert procedure. One ships in this repository:
-[`.claude/skills/my-rietveld-workflow/`](../.claude/skills/my-rietveld-workflow/SKILL.md),
-the maintainer's own powder Rietveld procedure: a fixed freeing sequence, gates
-between stages, and acceptance criteria. It covers constant-wavelength and TOF
-data, single- and multi-phase, and hands magnetic structures on to the
-magnetic-analysis flow.
+A skill composes tools into an expert procedure. Two ship in this repository:
+
+- [`.claude/skills/my-rietveld-workflow/`](../.claude/skills/my-rietveld-workflow/SKILL.md),
+  the maintainer's own powder Rietveld procedure: a fixed freeing sequence, gates
+  between stages, and acceptance criteria. It covers constant-wavelength and TOF
+  data, single- and multi-phase, and hands magnetic structures on to the
+  magnetic-analysis flow.
+- [`.claude/skills/pdf-workflow/`](../.claude/skills/pdf-workflow/SKILL.md), the
+  small-box PDF procedure: instrument resolution from a standard, the freeing
+  order, one correlated-motion term, boxcar scans for local versus average
+  structure. General practice until the maintainer's own PDF method is written
+  down.
+
+The same files serve both agents. Claude Code loads them as skills in this
+repository; the in-app Agent reads them through
+[`src/agent/skills.ts`](../src/agent/skills.ts). Its system prompt carries only
+each skill's name and description, and the Agent reads a skill with
+`read_skill` when the task calls for it (progressive disclosure). A skill's
+**References** section lists longer knowledge bases as relative links
+(`- [\`name\`](../../../knowledge/file.md) — what it covers`): Claude Code follows
+the path, and the in-app Agent reads the reference by name. `skills.test.ts`
+checks that every skill parses and every reference resolves.
+
+To add a skill, add a folder with a `SKILL.md` (frontmatter `name` and
+`description`, then the procedure, then References). Nothing else changes: both
+agents find it. A page's method skill is named in `PAGE_METHOD` (skills.ts).
 
 **Planned skills**
 - `refine-structure` — the guided sequence scale → background → cell → profile
@@ -372,8 +392,15 @@ The page-specific handlers are [`powderTools.ts`](../src/agent/powderTools.ts)
 and [`pdfTools.ts`](../src/agent/pdfTools.ts).
 - Read tools run at once: `get_state`, `assess_refinement`,
   `suggest_next_steps`, `rank_next_parameters`, `check_cell_symmetry`,
-  `find_unexplained_peaks`, `bond_geometry`, `interpret_structure`, `read_ref`.
-  The analysis tools are the MCP handlers above, fed from what is on screen.
+  `find_unexplained_peaks`, `bond_geometry`, `interpret_structure`,
+  `read_skill`, `read_ref`. The analysis tools are the MCP handlers above, fed
+  from what is on screen.
+- `read_skill` returns a skill whole, as Markdown (not cut to the ref budget),
+  with the names of its references; with `reference` it returns one of them.
+  Before its first change on a page, the Agent must have read that page's
+  method skill in this conversation (`my-rietveld-workflow` on the powder page,
+  `pdf-workflow` on the PDF page); a change before that is refused with the
+  call to make. Clearing the conversation resets it.
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
   `set_adp_model`, `set_site_ties`, `set_fit_range`, `refine`,
   `reset_parameters`, `go_to_step`.
@@ -488,8 +515,9 @@ conversation stays valid.
   refusal fallback to another model is an opt-in setting, and a turn another
   model answered is announced. The key is kept for the tab unless you tick
   Remember; it is never written to a project, autosave, or report. The system
-  prompt carries the `my-rietveld-workflow` skill and two `knowledge/` notes,
-  and is cached across turns.
+  prompt carries the role and the index of skills (about 6 KB; it carried the
+  Rietveld skill and two knowledge notes, about 63 KB, until the skills were
+  read on demand), and is cached across turns.
 - **Local proxy.** `<base>api/anthropic/` on the dev and preview servers
   ([`src/agent/proxy.ts`](../src/agent/proxy.ts)). The page sends its
   requests there, and the server adds the key from `ANTHROPIC_API_KEY` and
