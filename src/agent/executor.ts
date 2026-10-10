@@ -16,6 +16,7 @@ import { changePdf, describePdfChange, pdfNoOp, readPdfTool } from "@/agent/pdfT
 import type { LiveToolHost } from "@/agent/liveCommon";
 import { PROBE_OPTIONS, correlationRefusal, pairText, readCorrelations, refusalLine } from "@/agent/correlationCheck";
 import { PAGE_METHOD, readSkill } from "@/agent/skills";
+import { RULES, keyOfState, methodProgress, outOfOrder, ruleRefusal, stagesCovered, type AgentRecord, type MethodRule } from "@/agent/method";
 import { REF_KEY, RefStore, buildView } from "@/mcp/refs";
 import type { LinearRestraint, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { StepKind } from "@/core/project/history";
@@ -32,6 +33,9 @@ export interface AgentHost extends LiveToolHost {
   readonly asAgent: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Record the live state as a step now (a no-op when nothing changed). */
   readonly recordNow: (kind: StepKind, label?: string) => void;
+  /** The Agent's record of an analysis (method.ts): kept by the shell, saved with the project. */
+  readonly record: (key: string) => AgentRecord;
+  readonly updateRecord: (key: string, update: (record: AgentRecord) => AgentRecord) => void;
 }
 
 export type ActivityStatus = "waiting" | "running" | "done" | "declined" | "failed";
@@ -48,6 +52,8 @@ export interface ActivityEntry {
   readonly status: ActivityStatus;
   /** A short outcome line once it finished. */
   readonly outcome?: string;
+  /** Only the user may approve it: asked even in Auto. */
+  readonly alwaysAsk?: boolean;
 }
 
 /** The answer a model gets: JSON text, flagged when it is an error. */
@@ -108,7 +114,7 @@ export class AgentExecutor implements ToolRunner {
   }
 
   private async execute(spec: LiveToolSpec, raw: unknown): Promise<ToolOutcome> {
-    let entry: ActivityEntry = { id: `c${nextCallId++}`, tool: spec.name, title: spec.title, effect: spec.effect, at: Date.now(), status: "running" };
+    let entry: ActivityEntry = { id: `c${nextCallId++}`, tool: spec.name, title: spec.title, effect: spec.effect, at: Date.now(), status: "running", ...(spec.alwaysAsk ? { alwaysAsk: true } : {}) };
     const update = (patch: Partial<ActivityEntry>): void => {
       entry = { ...entry, ...patch };
       this.opts.onActivity(entry);
@@ -150,7 +156,9 @@ export class AgentExecutor implements ToolRunner {
         update({});
         // Let the drawer paint "running" before a heavy synchronous analysis.
         await new Promise((r) => setTimeout(r, 0));
-        const out = port.technique === "pdf" ? readPdfTool(spec.name, input, port, this.host) : readPowderTool(spec.name, input, port, this.host);
+        let out = port.technique === "pdf" ? readPdfTool(spec.name, input, port, this.host) : readPowderTool(spec.name, input, port, this.host);
+        if (spec.name === "check_cell_symmetry") this.noteCellGate(port, out as { passed?: boolean; unindexedPeaks?: unknown[]; absences?: { violated?: unknown[] } });
+        if (spec.name === "get_state") out = { ...(out as object), method: this.methodView(port) };
         update({ status: "done" });
         return this.respond(out);
       }
@@ -161,6 +169,7 @@ export class AgentExecutor implements ToolRunner {
       if (!this.skillsRead.has(method)) {
         throw new Error(`read the method first: call read_skill with name "${method}" — it is how the user works on this page, and changes wait until it has been read in this conversation`);
       }
+      if (spec.name === "allow_exception") return await this.allowException(port, input as { rule: MethodRule; reason: string }, entry, update);
       const before = port.state();
       if (before.busy) throw new Error("a refinement is running — wait for it to finish, or call cancel_refinement");
       const noOp = port.technique === "pdf" ? pdfNoOp(spec, input, before as PdfLiveState) : powderNoOp(spec, input, before as PowderLiveState);
@@ -169,6 +178,19 @@ export class AgentExecutor implements ToolRunner {
         return this.respond({ unchanged: true, note: noOp });
       }
       let preview = port.technique === "pdf" ? describePdfChange(spec, input, before as PdfLiveState) : describePowderChange(spec, input, before as PowderLiveState);
+      // The method's firm rules, then its order (a note, not a refusal).
+      const key = keyOfState(port.technique, before);
+      const freeBefore = before.parameters.filter((p) => !p.fixed && !p.expression);
+      let orderNote: string | null = null;
+      if (spec.name === "refine" || spec.name === "boxcar_scan") {
+        const record = this.host.record(key);
+        const rule = ruleRefusal(port.technique, freeBefore, restraintsOf(before), record);
+        if (rule) {
+          update({ status: "failed", preview, outcome: rule.line });
+          return error(rule.message);
+        }
+        if (spec.name === "refine") orderNote = outOfOrder(port.technique, freeBefore, record);
+      }
       if (spec.name === "refine") {
         // Correlated parameters are never refined together: measure the free
         // set first, and ask the user only about a set that may run.
@@ -208,7 +230,15 @@ export class AgentExecutor implements ToolRunner {
       });
       const note = typeof changed === "object" ? changed.note : changed;
       const after = this.requirePort().state();
-      const out = { ...changeOutcome(spec.name, before, after, this.currentStep(), note), ...(typeof changed === "object" ? changed.data : {}) };
+      if (spec.name === "refine" && after.result?.status === "converged") {
+        const covered = stagesCovered(port.technique, freeBefore);
+        this.host.updateRecord(key, (r) => ({ ...r, stagesDone: [...new Set([...r.stagesDone, ...covered])] }));
+      }
+      const out = {
+        ...changeOutcome(spec.name, before, after, this.currentStep(), note),
+        ...(typeof changed === "object" ? changed.data : {}),
+        ...(orderNote ? { methodNote: orderNote } : {}),
+      };
       update({ status: "done", outcome: outcomeLine(spec.name, before, after, note) });
       return this.respond(out);
     } catch (e) {
@@ -233,6 +263,52 @@ export class AgentExecutor implements ToolRunner {
     const h = this.host.history();
     const st = h?.steps.find((s) => s.id === h.current);
     return st ? { id: st.id, label: st.name ?? st.label } : null;
+  }
+
+  /** The cell gate's outcome, kept for the analysis it ran on. */
+  private noteCellGate(port: AgentPort, out: { passed?: boolean; unindexedPeaks?: unknown[]; absences?: { violated?: unknown[] } }): void {
+    const unindexed = out.unindexedPeaks?.length ?? 0;
+    const violated = out.absences?.violated?.length ?? 0;
+    const summary = out.passed ? "every peak indexes; the absences are consistent" : `${unindexed} unindexed peak${unindexed === 1 ? "" : "s"}, ${violated} violated absence${violated === 1 ? "" : "s"}`;
+    this.host.updateRecord(keyOfState(port.technique, port.state()), (r) => ({ ...r, cellGate: { passed: !!out.passed, at: Date.now(), summary } }));
+  }
+
+  /**
+   * get_state's view of the method: its stages (done or not), the cell gate,
+   * and the exceptions the user allowed. A converged refinement on screen
+   * counts its free blocks as done, whoever ran it.
+   */
+  private methodView(port: AgentPort): Record<string, unknown> {
+    const s = port.state();
+    const key = keyOfState(port.technique, s);
+    if (s.result?.status === "converged") {
+      const covered = stagesCovered(port.technique, s.parameters.filter((p) => !p.fixed && !p.expression));
+      this.host.updateRecord(key, (r) => (covered.every((c) => r.stagesDone.includes(c)) ? r : { ...r, stagesDone: [...new Set([...r.stagesDone, ...covered])] }));
+    }
+    const record = this.host.record(key);
+    const progress = methodProgress(port.technique, record);
+    return {
+      skill: progress.skill,
+      stages: progress.stages.map((st) => `${st.done ? "✓" : "○"} ${st.label}${st.optional ? " (if needed)" : ""}`),
+      next: progress.next ?? "every required stage done: check the acceptance bar",
+      ...(record.cellGate ? { cellGate: record.cellGate.passed ? "passed" : `not passed: ${record.cellGate.summary}` } : {}),
+      ...(record.exceptions.length > 0 ? { exceptions: record.exceptions.map((e) => `${e.rule}: ${e.reason}`) } : {}),
+    };
+  }
+
+  /** allow_exception: the user lifts a firm rule for this analysis. Always asks them. */
+  private async allowException(port: AgentPort, input: { rule: MethodRule; reason: string }, entry: ActivityEntry, update: (patch: Partial<ActivityEntry>) => void): Promise<ToolOutcome> {
+    const rule = RULES[input.rule];
+    if (!rule.pages.includes(port.technique)) throw new Error(`the rule "${input.rule}" does not apply on this page`);
+    update({ status: "waiting", preview: `${rule.title}, because: ${input.reason}` });
+    if (!(await this.opts.approve({ ...entry, status: "waiting", preview: `${rule.title}, because: ${input.reason}`, alwaysAsk: true }))) {
+      update({ status: "declined", outcome: "Declined" });
+      return this.respond({ declined: true, note: "The user keeps the rule. Work within it, or ask what they would prefer." });
+    }
+    const key = keyOfState(port.technique, port.state());
+    this.host.updateRecord(key, (r) => ({ ...r, exceptions: [...r.exceptions.filter((e) => e.rule !== input.rule), { rule: input.rule, reason: input.reason, at: Date.now() }] }));
+    update({ status: "done", outcome: "Allowed for this analysis" });
+    return this.respond({ allowed: input.rule, until: "the data or the phases change" });
   }
 
   private respond(out: unknown): ToolOutcome {

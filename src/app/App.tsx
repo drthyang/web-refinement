@@ -65,6 +65,7 @@ import { AgentLink } from "@/agent/link";
 import type { AgentHost } from "@/agent/executor";
 import { useAgent } from "@/agent/useAgent";
 import { AgentDrawer } from "@/agent/ui/AgentDrawer";
+import { emptyRecord, keyOfState, methodProgress, type AgentRecord } from "@/agent/method";
 
 // The header's refinement-target chips. "Nuclear" is the main refinement page
 // (the whole app refines, so no "Refinement" label needed); "Magnetic" is the
@@ -258,6 +259,11 @@ export function App(): JSX.Element {
   const agentLink = useRef(new AgentLink()).current;
   const stepActor = useRef<StepActor | undefined>(undefined);
   const [agentOpen, setAgentOpen] = useState(false);
+  // The Agent's record of each analysis (agent/method.ts): the cell gate, the
+  // exceptions the user allowed, the method stages done, its notes. The ref
+  // lets the executor read its own update before the next render.
+  const [agentRecords, setAgentRecords] = useState<Readonly<Record<string, AgentRecord>>>({});
+  const agentRecordsRef = useRef(agentRecords);
 
   const { structure } = session;
 
@@ -402,8 +408,20 @@ export function App(): JSX.Element {
     },
     history: () => agentLatest.current.history,
     goToStep: (id) => agentLatest.current.goToStep(id),
+    record: (key) => agentRecordsRef.current[key] ?? emptyRecord(key),
+    updateRecord: (key, update) => {
+      const next = { ...agentRecordsRef.current, [key]: update(agentRecordsRef.current[key] ?? emptyRecord(key)) };
+      agentRecordsRef.current = next;
+      setAgentRecords(next);
+    },
   }), [agentLink]);
   const agent = useAgent(agentHost, () => setAgentOpen(true));
+  // The open page's method, as the drawer's checklist shows it.
+  const agentPort = agentOpen ? agentLink.port() : null;
+  const agentMethod = agentPort ? (() => {
+    const key = keyOfState(agentPort.technique, agentPort.state());
+    return methodProgress(agentPort.technique, agentRecords[key] ?? emptyRecord(key));
+  })() : null;
   // The cards the agent is on breathe (workbench.css), while the Agent is open.
   const agentFocus = agentOpen ? agent.focus.join(" ") : "";
   useEffect(() => {
@@ -1259,7 +1277,7 @@ export function App(): JSX.Element {
         </a>
       </footer>
     </div>
-    {agentOpen && <AgentDrawer agent={agent} onClose={() => setAgentOpen(false)} />}
+    {agentOpen && <AgentDrawer agent={agent} method={agentMethod} onClose={() => setAgentOpen(false)} />}
     </div>
   );
 }

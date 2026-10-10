@@ -41,6 +41,8 @@ export interface LiveToolSpec {
   readonly effect: ToolEffect;
   /** The pages it works on; on another page it answers with an error naming them. */
   readonly pages: readonly AgentPage[];
+  /** A change only the user may make: it asks them even in Auto. */
+  readonly alwaysAsk?: boolean;
 }
 
 const ids = z.array(z.string().min(1)).describe("Parameter ids, or globs such as \"bkg*\" or \"*Fe1*\"");
@@ -140,6 +142,19 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     },
     effect: "read",
     pages: ["powder", "pdf"],
+  },
+  {
+    name: "allow_exception",
+    title: "Allow an exception to the method",
+    description:
+      "Ask the user to lift one of their method's firm rules for this analysis, when refine refused on it and the user wants to go on regardless: \"cell-gate\" (refine atomic parameters although check_cell_symmetry has not passed — e.g. a known impurity the model lacks) or \"bare-occupancy\" (refine an occupancy with no tie, because a second contrast — anomalous X-ray, isotopic neutron — determines it). Always shows the user an approval card, even in Auto; only they can approve it. Give their reason in `reason`. Lasts until the data or the phases change.",
+    inputSchema: {
+      rule: z.enum(["cell-gate", "bare-occupancy"]),
+      reason: z.string().min(3).describe("Why the rule does not apply here, in the user's terms"),
+    },
+    effect: "change",
+    pages: ["powder", "pdf"],
+    alwaysAsk: true,
   },
   {
     name: "read_ref",

@@ -42,7 +42,9 @@ answer — the most expensive failure mode. So the workflow has a hard gate up f
      `absencesConsistent`, with any `absences.violated` (hkl and σ).
    If a peak won't index or an absence is violated, STOP and say so — the cell or space
    group is wrong (or a phase is missing), and no amount of structural refinement will fix
-   it. Do not proceed. Report the numbers, not just "passed": how many absences were
+   it. Do not proceed. (In the app this is enforced: no atomic parameter refines until the
+   gate has passed for the analysis on screen; only he can lift it, with
+   `allow_exception`.) Report the numbers, not just "passed": how many absences were
    tested, how many were untestable (overlapped), and the tool's `limits` — it cannot see
    a too-large cell or a group with too few absences, so those stay his call.
 3. Only once that holds do you carry the cell (the tool's Le Bail `cell`), zero,
@@ -102,7 +104,8 @@ breaks the tie:
   that makes occupancy separately determined.
 
 If none of these is present, keep occupancy fixed and say why. This is a firm rule for
-him, not a suggestion.
+him, not a suggestion — and in the app a refinement with a bare occupancy is refused;
+only he can allow one (`allow_exception`), for a genuine second contrast.
 
 In the app the first two are the Shared site ties (`set_site_ties`): **Σ occ = 1** holds a
 mixed site full, and **hold composition** keeps each element's total in the cell, so atoms

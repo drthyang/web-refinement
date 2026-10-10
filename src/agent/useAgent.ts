@@ -109,7 +109,8 @@ export function useAgent(host: AgentHost, onAttention: () => void): AgentControl
         (m) =>
           new m.AgentExecutor(host, {
             approve: (entry) => {
-              if (settingsRef.current.autoApprove) return Promise.resolve(true);
+              // Auto approves every change but the ones only the user may make.
+              if (settingsRef.current.autoApprove && !entry.alwaysAsk) return Promise.resolve(true);
               attention.current();
               return new Promise<boolean>((resolve) => approvals.current.set(entry.id, resolve));
             },

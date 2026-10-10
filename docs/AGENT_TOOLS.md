@@ -401,6 +401,21 @@ and [`pdfTools.ts`](../src/agent/pdfTools.ts).
   method skill in this conversation (`my-rietveld-workflow` on the powder page,
   `pdf-workflow` on the PDF page); a change before that is refused with the
   call to make. Clearing the conversation resets it.
+- **The method's firm rules are code** ([`src/agent/method.ts`](../src/agent/method.ts)),
+  checked before the correlation probe: on the powder page no atomic parameter
+  (position, ADP, occupancy) refines until `check_cell_symmetry` has passed for
+  the analysis on screen (its data and phases); on both pages no occupancy
+  refines bare, with no Σ or composition tie. Only the user lifts a rule:
+  `allow_exception` (rule, reason) shows an approval card even in Auto, and the
+  exception lasts until the data or the phases change.
+- **The method's stages** (powder: cell gate, scale/background/cell, positions,
+  profile, ADPs, then occupancy and corrections if needed; PDF: scale/cell,
+  ADPs, correlated motion, positions, then occupancy and particle size) are a
+  checklist in the drawer and `get_state`'s `method`. A stage is done once a
+  converged refinement had one of its parameters free, whoever ran it. A
+  refinement out of order runs, with a `methodNote` in its outcome.
+- The record behind them (the gate, the exceptions, the stages done) is kept
+  per analysis by the shell.
 - Change tools ask first: `set_free`, `set_background`, `set_microstrain`,
   `set_adp_model`, `set_site_ties`, `set_fit_range`, `refine`,
   `reset_parameters`, `go_to_step`.

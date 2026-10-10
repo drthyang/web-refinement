@@ -9,6 +9,12 @@ release fixes bugs.
 
 ### Added
 
+- **The method's firm rules are enforced, and its stages shown.** On the
+  powder page the Agent cannot refine atomic parameters until the cell gate
+  has passed for the analysis on screen, and on both pages it cannot refine an
+  occupancy with no tie; only the user can lift a rule (`allow_exception`, an
+  approval card even in Auto). The drawer shows the method's stages as a
+  checklist, done or next, and a refinement out of order says so.
 - **The Agent reads its skills when it needs them.** Its system prompt now
   lists the skills (the user's methods) by name and description instead of
   carrying the Rietveld skill and two knowledge bases on every request (about

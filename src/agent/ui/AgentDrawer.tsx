@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { color, fz, mono, radius } from "@/app/theme";
 import type { ActivityEntry } from "@/agent/executor";
+import type { MethodProgress } from "@/agent/method";
 import { AGENT_MODES, type AgentController, type AgentMode, type AgentSettings, type TranscriptItem } from "@/agent/useAgent";
 import { CHAT_MODELS, hasRefusalFallback } from "@/agent/chat-models";
 import { listOllamaModels, unreachableHint, type OllamaModel } from "@/agent/ollama";
@@ -16,6 +17,8 @@ import { MATH_SPAN_SOURCE, mathInside, texPieces } from "@/agent/ui/texText";
 
 interface Props {
   readonly agent: AgentController;
+  /** The open page's method and how far along it is (null with no page open). */
+  readonly method?: MethodProgress | null;
   readonly onClose: () => void;
 }
 
@@ -26,7 +29,7 @@ function localModel(s: AgentSettings): string | null {
   return s.mode === "ollama" ? s.ollamaModel : s.mode === "lmstudio" ? s.lmstudioModel : null;
 }
 
-export function AgentDrawer({ agent, onClose }: Props): JSX.Element {
+export function AgentDrawer({ agent, method = null, onClose }: Props): JSX.Element {
   const { settings } = agent;
   const [showSettings, setShowSettings] = useState(false);
   const needsSetup = (settings.mode === "api-key" && !agent.apiKey) || localModel(settings) === "";
@@ -49,10 +52,41 @@ export function AgentDrawer({ agent, onClose }: Props): JSX.Element {
           <IconButton title="Close the Agent" onClick={onClose}>✕</IconButton>
         </span>
       </div>
+      {method && <MethodChecklist method={method} />}
       {showSettings && <Settings agent={agent} />}
       <Transcript agent={agent} />
       <Composer agent={agent} disabled={needsSetup} />
     </aside>
+  );
+}
+
+// ── method ──────────────────────────────────────────────────────────────────
+
+/**
+ * The page's method as a checklist: each stage done (✓) or not (○), the next
+ * required one marked, the stages used only when the data call for them dim.
+ */
+function MethodChecklist({ method }: { method: MethodProgress }): JSX.Element {
+  return (
+    <div style={checklist} aria-label="Method progress">
+      <span style={{ fontWeight: 600, color: color.secondary, marginRight: 2 }} title={`The page's method: the skill ${method.skill}`}>Method</span>
+      {method.stages.map((st) => {
+        const next = !st.done && st.label === method.next;
+        return (
+          <span
+            key={st.id}
+            style={{
+              whiteSpace: "nowrap",
+              color: st.done ? color.okInk : next ? color.primary : st.optional ? color.faintest : color.faint,
+              fontWeight: next ? 600 : 500,
+            }}
+            title={st.done ? "Done" : next ? "Next" : st.optional ? "If the data call for it" : "Not yet"}
+          >
+            {st.done ? "✓" : "○"} {st.label}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 
@@ -529,6 +563,7 @@ const drawer: CSSProperties = {
   background: color.raised,
   borderLeft: `1px solid ${color.border}`,
 };
+const checklist: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "3px 10px", padding: "7px 14px", borderBottom: `1px solid ${color.border}`, background: color.muted2, fontSize: fz.micro };
 const head: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "12px 14px", borderBottom: `1px solid ${color.border}` };
 const settingsBox: CSSProperties = { display: "flex", flexDirection: "column", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${color.border}`, background: color.muted2 };
 const transcriptBox: CSSProperties = { flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 };

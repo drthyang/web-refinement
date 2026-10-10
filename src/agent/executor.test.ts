@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { AgentExecutor, type ActivityEntry, type AgentHost } from "@/agent/executor";
 import { PAGE_METHOD } from "@/agent/skills";
+import { emptyRecord, keyOfState, type AgentRecord } from "@/agent/method";
 import type { AgentPort, PdfAgentPort, PdfLiveState, PowderAgentPort, PowderLiveState } from "@/agent/port";
 import { AgentLink } from "@/agent/link";
 import { gata4se8PdfExample } from "@/examples/gata4se8Pdf";
@@ -128,8 +129,9 @@ function sessionPort(start: Session): { port: PowderAgentPort; calls: string[]; 
   return { port, calls, session: () => s };
 }
 
-function fakeHost(port: AgentPort | null): { host: AgentHost; steps: { kind: StepKind; agent: boolean }[] } {
+function fakeHost(port: AgentPort | null): { host: AgentHost; steps: { kind: StepKind; agent: boolean }[]; records: Map<string, AgentRecord> } {
   const steps: { kind: StepKind; agent: boolean }[] = [];
+  const records = new Map<string, AgentRecord>();
   let agent = false;
   const host: AgentHost = {
     port: () => port,
@@ -146,8 +148,10 @@ function fakeHost(port: AgentPort | null): { host: AgentHost; steps: { kind: Ste
     recordNow: (kind) => steps.push({ kind, agent }),
     history: () => null,
     goToStep: () => undefined,
+    record: (key) => records.get(key) ?? emptyRecord(key),
+    updateRecord: (key, update) => void records.set(key, update(records.get(key) ?? emptyRecord(key))),
   };
-  return { host, steps };
+  return { host, steps, records };
 }
 
 /**
@@ -346,7 +350,12 @@ describe("AgentExecutor on a live powder fit", () => {
     const start = newSession(exampleStructure());
     // Scale with every site occupancy: an exact degeneracy (all three only scale intensity).
     const { port, calls } = sessionPort({ ...start, powderParams: start.powderParams.map((p) => ({ ...p, fixed: !["scale", "occ_Mn1", "occ_Ga1"].includes(p.id) })) });
-    const { ex, asked, seen } = executor(fakeHost(port).host, true);
+    const { host, records } = fakeHost(port);
+    // The method's firm rules come first (see below); here the gate has passed
+    // and the user allowed the bare occupancies, so the correlations decide.
+    const key = keyOfState("powder", port.state());
+    records.set(key, { ...emptyRecord(key), cellGate: { passed: true, at: 0, summary: "" }, exceptions: [{ rule: "bare-occupancy", reason: "test", at: 0 }] });
+    const { ex, asked, seen } = executor(host, true);
     const out = await ex.run("refine", {});
     expect(out.isError).toBe(true);
     expect(out.text).toMatch(/Not refined: .*Not determined by the data at all, together: .*occ_Mn1.*Fix one of each pair with set_free/);
@@ -361,6 +370,56 @@ describe("AgentExecutor on a live powder fit", () => {
     const refined = parse((await ex.run("refine", {})).text);
     expect(refined.refined).toBe(true);
     expect(asked.at(-1)!.preview).toMatch(/^Refine .* · (strongest correlation \S+ ↔ \S+ -?0\.\d{3}|no correlation above 0\.5)$/);
+  });
+
+  it("keeps the structure fixed until the cell gate passes, and counts the stages a refinement covers", async () => {
+    const start = newSession(exampleStructure());
+    const { port, calls } = sessionPort({ ...start, powderParams: start.powderParams.map((p) => ({ ...p, fixed: !["scale", "bkg0", "pos_Mn1_0"].includes(p.id) })) });
+    const { host, records } = fakeHost(port);
+    const { ex, asked, seen } = executor(host, true);
+    const refused = await ex.run("refine", {});
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/keeps the structure fixed until the cell and space group are trusted, and pos_Mn1_0 is atomic\. The cell gate has not run on this analysis\. Run check_cell_symmetry/);
+    expect(seen.filter((e) => e.tool === "refine").at(-1)!.outcome).toBe("Not run: 1 atomic parameter before the cell gate");
+    expect(calls).toEqual([]); // refused before the correlation probe
+    expect(asked).toEqual([]);
+
+    const gate = parse((await ex.run("check_cell_symmetry", {})).text);
+    expect(gate.passed).toBe(true);
+    const key = keyOfState("powder", port.state());
+    expect(records.get(key)!.cellGate).toMatchObject({ passed: true, summary: "every peak indexes; the absences are consistent" });
+
+    const done = parse((await ex.run("refine", {})).text);
+    expect(done.refined).toBe(true);
+    // Positions refined before the scale/background/cell block finished: a note, not a refusal.
+    expect(done.methodNote).toBeUndefined(); // the base block was free alongside
+    expect(records.get(key)!.stagesDone).toEqual(expect.arrayContaining(["base", "positions"]));
+    const method = parse((await ex.run("get_state", {})).text).method as { stages: string[]; next: string; cellGate: string };
+    expect(method.stages.slice(0, 4)).toEqual(["✓ Cell gate", "✓ Scale, background, cell", "✓ Positions", "○ Profile"]);
+    expect(method.next).toBe("Profile");
+    expect(method.cellGate).toBe("passed");
+
+    // ADPs before the profile: refined, with a note.
+    await ex.run("set_free", { fix: ["pos_Mn1_0"], free: ["B_Mn1"] });
+    const adp = parse((await ex.run("refine", {})).text);
+    expect(adp.methodNote).toMatch(/^Out of the method's order \(my-rietveld-workflow\): adps refined before profile\./);
+  });
+
+  it("never frees an occupancy bare; only the user lifts the rule, asked even in Auto", async () => {
+    const start = newSession(exampleStructure());
+    const { port } = sessionPort({ ...start, powderParams: start.powderParams.map((p) => ({ ...p, fixed: !["scale", "occ_Mn1"].includes(p.id) })) });
+    const { host, records } = fakeHost(port);
+    const key = keyOfState("powder", port.state());
+    records.set(key, { ...emptyRecord(key), cellGate: { passed: true, at: 0, summary: "" } });
+    const { ex, asked } = executor(host, "auto");
+    const refused = await ex.run("refine", {});
+    expect(refused.text).toMatch(/occ_Mn1 is a free occupancy with nothing but the scale to determine it.*Tie it \(set_site_ties/);
+    const allow = parse((await ex.run("allow_exception", { rule: "bare-occupancy", reason: "Mn K-edge anomalous contrast" })).text);
+    expect(allow.allowed).toBe("bare-occupancy");
+    expect(asked.at(-1)).toMatchObject({ tool: "allow_exception", alwaysAsk: true, preview: "Refine an occupancy with no tie or second contrast, because: Mn K-edge anomalous contrast" });
+    expect(records.get(key)!.exceptions).toEqual([expect.objectContaining({ rule: "bare-occupancy", reason: "Mn K-edge anomalous contrast" })]);
+    // Past the rule, the correlation check still applies (scale ↔ the only occupancy).
+    expect((await ex.run("refine", {})).text).not.toMatch(/free occupancy with nothing but the scale/);
   });
 
   it("does not refine when the correlation check itself fails", async () => {
@@ -581,6 +640,8 @@ describe("AgentExecutor on a live PDF fit", () => {
       expect(out.isError).toBe(true);
       expect(out.text).toMatch(new RegExp(`${name} works on the powder page only; the PDF page is open`));
     }
+    // The cell gate is a powder rule: there is nothing to lift on the PDF page.
+    expect((await ex.run("allow_exception", { rule: "cell-gate", reason: "an impurity" })).text).toMatch(/the rule "cell-gate" does not apply on this page/);
   });
 
   it("frees, refines as the agent, and reports Rw; the assessment drops the GoF verdict", async () => {
