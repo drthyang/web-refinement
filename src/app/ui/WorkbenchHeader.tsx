@@ -154,7 +154,7 @@ export function WorkbenchHeader({ steps, active, onStep, version, exports, techn
           >
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <SparkIcon size={14} />
-              Agent
+              <span className="wb-agent-label">Agent</span>
               {agent.pending > 0 && <span style={pendingBadge}>{agent.pending}</span>}
             </span>
           </ActionButton>

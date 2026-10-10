@@ -6,6 +6,8 @@
 
 export const SETTINGS_KEY = "materia.agent.settings";
 export const API_KEY_KEY = "materia.agent.apiKey";
+/** The drawer width the user dragged to (drawerWidth.ts). */
+export const WIDTH_KEY = "materia.agent.width";
 
 /** The keys under the feature's first name ("Copilot", renamed 2026-10-09). */
 const LEGACY = { settings: "materia.copilot.settings", apiKey: "materia.copilot.apiKey" } as const;

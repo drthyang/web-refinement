@@ -1139,7 +1139,7 @@ export function App(): JSX.Element {
     // workbench.css (.wb-shell): the height must follow the dynamic viewport on
     // iOS and undo the large-screen UI zoom, and on phones the whole page
     // scrolls instead, header included.
-    <div className="wb-frame">
+    <div className={agentOpen ? "wb-frame wb-frame-agent" : "wb-frame"}>
     <div className="wb-shell">
       <WorkbenchHeader
         steps={headerSteps}

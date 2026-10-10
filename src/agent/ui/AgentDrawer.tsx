@@ -4,7 +4,7 @@
  * it, so the plot and the parameter panel stay in view while Claude works.
  */
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
 import { color, fz, mono, radius } from "@/app/theme";
 import type { ActivityEntry } from "@/agent/executor";
 import { AGENT_MODES, type AgentController, type AgentMode, type AgentSettings, type TranscriptItem } from "@/agent/useAgent";
@@ -13,6 +13,8 @@ import { listOllamaModels, unreachableHint, type OllamaModel } from "@/agent/oll
 import { listLmStudioModels, lmstudioUnreachableHint, type LmStudioModel } from "@/agent/lmstudio";
 import { MIN_AGENT_CONTEXT } from "@/agent/localServer";
 import { MATH_SPAN_SOURCE, mathInside, texPieces } from "@/agent/ui/texText";
+import { DRAWER_MAX, DRAWER_MIN, KEY_STEP, clampDrawerWidth, readDrawerWidth, writeDrawerWidth } from "@/agent/ui/drawerWidth";
+import { cssZoom } from "@/app/ui/cssZoom";
 
 interface Props {
   readonly agent: AgentController;
@@ -35,8 +37,11 @@ export function AgentDrawer({ agent, onClose }: Props): JSX.Element {
     if (needsSetup) setShowSettings(true);
   }, [needsSetup]);
 
+  const [width, setWidth] = useDrawerWidth();
+  const aside = useRef<HTMLElement>(null);
   return (
-    <aside className="wb-agent" style={drawer} aria-label="Agent">
+    <aside ref={aside} className="wb-agent" style={width === null ? drawer : { ...drawer, ["--wb-agent-w" as string]: `${width}px` }} aria-label="Agent">
+      <ResizeHandle drawer={aside} width={width} onResize={setWidth} />
       <div style={head}>
         <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <SparkIcon />
@@ -53,6 +58,77 @@ export function AgentDrawer({ agent, onClose }: Props): JSX.Element {
       <Transcript agent={agent} />
       <Composer agent={agent} disabled={needsSetup} />
     </aside>
+  );
+}
+
+// ── width ───────────────────────────────────────────────────────────────────
+
+/** The width the user dragged the drawer to (null: the default), remembered by the browser. */
+function useDrawerWidth(): [number | null, (w: number | null, commit?: boolean) => void] {
+  const [width, setWidth] = useState<number | null>(() => (typeof localStorage === "undefined" ? null : readDrawerWidth(localStorage)));
+  const update = (w: number | null, commit = true): void => {
+    setWidth(w);
+    if (commit && typeof localStorage !== "undefined") writeDrawerWidth(localStorage, w);
+  };
+  return [width, update];
+}
+
+/**
+ * The drawer's left edge: drag to resize, ← / → by a step, Enter or a double
+ * click for the default width. Hidden where the drawer covers the page or docks
+ * under it (workbench.css).
+ */
+function ResizeHandle({ drawer, width, onResize }: { drawer: RefObject<HTMLElement>; width: number | null; onResize: (w: number | null, commit?: boolean) => void }): JSX.Element {
+  const drag = useRef<{ x: number; w: number; last: number } | null>(null);
+  // Widths are CSS px: under the large-screen UI zoom, screen px divide by it.
+  const viewport = (): number => window.innerWidth / cssZoom();
+  const current = (): number => (drawer.current ? drawer.current.getBoundingClientRect().width / cssZoom() : width ?? DRAWER_MIN);
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const w = current();
+    drag.current = { x: e.clientX, w, last: w };
+  };
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>): void => {
+    const d = drag.current;
+    if (!d) return;
+    d.last = clampDrawerWidth(d.w + (d.x - e.clientX) / cssZoom(), viewport());
+    onResize(d.last, false);
+  };
+  const onPointerUp = (): void => {
+    const d = drag.current;
+    drag.current = null;
+    if (d && d.last !== d.w) onResize(d.last);
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    const step = e.key === "ArrowLeft" ? KEY_STEP : e.key === "ArrowRight" ? -KEY_STEP : 0;
+    if (step !== 0) {
+      e.preventDefault();
+      onResize(clampDrawerWidth(current() + step, viewport()));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      onResize(null);
+    }
+  };
+  return (
+    <div
+      className="wb-agent-resize"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the Agent panel"
+      aria-valuemin={DRAWER_MIN}
+      aria-valuemax={DRAWER_MAX}
+      aria-valuenow={Math.round(width ?? current())}
+      title="Drag to resize · double-click for the default width"
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onDoubleClick={() => onResize(null)}
+      onKeyDown={onKeyDown}
+    />
   );
 }
 
@@ -401,7 +477,7 @@ function Composer({ agent, disabled }: { agent: AgentController; disabled: boole
       />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <AutonomySwitch agent={agent} />
-        <span style={{ fontSize: fz.micro, color: color.faint, fontFamily: mono, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span className="wb-agent-hint" style={{ fontSize: fz.micro, color: color.faint, fontFamily: mono, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {agent.usage.input + agent.usage.output > 0
             ? `${fmtTokens(agent.usage.input)} in · ${fmtTokens(agent.usage.cacheRead)} cached · ${fmtTokens(agent.usage.output)} out`
             : "Enter to send · Shift+Enter for a new line"}
@@ -538,10 +614,12 @@ const fieldLabel: CSSProperties = { fontSize: fz.micro, color: color.secondary, 
 const input: CSSProperties = { border: `1px solid ${color.input}`, borderRadius: 6, padding: "6px 8px", fontSize: 13, background: color.surface, color: color.ink, width: "100%", boxSizing: "border-box" };
 const note: CSSProperties = { margin: 0, fontSize: 12, color: color.secondary, lineHeight: 1.45 };
 const code: CSSProperties = { fontFamily: mono, fontSize: "0.92em", background: color.chipBg, padding: "0 4px", borderRadius: 4 };
-const userBubble: CSSProperties = { alignSelf: "flex-end", maxWidth: "88%", background: color.primaryTintBg, border: `1px solid ${color.primaryTintBorder}`, color: color.ink, padding: "7px 10px", borderRadius: 10, fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.45 };
-const assistantText: CSSProperties = { fontSize: 13, color: color.ink, lineHeight: 1.5 };
+// A long unbroken token (a parameter id list, a file name, a ref) wraps
+// inside the drawer instead of widening the conversation past it.
+const userBubble: CSSProperties = { alignSelf: "flex-end", maxWidth: "88%", background: color.primaryTintBg, border: `1px solid ${color.primaryTintBorder}`, color: color.ink, padding: "7px 10px", borderRadius: 10, fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.45, overflowWrap: "anywhere" };
+const assistantText: CSSProperties = { fontSize: 13, color: color.ink, lineHeight: 1.5, overflowWrap: "anywhere" };
 const list: CSSProperties = { margin: "0 0 6px", paddingLeft: 18 };
-const toolCard: CSSProperties = { border: `1px solid ${color.border}`, borderRadius: 8, padding: "8px 10px", background: color.surface };
+const toolCard: CSSProperties = { border: `1px solid ${color.border}`, borderRadius: 8, padding: "8px 10px", background: color.surface, overflowWrap: "anywhere" };
 const primaryButton: CSSProperties = { border: `1px solid ${color.primary}`, background: color.primary, color: "#fff", borderRadius: 6, padding: "5px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" };
 const secondaryButton: CSSProperties = { border: `1px solid ${color.control}`, background: color.surface, color: color.ink, borderRadius: 6, padding: "5px 14px", fontSize: 12.5, cursor: "pointer" };
 const noticeStyle = (tone: "info" | "error"): CSSProperties => ({
