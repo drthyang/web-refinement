@@ -37,6 +37,11 @@ export interface LiveToolSpec {
   readonly title: string;
   /** Model-facing: what the tool does and when to reach for it. */
   readonly description: string;
+  /**
+   * The description without the skills (the validation's arm C), where this
+   * one refers to the page's written method; absent: the same in both.
+   */
+  readonly withoutSkills?: string;
   readonly inputSchema: Record<string, z.ZodType>;
   readonly effect: ToolEffect;
   /** The pages it works on; on another page it answers with an error naming them. */
@@ -105,6 +110,8 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     title: "Check the fit range",
     description:
       "Powder page only. Reads the data's two ends and proposes where the fit window should start and stop, as the GSAS-II tutorials do: the long-d end starts just below the first reflection (the background beyond it tells the structure nothing) unless the data hold peaks there that no phase explains (magnetic order, an impurity: then keep them); the far end ends in a gap below a detector's or scan's edge (counts that step up and stay), points with no counts, a line cut by the last point, or the stretch where peaks have faded into the noise; on a converged fit, a stretch at an end the model misses by more than anywhere just inside. Each cut lies in a gap between reflections. Returns each end's verdict with the evidence, the counting σ at the ends, and `proposed` (the window, in the data's unit and in d) — apply it with set_fit_range, which asks the user. The first step of the method: run it before the cell check, and again after the first refinement, when the residual can show what the data alone could not. It never changes the window itself.",
+    withoutSkills:
+      "Powder page only. Reads the data's two ends and proposes where the fit window should start and stop, as the GSAS-II tutorials do: the long-d end starts just below the first reflection (the background beyond it tells the structure nothing) unless the data hold peaks there that no phase explains (magnetic order, an impurity: then keep them); the far end ends in a gap below a detector's or scan's edge (counts that step up and stay), points with no counts, a line cut by the last point, or the stretch where peaks have faded into the noise; on a converged fit, a stretch at an end the model misses by more than anywhere just inside. Each cut lies in a gap between reflections. Returns each end's verdict with the evidence, the counting σ at the ends, and `proposed` (the window, in the data's unit and in d) — apply it with set_fit_range, which asks the user. Run it again after the first refinement, when the residual can show what the data alone could not. It never changes the window itself.",
     inputSchema: {},
     effect: "read",
     pages: ["powder"],
@@ -114,6 +121,8 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     title: "Read the reflection data",
     description:
       "Single-crystal page only. The data before the model, as a crystallographer reads them first: reflections measured and unique after merging in the Laue class, R_int and R_σ, the redundancy, the resolution (d_min, sinθ/λ max) and the completeness to it, ⟨I/σ⟩ and completeness shell by shell, whether Friedel pairs were measured apart (the absolute structure needs them in a non-centrosymmetric group), the reflections the space group forbids that carry intensity (≥ 3σ: a wrong group, twinning, or multiple scattering), the intensity statistics ⟨|E²−1|⟩ (≈ 0.97 centrosymmetric, ≈ 0.74 not; low values hint at twinning), and where the lattice holds more symmetry than the Laue class, each merohedral twin law (`twinLaws`, as set_twin takes it) with the twin fraction Yeates' H-test reads for it from the intensities alone. The method's first stage: read it before refining.",
+    withoutSkills:
+      "Single-crystal page only. The data before the model, as a crystallographer reads them first: reflections measured and unique after merging in the Laue class, R_int and R_σ, the redundancy, the resolution (d_min, sinθ/λ max) and the completeness to it, ⟨I/σ⟩ and completeness shell by shell, whether Friedel pairs were measured apart (the absolute structure needs them in a non-centrosymmetric group), the reflections the space group forbids that carry intensity (≥ 3σ: a wrong group, twinning, or multiple scattering), the intensity statistics ⟨|E²−1|⟩ (≈ 0.97 centrosymmetric, ≈ 0.74 not; low values hint at twinning), and where the lattice holds more symmetry than the Laue class, each merohedral twin law (`twinLaws`, as set_twin takes it) with the twin fraction Yeates' H-test reads for it from the intensities alone.",
     inputSchema: {},
     effect: "read",
     pages: ["singleCrystal"],
@@ -307,6 +316,8 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     title: "Review the space group (last step)",
     description:
       "Powder page only. The LAST step of the method, never the first: once every required stage is refined (scale, background, cell, positions, profile, ADPs) and the fit is still not good, read the REFINED residual at the reflections the space group forbids. Lists the forbidden reflections that still carry intensity and the subgroups of the same lattice that allow them (smallest index first, with their domain counts). Refuses, naming the stages left, until the method's stages are done: intensity differences on known reflections are what refinement fixes, so lowering the symmetry before refining to the best is wrong. The result is a proposal for the user: a lower group is a new model (its CIF), refined again from the start.",
+    withoutSkills:
+      "Powder page only. Once the structure is refined to the best its group allows and the fit is still not good, read the REFINED residual at the reflections the space group forbids. Lists the forbidden reflections that still carry intensity and the subgroups of the same lattice that allow them (smallest index first, with their domain counts). Refuses until a refinement has converged: intensity differences on known reflections are what refinement fixes, so lowering the symmetry before refining to the best is wrong. The result is a proposal for the user: a lower group is a new model (its CIF), refined again from the start.",
     inputSchema: {},
     effect: "read",
     pages: ["powder"],
@@ -377,7 +388,7 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "identify_peaks",
     title: "Identify extra peaks",
     description:
-      "Powder page only. Match peaks no phase of the model explains against phases a pattern often holds besides the sample: the sample environment (Al can or cryostat shields, V, Cu, steels, Nb heat shields, Pb shielding), holders (corundum, graphite), standards (Si, LaB₆, CeO₂) and common synthesis impurities (CaF₂, NaF, NaCl), their lines computed for this radiation. Each phase may scale its d-spacings by up to ±1.5 % (cooling; a part off the sample position shifts its lines). Returns the candidates with the lines they explain and the strong lines they should also show. Uses the residual's unexplained peaks (find_unexplained_peaks), or the d-spacings you pass (e.g. the cell check's unindexed peaks). A lead to put to the user, not an identification; add_known_phase then adds a matched phase to the model.",
+      "Powder page only. Match peaks no phase of the model explains against phases a pattern often holds besides the sample: the sample environment (Al can or cryostat shields, V, Cu, steels, Nb heat shields, Pb shielding), holders (corundum, graphite), standards (Si, LaB₆, CeO₂) and the synthesis impurities in its library, their lines computed for this radiation. Each phase may scale its d-spacings by up to ±1.5 % (cooling; a part off the sample position shifts its lines). Returns the candidates with the lines they explain and the strong lines they should also show. Uses the residual's unexplained peaks (find_unexplained_peaks), or the d-spacings you pass (e.g. the cell check's unindexed peaks). A lead to put to the user, not an identification; add_known_phase then adds a matched phase to the model.",
     inputSchema: {
       d: z.array(z.number().positive()).optional().describe("d-spacings (Å) to identify; default: the residual's unexplained peaks"),
     },
@@ -388,7 +399,7 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     name: "add_known_phase",
     title: "Add a known phase",
     description:
-      "Powder page only. Add one of identify_peaks' library phases (the sample environment, holders, line standards, and the impurities a synthesis leaves most often: CaF₂, NaF, NaCl) to the model as a further phase, with the library's room-temperature cell and positions and B ≈ 0.5 Å². Its scale and cell then refine with the others (free them with set_free; the cell first if identify_peaks found a d scale away from 1); report its weight fraction. Call it once identify_peaks has matched the unindexed peaks to it and the user agrees. A phase outside the library needs the user's CIF (Add CIF…). Always asks the user.",
+      "Powder page only. Add one of identify_peaks' library phases (the sample environment, holders, line standards, and the synthesis impurities in its library) to the model as a further phase, with the library's room-temperature cell and positions and B ≈ 0.5 Å². Its scale and cell then refine with the others (free them with set_free; the cell first if identify_peaks found a d scale away from 1); report its weight fraction. Call it once identify_peaks has matched the unindexed peaks to it and the user agrees. A phase outside the library needs the user's CIF (Add CIF…). Always asks the user.",
     inputSchema: {
       name: z.string().describe("The phase as identify_peaks names it, e.g. \"CaF₂\""),
     },
@@ -597,6 +608,8 @@ export const LIVE_TOOLS: readonly LiveToolSpec[] = [
     title: "Write the analysis report",
     description:
       "Write the analysis report and open it for the user, who can save it as HTML, Markdown or PDF, with the CIF. It holds what the page's own report holds — the data and the model, the fit figure, the refined structure with esds, every parameter, the agreement factors and the diagnostics — and the analysis as you ran it: the History's steps on the path to the result (what each refinement freed, and the method stage that is the reason), the method's checklist, the engine's checks (convergence, agreement, correlations, bounds, residual peaks, serial correlation, bond valences, the cell check and symmetry review) with the issues left open, the Bayesian check if you ran sample_posterior on this refinement, and your notes. Every number in it comes from the engine and the History. You write only `summary`, your own account, which the report labels as yours. Quote the engine's numbers by reference ({{wR2}}, {{Rwp}}, {{verdict}}, {{p:ID}}; get_state lists them): the app fills them in from the engine, and refuses a reference that names nothing the page has. Any decimal number you type yourself is checked against the numbers the report computed: one that matches none is underlined in the report and listed in the answer — correct it (get_state, structure_table) and call again, or leave it out. Call it when the analysis is done and you have reported, or when the user asks for the report.",
+    withoutSkills:
+      "Write the analysis report and open it for the user, who can save it as HTML, Markdown or PDF, with the CIF. It holds what the page's own report holds — the data and the model, the fit figure, the refined structure with esds, every parameter, the agreement factors and the diagnostics — and the analysis as you ran it: the History's steps on the path to the result (what each refinement freed), the engine's checks (convergence, agreement, correlations, bounds, residual peaks, serial correlation, bond valences, the cell check and symmetry review) with the issues left open, the Bayesian check if you ran sample_posterior on this refinement, and your notes. Every number in it comes from the engine and the History. You write only `summary`, your own account, which the report labels as yours. Quote the engine's numbers by reference ({{wR2}}, {{Rwp}}, {{verdict}}, {{p:ID}}; get_state lists them): the app fills them in from the engine, and refuses a reference that names nothing the page has. Any decimal number you type yourself is checked against the numbers the report computed: one that matches none is underlined in the report and listed in the answer — correct it (get_state, structure_table) and call again, or leave it out. Call it when the analysis is done and you have reported, or when the user asks for the report.",
     inputSchema: {
       summary: z.string().min(20).max(6000).describe(
         "Your account, in plain prose, one to four short paragraphs separated by blank lines: what you did and why, what the result shows about the structure, its caveats, and what is left open. The engine's numbers by reference ({{wR2}}, {{p:ID}}); any other number exactly as the tools gave it (or rounded from it); add none of your own.",

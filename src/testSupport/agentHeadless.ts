@@ -15,26 +15,24 @@ import { buildPdfProblem, buildPdfSpec, pdfCurves } from "@/core/workflow/pdf";
 import { applyParameters } from "@/core/workflow/apply";
 import { refine as refineProblem } from "@/core/refinement/engine";
 import { boxcarTable, boxcarWindows, type BoxcarRun } from "@/core/workflow/pdfBoxcar";
-import { DEFAULT_INSTRUMENT, buildSpecFor, keptBindings, keptRow, keptRows, withMagneticRows, withValidUserTies, type Session } from "@/app/powderSession";
+import { DEFAULT_INSTRUMENT, keptRow, withValidUserTies, type Session } from "@/app/powderSession";
 import { withEqualTies } from "@/core/refinement/constraints";
-import { withConstants, type InstrumentParameters } from "@/core/diffraction/instrument";
-import { withAntisite } from "@/core/crystal/antisite";
+import type { InstrumentParameters } from "@/core/diffraction/instrument";
 import { isHydrogen, withAdpModel } from "@/core/crystal/adp";
 import type { DistanceRestraint, RidingRule, StructureModel } from "@/core/crystal/types";
 import { inversionText, invertedModel, invertedRiding, invertedTwinFractions } from "@/core/crystal/inversion";
 import { ridingRules } from "@/core/crystal/riding";
-import { powderRestraints } from "@/app/powderSpec";
-import { runPowderRefinement } from "@/workers/runPowder";
-import { leBailCellPrefit } from "@/core/workflow/leBailPrefit";
-import { refineMultiStart } from "@/core/refinement/multiStart";
 import { axisContext, convertAxisArray } from "@/visualization/axisUnits";
-import { excludedPointMask } from "@/core/refinement/factors";
-import type { RefinementOptions, RefinementResult } from "@/core/refinement/types";
-import { buildMagneticPowderProblem } from "@/core/workflow/magneticPowder";
-import { buildPowderProblem } from "@/core/workflow/powder";
-import { samplePosterior, type SampleResult } from "@/core/refinement/bayes/sampler";
-import { magneticHandle, sessionCurves } from "@/testSupport/magneticHeadless";
-import { recordStep, type ProjectHistory, type Snapshot, type StepActor, type StepKind } from "@/core/project/history";
+import type { RefinementResult } from "@/core/refinement/types";
+import type { SampleOptions, SampleResult } from "@/core/refinement/bayes/sampler";
+import { magneticHandle } from "@/testSupport/magneticHeadless";
+import { ComputeClient } from "@/workers/computeClient";
+import {
+  extentOf, hasTensorAdp, observationsIn, posteriorRun, powderFit, powderPageCurves, refinedPhasesOf, restraintRequest, thoroughFit, weightedR,
+  withAnisotropicAdp, withAntisitePair, withBackgroundTerms, withBackgroundType, withCorrections, withFitResult, withFixed, withInstrumentConstants,
+  withMustrain, withParameterTies, withPhase, withReset, withSiteTies, type FitWindow, type PowderCompute, type PowderPageModel,
+} from "@/app/powderPage";
+import { moveTo, recordStep, restoreStep, type ProjectHistory, type Snapshot, type StepActor, type StepKind } from "@/core/project/history";
 import type { Workspace } from "@/core/project/types";
 import { pdfReportInput, powderReportInput, singleCrystalReportInput } from "@/app/reportInputs";
 import type { ExtinctionModel, OmittedMeasurement, Radiation, ResolutionRange, ShelxWeighting, SingleCrystalDataset, TwinLaw } from "@/core/diffraction/types";
@@ -43,39 +41,47 @@ import { measurementMerge } from "@/core/diffraction/merge";
 import { SINGLE_CRYSTAL_REFINE_OPTIONS, buildSingleCrystalRefinementProblem, buildSingleCrystalSpec, mergedDataset, refineSingleCrystal, inResolution, isOmitted, optimalScale, singleCrystalRefinementComparison, withinResolution, withoutOmitted } from "@/core/workflow/singleCrystalRefinement";
 
 /**
- * A powder page without React: a session, the real curves and the real
- * engine behind the port, so the tools judge an actual fit.
+ * What a headless page keeps of itself in a History step, and how it goes
+ * back to one: the app restores a step's workspace when the user (or the
+ * Agent's go_to_step) returns to it, and a page registered here does the same.
  */
-export function sessionPort(start: Session, instrument: InstrumentParameters = DEFAULT_INSTRUMENT, opts: { readonly instrumentOnPage?: boolean } = {}): { port: PowderAgentPort; calls: string[]; session: () => Session } {
+const PAGE_STATE = new WeakMap<AgentPort, { readonly capture: () => unknown; readonly restore: (captured: unknown) => void }>();
+
+/**
+ * A powder page without React: a session behind the page's own operations
+ * (powderPage.ts) and the app's compute client, which runs in-thread here. So
+ * a tool judges an actual fit, and the page computes what the app's does: the
+ * same curves, agreement, setters, fits, Prefit and posterior, from the same
+ * requests.
+ */
+export function sessionPort(start: Session, instrument: InstrumentParameters = DEFAULT_INSTRUMENT, opts: { readonly instrumentOnPage?: boolean; readonly client?: PowderCompute } = {}): { port: PowderAgentPort; calls: string[]; session: () => Session } {
   let s = start;
   // The page shows its instrument as the app does (a TOF pattern needs it for d); off by default, as the older tests expect.
   const shown = opts.instrumentOnPage ? instrument : undefined;
   let result: RefinementResult | null = null;
-  let fitRange: { min: number; max: number } | null = null;
+  let fitRange: FitWindow | null = null;
   const calls: string[] = [];
+  // The app's compute client: without a Worker (here) it runs each request in-thread. A test may watch the requests.
+  const client: PowderCompute = opts.client ?? new ComputeClient();
+  /** The window as the app applies it: only when it narrows the pattern. */
+  const activeWindow = (): FitWindow | null => {
+    if (!fitRange) return null;
+    const extent = extentOf(powderPageCurves(s).curves.x);
+    return fitRange.min > extent.min || fitRange.max < extent.max ? { ...fitRange } : null;
+  };
+  const page = (): PowderPageModel => ({ session: s, instrument, fitRange: activeWindow(), result });
+  const changed = (next: Session): void => {
+    s = next;
+    result = null;
+  };
   const state = (): PowderLiveState => {
-    const curves = sessionCurves(s);
-    const xs = curves.x;
-    const excluded = excludedPointMask(curves.yObs);
-    let num = 0;
-    let den = 0;
-    let n = 0;
-    curves.yObs.forEach((o, i) => {
-      if (excluded[i]) return;
-      n++;
-      const w = 1 / Math.max(o, 1);
-      num += w * (o - curves.yCalc[i]!) ** 2;
-      den += w * o * o;
-    });
+    const { curves } = powderPageCurves(s);
+    const window = activeWindow();
+    const zero = s.powderParams.find((p) => p.kind === "zeroShift")?.value;
     return {
       structure: s.structure,
       extraPhases: s.extraPhases,
-      // Each phase with the parameters applied, its bindings routed by phase (as the page does).
-      refinedPhases: ((): PowderLiveState["refinedPhases"] => {
-        const values: Record<string, number> = Object.fromEntries(s.powderParams.map((p) => [p.id, p.value]));
-        const multi = s.extraPhases.length > 0;
-        return [s.structure, ...s.extraPhases].map((ph) => applyParameters(ph, multi ? s.powderBindings.filter((b) => b.targetId === ph.id) : s.powderBindings, values).model);
-      })(),
+      refinedPhases: refinedPhasesOf(s),
       pattern: s.pattern,
       parameters: s.powderParams,
       bindings: s.powderBindings,
@@ -83,157 +89,107 @@ export function sessionPort(start: Session, instrument: InstrumentParameters = D
       magnetic: s.magnetic ?? null,
       result,
       instrument: shown ?? null,
-      fitRange,
-      extent: { min: Math.min(...xs), max: Math.max(...xs) },
+      fitRange: window,
+      extent: extentOf(curves.x),
       busy: false,
-      viewOnly: false,
-      wR: Math.sqrt(num / den),
-      settings: { backgroundTerms: s.backgroundTerms, backgroundType: "chebyshev", mustrain: "isotropic", anisotropicAdp: s.structure.sites.some((site) => site.adp.kind === "anisotropic"), siteTies: s.siteTies, corrections: s.corrections ?? {} },
+      viewOnly: s.pattern.xUnit === "tof" && s.powderProfile.shape !== "tof",
+      wR: weightedR(s, curves, window),
+      settings: {
+        backgroundTerms: s.backgroundTerms,
+        backgroundType: s.powderProfile.backgroundType ?? "chebyshev",
+        mustrain: s.mustrain ?? "isotropic",
+        anisotropicAdp: hasTensorAdp(s.structure),
+        siteTies: s.siteTies,
+        corrections: s.corrections ?? {},
+      },
       curves,
-      d: convertAxisArray(curves.x, s.pattern.xUnit, "dSpacing", axisContext(s.pattern, shown, s.powderParams.find((p) => p.kind === "zeroShift")?.value)),
-      observationCount: n,
-      axis: axisContext(s.pattern, shown, s.powderParams.find((p) => p.kind === "zeroShift")?.value),
+      d: s.pattern.xUnit === "dSpacing" ? curves.x : convertAxisArray(curves.x, s.pattern.xUnit, "dSpacing", axisContext(s.pattern, shown, zero)),
+      observationCount: observationsIn(curves, window),
+      axis: axisContext(s.pattern, shown, zero),
       source: "test",
-      restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
-      ...(s.extraPhases.length > 0 ? { extraPhases: s.extraPhases } : {}),
+      restraints: restraintRequest(s).restraints ?? [],
     };
   };
-  /** The fit as the page runs it, inside the fit window: nuclear + magnetic once a magnetic model is on the session. */
-  const fitFrom = (parameters: Session["powderParams"], options: Partial<RefinementOptions>): RefinementResult =>
-    s.magnetic
-      ? refineProblem(buildMagneticPowderProblem(s.structure, s.magnetic, s.pattern, parameters, s.powderBindings, { shape: s.powderProfile.shape, ...(s.powderProfile.eta !== undefined ? { eta: s.powderProfile.eta } : {}) }, fitRange ?? undefined), options)
-      : runPowderRefinement({
-        type: "refinePowder",
-        requestId: 0,
-        structure: s.structure,
-        pattern: s.pattern,
-        parameters,
-        bindings: s.powderBindings,
-        shape: s.powderProfile.shape,
-        restraints: powderRestraints([s.structure], s.siteTies, s.powderParams),
-        ...(s.extraPhases.length > 0 ? { extraPhases: s.extraPhases } : {}),
-        ...(fitRange ? { fitRange: { ...fitRange } } : {}),
-        options,
-      });
-  const fitOnce = (options: Partial<RefinementOptions>): RefinementResult => fitFrom(s.powderParams, options);
-  let sampled: SampleResult | null = null;
-  const refine = async (): Promise<string | null> => {
-    calls.push("refine");
-    const r = fitOnce({ maxIterations: 20 });
-    s = { ...s, powderParams: s.powderParams.map((p) => ({ ...p, value: r.parameters[p.id] ?? p.value })) };
-    result = r;
-    return null;
-  };
-  /**
-   * The Prefit / Escape-minimum button as the page runs it: with no fit yet,
-   * a Le Bail cell pre-fit (one phase, a cell row free; its zero seeds a free
-   * zero) and then a multi-start search of 8 restarts; after a fit, 3
-   * restarts with a tight kick.
-   */
-  const thorough = async (): Promise<string | null> => {
-    calls.push("thorough");
-    const prefit = result === null;
-    let start = s.powderParams;
-    const isCell = (kind: string): boolean => kind === "cellLength" || kind === "cellAngle";
-    if (prefit && !s.magnetic && s.extraPhases.length === 0 && s.pattern.xUnit === "twoTheta" && start.some((p) => isCell(p.kind) && !p.fixed && !p.expression)) {
-      const pre = leBailCellPrefit(s.structure, s.pattern, start.filter((p) => isCell(p.kind)), s.powderBindings.filter((b) => isCell(b.kind)), {
-        shape: s.powderProfile.shape,
-        ...(s.powderProfile.eta !== undefined ? { eta: s.powderProfile.eta } : {}),
-        ...(fitRange ? { fitRange: { ...fitRange } } : {}),
-      });
-      if (pre.refined) {
-        start = start.map((p) => (pre.cellValues[p.id] !== undefined
-          ? { ...p, value: pre.cellValues[p.id]! }
-          : p.kind === "zeroShift" && pre.zero !== undefined && !p.fixed && !p.expression ? { ...p, value: pre.zero } : p));
-      }
-    }
-    const ms = await refineMultiStart(start, (from) => {
-      const r = fitFrom([...from], { maxIterations: 20 });
-      return { parameters: from.map((p) => ({ ...p, value: r.parameters[p.id] ?? p.value })), final: r };
-    }, prefit ? { restarts: 8 } : { restarts: 3, escapeSigma: 1.5 });
-    s = { ...s, powderParams: s.powderParams.map((p) => ({ ...p, value: ms.final.parameters[p.id] ?? p.value })) };
-    result = ms.final;
-    return null;
-  };
+  /** The posterior run to continue: its closure keeps the problem it sampled, as the page's. */
+  let sampled: { result: SampleResult; rerun: (options: SampleOptions) => Promise<SampleResult> } | null = null;
   const port: PowderAgentPort = {
     technique: "powder",
     state,
     setFixed: (changes) => {
       calls.push(`setFixed ${changes.map((c) => `${c.id}=${c.fixed}`).join(",")}`);
-      const m = new Map(changes.map((c) => [c.id, c.fixed]));
-      s = { ...s, powderParams: s.powderParams.map((p) => (m.has(p.id) ? { ...p, fixed: m.get(p.id)! } : p)) };
+      s = withFixed(s, changes);
     },
-    setBackgroundTerms: (n) => calls.push(`terms ${n}`),
-    setBackgroundType: (t) => calls.push(`type ${t}`),
-    setMustrain: (m) => calls.push(`mustrain ${m}`),
-    setAnisotropicAdp: (on) => calls.push(`adp ${on}`),
+    setBackgroundTerms: (n) => {
+      calls.push(`terms ${n}`);
+      changed(withBackgroundTerms(s, n, instrument));
+    },
+    setBackgroundType: (t) => {
+      calls.push(`type ${t}`);
+      changed(withBackgroundType(s, t));
+    },
+    setMustrain: (m) => {
+      calls.push(`mustrain ${m}`);
+      changed(withMustrain(s, m, instrument));
+    },
+    setAnisotropicAdp: (on) => {
+      calls.push(`adp ${on}`);
+      changed(withAnisotropicAdp(s, on, instrument));
+    },
     setSiteTies: (update) => {
       calls.push(`ties ${JSON.stringify(update)}`);
-      s = { ...s, siteTies: { ...s.siteTies, ...update } };
+      changed(withSiteTies(s, update, instrument));
     },
     addAntisite: (a, b) => {
       calls.push(`antisite ${a} ${b}`);
-      const structure = withAntisite(s.structure, a, b);
-      const siteTies = { ...s.siteTies, occupancyToUnity: true, composition: true };
-      const spec = buildSpecFor(structure, s.extraPhases, s.pattern, instrument, true, s.backgroundTerms, siteTies, s.mustrain ?? "isotropic", s.corrections);
-      s = { ...s, structure, siteTies, powderParams: keptRows(spec.params, s.powderParams), powderBindings: keptBindings(spec.bindings, s.powderBindings) };
+      changed(withAntisitePair(s, a, b, instrument));
     },
     addPhase: (structure) => {
       calls.push(`add phase ${structure.name}`);
-      const extraPhases = [...s.extraPhases, structure];
-      const spec = buildSpecFor(s.structure, extraPhases, s.pattern, instrument, true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic", s.corrections);
-      s = { ...s, extraPhases, powderParams: keptRows(spec.params, s.powderParams), powderBindings: keptBindings(spec.bindings, s.powderBindings), powderProfile: spec.profile };
+      changed(withPhase(s, structure, instrument));
     },
     setParameterTies: (update) => {
       calls.push(`ties ${JSON.stringify(update)}`);
-      s = { ...s, powderParams: withEqualTies(s.powderParams, update) };
+      changed(withParameterTies(s, update));
     },
     setInstrumentConstants: (update) => {
       calls.push(`constants ${JSON.stringify(update)}`);
-      if (s.pattern.radiation.kind === "xray") s = { ...s, pattern: { ...s.pattern, radiation: withConstants(s.pattern.radiation, update) } };
+      changed(withInstrumentConstants(s, update));
     },
     setCorrections: (update) => {
       calls.push(`corrections ${JSON.stringify(update)}`);
-      const was = s.corrections ?? {};
-      const po = update.preferredOrientation === undefined ? was.preferredOrientation : update.preferredOrientation ?? undefined;
-      const peak = update.peak ?? was.peak ?? [];
-      const corrections = { ...((update.asymmetry ?? was.asymmetry) ? { asymmetry: true } : {}), ...(po ? { preferredOrientation: po } : {}), ...(peak.length ? { peak } : {}) };
-      const spec = buildSpecFor(s.structure, s.extraPhases, s.pattern, instrument, true, s.backgroundTerms, s.siteTies, "isotropic", corrections);
-      const previous = new Map(s.powderParams.map((p) => [p.id, p]));
-      s = {
-        ...s,
-        corrections,
-        powderParams: withMagneticRows(spec.params.map((p) => {
-          const old = previous.get(p.id);
-          return old ? { ...p, value: old.value, initialValue: old.initialValue, fixed: old.fixed } : { ...p, fixed: true };
-        }), s.powderParams),
-        powderBindings: keptBindings(spec.bindings, s.powderBindings),
-        powderProfile: spec.profile,
-      };
-      result = null;
+      changed(withCorrections(s, update, instrument));
     },
     setFitRange: (r) => {
       calls.push(`range ${r ? `${r.min}-${r.max}` : "whole"}`);
-      fitRange = r ? { ...r } : null;
+      fitRange = r ? { min: r.min, max: r.max } : null;
     },
     showPeaks: (peaks) => calls.push(`showPeaks ${peaks.map((p) => p.d.toFixed(3)).join(",")}`),
-    refine,
-    thorough,
+    refine: async () => {
+      calls.push("refine");
+      const r = await powderFit(client, page(), { maxIterations: 20 });
+      s = withFitResult(s, r);
+      result = r;
+      return null;
+    },
+    thorough: async () => {
+      calls.push("thorough");
+      const out = await thoroughFit(client, page());
+      s = out.session;
+      result = out.result;
+      return null;
+    },
     samplePosterior: async ({ continue: more, steps }) => {
       calls.push(`sample ${more ? "continue" : "start"} ${steps}`);
       if (more && !sampled) return "there is no posterior run to continue: sample first";
-      const problem = buildPowderProblem(s.structure, s.pattern, s.powderParams, s.powderBindings, s.powderProfile, powderRestraints([s.structure], s.siteTies, s.powderParams));
-      sampled = samplePosterior(problem, {
-        nSteps: steps,
-        seed: 0xbae5,
-        ...(more && sampled ? { init: sampled.resume } : {}),
-        ...(result?.esd ? { linearizedEsd: result.esd } : {}),
-      });
-      return sampled;
+      const prior = more ? sampled : null;
+      const rerun = prior ? prior.rerun : posteriorRun(client, page());
+      const res = await rerun({ nSteps: steps, seed: 0xbae5, ...(prior ? { init: prior.result.resume } : {}) });
+      sampled = { result: res, rerun };
+      return res;
     },
     probe: async (options) => {
       calls.push("probe");
-      return fitOnce(options);
+      return powderFit(client, page(), options);
     },
     // The page's report (Export ▾ → Report) from the same state.
     reportInput: () => {
@@ -252,7 +208,7 @@ export function sessionPort(start: Session, instrument: InstrumentParameters = D
         curves: { x: st.curves.x, yObs: st.curves.yObs, yCalc: st.curves.yCalc, diff: st.curves.yObs.map((o, i) => o - st.curves.yCalc[i]!) },
         xLabel: s.pattern.xUnit === "twoTheta" ? "2θ (°)" : s.pattern.xUnit,
         ticks: [],
-        fitRange,
+        fitRange: st.fitRange,
         pointsInWindow: st.observationCount,
         tofViewOnly: false,
         explored: null,
@@ -261,9 +217,7 @@ export function sessionPort(start: Session, instrument: InstrumentParameters = D
     cancel: () => calls.push("cancel"),
     reset: (ids) => {
       calls.push(ids ? `reset ${ids.join(",")}` : "reset");
-      const only = ids ? new Set(ids) : null;
-      s = { ...s, powderParams: s.powderParams.map((p) => (only && !only.has(p.id) ? p : { ...p, value: p.initialValue })) };
-      result = null;
+      changed(withReset(s, ids));
     },
     magnetic: () => magnetic,
     openStep: (step) => calls.push(`step ${step}`),
@@ -272,6 +226,15 @@ export function sessionPort(start: Session, instrument: InstrumentParameters = D
     s = next;
     result = null;
   }, (step) => calls.push(`step ${step}`), shown);
+  PAGE_STATE.set(port, {
+    capture: () => ({ session: s, result, fitRange }),
+    restore: (captured) => {
+      const at = captured as { session: Session; result: RefinementResult | null; fitRange: FitWindow | null };
+      s = at.session;
+      result = at.result;
+      fitRange = at.fitRange;
+    },
+  });
   return { port, calls, session: () => s };
 }
 
@@ -290,6 +253,7 @@ export function fakeHost(
   port: AgentPort | null,
   history: () => ProjectHistory | null = () => null,
   onRecord?: (kind: StepKind, agent: boolean) => void,
+  goToStep: (id: string) => void = () => undefined,
 ): { host: AgentHost; steps: { kind: StepKind; agent: boolean }[]; records: Map<string, AgentRecord> } {
   const steps: { kind: StepKind; agent: boolean }[] = [];
   const records = new Map<string, AgentRecord>();
@@ -311,7 +275,7 @@ export function fakeHost(
       onRecord?.(kind, agent);
     },
     history,
-    goToStep: () => undefined,
+    goToStep,
     record: (key) => records.get(key) ?? emptyRecord(key),
     updateRecord: (key, update) => void records.set(key, update(records.get(key) ?? emptyRecord(key))),
   };
@@ -328,7 +292,7 @@ export function fakeHost(
  * (record("refine", "agent", "Refine")). A report written in a test or an
  * eval then lists the analysis' steps with their agreement, as the app's does.
  */
-export function headlessHistory(port: AgentPort): { history: () => ProjectHistory | null; record: (kind: StepKind, actor?: StepActor, label?: string) => void } {
+export function headlessHistory(port: AgentPort): { history: () => ProjectHistory | null; record: (kind: StepKind, actor?: StepActor, label?: string) => void; goTo: (id: string) => void } {
   const snapshot = (): Snapshot => {
     const s = port.state();
     const structures = "phases" in s ? s.phases : "dataset" in s ? [s.structure] : [s.structure, ...s.extraPhases];
@@ -344,13 +308,21 @@ export function headlessHistory(port: AgentPort): { history: () => ProjectHistor
           ...(s.weighting ? { weighting: { a: s.weighting.a, b: s.weighting.b } } : {}),
         }
       : {};
-    return { structures, workspace: { technique: port.technique, refinement, ...sc } as unknown as Workspace };
+    // A registered page keeps its own state with the step, to go back to it (PAGE_STATE).
+    const page = PAGE_STATE.get(port);
+    return { structures, workspace: { technique: port.technique, refinement, ...sc, ...(page ? { headlessPage: page.capture() } : {}) } as unknown as Workspace };
   };
   let h: ProjectHistory = recordStep(null, { ...snapshot(), kind: "load", label: "Start" });
   return {
     history: () => h,
     record: (kind, actor, label) => {
       h = recordStep(h, { ...snapshot(), kind, ...(label ? { label } : {}), ...(actor ? { actor } : {}) });
+    },
+    // The app's go-to-step: the step's state back on the page, and the History's current step moved to it.
+    goTo: (id) => {
+      const captured = (restoreStep(h, id).workspace as unknown as { headlessPage?: unknown }).headlessPage;
+      if (captured !== undefined) PAGE_STATE.get(port)?.restore(captured);
+      h = moveTo(h, id);
     },
   };
 }

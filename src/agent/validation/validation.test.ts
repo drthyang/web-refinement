@@ -5,12 +5,18 @@ import { tmpdir } from "node:os";
 import { DEV_CASES, HELD_OUT_TERMS, MESSAGE, TEST_CASES, TOLERANCES, VALIDATION_CASES, caseById, casePage } from "@/agent/validation/cases";
 import { assertsFault, recovered, reproducibility, scoreRun, unsafeOutcomes, type CaseScore } from "@/agent/validation/scoring";
 import { SpendLedger, armARecord, costOf, modelByKey } from "@/agent/validation/run";
-import { decisionsOf, traceNumbers, transcriptMarkdown } from "@/agent/validation/record";
+import { decisionsOf, policyLine, traceNumbers, transcriptMarkdown } from "@/agent/validation/record";
+import { runPolicy } from "@/agent/chat";
 import { findingProblems, type Finding } from "@/agent/validation/findings";
 import { agentSystemPrompt } from "@/agent/systemPrompt";
 import { AgentExecutor } from "@/agent/executor";
 import { fakeHost, sessionPort } from "@/testSupport/agentHeadless";
-import type { EvalEvent } from "@/agent/evals/harness";
+import { runScenario, type EvalEvent } from "@/agent/evals/harness";
+import { scenario } from "@/agent/evals/scenarios";
+import { scriptedModel, type ScriptTurn } from "@/agent/evals/scripted";
+import { RIETVELD } from "@/agent/evals/replays";
+import { allSkills } from "@/agent/skills";
+import { stagesFor } from "@/agent/method";
 import { openedSession, simulatePowder, structureOf, cif } from "@/agent/validation/simulate";
 
 /**
@@ -43,18 +49,28 @@ describe("the validation's rules", () => {
   });
 
   it("never tunes on the test set: its structures and ids appear nowhere the Agent is taught or evaluated", () => {
+    // The skills and the knowledge they cite; everything under src/agent (tools, prompt, eval scenarios and their
+    // tests); and every source file that ships, since any of them can reach the model as a tool's text (the MCP
+    // tools, the diagnostics, the known-phase library, the app). A unit test elsewhere is seen by no model.
     const files: string[] = [];
-    const walk = (dir: string): void => {
+    const walk = (dir: string, tests: boolean): void => {
       for (const name of readdirSync(dir)) {
         const p = join(dir, name);
         if (statSync(p).isDirectory()) {
-          if (p !== join(ROOT, "src/agent/validation")) walk(p);
-        } else if (/\.(md|ts|tsx)$/.test(name)) files.push(p);
+          if (p !== join(ROOT, "src/agent/validation")) walk(p, tests || p === join(ROOT, "src/agent"));
+        } else if (/\.(md|ts|tsx)$/.test(name) && (tests || !/\.test\.tsx?$/.test(name))) files.push(p);
       }
     };
-    for (const dir of [".claude/skills", "knowledge", "src/agent"]) walk(join(ROOT, dir));
-    expect(files.length).toBeGreaterThan(50);
+    for (const dir of [".claude/skills", "knowledge"]) walk(join(ROOT, dir), true);
+    walk(join(ROOT, "src"), false);
+    expect(files.some((f) => f.includes("src/mcp/registry.ts")) && files.some((f) => f.includes("src/core/diagnostics/knownPhases.ts"))).toBe(true);
+    expect(files.some((f) => f.endsWith("src/agent/evals/evals.test.ts"))).toBe(true);
+    expect(files.length).toBeGreaterThan(300);
     const terms = [...HELD_OUT_TERMS, ...TEST_CASES.map((c) => new RegExp(`\\b${c.id}\\b`))];
+    // A test case's impurity is in the known-phase library, as a lab's would be, but the text that teaches the Agent does not name it.
+    const taught = files.filter((f) => f.includes("/.claude/skills/") || f.includes("/knowledge/") || /src\/agent\/tools\.ts$|src\/mcp\/registry\.ts$/.test(f));
+    expect(taught.length).toBeGreaterThan(6);
+    expect(taught.filter((f) => /\bNaCl\b/.test(readFileSync(f, "utf8"))).map((f) => f.slice(ROOT.length + 1))).toEqual([]);
     const hits = files.flatMap((f) => {
       const text = readFileSync(f, "utf8");
       return terms.filter((t) => t.test(text)).map((t) => `${f.slice(ROOT.length + 1)}: ${t}`);
@@ -188,6 +204,47 @@ describe("arms B and C, wired without a model", () => {
     expect((await off.run("set_free", { free: ["scale"] })).text).not.toMatch(/read the method first/);
     const on = new AgentExecutor(fakeHost(port).host, opts);
     expect((await on.run("set_free", { free: ["scale"] })).text).toMatch(/read the method first/);
+  });
+
+  it("arm C sees no method anywhere the model reads: the prompt, the tools, and every answer and note", async () => {
+    // A session that touches every place the method shows: get_state, a refinement out of the
+    // method's order (the ADPs first), the symmetry review's gate, and the report.
+    const script = (skills: boolean): ScriptTurn[] => [
+      { calls: [...(skills ? [RIETVELD] : []), { name: "get_state" }] },
+      { calls: [{ name: "set_free", input: { free: ["B_Mn1", "B_Ga1"] } }, { name: "refine" }] },
+      { calls: [{ name: "review_symmetry" }] },
+      { calls: [{ name: "write_report", input: { summary: "The ADPs refined." } }] },
+      { text: "The ADPs refined." },
+    ];
+    const seen = async (skills: boolean, toolScope: "all" | "stage"): Promise<{ text: string; offered: readonly (readonly string[])[] }> => {
+      const stand = await scriptedModel(script(skills));
+      try {
+        await runScenario(scenario("full-refinement"), { ...stand.model, toolScope, ...(skills ? {} : { skills: false }) });
+        // What the model reads of each request: the instructions, the tools and the conversation (not the API's own settings).
+        const read = (stand.requests() as { system?: unknown; tools?: unknown; messages?: unknown }[]).map((r) => ({ system: r.system, tools: r.tools, messages: r.messages }));
+        return { text: JSON.stringify(read), offered: stand.offered() };
+      } finally {
+        await stand.close();
+      }
+    };
+    const labels = [...new Set((["powder", "pdf", "singleCrystal"] as const).flatMap((page) => stagesFor(page).map((st) => st.label)))];
+    const checklist = new RegExp(`[✓○] (${labels.map((l) => l.replace(/[()]/g, "\\$&")).join("|")})`);
+    const method = [...allSkills().map((k) => new RegExp(k.name)), /read_skill/, /"method":/, /methodNote/, checklist, /the method's|stages? of the method|method's (order|stages)/i];
+    const leaks = (text: string): string[] => method.filter((m) => m.test(text)).map(String);
+    for (const scope of ["all", "stage"] as const) {
+      const off = await seen(false, scope);
+      expect(leaks(off.text), scope).toEqual([]);
+      // No stage to scope by: a local model is offered every tool of the page (bar read_skill), on every request.
+      if (scope === "stage") for (const o of off.offered) expect(o.length).toBe(off.offered[0]!.length);
+    }
+    // The same probe finds the method where it is.
+    expect(leaks((await seen(true, "all")).text).length).toBeGreaterThan(3);
+  }, 60_000);
+
+  it("says in each transcript the policy the run ran under", () => {
+    const local = runPolicy({ transport: "lmstudio", model: "m", effort: "high", policy: { temperature: 0.6 } }, 32768);
+    expect(policyLine(local)).toBe("turn cap 80 · tools by the page and the method's stage · old results digested to fit the window · stops after reads that change nothing · temperature 0.6 · replies up to 64000 tokens");
+    expect(policyLine(runPolicy({ transport: "api-key", model: "m", effort: "high" }, null))).toMatch(/^turn cap 40 · every tool · old results cleared by the API · no stop .* · adaptive thinking/);
   });
 
   it("prices the API runs and stops before the cap", () => {

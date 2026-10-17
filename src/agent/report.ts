@@ -89,7 +89,7 @@ function freeFixOnly(st: HistoryStep): boolean {
  * The steps on the path from the first step to the one on screen, as the
  * report lists them, and how many steps lie on branches the analysis left.
  */
-export function historySteps(page: AgentPage, history: ProjectHistory | null): { steps: ReportStep[]; otherBranches: number; rowOf: Map<string, number> } {
+export function historySteps(page: AgentPage, history: ProjectHistory | null, method = true): { steps: ReportStep[]; otherBranches: number; rowOf: Map<string, number> } {
   if (!history) return { steps: [], otherBranches: 0, rowOf: new Map() };
   const path = lineage(history);
   const stageLabel = new Map(stagesFor(page).map((s) => [s.id, s.label]));
@@ -97,7 +97,8 @@ export function historySteps(page: AgentPage, history: ProjectHistory | null): {
   const steps = shown.map((st): ReportStep => {
     const refine = st.kind === "refine";
     const free = refine ? stepParameters(st).filter((p) => !p.fixed && !p.expression) : [];
-    const stages = stagesCovered(page, free).map((id) => stageLabel.get(id) ?? id).join(" · ");
+    // Without the skills (arm C) there is no method stage to give as a step's reason.
+    const stages = method ? stagesCovered(page, free).map((id) => stageLabel.get(id) ?? id).join(" · ") : "";
     const status = refine && st.summary.status && st.summary.status !== "converged" ? ` (${st.summary.status})` : "";
     return {
       label: `${st.name ? `${st.name} — ` : ""}${st.label}${status}`,
@@ -360,16 +361,23 @@ export interface AgentReportArgs {
   /** What the user said in the conversation: the numbers they gave may be quoted. */
   readonly userText?: string;
   readonly date?: Date;
+  /**
+   * The page's written method was in play (default). False without the skills
+   * (the validation's arm C): no method checklist, no stage given as a step's
+   * reason, and no stage left among the open issues.
+   */
+  readonly method?: boolean;
 }
 
 /** Build the report: its input, the Agent section, the HTML and the Markdown, and the audit. */
 export function buildAgentReport(a: AgentReportArgs): { input: ReportInput; agent: ReportAgent; html: string; markdown: string; unverified: string[]; audit: AgentReport["audit"] } {
+  const method = a.method !== false;
   const progress = methodProgress(a.page, a.record);
-  const { steps, otherBranches, rowOf } = historySteps(a.page, a.history);
+  const { steps, otherBranches, rowOf } = historySteps(a.page, a.history, method);
   const compared = a.page === "singleCrystal" && a.input.phases[0] ? comparedRefinements(a.history, a.input.phases[0].structure.cell, rowOf) : null;
   const diagnosed = earlierDiagnoses(a.record, a.history, rowOf, steps);
   const checks = [...a.checks, ...recordChecks(a.page, a.record), ...(diagnosed ? [diagnosed] : []), ...(compared ? [compared] : [])];
-  const left = stagesLeft(a.page, a.record);
+  const left = method ? stagesLeft(a.page, a.record) : [];
   // An earlier run is placed by its row in the steps table, the reader's own reference.
   const where = (id: string | null): string => {
     const row = id ? rowOf.get(id) : undefined;
@@ -383,7 +391,7 @@ export function buildAgentReport(a: AgentReportArgs): { input: ReportInput; agen
   ];
   const base: ReportAgent = {
     model: a.model,
-    method: { skill: progress.skill, stages: progress.stages.map((s) => ({ label: s.label, done: s.done, optional: s.optional })) },
+    ...(method ? { method: { skill: progress.skill, stages: progress.stages.map((s) => ({ label: s.label, done: s.done, optional: s.optional })) } } : {}),
     steps,
     agreementLabel: a.page === "pdf" ? "Rw" : a.page === "singleCrystal" ? "wR2" : "wR",
     ...(otherBranches > 0 ? { otherBranches } : {}),

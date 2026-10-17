@@ -50,6 +50,7 @@ workbench? Start with the [user guide](./USER_GUIDE.md), and read
 | [ROADMAP.md](./ROADMAP.md) | The authoritative roadmap for the whole project |
 | [PDF_MPDF_ROADMAP.md](./PDF_MPDF_ROADMAP.md) | The real-space PDF and magnetic PDF track |
 | [PLAN_SUBGROUPS_AND_INCOMMENSURATE.md](./PLAN_SUBGROUPS_AND_INCOMMENSURATE.md) | Planned next: PDF subgroups and supercells; incommensurate magnetic studies |
+| [AGENT_PLAN.md](./AGENT_PLAN.md) | Planned before the Agent's validation: its architecture, tools and skills |
 
 ## Archive
 

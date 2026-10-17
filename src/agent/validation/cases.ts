@@ -371,6 +371,6 @@ export const TEST_CASES = TEST;
 export const DEV_CASES = DEV;
 
 /** The held-out structures' names and formulas: none may appear where the Agent is taught (validation.test.ts). */
-export const HELD_OUT_TERMS: readonly RegExp[] = [/\brutile\b/i, /\bTiO[2₂]\b/, /\bcalcite\b/i, /\bCaCO[3₃]\b/, /\bwurtzite\b/i, /\bZnO\b/, /\bNiAl\b/];
+export const HELD_OUT_TERMS: readonly RegExp[] = [/\brutile\b/i, /\bTiO[2₂]\b/, /titanium dioxide/i, /\bcalcite\b/i, /\bCaCO[3₃]\b/, /calcium carbonate/i, /\bwurtzite\b/i, /\bZnO\b/, /zinc oxide/i, /\bNiAl\b/, /nickel aluminide/i];
 
 export const caseById = (id: string): ValidationCase | undefined => VALIDATION_CASES.find((c) => c.id === id);

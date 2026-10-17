@@ -467,10 +467,14 @@ The page-specific handlers are [`powderTools.ts`](../src/agent/powderTools.ts),
   then occupancy and particle size) are a checklist in the drawer and
   `get_state`'s `method`. A stage is done once a converged refinement had one
   of its parameters free, whoever ran it (the scale, refined with every
-  stage, counts for the first only when nothing else is free). A refinement out of order runs, with
-  a `methodNote` in its outcome.
+  stage, counts for the first only when nothing else is free), and stays done
+  while it is on the History's path to the step on screen and each of its
+  parameters holds the value the last refinement of it left: undo,
+  `go_to_step`, a reset and a value typed in by hand take it back off. A
+  refinement out of order runs, with a `methodNote` in its outcome.
 - The record behind them (the cell check, the symmetry review, the
-  exceptions, the stages done, and the Agent's notes) is kept per analysis by the shell and saved with the project
+  exceptions, the measurements kept at the user's word, the stages done, and
+  the Agent's notes) is kept per analysis by the shell and saved with the project
   (`agent.records` in the project file; autosaved too). `write_note` adds a
   note without asking (it changes the record, not the analysis); `get_state`
   lists the notes, so a later conversation or session starts from them.

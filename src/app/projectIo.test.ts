@@ -45,6 +45,7 @@ describe("the Agent's records in a project", () => {
       key: "powder¦mgal2o4.xye¦MgAl2O4|F d -3 m:2",
       cellCheck: { passed: true, at: 1, summary: "every peak indexes; no absence flagged" },
       exceptions: [{ rule: "bare-occupancy" as const, reason: "isotopic contrast", at: 2 }],
+      kept: [{ measurement: "1,0,4,2", reason: "re-measured; the value stands", at: 4 }],
       stagesDone: ["base", "positions"],
       notes: [{ text: "The user holds the composition: inversion is the question.", at: 3 }],
     };
@@ -55,6 +56,9 @@ describe("the Agent's records in a project", () => {
     const bad = JSON.parse(serializeProject(file as never));
     bad.agent.records[0].exceptions[0].rule = "anything-goes";
     expect(() => parseProject(JSON.stringify(bad))).toThrow(/agent\.records\[0\]\.exceptions\[0\]\.rule/);
+    const unreasoned = JSON.parse(serializeProject(file as never));
+    delete unreasoned.agent.records[0].kept[0].reason;
+    expect(() => parseProject(JSON.stringify(unreasoned))).toThrow(/agent\.records\[0\]\.kept\[0\]\.reason/);
   });
 });
 

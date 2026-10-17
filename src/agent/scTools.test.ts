@@ -196,7 +196,8 @@ describe("AgentExecutor on the single-crystal page", { timeout: 30_000 }, () => 
     const failedPage = (): ReturnType<typeof page> => page({ extinction: 20, failed: { h: 1, k: 0, l: 4, factor: 0.03 } });
     for (const way of ["omit", "keep"] as const) {
       const { port } = failedPage();
-      const { ex, asked } = executor(fakeHost(port).host, "auto");
+      const { host, records } = fakeHost(port);
+      const { ex, asked } = executor(host, "auto");
       await ex.run("refine", {});
       const listed = parse((await ex.run("assess_refinement", {})).text).failedMeasurements as string[];
       expect(listed).toEqual(["1 0 4"]);
@@ -211,6 +212,8 @@ describe("AgentExecutor on the single-crystal page", { timeout: 30_000 }, () => 
         expect((await ex.run("keep_reflections", { reflections: [{ h: 2, k: 0, l: 4 }], reason: "the user trusts it" })).isError).toBe(true);
         await ex.run("keep_reflections", { reflections: [{ h: 1, k: 0, l: 4 }], reason: "the user re-measured it and the value stands" });
         expect(asked.some((e) => e.tool === "keep_reflections")).toBe(true);
+        // Kept in the analysis' record, so it is saved with the project (not in the page's memory).
+        expect([...records.values()].flatMap((r) => r.kept ?? []).map((k) => [k.measurement, k.reason])).toEqual([["1,0,4,", "the user re-measured it and the value stands"]]);
       }
       const written = await ex.run("write_report", { summary: "Refined; R1 as listed." });
       expect(written.isError, written.text).toBe(false);

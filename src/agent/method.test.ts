@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ALTERNATION_SETTLED, advanceAlternation, alternationView, analysisKey, emptyRecord, methodProgress, outOfOrder, ruleRefusal, stagesCovered, stagesLeft, type Alternation } from "@/agent/method";
-import type { RefinementParameter } from "@/core/refinement/types";
+import { ALTERNATION_SETTLED, advanceAlternation, alternationView, analysisKey, emptyRecord, methodProgress, outOfOrder, ruleRefusal, stagesCovered, stagesLeft, stagesOnPath, type Alternation } from "@/agent/method";
+import type { RefinementParameter, RefinementResult } from "@/core/refinement/types";
+import { recordStep, type ProjectHistory, type StepKind } from "@/core/project/history";
+import type { Workspace } from "@/core/project/types";
 
 const p = (id: string, kind: RefinementParameter["kind"]): RefinementParameter => ({ id, label: id, kind, value: 1, initialValue: 1, fixed: false });
 
@@ -54,6 +56,40 @@ describe("the method as code", () => {
     // Optional stages never hold up the next one.
     const all = methodProgress("pdf", { ...emptyRecord("k"), stagesDone: ["base", "adp", "motion", "positions"] });
     expect(all.next).toBeNull();
+  });
+
+  it("keeps a stage done only while the History's path holds what refined it: undo, a reset and a typed value take it back", () => {
+    const start = [p("scale", "scale"), p("bkg0", "background"), p("a", "cellLength"), p("x", "atomX"), p("W", "profileW"), p("B", "bIso")];
+    // A page's state: its parameters (free ones as listed, each at its value) and a converged fit of the free ones.
+    const at = (values: Record<string, number>, free: readonly string[] | null): { parameters: RefinementParameter[]; result: RefinementResult | null } => {
+      const parameters = start.map((q) => ({ ...q, value: values[q.id] ?? q.value, fixed: free !== null && !free.includes(q.id) }));
+      const result = free ? ({ status: "converged", agreement: { rWeighted: 0.1 }, esd: Object.fromEntries(free.map((id) => [id, 0.01])) } as unknown as RefinementResult) : null;
+      return { parameters, result };
+    };
+    let h: ProjectHistory | null = null;
+    const step = (kind: StepKind, s: ReturnType<typeof at>): void => {
+      h = recordStep(h, { structures: [], workspace: { technique: "powder", refinement: { parameters: s.parameters, ...(s.result ? { lastResult: s.result } : {}) } } as unknown as Workspace, kind, label: kind });
+    };
+    step("load", at({}, null));
+    const base = at({ scale: 2, bkg0: 5, a: 4.1 }, ["scale", "bkg0", "a"]);
+    step("refine", base);
+    const positions = at({ scale: 2.1, bkg0: 5, a: 4.1, x: 0.27 }, ["scale", "x"]);
+    step("refine", positions);
+    const afterBase = h!.steps[1]!.id;
+    expect(stagesOnPath("powder", h, positions)).toEqual(["base", "positions"]);
+    // The scale refined again with the positions does not undo the base stage; a converged fit not yet recorded counts.
+    expect(stagesOnPath("powder", h, at({ scale: 2.2, bkg0: 5, a: 4.1, x: 0.27, W: 0.8 }, ["scale", "W"]))).toEqual(["base", "positions", "profile"]);
+    // Undo (go_to_step) to the step after the base refinement: the positions were never refined on that path.
+    expect(stagesOnPath("powder", { ...h!, current: afterBase }, base)).toEqual(["base"]);
+    // A reset of the cell (of some parameters) takes back the stage it belongs to, and only that one.
+    expect(stagesOnPath("powder", h, at({ scale: 2.1, bkg0: 5, x: 0.27 }, null))).toEqual(["positions"]);
+    // A reset of everything: nothing is done.
+    expect(stagesOnPath("powder", h, at({}, null))).toEqual([]);
+    // A new load starts a new analysis.
+    step("load", at({}, null));
+    expect(stagesOnPath("powder", h, at({ scale: 2.1, bkg0: 5, a: 4.1, x: 0.27 }, null))).toEqual([]);
+    // No History: the record's own list stands.
+    expect(stagesOnPath("powder", null, positions)).toBeNull();
   });
 
   it("lists the refinement stages left before the space group may be questioned", () => {

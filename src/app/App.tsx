@@ -61,11 +61,11 @@ import {
   withoutCorrections,
   carryRefinedStructure,
   keptBindings,
-  keptRows,
   withMagneticRows,
   DEFAULT_INSTRUMENT,
   EMPTY_SOURCE,
 } from "@/app/powderSession";
+import { withInstrumentConstants, withPhase, withoutPhase } from "@/app/powderPage";
 import type { WorkbenchExports } from "@/app/workbenchEngine";
 import { AgentLink } from "@/agent/link";
 import type { AgentHost } from "@/agent/executor";
@@ -686,17 +686,7 @@ export function App(): JSX.Element {
 
   /** Add a further phase (a parsed CIF, or a known phase the Agent adds) and rebuild the spec. */
   function addPhaseStructure(parsed: StructureModel): void {
-    setSession((s) => {
-      const extraPhases = [...s.extraPhases, parsed];
-      const spec = buildSpecFor(s.structure, extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic", s.corrections);
-      return {
-        ...s,
-        extraPhases,
-        powderParams: keptRows(spec.params, s.powderParams),
-        powderBindings: keptBindings(spec.bindings, s.powderBindings),
-        powderProfile: { ...spec.profile, ...(s.powderProfile.backgroundType ? { backgroundType: s.powderProfile.backgroundType } : {}) },
-      };
-    });
+    setSession((s) => withPhase(s, parsed, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT));
     setPowderResult(null);
     setMessage(`Added phase "${parsed.name}" (${parsed.spaceGroup.hermannMauguin ?? "?"}). Refine to fit its scale/cell.`);
     requestStep("load", `Added phase ${parsed.name}`);
@@ -706,17 +696,7 @@ export function App(): JSX.Element {
   function onRemovePhase(id: string): void {
     const removed = session.extraPhases.find((p) => p.id === id);
     requestStep("load", `Removed phase ${removed?.name || id}`);
-    setSession((s) => {
-      const extraPhases = s.extraPhases.filter((p) => p.id !== id);
-      const spec = buildSpecFor(s.structure, extraPhases, s.pattern, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT, s.powderProfile.lorentz ?? true, s.backgroundTerms, s.siteTies, s.mustrain ?? "isotropic", s.corrections);
-      return {
-        ...s,
-        extraPhases,
-        powderParams: keptRows(spec.params, s.powderParams),
-        powderBindings: keptBindings(spec.bindings, s.powderBindings),
-        powderProfile: { ...spec.profile, ...(s.powderProfile.backgroundType ? { backgroundType: s.powderProfile.backgroundType } : {}) },
-      };
-    });
+    setSession((s) => withoutPhase(s, id, instrumentLoaded ? instrument : DEFAULT_INSTRUMENT));
     setPowderResult(null);
   }
 
@@ -1139,7 +1119,7 @@ export function App(): JSX.Element {
    *  determine, so they are set, never refined. */
   function onInstrumentConstants(update: InstrumentConstants): void {
     setInstrument((inst) => (inst.kind === "constantWavelength" ? withConstants(inst, update) : inst));
-    setSession((s) => (s.pattern.radiation.kind === "xray" ? { ...s, pattern: { ...s.pattern, radiation: withConstants(s.pattern.radiation, update) } } : s));
+    setSession((s) => withInstrumentConstants(s, update));
     setPowderResult(null);
     requestStep("settings", "Instrument constants changed");
   }

@@ -4,7 +4,13 @@ The in-app Agent is tested on what it does. Each eval scenario is a request a
 user or a researcher round made that the Agent once got wrong: a page built from
 the repository's own data, the message the user typed, what the stand-in user
 approves, and the checks that say whether the Agent got it right this time. The
-real chat loop, executor and tools run; only the model changes.
+real chat loop, executor and tools run; only the model changes. A powder page
+runs the app's own operations without React
+([`src/app/powderPage.ts`](../src/app/powderPage.ts): the curves and agreement,
+what each control does, Refine, Prefit, the posterior, going back to a History
+step) through the app's compute client, in-thread, so a scenario's fit is the
+one the app would run. The PDF and single-crystal pages still keep their own
+copies ([AGENT_PLAN.md](./AGENT_PLAN.md), 1.2).
 
 - **In CI**, every scenario is replayed with a scripted model twice: once as the
   Agent should behave (every check passes) and once as it did when the failure

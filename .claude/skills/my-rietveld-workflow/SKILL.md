@@ -78,7 +78,7 @@ Only a peak that sits on no reflection of any phase is an extra peak.
      peaks against Al (can, cryostat shields), V, Cu, steels, Nb, Pb and common standards
      (Cr₂WO₆ at 150 K: weak lines at 62.4° and 73.5° were Al 111 and 200, shifted because
      the shields sit off the sample position). It knows the impurities a synthesis leaves
-     most often too (CaF₂, NaF, NaCl: NAC on 11-BM held fluorite), and `add_known_phase`
+     most often too (NAC on 11-BM held fluorite), and `add_known_phase`
      adds a matched phase to the model once the user agrees; another phase needs the
      user's CIF. Small bumps on a strong line's flank are `shoulders` — a profile tail,
      not a phase.

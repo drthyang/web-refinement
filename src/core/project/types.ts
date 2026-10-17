@@ -303,6 +303,12 @@ export interface AgentRecordFile {
   /** The fit's diagnoses (diagnose_fit), each with the History step it read; the latest per step, oldest first. */
   readonly diagnoses?: readonly { readonly at: number; readonly step?: string; readonly summary: string }[];
   readonly exceptions: readonly { readonly rule: "bare-occupancy" | "instrument-with-thermal"; readonly reason: string; readonly at: number }[];
+  /**
+   * Single-crystal measurements the user chose to keep in the fit though they
+   * read as failed (keep_reflections, always their decision): "h,k,l,batch",
+   * with their reason.
+   */
+  readonly kept?: readonly { readonly measurement: string; readonly reason: string; readonly at: number }[];
   readonly stagesDone: readonly string[];
   readonly notes: readonly { readonly text: string; readonly at: number }[];
 }

@@ -8,6 +8,7 @@
  */
 
 import type { EvalRun, EvalUsage } from "@/agent/evals/harness";
+import type { RunPolicy } from "@/agent/chat";
 import { tierFlags, type TierFlags } from "@/agent/evals/harness";
 import { sentences } from "@/agent/evals/checks";
 import type { CaseScore } from "@/agent/validation/scoring";
@@ -67,6 +68,8 @@ export interface ValidationRecord {
   readonly costUsd?: number;
   readonly seconds: number;
   readonly notices: readonly string[];
+  /** The policy the run ran under (arms B and C): the turn cap, the tool scope, the pruning, the stall stop, the temperature. */
+  readonly policy?: RunPolicy;
 }
 
 const short = (text: string, max = 600): string => (text.length > max ? `${text.slice(0, max)}…` : text);
@@ -168,7 +171,20 @@ export function agentRecord(args: {
     ...(args.costUsd !== undefined ? { costUsd: args.costUsd } : {}),
     seconds: r.seconds,
     notices: r.notices,
+    ...(r.policy ? { policy: r.policy } : {}),
   };
+}
+
+/** A run's policy in a line, as the transcript gives it. */
+export function policyLine(p: RunPolicy): string {
+  return [
+    `turn cap ${p.turnCap}`,
+    p.toolScope === "stage" ? "tools by the page and the method's stage" : "every tool",
+    p.pruning === "server" ? "old results cleared by the API" : "old results digested to fit the window",
+    p.stallStop ? "stops after reads that change nothing" : "no stop for reads that change nothing",
+    p.temperature === null ? (p.thinking === "adaptive" ? "adaptive thinking (its own temperature)" : "the server's temperature") : `temperature ${p.temperature}`,
+    `replies up to ${p.replyCap} tokens`,
+  ].join(" · ");
 }
 
 /** Everything the Agent said, and its reports: the text its conclusion is scored on. */
@@ -190,6 +206,7 @@ export function transcriptMarkdown(rec: ValidationRecord, c: ValidationCase): st
     `- **Case:** ${c.title}`,
     `- **Source:** ${c.source}`,
     `- **Injected fault:** ${c.fault ? `${c.fault.kind}: ${c.fault.detail}` : "none"}`,
+    ...(rec.policy ? [`- **Run policy:** ${policyLine(rec.policy)}`] : []),
     "",
     "## What the user asked",
     "",

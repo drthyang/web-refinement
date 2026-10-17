@@ -31,7 +31,7 @@ import type {
   BetaUsage,
 } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { LIVE_TOOLS, inputJsonSchema, liveTool, type LiveToolSpec } from "@/agent/tools";
-import { SCOPE_NOTE, scopedTools } from "@/agent/toolScope";
+import { scopeNote, scopedTools } from "@/agent/toolScope";
 import { evidenceGate, gradeContradiction } from "@/agent/evidence";
 import type { AgentSituation, ToolRunner } from "@/agent/executor";
 import { agentSystemPrompt, autonomyNote, type AgentAutonomy } from "@/agent/systemPrompt";
@@ -78,6 +78,8 @@ export interface ChatConfig {
    * local model's default, its window being small.
    */
   readonly toolScope?: "stage" | "all";
+  /** What the run policy (runPolicy) may be told instead of its default for the transport. */
+  readonly policy?: { readonly turnCap?: number; readonly stallStop?: boolean; readonly temperature?: number | null };
   /**
    * The skills offered (default on). Off is the validation's ablation arm
    * (docs/VALIDATION.md): no skill index in the prompt and no read_skill; the
@@ -122,7 +124,8 @@ const LARGE_CONTEXT = 131_072;
 export class AgentChat {
   private readonly messages: BetaMessageParam[] = [];
   private backend: Backend | null = null;
-  private readonly tools: BetaTool[] = LIVE_TOOLS.map(toBetaTool);
+  private readonly tools: BetaTool[] = LIVE_TOOLS.map((t) => toBetaTool(t));
+  private readonly toolsWithoutSkills: BetaTool[] = LIVE_TOOLS.filter((t) => t.name !== "read_skill").map((t) => toBetaTool(t, false));
   /** Where the analysis stood after the last call (the page, the stage), for the tools a request offers. */
   private here: AgentSituation | null = null;
   /** Every tool called in this conversation: it stays offered. */
@@ -199,12 +202,12 @@ export class AgentChat {
     // Evidence rules sent back for this message (evidence.ts): each at most once, and apart from the stall nudges.
     const gated = new Set<string>();
     const ran: string[] = [];
-    // The same call at the same state, or call after call that changes nothing: a loop.
-    // Calls that change nothing are counted on a local model only: Claude may read at length (a ref page by page).
-    const guard = new LoopGuard({ countStill: isSized(config.transport) });
+    // The same call at the same state, or call after call that changes nothing (when the policy counts those): a loop.
+    const policy = runPolicy(config, this.window);
+    const guard = new LoopGuard({ countStill: policy.stallStop, method: config.skills !== false });
     this.here = await this.situation();
     let fingerprint = this.here?.fingerprint ?? null;
-    const maxTurns = isSized(config.transport) ? MAX_TURNS_SIZED : MAX_TURNS;
+    const maxTurns = policy.turnCap;
     // Refinements the guards refused in a row: after a few, the model is told how to get out.
     let refusedInARow = 0;
     for (let turn = 0; turn < maxTurns; turn++) {
@@ -277,7 +280,7 @@ export class AgentChat {
         // tool that already answered, or says nothing after a result) leaves
         // the user waiting on nothing. Ask the model to go on, twice at most.
         const said = message.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
-        const stall = nudges < MAX_NUDGES ? stalledReply(said, this.tools.map((t) => t.name), ran) : null;
+        const stall = nudges < MAX_NUDGES ? stalledReply(said, this.tools.map((t) => t.name), ran, config.skills !== false) : null;
         if (stall === null) {
           if (message.stop_reason === "max_tokens" && this.window !== null) cb.onNotice("The reply filled the room left in the model's window and was cut off. Ask it to go on, or clear the conversation to give it more room.", "error");
           if (!said.trim() && ran.length > 0) cb.onNotice(`The model gave no reply after the ${ran.at(-1)} result.${isLocal(config.transport) ? " Local models do this when the conversation no longer fits their context: clear the conversation, or use a longer context." : ""}`, "error");
@@ -382,16 +385,15 @@ export class AgentChat {
       // A thinking-capable model thinks by default, and the servers reuse the
       // cached prompt prefix by themselves.
       const scoped = this.offered(config);
-      const system = `${this.systemFor(config)}\n\n${autonomyNote(config.autonomy ?? "ask")}${scoped ? `\n\n${SCOPE_NOTE}` : ""}`;
-      let tools = this.skillsOff(config, scoped ?? this.tools);
+      const system = `${this.systemFor(config)}\n\n${autonomyNote(config.autonomy ?? "ask", { skills: config.skills !== false })}${scoped ? `\n\n${scopeNote(config.skills !== false)}` : ""}`;
+      let tools = scoped ?? this.allTools(config);
       if (this.window === null) {
         // The window unknown: old tool results go from the copy it gets past a fixed budget.
         this.sent = null;
-        return { model: config.model, max_tokens: 64000, system, tools, messages: pruneForLocal(this.messages) };
+        return { model: config.model, max_tokens: 64000, system, tools, messages: pruneForLocal(this.messages), ...temperatureOf(config) };
       }
       let fixed = system.length + JSON.stringify(tools).length;
-      // OpenAI's own models take at most 16k (gpt-4o) to 32k tokens of reply: cap it there.
-      const cap = config.transport === "openai-compatible" ? OPENAI_REPLY_CAP : 64000;
+      const cap = runPolicy(config, this.window).replyCap;
       let fit = fitWindow(this.messages, fixed, this.window, this.charsPerToken, cap);
       if (fit.refusal !== null && scoped) {
         // Every tool used stays offered, and a long session gathers many: when nothing else fits, the stage's tools only.
@@ -420,15 +422,15 @@ export class AgentChat {
       this.sent = { chars: fit.chars, sentChars: fit.sentChars, estimate: fit.estimate };
       // fit was sized to this.window (grown when it had to be).
       this.ollamaPlan = config.transport === "ollama" ? { numCtx: this.window, numPredict: fit.maxTokens } : null;
-      return { model: config.model, max_tokens: fit.maxTokens, system, tools, messages: fit.messages };
+      return { model: config.model, max_tokens: fit.maxTokens, system, tools, messages: fit.messages, ...temperatureOf(config) };
     }
     return {
       model: config.model,
       max_tokens: 64000,
       // The mode follows the cached prompt, so switching it keeps the cache.
-      system: [{ type: "text", text: this.systemFor(config), cache_control: { type: "ephemeral" } }, { type: "text", text: `${autonomyNote(config.autonomy ?? "ask")}${this.offered(config) ? `\n\n${SCOPE_NOTE}` : ""}` }],
+      system: [{ type: "text", text: this.systemFor(config), cache_control: { type: "ephemeral" } }, { type: "text", text: `${autonomyNote(config.autonomy ?? "ask", { skills: config.skills !== false })}${this.offered(config) ? `\n\n${scopeNote(config.skills !== false)}` : ""}` }],
       // Inputs stream as generated; the executor validates each against its schema.
-      tools: this.skillsOff(config, this.offered(config) ?? this.tools).map((t) => ({ ...t, eager_input_streaming: true })),
+      tools: (this.offered(config) ?? this.allTools(config)).map((t) => ({ ...t, eager_input_streaming: true })),
       messages: this.messages,
       thinking: { type: "adaptive", display: "summarized" },
       output_config: { effort: config.effort },
@@ -457,6 +459,11 @@ export class AgentChat {
     }
   }
 
+  /** The policy the conversation runs under now (its window as the last message found it): for a run's record. */
+  policyFor(config: ChatConfig): RunPolicy {
+    return runPolicy(config, this.window);
+  }
+
   /** Messages so far (for tests). */
   history(): readonly BetaMessageParam[] {
     return this.messages;
@@ -466,9 +473,9 @@ export class AgentChat {
     return config.skills === false ? this.noSkills : this.withSkills;
   }
 
-  /** Without skills (the validation's ablation arm), read_skill is not offered. */
-  private skillsOff(config: ChatConfig, tools: BetaTool[]): BetaTool[] {
-    return config.skills === false ? tools.filter((t) => t.name !== "read_skill") : tools;
+  /** Every tool, as the model is offered it: without the skills (the validation's ablation arm), no read_skill, and each description in its form without them. */
+  private allTools(config: ChatConfig): BetaTool[] {
+    return config.skills === false ? this.toolsWithoutSkills : this.tools;
   }
 
   /**
@@ -478,11 +485,13 @@ export class AgentChat {
    */
   private offered(config: ChatConfig, lean = false): BetaTool[] | null {
     // A local model's window is small; an OpenAI-compatible one's may be either: all the tools only when it is large.
-    const scope = config.toolScope ?? (isLocal(config.transport) || (config.transport === "openai-compatible" && (this.window ?? 0) < LARGE_CONTEXT) ? "stage" : "all");
-    if (scope === "all" || this.here === null) return null;
+    if (runPolicy(config, this.window).toolScope === "all" || this.here === null) return null;
     // Lean: the page's and the stage's tools only, for a prompt that otherwise cannot fit.
     const asked = lean ? [] : this.messages.filter((m) => m.role === "user" && typeof m.content === "string" && !m.content.startsWith(FROM_APP)).map((m) => m.content as string);
-    return scopedTools({ page: this.here.page, stage: this.here.stage, magnetic: this.here.magnetic, asked, called: lean ? new Set<string>() : this.called }).map(toBetaTool);
+    const skills = config.skills !== false;
+    return scopedTools({ page: this.here.page, stage: this.here.stage, magnetic: this.here.magnetic, asked, called: lean ? new Set<string>() : this.called, method: skills })
+      .filter((t) => skills || t.name !== "read_skill")
+      .map((t) => toBetaTool(t, skills));
   }
 
   /**
@@ -541,6 +550,52 @@ export const REPLY_RESERVE = 6144;
 export const MIN_REPLY = 2048;
 /** The most an OpenAI-compatible reply is given (gpt-4o takes no more). */
 const OPENAI_REPLY_CAP = 16384;
+
+/**
+ * How a conversation runs on its transport: its limits and the shape of each
+ * request. Each default is the app's choice for that transport, with its
+ * reason where it is set; a run records the policy it ran under, so models
+ * reached in different ways are compared knowing how (docs/VALIDATION.md).
+ */
+export interface RunPolicy {
+  /** Most model turns one user message may run (MAX_TURNS, MAX_TURNS_SIZED). */
+  readonly turnCap: number;
+  /** The tools a request offers: all of them, or the page's and the method stage's (toolScope.ts). */
+  readonly toolScope: "stage" | "all";
+  /** Old tool results: cleared by the API past a budget (Claude), or digested by the app to fit the window (contextWindow.ts). */
+  readonly pruning: "server" | "digest";
+  /** A turn stops after STILL_STOP read calls in a row that change nothing (LoopGuard). */
+  readonly stallStop: boolean;
+  /** Sent with each request; null: the server's default for the model. Claude thinks (adaptive), which takes its own. */
+  readonly temperature: number | null;
+  /** Most tokens one reply may take. */
+  readonly replyCap: number;
+  /** Claude's adaptive thinking at the configured effort, or what a local model does by default. */
+  readonly thinking: "adaptive" | "model";
+}
+
+export function runPolicy(config: ChatConfig, window: number | null): RunPolicy {
+  const sized = isSized(config.transport);
+  const set = config.policy ?? {};
+  return {
+    turnCap: set.turnCap ?? (sized ? MAX_TURNS_SIZED : MAX_TURNS),
+    // A local model's window is small; an OpenAI-compatible one's may be either: all the tools only when it is large.
+    toolScope: config.toolScope ?? (isLocal(config.transport) || (config.transport === "openai-compatible" && (window ?? 0) < LARGE_CONTEXT) ? "stage" : "all"),
+    pruning: sized ? "digest" : "server",
+    // Calls that change nothing are counted on a sized transport only: Claude may read at length (a ref page by page).
+    stallStop: set.stallStop ?? sized,
+    temperature: sized ? set.temperature ?? null : null,
+    // OpenAI's own models take at most 16k (gpt-4o) to 32k tokens of reply: cap it there.
+    replyCap: config.transport === "openai-compatible" ? OPENAI_REPLY_CAP : 64000,
+    thinking: sized ? "model" : "adaptive",
+  };
+}
+
+/** A sized request's temperature, when the policy sets one. */
+function temperatureOf(config: ChatConfig): { temperature?: number } {
+  const t = runPolicy(config, null).temperature;
+  return t === null ? {} : { temperature: t };
+}
 /** Template tokens around each message. */
 const MESSAGE_TOKENS = 8;
 /** A prompt the server counts below this share of the estimate was cut. */
@@ -636,7 +691,8 @@ export class LoopGuard {
   private still = 0;
   private toldStill = false;
 
-  constructor(private readonly opts: { readonly countStill?: boolean } = {}) {}
+  /** `method`: a page's written method is in play (false without the skills, the validation's arm C: the notes then name none). */
+  constructor(private readonly opts: { readonly countStill?: boolean; readonly method?: boolean } = {}) {}
 
   /** Before a call: why it must not run (it already ran twice at this very state), or null. */
   check(name: string, input: unknown, at: string | null): { readonly why: string; readonly nudge: string } | null {
@@ -667,14 +723,14 @@ export class LoopGuard {
       if (count >= MAX_SAME_CALL) return { note: null, stop: `it called ${name} ${count} times with the same input, and nothing changed in between` };
       if (this.repeats >= MAX_REPEATS) return { note: null, stop: `it repeated calls it had already made ${this.repeats} times, with nothing changed in between` };
       return {
-        note: `${FROM_APP} You already made this call (${name}, the same input) and nothing has changed since: this is the same result as before.${name === "read_skill" ? " The skill is already in this conversation." : ""} Do not call it again. Take the next step of the method with what you have, or stop and tell the user what you need.`,
+        note: `${FROM_APP} You already made this call (${name}, the same input) and nothing has changed since: this is the same result as before.${name === "read_skill" ? " The skill is already in this conversation." : ""} Do not call it again. Take the next step${this.opts.method === false ? "" : " of the method"} with what you have, or stop and tell the user what you need.`,
         stop: null,
       };
     }
     if (this.still >= STILL_STOP) return { note: null, stop: `it made ${this.still} tool calls in a row without changing the analysis` };
     if (this.still >= STILL_NOTE && !this.toldStill) {
       this.toldStill = true;
-      return { note: `${FROM_APP} ${this.still} tool calls in a row have not changed the analysis. Make the change the method calls for next, write the report if the work is done, or stop and ask the user.`, stop: null };
+      return { note: `${FROM_APP} ${this.still} tool calls in a row have not changed the analysis. Make the change ${this.opts.method === false ? "the analysis needs" : "the method calls for"} next, write the report if the work is done, or stop and ask the user.`, stop: null };
     }
     return { note: null, stop: null };
   }
@@ -694,13 +750,13 @@ const FROM_APP = "(From the app, not the user.)";
  * the app tells the model about it; null for an ordinary final reply. `ran`
  * holds the tools that already ran for this message, in order.
  */
-export function stalledReply(text: string, tools: readonly string[], ran: readonly string[]): { notice: string; nudge: string } | null {
+export function stalledReply(text: string, tools: readonly string[], ran: readonly string[], method = true): { notice: string; nudge: string } | null {
   const last = ran.at(-1);
   if (!text.trim()) {
     if (last === undefined) return null;
     return {
       notice: `The model said nothing after the ${last} result; the app asked it to go on.`,
-      nudge: `${FROM_APP} You replied with nothing after the ${last} result above. Say what it shows and take the next step your method calls for, or stop for the user and say why.`,
+      nudge: `${FROM_APP} You replied with nothing after the ${last} result above. Say what it shows and take the next step${method ? " your method calls for" : ""}, or stop for the user and say why.`,
     };
   }
   // "I was waiting for the check_cell_symmetry tool to complete" — about a
@@ -799,8 +855,8 @@ export function repeatingTail(text: string, run = 6, minUnit = 8, maxUnit = 400)
   return null;
 }
 
-function toBetaTool(t: LiveToolSpec): BetaTool {
-  return { name: t.name, description: t.description, input_schema: inputJsonSchema(t) as BetaTool["input_schema"] };
+function toBetaTool(t: LiveToolSpec, skills = true): BetaTool {
+  return { name: t.name, description: skills ? t.description : t.withoutSkills ?? t.description, input_schema: inputJsonSchema(t) as BetaTool["input_schema"] };
 }
 
 function toolError(id: string, text: string): BetaToolResultBlockParam {

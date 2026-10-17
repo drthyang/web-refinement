@@ -139,6 +139,28 @@ describe("the eval pages", () => {
     }
   }, 60_000);
 
+  it("sends back a grade that contradicts the engine's verdict, as the app does", async () => {
+    // The harness's runner once had no `fill`, so this final-answer check ran in the app but never in an eval or the validation.
+    const turns = (answer: string): ScriptTurn[] => [
+      { calls: [RIETVELD, { name: "get_state" }] },
+      { text: "Stage 1: scale, background and cell.", calls: [{ name: "refine" }] },
+      { calls: [{ name: "assess_refinement" }] },
+      { text: answer },
+      { text: "The engine's verdict is {{verdict}}." },
+    ];
+    const quoted = await replay("full-refinement", turns("The engine's verdict is {{verdict}}."));
+    const band = quoted.run.events.flatMap((e) => (e.kind === "reply" && e.refs ? [e.refs["verdict"]] : []))[0];
+    expect(band, why(quoted)).toBeTruthy();
+    expect(quoted.run.notices.filter((n) => /quote the engine's verdict/.test(n)), why(quoted)).toEqual([]);
+    const contradicting = /excellent|good/.test(band!) ? "A poor fit, every stage refined." : "An excellent fit, every stage refined.";
+    const graded = await replay("full-refinement", turns(contradicting));
+    expect(graded.run.notices.some((n) => /quote the engine's verdict/.test(n)), why(graded)).toBe(true);
+    expect(graded.overrun, why(graded)).toBe(0);
+    // Every run keeps the policy it ran under, through the saved run too.
+    expect(graded.run.policy).toMatchObject({ turnCap: 40, toolScope: "all", pruning: "server" });
+    expect((JSON.parse(JSON.stringify(savedRun(graded))) as SavedRun).policy).toEqual(graded.run.policy);
+  }, 60_000);
+
   it("does not take a denial for a proposal: \"Neither is evidence for a lower group\"", async () => {
     // A live run (2026-10-10) failed symmetry-last on that sentence: "neither" was not read as a negation.
     const r = await replay("symmetry-last", [

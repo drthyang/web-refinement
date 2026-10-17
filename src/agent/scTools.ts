@@ -13,6 +13,7 @@ import type { ProjectHistory } from "@/core/project/history";
 import { assess_refinement, bond_geometry } from "@/mcp/tools";
 import type { ReferenceEntry } from "@/agent/references";
 import { compareWithLoaded, structureTable, withEsd } from "@/agent/structureTable";
+import { keyOfState, type AgentRecord } from "@/agent/method";
 import { applyFree, bondEsds, bondsOf, uniqueBonds, cellOf, describeFree, freeNoOp, goToStep, historyView, matchIds, parameterSummary, pct, sig, type ChangeResult, type LiveToolHost } from "@/agent/liveCommon";
 import type { RefinementResult } from "@/core/refinement/types";
 import type { ReportCheck } from "@/core/export/report";
@@ -50,7 +51,7 @@ export function readSingleCrystalTool(name: string, input: Input, port: SingleCr
     case "reflection_equivalents":
       return equivalentsView(s, input.h, input.k, input.l);
     case "assess_refinement":
-      return assessment(s);
+      return assessment(s, keptMeasurements(host.record(keyOfState("singleCrystal", s))));
     case "structure_table": {
       const table = structureTable(s.refinedStructure, 0, s.parameters, s.bindings, s.result?.esd ?? {});
       return {
@@ -98,9 +99,12 @@ export async function changeSingleCrystal(name: string, input: Input, port: Sing
       const asked = (input.reflections as { h: number; k: number; l: number; batch?: number }[]);
       const unknown = asked.filter((r) => !failed.some((f) => keptKey(f) === keptKey(r)));
       if (unknown.length) throw new Error(`${unknown.map(measurementName).join(", ")} ${unknown.length === 1 ? "is" : "are"} not on the failed list (assess_refinement \`failedMeasurements\`): only a listed failure needs keeping`);
-      const kept = new Map(keptMeasurements(s));
-      for (const r of asked) kept.set(keptKey(r), String(input.reason));
-      KEPT.set(s.dataset, kept);
+      const at = Date.now();
+      host.updateRecord(keyOfState("singleCrystal", s), (rec) => {
+        const kept = new Map((rec.kept ?? []).map((k) => [k.measurement, k]));
+        for (const r of asked) kept.set(keptKey(r), { measurement: keptKey(r), reason: String(input.reason), at });
+        return { ...rec, kept: [...kept.values()] };
+      });
       return `Kept in the fit at the user's word (${input.reason}): ${asked.map(measurementName).join(", ")}. The report says so; a change of the data starts the list again.`;
     }
     case "set_resolution_range":
@@ -1016,13 +1020,12 @@ const keptKey = (r: { h: number; k: number; l: number; batch?: number }): string
 
 /**
  * The measurements the user chose to keep in the fit though they read as
- * failed (keep_reflections, always their decision), by the data they belong
- * to: a change of the data starts a new list, as it lifts an exception.
+ * failed (keep_reflections, always their decision), with their reasons: kept
+ * in the analysis' record, so they are saved with the project, and a change
+ * of the data (another analysis) starts a new list, as it lifts an exception.
  */
-const KEPT = new WeakMap<object, Map<string, string>>();
-
-export function keptMeasurements(s: SingleCrystalLiveState): ReadonlyMap<string, string> {
-  return KEPT.get(s.dataset) ?? new Map();
+export function keptMeasurements(record: AgentRecord): ReadonlyMap<string, string> {
+  return new Map((record.kept ?? []).map((k) => [k.measurement, k.reason]));
 }
 
 /**
@@ -1350,7 +1353,7 @@ export function singleCrystalReferences(s: SingleCrystalLiveState): ReferenceEnt
   ];
 }
 
-function assessment(s: SingleCrystalLiveState): Record<string, unknown> {
+function assessment(s: SingleCrystalLiveState, kept: ReadonlyMap<string, string>): Record<string, unknown> {
   if (!s.result) throw new Error("there is no refinement result on screen — refine first (a model change clears the last result)");
   const a = assess_refinement({ result: s.result, parameters: [...s.parameters], observationCount: s.observationCount, mode: "single-crystal", restraints: s.restraints, disorder: disorderAssemblies(s.structure, s.bindings, s.twinLaws) });
   const v = validationOf(s);
@@ -1374,7 +1377,6 @@ function assessment(s: SingleCrystalLiveState): Record<string, unknown> {
     outliers: outliersView(s, 8),
     ...(() => {
       const failed = failedMeasurements(s);
-      const kept = keptMeasurements(s);
       return failed.length > 0 ? { failedMeasurements: failed.map((r) => `${measurementName(r)}${kept.has(keptKey(r)) ? ` — kept by the user: ${kept.get(keptKey(r))}` : ""}`) } : {};
     })(),
     outliersReading: "Each outlier against its equivalents: one marked a failed measurement goes with omit_reflections (by its batch); a reflection the model misses stays, whatever its residual.",
@@ -1439,10 +1441,9 @@ function restraintsView(s: SingleCrystalLiveState): Record<string, unknown> {
 }
 
 /** The report's checks: the engine's view of the fit on screen. */
-export function singleCrystalReportChecks(s: SingleCrystalLiveState, probe: RefinementResult | null = null): ReportCheck[] {
+export function singleCrystalReportChecks(s: SingleCrystalLiveState, probe: RefinementResult | null = null, kept: ReadonlyMap<string, string> = new Map()): ReportCheck[] {
   if (!s.result || s.structure.sites.length === 0) return [noResultCheck()];
   // A measurement the data say failed, still fitted and not kept by the user: no report on a fit that carries it.
-  const kept = keptMeasurements(s);
   const failed = failedMeasurements(s);
   const open = failed.filter((r) => !kept.has(keptKey(r)));
   if (open.length > 0) {

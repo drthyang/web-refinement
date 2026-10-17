@@ -65,6 +65,11 @@ export class RefStore {
     return `#${n}`;
   }
 
+  /** Forget every stored output. The numbering goes on, so a ref from before reads as gone, never as another call's. */
+  clear(): void {
+    this.entries.clear();
+  }
+
   /**
    * The stored value a ref points at (shared, not a copy — callers clone
    * before handing it to a handler). Throws a message a model can act on.

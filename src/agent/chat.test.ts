@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
-import { AgentChat, CHARS_PER_TOKEN, LoopGuard, MIN_REPLY, REPLY_RESERVE, announcedTool, describeChatError, fitWindow, repeatingTail, stalledReply } from "@/agent/chat";
+import { AgentChat, CHARS_PER_TOKEN, LoopGuard, MIN_REPLY, REPLY_RESERVE, announcedTool, describeChatError, fitWindow, repeatingTail, runPolicy, stalledReply } from "@/agent/chat";
 import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import type { AgentExecutor } from "@/agent/executor";
 import { LIVE_TOOLS } from "@/agent/tools";
@@ -319,6 +319,15 @@ describe("AgentChat on Ollama", () => {
       { role: "assistant", content: "", thinking: "Look first.", tool_calls: [{ function: { name: "get_state", arguments: {} } }] },
       { role: "tool", content: "{\"technique\":\"powder\"}", tool_name: "get_state" },
     ]);
+  });
+
+  it("sends the policy's temperature to a local model, and none by default (the server's)", async () => {
+    const api = await fakeApi([ndjson([{ type: "text", text: "Fine." }]), ndjson([{ type: "text", text: "Fine." }])], undefined, qwen(40960));
+    server = api.server;
+    const chat = new AgentChat({ run: async () => ({ isError: false, text: "{}" }) } as unknown as AgentExecutor);
+    await chat.send("hi", { transport: "ollama", serverUrl: api.url, model: "qwen3:32b", effort: "high" }, quiet, new AbortController().signal);
+    await chat.send("hi", { transport: "ollama", serverUrl: api.url, model: "qwen3:32b", effort: "high", policy: { temperature: 0.6 } }, quiet, new AbortController().signal);
+    expect(api.requests.map((r) => (r.body.options as { temperature?: number }).temperature)).toEqual([undefined, 0.6]);
   });
 
   it("runs at the context the model is loaded with, when it holds the Agent: no reload", async () => {
@@ -990,5 +999,20 @@ describe("a refusal that says what would fit", () => {
     await new Promise<void>((r) => api.server.close(() => r()));
     expect(api.requests).toHaveLength(1);
     expect(describeChatError(err, config)).toMatch(/^This conversation no longer fits the 32k-token context LM Studio runs qwen\/qwen3\.8-27b with, even with the old tool results shortened\. Nothing was sent, so the model was not handed a cut prompt\. This conversation needs about \d+k tokens; qwen\/qwen3\.8-27b takes up to 128k, if this machine has the memory for it\. Reload it at \d+k in LM Studio/);
+  });
+});
+
+describe("the run policy", () => {
+  it("is the app's choice for each transport, said in full, and takes the overrides a run sets", () => {
+    const claude = runPolicy({ transport: "api-key", model: "m", effort: "high" }, null);
+    expect(claude).toEqual({ turnCap: 40, toolScope: "all", pruning: "server", stallStop: false, temperature: null, replyCap: 64000, thinking: "adaptive" });
+    const local = runPolicy({ transport: "lmstudio", model: "m", effort: "high" }, 32768);
+    expect(local).toEqual({ turnCap: 80, toolScope: "stage", pruning: "digest", stallStop: true, temperature: null, replyCap: 64000, thinking: "model" });
+    // An OpenAI-compatible server: every tool only in a large window, and its replies capped.
+    expect(runPolicy({ transport: "openai-compatible", model: "m", effort: "high" }, 200_000)).toMatchObject({ toolScope: "all", replyCap: 16384 });
+    expect(runPolicy({ transport: "openai-compatible", model: "m", effort: "high" }, 32768).toolScope).toBe("stage");
+    expect(runPolicy({ transport: "ollama", model: "m", effort: "high", toolScope: "all", policy: { turnCap: 60, stallStop: false, temperature: 0.6 } }, 32768)).toMatchObject({ turnCap: 60, toolScope: "all", stallStop: false, temperature: 0.6 });
+    // Claude thinks adaptively, which takes its own temperature: none is sent.
+    expect(runPolicy({ transport: "api-key", model: "m", effort: "high", policy: { temperature: 0.6 } }, null).temperature).toBeNull();
   });
 });

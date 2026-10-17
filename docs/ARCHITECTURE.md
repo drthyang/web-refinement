@@ -62,7 +62,9 @@ worker dependencies. Every scientific function is pure and independently
 testable, which keeps validation tractable. It also keeps every consumer surface
 thin, so adding a surface never adds science:
 
-- **Web app:** React state over core functions.
+- **Web app:** React state over core functions. What a page's controls and
+  fits do is plain functions too where a second surface needs them: the
+  powder page's (`app/powderPage.ts`) are shared with the Agent's test pages.
 - **MCP server:** a registry of the same functions behind a stdio transport.
   The transport keeps bulky data server-side and passes refs
   ([AGENT_TOOLS.md](./AGENT_TOOLS.md)).

@@ -73,6 +73,7 @@ describe.skipIf(!live)(`Validation arms ${arms.join(", ")} (${model?.label ?? "n
             c, arm, model: model!, run, commit, signal: ctrl.signal,
             ...(env.MATERIA_VALIDATION_SERVER ? { server: env.MATERIA_VALIDATION_SERVER } : {}),
             ...(api && env.ANTHROPIC_API_KEY ? { apiKey: env.ANTHROPIC_API_KEY } : {}),
+            ...(env.MATERIA_VALIDATION_TEMPERATURE ? { temperature: Number(env.MATERIA_VALIDATION_TEMPERATURE) } : {}),
             onUsage: (u) => {
               if (!ledger) return;
               const cost = costOf(model!, u);

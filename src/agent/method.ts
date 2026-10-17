@@ -28,12 +28,13 @@
  * the data and the phases — and is kept by the shell, saved with the project.
  */
 
-import type { LinearRestraint, ParameterKind, RefinementParameter } from "@/core/refinement/types";
+import type { LinearRestraint, ParameterKind, RefinementParameter, RefinementResult } from "@/core/refinement/types";
 import type { AgentRecordFile } from "@/core/project/types";
 import type { AgentPage } from "@/agent/tools";
 import type { LiveState } from "@/agent/port";
 import { PAGE_METHOD } from "@/agent/skills";
 import { parseTie } from "@/core/refinement/constraints";
+import { lineage, type ProjectHistory } from "@/core/project/history";
 
 export type MethodRule = "bare-occupancy" | "instrument-with-thermal";
 
@@ -161,6 +162,46 @@ export function stagesCovered(page: AgentPage, free: readonly RefinementParamete
   const available = all ? new Set(all.map((p) => p.kind)) : null;
   // A required stage the model has no parameter for is passed by a later one; an optional one (a twin the crystal does not have) stays open.
   return stages.filter((s, i) => covered[i] || (available !== null && i < last && !s.optional && s.kinds.length > 0 && !s.kinds.some((k) => available.has(k)))).map((s) => s.id);
+}
+
+/** Two values of a parameter the same: a refinement's own, read back from a snapshot. */
+const sameValue = (a: number, b: number): boolean => a === b || Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
+
+/**
+ * The stages done as the analysis stands, from the History: every stage a
+ * converged refinement on the path to the step on screen covered (since the
+ * analysis was loaded), as long as each of its parameters still holds the
+ * value the last converged refinement that refined it left. Undo and
+ * go_to_step leave the path; a reset, of every parameter or some, and a
+ * value typed in by hand move a parameter off its refined value: either way
+ * the stage is no longer done. `now` is the page as it is, its converged fit
+ * counted even before the page records it as a step. Null without a History
+ * (the record's own list then stands).
+ */
+export function stagesOnPath(page: AgentPage, history: ProjectHistory | null, now: { readonly parameters: readonly RefinementParameter[]; readonly result: RefinementResult | null }): string[] | null {
+  if (!history) return null;
+  const path = lineage(history);
+  const start = Math.max(0, ...path.map((st, i) => (st.kind === "load" || st.kind === "open" ? i : 0)));
+  const fits = path.slice(start).map((st) => {
+    const r = st.workspace.refinement as { parameters?: readonly RefinementParameter[]; lastResult?: RefinementResult } | undefined;
+    return { parameters: r?.parameters ?? [], result: r?.lastResult ?? null };
+  });
+  const covered = new Set<string>();
+  // Each parameter's value at the end of the last converged refinement that refined it.
+  const refinedValue = new Map<string, number>();
+  for (const fit of [...fits, now]) {
+    if (fit.result?.status !== "converged") continue;
+    const refined = new Set(Object.keys(fit.result.esd));
+    const free = fit.parameters.filter((p) => refined.has(p.id));
+    for (const id of stagesCovered(page, free, fit.parameters)) covered.add(id);
+    for (const p of free) refinedValue.set(p.id, p.value);
+  }
+  const value = new Map(now.parameters.map((p) => [p.id, p.value]));
+  return stagesFor(page).filter((st) => covered.has(st.id) && now.parameters.every((p) => {
+    if (!st.kinds.includes(p.kind)) return true;
+    const was = refinedValue.get(p.id);
+    return was === undefined || sameValue(was, value.get(p.id)!);
+  })).map((st) => st.id);
 }
 
 export interface StageView {

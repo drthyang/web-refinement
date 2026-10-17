@@ -20,6 +20,9 @@
  *  - every tool the model has already called: a tool is never taken away
  *    mid-task, and one called by name though not offered (the executor runs
  *    any tool) is offered from then on.
+ *
+ * Without the skills (the validation's arm C) there is no method to follow,
+ * so no stage either: every page offers all of its tools.
  */
 
 import { LIVE_TOOLS, type AgentPage, type LiveToolSpec } from "@/agent/tools";
@@ -91,13 +94,15 @@ export interface ScopeInput {
   readonly asked: readonly string[];
   /** Every tool called in this conversation. */
   readonly called: ReadonlySet<string>;
+  /** The page's written method is in play (default). False without the skills (arm C): the page's tools, not the stage's. */
+  readonly method?: boolean;
 }
 
 /** The names a local model is offered now. */
 export function scopedToolNames(input: ScopeInput): Set<string> {
   const names = new Set<string>(CORE_TOOLS);
   const add = (list: readonly string[]): void => list.forEach((n) => names.add(n));
-  if (input.page === "pdf" || input.page === "singleCrystal") {
+  if (input.page === "pdf" || input.page === "singleCrystal" || (input.page === "powder" && input.method === false)) {
     add(LIVE_TOOLS.filter((t) => t.pages.includes(input.page!)).map((t) => t.name));
   } else if (input.page === "powder") {
     add(POWDER_ALWAYS);
@@ -127,3 +132,11 @@ export function scopedTools(input: ScopeInput): LiveToolSpec[] {
 
 /** What a local model is told about its tool list. */
 export const SCOPE_NOTE = "Tools: you are offered the tools of the page and of the method's current stage; a later stage's tools appear once you reach it (a converged refinement completes a stage), and every tool you have used stays offered.";
+
+/** The same, without the skills (arm C): no method, so no stage. */
+export const SCOPE_NOTE_PAGE = "Tools: you are offered the tools of the page that is open.";
+
+/** The note that goes with a scoped tool list. */
+export function scopeNote(method: boolean): string {
+  return method ? SCOPE_NOTE : SCOPE_NOTE_PAGE;
+}

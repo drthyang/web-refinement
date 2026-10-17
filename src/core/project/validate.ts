@@ -652,6 +652,14 @@ function checkAgent(v: unknown, path: string): void {
       str(ex.reason, `${p}.exceptions[${j}].reason`);
       num(ex.at, `${p}.exceptions[${j}].at`);
     });
+    if (record.kept !== undefined && record.kept !== null) {
+      arr(record.kept, `${p}.kept`).forEach((k, j) => {
+        const kept = rec(k, `${p}.kept[${j}]`);
+        str(kept.measurement, `${p}.kept[${j}].measurement`);
+        str(kept.reason, `${p}.kept[${j}].reason`);
+        num(kept.at, `${p}.kept[${j}].at`);
+      });
+    }
     arr(record.stagesDone, `${p}.stagesDone`).forEach((st, j) => str(st, `${p}.stagesDone[${j}]`));
     arr(record.notes, `${p}.notes`).forEach((n, j) => {
       const note = rec(n, `${p}.notes[${j}]`);

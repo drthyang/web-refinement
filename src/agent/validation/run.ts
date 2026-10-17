@@ -136,6 +136,8 @@ export function caseScenario(c: ValidationCase): EvalScenario {
 export async function agentArmRecord(args: {
   readonly c: ValidationCase; readonly arm: Exclude<Arm, "A">; readonly model: ValidationModel; readonly run: number;
   readonly server?: string; readonly apiKey?: string; readonly signal?: AbortSignal; readonly onUsage?: (u: EvalUsage) => void; readonly commit?: string;
+  /** A temperature for a local model (default: the server's for the model, as the app runs it); the record keeps the one used. */
+  readonly temperature?: number;
 }): Promise<ValidationRecord> {
   const m = args.model;
   const config: EvalModel = {
@@ -146,6 +148,7 @@ export async function agentArmRecord(args: {
     ...(args.server ? { serverUrl: args.server } : {}),
     ...(args.apiKey ? { apiKey: args.apiKey } : {}),
     ...(args.arm === "C" ? { skills: false } : {}),
+    ...(args.temperature !== undefined ? { policy: { temperature: args.temperature } } : {}),
   };
   const result = await runScenario(caseScenario(args.c), config, args.signal, args.onUsage);
   const r = result.run;

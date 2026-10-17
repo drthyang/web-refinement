@@ -18,6 +18,8 @@ export interface ScriptedModel {
   readonly overrun: () => number;
   /** The tool names each request offered, in order. */
   readonly offered: () => readonly (readonly string[])[];
+  /** Each request as the model received it (system, tools, messages), in order. */
+  readonly requests: () => readonly unknown[];
   readonly close: () => Promise<void>;
 }
 
@@ -26,13 +28,17 @@ export async function scriptedModel(turns: readonly ScriptTurn[]): Promise<Scrip
   let served = 0;
   let overrun = 0;
   const offered: string[][] = [];
+  const requests: unknown[] = [];
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
       try {
-        offered.push(((JSON.parse(Buffer.concat(chunks).toString("utf8")) as { tools?: { name: string }[] }).tools ?? []).map((t) => t.name));
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { tools?: { name: string }[] };
+        requests.push(body);
+        offered.push((body.tools ?? []).map((t) => t.name));
       } catch {
+        requests.push(null);
         offered.push([]);
       }
       const turn = turns[served];
@@ -49,6 +55,7 @@ export async function scriptedModel(turns: readonly ScriptTurn[]): Promise<Scrip
     model: { transport: "api-key", apiKey: "scripted", baseURL: `http://127.0.0.1:${port}`, model: "scripted", effort: "low" },
     overrun: () => overrun,
     offered: () => offered,
+    requests: () => requests,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
 }
